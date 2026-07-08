@@ -1,0 +1,30 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.react-grid-item.react-grid-placeholder {
+  background: rgba(56, 189, 248, 0.25);
+  border-radius: 0.75rem;
+}
+
+.topology-flow-line {
+  stroke-dasharray: 10 8;
+  animation: topology-flow 0.8s linear infinite;
+}
+
+@keyframes topology-flow {
+  to {
+    stroke-dashoffset: -18;
+  }
+}

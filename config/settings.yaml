@@ -1,0 +1,10 @@
+llm:
+  base_url: "http://localhost:8001/v1"
+  api_key: "not-needed"
+  model: "./llm_model/qwen3-4b-4bit-mlx"
+  # Alternative model: gpt-oss-20b
+  # model_path: ./llm_model/gpt-oss-20b | ./llm_model/qwen3-4b-4bit-mlx
+
+server:
+  backend_port: 8080
+  frontend_port: 9001

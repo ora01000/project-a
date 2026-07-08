@@ -1,0 +1,20 @@
+servers:
+  # MCP 설정은 환경변수로 오버라이드 가능
+  #   MCP_<SERVER_KEY>_URL      예: MCP_KUBERNETES_URL
+  #   MCP_<SERVER_KEY>_ENABLED  예: MCP_KUBERNETES_ENABLED=true
+  kubernetes:
+    transport: streamable_http
+    url: "http://k8smcp.ora01000.pe.kr:32716/mcp"
+    enabled: true
+  kubectl_ai:
+    transport: streamable_http
+    url: "http://kubectl-ai.ora01000.pe.kr:32716/mcp"
+    enabled: true
+  vcenter:
+    transport: streamable_http
+    url: "http://localhost:9090/mcp"
+    enabled: false
+  ansible:
+    transport: streamable_http
+    url: "http://localhost:9091/mcp"
+    enabled: false
