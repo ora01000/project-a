@@ -1,16 +1,23 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { TopologyProvider } from "./context/TopologyContext";
 import { AgentGrid } from "./components/AgentGrid";
+import { AgentNodeListPanel } from "./components/AgentNodeListPanel";
+import { DetailInfoPanel } from "./components/DetailInfoPanel";
+import { IntegratedChatPanel } from "./components/IntegratedChatPanel";
 import { MenuBar } from "./components/MenuBar";
 import { StatusBar } from "./components/StatusBar";
-import { TopologyMap } from "./components/TopologyMap";
 import type { AgentInfo, HealthInfo } from "./types/agent";
 
 export default function App() {
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [health, setHealth] = useState<HealthInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [integratedChatFullscreen, setIntegratedChatFullscreen] = useState(false);
+
+  const toggleIntegratedChatFullscreen = useCallback(() => {
+    setIntegratedChatFullscreen((current) => !current);
+  }, []);
 
   useEffect(() => {
     const load = async () => {
@@ -41,11 +48,11 @@ export default function App() {
 
   return (
     <TopologyProvider>
-      <div className="min-h-screen bg-slate-950 px-6 py-6">
-        <header className="mb-4">
+      <div className="flex h-screen flex-col overflow-hidden bg-slate-950 px-6 py-6">
+        <header className="mb-4 shrink-0">
           <h1 className="text-2xl font-bold text-slate-100">LangGraph Multi-Agent Dashboard</h1>
           <p className="mt-1 text-sm text-slate-400">
-            화면 크기에 따라 에이전트 타일이 자동으로 배치됩니다.
+            에이전트 노드와 오른쪽 통합 채팅 창으로 멀티 에이전트를 관리합니다.
           </p>
         </header>
 
@@ -61,9 +68,23 @@ export default function App() {
           </div>
         ) : null}
 
-        {agents.length > 0 ? <AgentGrid agents={agents} /> : null}
+        <div className="flex min-h-0 flex-1 items-stretch gap-4">
+          {!integratedChatFullscreen ? (
+            <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-4 self-stretch">
+              <AgentNodeListPanel>
+                {agents.length > 0 ? <AgentGrid agents={agents} /> : null}
+              </AgentNodeListPanel>
 
-        <TopologyMap agents={agents} health={health} />
+              <DetailInfoPanel agents={agents} health={health} />
+            </div>
+          ) : null}
+
+          <IntegratedChatPanel
+            agents={agents}
+            isFullscreen={integratedChatFullscreen}
+            onToggleFullscreen={toggleIntegratedChatFullscreen}
+          />
+        </div>
       </div>
     </TopologyProvider>
   );

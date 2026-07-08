@@ -87,7 +87,7 @@ def run() -> None:
     _, server_settings, _ = load_settings()
     uvicorn.run(
         "backend.app.main:app",
-        host="0.0.0.0",
+        host=server_settings.backend_host,
         port=server_settings.backend_port,
         reload=True,
     )

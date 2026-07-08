@@ -7,11 +7,9 @@ interface AgentGridProps {
 
 export function AgentGrid({ agents }: AgentGridProps) {
   return (
-    <div className="grid grid-cols-[repeat(auto-fill,500px)] justify-start gap-4">
+    <div className="grid w-full grid-cols-[repeat(auto-fill,500px)] justify-start gap-4">
       {agents.map((agent) => (
-        <div key={agent.id} className="w-[500px]">
-          <AgentTile agent={agent} />
-        </div>
+        <AgentTile key={agent.id} agent={agent} />
       ))}
     </div>
   );

@@ -8,6 +8,7 @@ import { useTopology } from "../context/TopologyContext";
 interface TopologyMapProps {
   agents: AgentInfo[];
   health: HealthInfo | null;
+  embedded?: boolean;
 }
 
 interface NodePosition {
@@ -127,19 +128,21 @@ function isFlowActive(flowFrom: string, flowTo: string, edgeFrom: string, edgeTo
   return flowFrom === edgeFrom && flowTo === edgeTo;
 }
 
-export function TopologyMap({ agents, health }: TopologyMapProps) {
+export function TopologyMap({ agents, health, embedded = false }: TopologyMapProps) {
   const { activeFlows } = useTopology();
 
   const nodes = useMemo(() => buildNodes(agents, health), [agents, health]);
   const edges = useMemo(() => buildEdges(agents), [agents]);
   const positions = useMemo(() => computePositions(nodes), [nodes]);
 
-  return (
-    <section className="mt-8 rounded-xl border border-slate-800 bg-slate-900/70 p-4">
-      <div className="mb-3 flex items-center justify-between">
-        <h2 className="text-sm font-semibold text-slate-200">Topology Map</h2>
-        <p className="text-xs text-slate-500">에이전트 · LLM · MCP 호출 관계</p>
-      </div>
+  const content = (
+    <>
+      {!embedded ? (
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="text-sm font-semibold text-slate-200">Topology Map</h2>
+          <p className="text-xs text-slate-500">에이전트 · LLM · MCP 호출 관계</p>
+        </div>
+      ) : null}
 
       <div className="overflow-x-auto">
         <svg viewBox={`0 0 ${SVG_WIDTH} ${SVG_HEIGHT}`} className="min-w-[960px] w-full">
@@ -228,6 +231,14 @@ export function TopologyMap({ agents, health }: TopologyMapProps) {
           })}
         </svg>
       </div>
-    </section>
+    </>
+  );
+
+  if (embedded) {
+    return content;
+  }
+
+  return (
+    <section className="mt-8 rounded-xl border border-slate-800 bg-slate-900/70 p-4">{content}</section>
   );
 }

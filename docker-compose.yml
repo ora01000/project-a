@@ -1,0 +1,43 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: docker/backend/Dockerfile
+    ports:
+      - "${BACKEND_PORT:-8080}:${BACKEND_PORT:-8080}"
+    environment:
+      BACKEND_HOST: ${BACKEND_HOST:-0.0.0.0}
+      BACKEND_PORT: ${BACKEND_PORT:-8080}
+      LLM_BASE_URL: ${LLM_BASE_URL:-http://host.docker.internal:8001/v1}
+      LLM_API_KEY: ${LLM_API_KEY:-not-needed}
+      LLM_MODEL: ${LLM_MODEL:-./llm_model/qwen3-4b-4bit-mlx}
+      MCP_KUBERNETES_URL: ${MCP_KUBERNETES_URL:-}
+      MCP_KUBERNETES_ENABLED: ${MCP_KUBERNETES_ENABLED:-true}
+      MCP_KUBECTL_AI_URL: ${MCP_KUBECTL_AI_URL:-}
+      MCP_KUBECTL_AI_ENABLED: ${MCP_KUBECTL_AI_ENABLED:-true}
+      MCP_VCENTER_URL: ${MCP_VCENTER_URL:-}
+      MCP_VCENTER_ENABLED: ${MCP_VCENTER_ENABLED:-false}
+      MCP_ANSIBLE_URL: ${MCP_ANSIBLE_URL:-}
+      MCP_ANSIBLE_ENABLED: ${MCP_ANSIBLE_ENABLED:-false}
+    volumes:
+      - ./logs:/app/logs
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/frontend/Dockerfile
+    ports:
+      - "${FRONTEND_PORT:-9001}:${FRONTEND_PORT:-9001}"
+    environment:
+      FRONTEND_HOST: ${FRONTEND_HOST:-0.0.0.0}
+      FRONTEND_PORT: ${FRONTEND_PORT:-9001}
+      BACKEND_API_HOST: ${BACKEND_API_HOST:-backend}
+      BACKEND_API_PORT: ${BACKEND_API_PORT:-${BACKEND_PORT:-8080}}
+    depends_on:
+      - backend
+    volumes:
+      - ./logs:/var/log/nginx
+    restart: unless-stopped

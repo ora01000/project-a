@@ -18,8 +18,12 @@ class LLMSettings(BaseModel):
 
 
 class ServerSettings(BaseModel):
+    backend_host: str = "0.0.0.0"
     backend_port: int = 8080
+    frontend_host: str = "0.0.0.0"
     frontend_port: int = 9001
+    backend_api_host: str = "localhost"
+    backend_api_port: int = 8080
 
 
 class MCPServerConfig(BaseModel):
@@ -38,8 +42,12 @@ class AppSettings(BaseSettings):
     llm_base_url: str = Field(default="http://localhost:8001/v1", alias="LLM_BASE_URL")
     llm_api_key: str = Field(default="not-needed", alias="LLM_API_KEY")
     llm_model: str = Field(default="./llm_model/qwen3-4b-4bit-mlx", alias="LLM_MODEL")
+    backend_host: str = Field(default="0.0.0.0", alias="BACKEND_HOST")
     backend_port: int = Field(default=8080, alias="BACKEND_PORT")
+    frontend_host: str = Field(default="0.0.0.0", alias="FRONTEND_HOST")
     frontend_port: int = Field(default=9001, alias="FRONTEND_PORT")
+    backend_api_host: str = Field(default="localhost", alias="BACKEND_API_HOST")
+    backend_api_port: int | None = Field(default=None, alias="BACKEND_API_PORT")
 
 
 def _merged_env() -> dict[str, str]:
@@ -104,8 +112,17 @@ def load_settings() -> tuple[LLMSettings, ServerSettings, dict[str, MCPServerCon
         model=env_settings.llm_model or llm_yaml.get("model", LLMSettings.model_fields["model"].default),
     )
     server = ServerSettings(
+        backend_host=env_settings.backend_host or server_yaml.get("backend_host", "0.0.0.0"),
         backend_port=env_settings.backend_port or server_yaml.get("backend_port", 8080),
+        frontend_host=env_settings.frontend_host or server_yaml.get("frontend_host", "0.0.0.0"),
         frontend_port=env_settings.frontend_port or server_yaml.get("frontend_port", 9001),
+        backend_api_host=env_settings.backend_api_host or server_yaml.get("backend_api_host", "localhost"),
+        backend_api_port=(
+            env_settings.backend_api_port
+            or server_yaml.get("backend_api_port")
+            or env_settings.backend_port
+            or server_yaml.get("backend_port", 8080)
+        ),
     )
 
     mcp_servers: dict[str, MCPServerConfig] = {}

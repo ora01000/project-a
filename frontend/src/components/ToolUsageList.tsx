@@ -11,9 +11,9 @@ export function ToolUsageList({ tools }: ToolUsageListProps) {
 
   return (
     <div className="mb-2 flex flex-wrap gap-1">
-      {tools.map((tool) => (
+      {tools.map((tool, index) => (
         <span
-          key={`${tool.mcp_server ?? "unknown"}-${tool.name}`}
+          key={`${index}-${tool.mcp_server ?? "unknown"}-${tool.name}`}
           className="rounded-full border border-emerald-700/60 bg-emerald-950/50 px-2 py-0.5 text-[10px] text-emerald-200"
           title={tool.mcp_server ? `MCP: ${tool.mcp_server}` : undefined}
         >

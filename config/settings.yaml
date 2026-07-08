@@ -6,5 +6,9 @@ llm:
   # model_path: ./llm_model/gpt-oss-20b | ./llm_model/qwen3-4b-4bit-mlx
 
 server:
+  backend_host: "0.0.0.0"
   backend_port: 8080
+  frontend_host: "0.0.0.0"
   frontend_port: 9001
+  backend_api_host: "localhost"
+  backend_api_port: 8080

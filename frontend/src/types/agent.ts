@@ -31,3 +31,13 @@ export interface ChatTurn {
   assistantContent: string;
   toolsUsed: ToolUsage[];
 }
+
+export interface IntegratedChatResponse {
+  id: string;
+  agentId: string;
+  agentName: string;
+  userContent: string;
+  assistantContent: string;
+  toolsUsed: ToolUsage[];
+  createdAt: string;
+}

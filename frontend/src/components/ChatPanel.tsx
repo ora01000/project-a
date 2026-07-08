@@ -13,9 +13,10 @@ import { ToolUsageList } from "./ToolUsageList";
 interface ChatPanelProps {
   agentId: string;
   disabled?: boolean;
+  expanded?: boolean;
 }
 
-export function ChatPanel({ agentId, disabled = false }: ChatPanelProps) {
+export function ChatPanel({ agentId, disabled = false, expanded = false }: ChatPanelProps) {
   const { emitFlow } = useTopology();
   const [input, setInput] = useState("");
   const [turns, setTurns] = useState<ChatTurn[]>([]);
@@ -24,6 +25,16 @@ export function ChatPanel({ agentId, disabled = false }: ChatPanelProps) {
   const [historyIndex, setHistoryIndex] = useState(-1);
   const userScrollRef = useRef<HTMLDivElement>(null);
   const assistantScrollRef = useRef<HTMLDivElement>(null);
+  const layoutRef = useRef<HTMLDivElement>(null);
+
+  const reflowScrollAreas = () => {
+    if (userScrollRef.current) {
+      userScrollRef.current.scrollTop = userScrollRef.current.scrollHeight;
+    }
+    if (assistantScrollRef.current) {
+      assistantScrollRef.current.scrollTop = assistantScrollRef.current.scrollHeight;
+    }
+  };
 
   useEffect(() => {
     setTurns([]);
@@ -54,6 +65,25 @@ export function ChatPanel({ agentId, disabled = false }: ChatPanelProps) {
       behavior: "smooth",
     });
   }, [assistantScrollKey]);
+
+  useEffect(() => {
+    reflowScrollAreas();
+    const timer = window.setTimeout(reflowScrollAreas, 50);
+    return () => window.clearTimeout(timer);
+  }, [expanded]);
+
+  useEffect(() => {
+    const node = layoutRef.current;
+    if (!node) {
+      return;
+    }
+
+    const observer = new ResizeObserver(() => {
+      window.requestAnimationFrame(reflowScrollAreas);
+    });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
 
   const updateLastTurnAssistant = (content: string, toolsUsed?: ToolUsage[]) => {
     setTurns((prev) => {
@@ -189,8 +219,8 @@ export function ChatPanel({ agentId, disabled = false }: ChatPanelProps) {
   const canShowPrevious = inputHistory.length > 0;
 
   return (
-    <div className="flex flex-col gap-2">
-      <div className="flex flex-col gap-1">
+    <div ref={layoutRef} className={`flex flex-col gap-2 ${expanded ? "h-full min-h-0" : ""}`}>
+      <div className={`flex flex-col gap-1 ${expanded ? "shrink-0" : ""}`}>
         <div className="text-xs font-medium uppercase tracking-wide text-sky-300">User</div>
         <div
           ref={userScrollRef}
@@ -202,18 +232,22 @@ export function ChatPanel({ agentId, disabled = false }: ChatPanelProps) {
             turns.map((turn) => (
               <div key={`user-${turn.num}-${turn.createdAt}`} className="rounded-md bg-sky-900/40 px-2 py-1 text-sky-100">
                 <MessageIndexLabel num={turn.num} createdAt={turn.createdAt} />
-                <span className="whitespace-pre-wrap">{turn.userContent}</span>
+                <span className="whitespace-pre-wrap break-words">{turn.userContent}</span>
               </div>
             ))
           )}
         </div>
       </div>
 
-      <div className="flex flex-col gap-1 border-t border-slate-700 pt-2">
+      <div className={`flex flex-col gap-1 border-t border-slate-700 pt-2 ${expanded ? "min-h-0 flex-1" : ""}`}>
         <div className="text-xs font-medium uppercase tracking-wide text-emerald-300">Assistant</div>
         <div
           ref={assistantScrollRef}
-          className="h-[300px] max-h-[600px] min-h-[300px] resize-y space-y-2 overflow-y-auto overscroll-contain rounded-md border border-slate-800 bg-slate-900/70 p-2 text-sm"
+          className={
+            expanded
+              ? "min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain rounded-md border border-slate-800 bg-slate-900/70 p-2 text-sm"
+              : "h-[300px] max-h-[600px] min-h-[300px] resize-y space-y-2 overflow-y-auto overscroll-contain rounded-md border border-slate-800 bg-slate-900/70 p-2 text-sm"
+          }
         >
           {turns.length === 0 ? (
             <p className="text-slate-500">에이전트 응답이 여기에 표시됩니다.</p>
@@ -221,7 +255,7 @@ export function ChatPanel({ agentId, disabled = false }: ChatPanelProps) {
             turns.map((turn) => (
               <div
                 key={`assistant-${turn.num}-${turn.createdAt}`}
-                className="rounded-md bg-slate-800/80 px-2 py-2 text-slate-100"
+                className="rounded-md bg-slate-800/80 px-2 py-2 text-slate-100 break-words"
               >
                 <MessageIndexLabel num={turn.num} createdAt={turn.createdAt} />
                 <ToolUsageList tools={turn.toolsUsed} />
@@ -236,7 +270,7 @@ export function ChatPanel({ agentId, disabled = false }: ChatPanelProps) {
         </div>
       </div>
 
-      <form onSubmit={handleSubmit} className="flex shrink-0 gap-2">
+      <form onSubmit={handleSubmit} className={`flex shrink-0 gap-2 ${expanded ? "mt-auto" : ""}`}>
         <button
           type="button"
           onClick={handlePreviousMessage}
