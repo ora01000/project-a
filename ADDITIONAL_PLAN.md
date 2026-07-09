@@ -72,7 +72,7 @@
                 - username : varchar(50)
                 - password : varchar(50)
                 - depart : varchar(100)
-                - role : varchar(20)
+                - role : int
     - 초기 데이터
         - users 테이블에 초기 데이터 생성
             - record #1
@@ -81,19 +81,45 @@
                 - username : 윤인수
                 - password : isyun
                 - depart : IT플랫폼운영팀
-                - role : admin
+                - role : 0
             - record #2
                 - userid : loadan
                 - email : loadan@lguplus.co.kr
                 - username : 안세훈
                 - password : loadan
                 - depart : IT플랫폼운영팀
-                - role : admin
+                - role : 0
 
 - frontend 최초 접속시 로그인 프레임을 생성하고 hsql db 와 연동하여 인증
 - 사용자 관리 기능
+    - 최초 대시보드 화면은 메뉴바의 mockup 으로 제작된 "대시보드" 메뉴와 연동
     - 메뉴바의 mockup 으로 제작된 "사용자 관리" 메뉴에 sub menu 추가
         - sub menu
-            - 사용자 조회 : users 테이블의 데이터를 표로 출력, checkbox 를 사용하여 check 된 사용자를 수정할 수 있는 수정 메뉴
+            - 사용자 조회(sub menu)
+                - users 테이블의 데이터를 표로 출력
+                - 각 행에는 checkbox 를 두고 선택 가능
+                - 조회 화면에는 다음 기능 버튼을 배치
+                    - 삭제 : users 테이블에서 선택된 레코드를 삭제
+                    - 수정 : 선택된 레코드의 정보를 수정하는 팝업 창을 로드
+                - 수정시 숨겨진 레코드(사용자 정보) 수정 페이지가 활성화 된다
+                - 수정 팝업창의 수정가능/불가한 정보는 다음과 같다
+                    - idx : 수정불가, 표시되지 않음
+                    - userid : 라벨 -> 아이디, 수정불가
+                    - email : 라벨 -> 이메일, 수정가능
+                    - username : 라벨 -> 이름, 수정가능
+                    - password : 라벨 -> 패스워드, 수정가능, 눈동자 모양의 visible/hidden 토글 버튼 표시
+                    - depart : 라벨 -> 조직, 수정가능
+                    - role : 라벨 -> 역할, 수정가능, 0:admin, 1:user
+                - 수정 팝업창은 저장 / 닫기 버튼이 있다
+                    - 저장 : 수정된 데이터로 레코드를 업데이트 한다. 업데이트가 완료되면 수정 팝업창을 닫는다.
+                    - 닫기 : 수정을 취소하고 수정 팝업창을 닫는다
+            - 에이전트 할당(sub menu)
+                - 상세한 구현은 추후 진행
 
+- 로그인 화면
+    - 최초 접속시 표시될 로그인 화면 작성
+        - 입력 : 아이디 / 패스워드
+        - users 테이블에서 조회 후 인증
+        - 인증 성공시 대시보드 화면으로 이동
+        
 
