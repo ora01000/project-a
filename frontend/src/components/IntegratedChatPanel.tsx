@@ -13,6 +13,7 @@ interface IntegratedChatPanelProps {
   agents: AgentInfo[];
   isFullscreen: boolean;
   onToggleFullscreen: () => void;
+  onChatComplete?: () => void;
 }
 
 function createResponseId(): string {
@@ -23,6 +24,7 @@ export function IntegratedChatPanel({
   agents,
   isFullscreen,
   onToggleFullscreen,
+  onChatComplete,
 }: IntegratedChatPanelProps) {
   const { emitFlow } = useTopology();
   const [selectedAgentId, setSelectedAgentId] = useState("");
@@ -233,6 +235,7 @@ export function IntegratedChatPanel({
       updateLastResponse(`오류: ${message}`, []);
     } finally {
       setIsLoading(false);
+      onChatComplete?.();
     }
   };
 

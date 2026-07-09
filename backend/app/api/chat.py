@@ -5,7 +5,12 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
-from backend.app.agents.base import AgentInvokeResult, ToolUsage, invoke_agent
+from backend.app.agents.base import (
+    AgentInvokeResult,
+    ToolUsage,
+    extract_token_usage_from_text,
+    invoke_agent,
+)
 from backend.app.logging.agent_logger import log_agent_interaction
 
 router = APIRouter(tags=["chat"])
@@ -73,6 +78,9 @@ async def chat_with_agent(agent_id: str, payload: ChatRequest, request: Request)
 
     if mcp_statuses and all(status == "disabled" for status in mcp_statuses.values()):
         disabled_message = _build_mcp_disabled_message(definition.mcp_server_keys)
+        input_tokens, output_tokens = extract_token_usage_from_text(payload.message, disabled_message)
+        if manager.token_tracker:
+            manager.token_tracker.record(agent_id, input_tokens, output_tokens)
         log_agent_interaction(
             agent_id=agent_id,
             input_message=payload.message,
@@ -85,6 +93,9 @@ async def chat_with_agent(agent_id: str, payload: ChatRequest, request: Request)
         result = await invoke_agent(agent, payload.message, manager.mcp_manager)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    if manager.token_tracker:
+        manager.token_tracker.record(agent_id, result.input_tokens, result.output_tokens)
 
     log_agent_interaction(
         agent_id=agent_id,

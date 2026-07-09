@@ -31,6 +31,12 @@ class ToolUsage:
 class AgentInvokeResult:
     content: str
     tools_used: list[ToolUsage]
+    input_tokens: int = 0
+    output_tokens: int = 0
+
+    @property
+    def total_tokens(self) -> int:
+        return self.input_tokens + self.output_tokens
 
 
 def _aggregate_mcp_status(mcp_manager: MCPClientManager, server_keys: list[str]) -> str:
@@ -72,6 +78,62 @@ def extract_tools_used(messages: list[Any], mcp_manager: MCPClientManager | None
             tools_used.append(ToolUsage(name=name, mcp_server=mcp_server))
 
     return tools_used
+
+
+def _estimate_tokens(text: str) -> int:
+    stripped = text.strip()
+    if not stripped:
+        return 0
+    return max(1, len(stripped) // 4)
+
+
+def _usage_from_metadata(metadata: dict[str, Any]) -> tuple[int, int] | None:
+    usage = metadata.get("token_usage") or metadata.get("usage")
+    if not isinstance(usage, dict):
+        return None
+
+    input_tokens = usage.get("prompt_tokens", usage.get("input_tokens"))
+    output_tokens = usage.get("completion_tokens", usage.get("output_tokens"))
+    if input_tokens is None and output_tokens is None:
+        total_tokens = usage.get("total_tokens")
+        if total_tokens is None:
+            return None
+        return int(total_tokens), 0
+
+    return int(input_tokens or 0), int(output_tokens or 0)
+
+
+def extract_token_usage_from_messages(messages: list[Any]) -> tuple[int, int]:
+    input_tokens = 0
+    output_tokens = 0
+    metadata_found = False
+
+    for message in messages:
+        metadata = getattr(message, "response_metadata", None) or {}
+        if isinstance(metadata, dict):
+            usage = _usage_from_metadata(metadata)
+            if usage is not None:
+                metadata_found = True
+                prompt_tokens, completion_tokens = usage
+                input_tokens += prompt_tokens
+                output_tokens += completion_tokens
+                continue
+
+        content = _extract_message_content(message)
+        estimated = _estimate_tokens(content)
+        if isinstance(message, HumanMessage):
+            input_tokens += estimated
+        elif isinstance(message, AIMessage):
+            output_tokens += estimated
+
+    if metadata_found:
+        return input_tokens, output_tokens
+
+    return input_tokens, output_tokens
+
+
+def extract_token_usage_from_text(input_text: str, output_text: str) -> tuple[int, int]:
+    return _estimate_tokens(input_text), _estimate_tokens(output_text)
 
 
 def _extract_message_content(message: Any) -> str:
@@ -122,4 +184,10 @@ async def invoke_agent(
 
     tools_used = extract_tools_used(messages, mcp_manager)
     content = _extract_message_content(messages[-1])
-    return AgentInvokeResult(content=content, tools_used=tools_used)
+    input_tokens, output_tokens = extract_token_usage_from_messages(messages)
+    return AgentInvokeResult(
+        content=content,
+        tools_used=tools_used,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+    )

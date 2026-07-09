@@ -1,15 +1,20 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { TopologyProvider } from "./context/TopologyContext";
-import { AgentGrid } from "./components/AgentGrid";
-import { AgentNodeListPanel } from "./components/AgentNodeListPanel";
-import { DetailInfoPanel } from "./components/DetailInfoPanel";
-import { IntegratedChatPanel } from "./components/IntegratedChatPanel";
+import { DashboardPage } from "./components/DashboardPage";
+import { LoginPage } from "./components/LoginPage";
 import { MenuBar } from "./components/MenuBar";
 import { StatusBar } from "./components/StatusBar";
+import { AgentAssignmentPage } from "./components/users/AgentAssignmentPage";
+import { UserListPage } from "./components/users/UserListPage";
 import type { AgentInfo, HealthInfo } from "./types/agent";
+import type { AuthUser } from "./types/auth";
+import type { AppView } from "./types/navigation";
+import { clearAuthUser, formatUserLabel, loadAuthUser, saveAuthUser } from "./utils/authSession";
 
 export default function App() {
+  const [user, setUser] = useState<AuthUser | null>(() => loadAuthUser());
+  const [activeView, setActiveView] = useState<AppView>("dashboard");
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [health, setHealth] = useState<HealthInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -19,32 +24,62 @@ export default function App() {
     setIntegratedChatFullscreen((current) => !current);
   }, []);
 
-  useEffect(() => {
-    const load = async () => {
-      try {
-        const [agentsResponse, healthResponse] = await Promise.all([
-          fetch("/api/agents"),
-          fetch("/api/health"),
-        ]);
-
-        if (!agentsResponse.ok || !healthResponse.ok) {
-          throw new Error("백엔드 API에 연결할 수 없습니다.");
-        }
-
-        const agentsData = (await agentsResponse.json()) as AgentInfo[];
-        const healthData = (await healthResponse.json()) as HealthInfo;
-        setAgents(agentsData);
-        setHealth(healthData);
-        setError(null);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Unknown error");
-      }
-    };
-
-    load();
-    const interval = window.setInterval(load, 15000);
-    return () => window.clearInterval(interval);
+  const handleLoginSuccess = useCallback((loggedInUser: AuthUser) => {
+    saveAuthUser(loggedInUser);
+    setUser(loggedInUser);
+    setActiveView("dashboard");
   }, []);
+
+  const handleLogout = useCallback(() => {
+    clearAuthUser();
+    setUser(null);
+    setActiveView("dashboard");
+    setAgents([]);
+    setHealth(null);
+    setError(null);
+    setIntegratedChatFullscreen(false);
+  }, []);
+
+  const loadDashboardData = useCallback(async () => {
+    try {
+      const [agentsResponse, healthResponse] = await Promise.all([
+        fetch("/api/agents"),
+        fetch("/api/health"),
+      ]);
+
+      if (!agentsResponse.ok || !healthResponse.ok) {
+        throw new Error("백엔드 API에 연결할 수 없습니다.");
+      }
+
+      const agentsData = (await agentsResponse.json()) as AgentInfo[];
+      const healthData = (await healthResponse.json()) as HealthInfo;
+      setAgents(agentsData);
+      setHealth(healthData);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unknown error");
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!user || activeView !== "dashboard") {
+      return;
+    }
+
+    loadDashboardData();
+    const interval = window.setInterval(loadDashboardData, 15000);
+    return () => window.clearInterval(interval);
+  }, [activeView, loadDashboardData, user]);
+
+  useEffect(() => {
+    if (activeView !== "dashboard") {
+      setIntegratedChatFullscreen(false);
+    }
+  }, [activeView]);
+
+  if (!user) {
+    return <LoginPage onLoginSuccess={handleLoginSuccess} />;
+  }
 
   return (
     <TopologyProvider>
@@ -56,35 +91,34 @@ export default function App() {
           </p>
         </header>
 
-        <MenuBar />
+        <MenuBar
+          activeView={activeView}
+          userLabel={formatUserLabel(user)}
+          onNavigate={setActiveView}
+          onLogout={handleLogout}
+        />
 
-        <div className="mb-4">
-          <StatusBar health={health} />
-        </div>
-
-        {error ? (
-          <div className="mb-4 rounded-lg border border-rose-800 bg-rose-950/40 px-4 py-3 text-sm text-rose-200">
-            {error}
-          </div>
+        {activeView === "dashboard" ? (
+          <>
+            <div className="mb-4">
+              <StatusBar health={health} />
+            </div>
+            <DashboardPage
+              agents={agents}
+              health={health}
+              error={error}
+              integratedChatFullscreen={integratedChatFullscreen}
+              onToggleIntegratedChatFullscreen={toggleIntegratedChatFullscreen}
+              onChatComplete={loadDashboardData}
+            />
+          </>
         ) : null}
 
-        <div className="flex min-h-0 flex-1 items-stretch gap-4">
-          {!integratedChatFullscreen ? (
-            <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-4 self-stretch">
-              <AgentNodeListPanel>
-                {agents.length > 0 ? <AgentGrid agents={agents} /> : null}
-              </AgentNodeListPanel>
+        {activeView === "user-list" ? (
+          <UserListPage currentUserIdx={user.idx} />
+        ) : null}
 
-              <DetailInfoPanel agents={agents} health={health} />
-            </div>
-          ) : null}
-
-          <IntegratedChatPanel
-            agents={agents}
-            isFullscreen={integratedChatFullscreen}
-            onToggleFullscreen={toggleIntegratedChatFullscreen}
-          />
-        </div>
+        {activeView === "agent-assignment" ? <AgentAssignmentPage /> : null}
       </div>
     </TopologyProvider>
   );

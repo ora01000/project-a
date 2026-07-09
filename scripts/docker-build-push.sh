@@ -4,8 +4,8 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${ROOT_DIR}"
 
-BACKEND_IMAGE="${BACKEND_IMAGE:-ora01000/project-a-backend:latest}"
-FRONTEND_IMAGE="${FRONTEND_IMAGE:-ora01000/project-a-frontend:latest}"
+BACKEND_IMAGE="${BACKEND_IMAGE:-ora01000/project-a-backend:260710}"
+FRONTEND_IMAGE="${FRONTEND_IMAGE:-ora01000/project-a-frontend:260710}"
 PLATFORMS="${PLATFORMS:-linux/amd64,linux/arm64}"
 BUILDER_NAME="${BUILDER_NAME:-project-a-multiarch}"
 PUSH="${PUSH:-true}"

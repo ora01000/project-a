@@ -9,10 +9,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from backend.app.agents.base import build_agent
 from backend.app.agents.registry import AGENT_DEFINITIONS, AGENT_DEFINITIONS_BY_ID
 from backend.app.api.agents import router as agents_router
+from backend.app.api.auth import router as auth_router
 from backend.app.api.chat import router as chat_router
+from backend.app.api.users import router as users_router
 from backend.app.config import load_settings
+from backend.app.db import init_database
 from backend.app.logging.agent_logger import ensure_agent_logs_dir
 from backend.app.mcp.client import MCPClientManager
+from backend.app.usage.token_tracker import TokenTracker
 
 logger = logging.getLogger(__name__)
 
@@ -22,9 +26,13 @@ class AgentManager:
         self.agents: dict[str, Any] = {}
         self.mcp_manager: MCPClientManager | None = None
         self.llm_status: str = "unknown"
+        self.token_tracker: TokenTracker | None = None
+        self.max_context_tokens: int = 32768
 
     async def initialize(self) -> None:
-        llm_settings, _, mcp_servers = load_settings()
+        llm_settings, _, mcp_servers, _ = load_settings()
+        self.max_context_tokens = llm_settings.max_context_tokens
+        self.token_tracker = TokenTracker(max_context_tokens=self.max_context_tokens)
         self.mcp_manager = MCPClientManager(mcp_servers)
         await self.mcp_manager.initialize()
 
@@ -59,6 +67,8 @@ agent_manager = AgentManager()
 async def lifespan(app: FastAPI):
     logging.basicConfig(level=logging.INFO)
     ensure_agent_logs_dir()
+    _, _, _, database_path = load_settings()
+    app.state.database_path = init_database(database_path)
     await agent_manager.initialize()
     app.state.agent_manager = agent_manager
     yield
@@ -73,6 +83,8 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    app.include_router(auth_router, prefix="/api")
+    app.include_router(users_router, prefix="/api")
     app.include_router(agents_router, prefix="/api")
     app.include_router(chat_router, prefix="/api")
     return app
@@ -84,7 +96,7 @@ app = create_app()
 def run() -> None:
     import uvicorn
 
-    _, server_settings, _ = load_settings()
+    _, server_settings, _, _ = load_settings()
     uvicorn.run(
         "backend.app.main:app",
         host=server_settings.backend_host,

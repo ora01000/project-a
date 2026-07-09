@@ -8,7 +8,7 @@ interface DetailInfoPanelProps {
   health: HealthInfo | null;
 }
 
-type DetailTab = "topology" | "debugging";
+type DetailTab = "topology" | "logs";
 
 const DEFAULT_HEIGHT = 500;
 const MIN_HEIGHT = 200;
@@ -92,14 +92,14 @@ export function DetailInfoPanel({ agents, health }: DetailInfoPanelProps) {
         </button>
         <button
           type="button"
-          onClick={() => setActiveTab("debugging")}
+          onClick={() => setActiveTab("logs")}
           className={`rounded-t-md px-3 py-2 text-xs font-medium ${
-            activeTab === "debugging"
+            activeTab === "logs"
               ? "border border-b-0 border-slate-600 bg-slate-800 text-sky-200"
               : "text-slate-400 hover:bg-slate-800/60 hover:text-slate-200"
           }`}
         >
-          디버깅
+          로그
         </button>
       </div>
 
@@ -108,7 +108,7 @@ export function DetailInfoPanel({ agents, health }: DetailInfoPanelProps) {
           <TopologyMap agents={agents} health={health} embedded />
         ) : (
           <div className="flex h-full min-h-[120px] items-center justify-center rounded-md border border-dashed border-slate-700 bg-slate-950/40 text-sm text-slate-500">
-            디버깅 정보가 없습니다.
+            표시할 로그가 없습니다.
           </div>
         )}
       </div>

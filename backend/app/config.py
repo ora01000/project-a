@@ -15,6 +15,7 @@ class LLMSettings(BaseModel):
     base_url: str = "http://localhost:8001/v1"
     api_key: str = "not-needed"
     model: str = "./llm_model/qwen3-4b-4bit-mlx"
+    max_context_tokens: int = 32768
 
 
 class ServerSettings(BaseModel):
@@ -42,12 +43,14 @@ class AppSettings(BaseSettings):
     llm_base_url: str = Field(default="http://localhost:8001/v1", alias="LLM_BASE_URL")
     llm_api_key: str = Field(default="not-needed", alias="LLM_API_KEY")
     llm_model: str = Field(default="./llm_model/qwen3-4b-4bit-mlx", alias="LLM_MODEL")
+    llm_max_context_tokens: int = Field(default=32768, alias="LLM_MAX_CONTEXT_TOKENS")
     backend_host: str = Field(default="0.0.0.0", alias="BACKEND_HOST")
     backend_port: int = Field(default=8080, alias="BACKEND_PORT")
     frontend_host: str = Field(default="0.0.0.0", alias="FRONTEND_HOST")
     frontend_port: int = Field(default=9001, alias="FRONTEND_PORT")
     backend_api_host: str = Field(default="localhost", alias="BACKEND_API_HOST")
     backend_api_port: int | None = Field(default=None, alias="BACKEND_API_PORT")
+    database_path: str = Field(default="data/app.db", alias="DATABASE_PATH")
 
 
 def _merged_env() -> dict[str, str]:
@@ -98,7 +101,7 @@ def _load_yaml(path: Path) -> dict[str, Any]:
         return yaml.safe_load(file) or {}
 
 
-def load_settings() -> tuple[LLMSettings, ServerSettings, dict[str, MCPServerConfig]]:
+def load_settings() -> tuple[LLMSettings, ServerSettings, dict[str, MCPServerConfig], str]:
     yaml_settings = _load_yaml(CONFIG_DIR / "settings.yaml")
     mcp_yaml = _load_yaml(CONFIG_DIR / "mcp_servers.yaml")
     env_settings = AppSettings()
@@ -110,6 +113,10 @@ def load_settings() -> tuple[LLMSettings, ServerSettings, dict[str, MCPServerCon
         base_url=env_settings.llm_base_url or llm_yaml.get("base_url", LLMSettings.model_fields["base_url"].default),
         api_key=env_settings.llm_api_key or llm_yaml.get("api_key", LLMSettings.model_fields["api_key"].default),
         model=env_settings.llm_model or llm_yaml.get("model", LLMSettings.model_fields["model"].default),
+        max_context_tokens=(
+            env_settings.llm_max_context_tokens
+            or llm_yaml.get("max_context_tokens", LLMSettings.model_fields["max_context_tokens"].default)
+        ),
     )
     server = ServerSettings(
         backend_host=env_settings.backend_host or server_yaml.get("backend_host", "0.0.0.0"),
@@ -131,4 +138,6 @@ def load_settings() -> tuple[LLMSettings, ServerSettings, dict[str, MCPServerCon
 
     mcp_servers = _apply_mcp_env_overrides(mcp_servers)
 
-    return llm, server, mcp_servers
+    database_path = env_settings.database_path or server_yaml.get("database_path", "data/app.db")
+
+    return llm, server, mcp_servers, database_path

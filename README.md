@@ -92,13 +92,13 @@ npm run dev
 | GET | `/api/health` | LLM/MCP 연결 상태 |
 | POST | `/api/agents/{id}/chat` | 에이전트 채팅 (SSE) |
 
-에이전트 ID: `k8s`, `kubevirt`, `vcenter`
+에이전트 ID 예시: `dprv6-k8s`, `pcicd-k8s`, `dprv-k8s`, `dprsv-k8s`, `dprmn-k8s`, `dprrt-k8s`, `dpvs-k8s`, `dtest-k8s`, `kubevirt`, `vcenter`, `ansible`
 
 ## 에이전트 역할
 
 | 에이전트 | MCP | 역할 |
 |---------|-----|------|
-| Kubernetes Cluster Agent | kubernetes-mcp-server, kubectl-ai | K8s 클러스터 리소스 조회 |
+| Kubernetes 클러스터 에이전트 (8종) | kubernetes-mcp-server, kubectl-ai | 클러스터별 K8s 리소스 조회 |
 | KubeVirt VM Agent | kubernetes-mcp-server | KubeVirt VM/VMI 조회 |
 | VMware Agent | vcenter (placeholder) | VMware vCenter 인벤토리 조회 |
 
