@@ -25,6 +25,10 @@
     - 명칭 : 테스트 클러스터
     - 사용도구 : kubernetes, kubectl-ai
 
+## 에이전트 표시 정보 추가
+- 각 에이전트가 질의하고 응답받는 토큰의 양을 계산하고 에이전트 노드 타일에 표시
+- 최대 토큰의 프레임을 기준으로 percentage 정보 표시
+
 ## bottom 레이어 디버깅 탭 수정
 - 디버깅 탭 -> 로그 탭 으로 변경
 
@@ -57,8 +61,39 @@
         - chroma DB 의 데이터 저장 경로는 환경변수로 수정 가능
         - 질의 내용을 판단하여 chroma DB의 정보를 조회, 출력
 
-## 메뉴바 기능 구현
-- Mockup 된 메뉴바에 실제 기능 추가
-    - 에이전트 관리
-    
+## 로그인 기능 구현
+- hsql로 DB 구현
+    - DDL 정의
+        - table#1 name : users
+            - column
+                - idx : int, auto increment, primary key
+                - userid : varchar(50), unique
+                - email : varchar(50)
+                - username : varchar(50)
+                - password : varchar(50)
+                - depart : varchar(100)
+                - role : varchar(20)
+    - 초기 데이터
+        - users 테이블에 초기 데이터 생성
+            - record #1
+                - userid : isyun
+                - email : isyun@lguplus.co.kr
+                - username : 윤인수
+                - password : isyun
+                - depart : IT플랫폼운영팀
+                - role : admin
+            - record #2
+                - userid : loadan
+                - email : loadan@lguplus.co.kr
+                - username : 안세훈
+                - password : loadan
+                - depart : IT플랫폼운영팀
+                - role : admin
+
+- frontend 최초 접속시 로그인 프레임을 생성하고 hsql db 와 연동하여 인증
+- 사용자 관리 기능
+    - 메뉴바의 mockup 으로 제작된 "사용자 관리" 메뉴에 sub menu 추가
+        - sub menu
+            - 사용자 조회 : users 테이블의 데이터를 표로 출력, checkbox 를 사용하여 check 된 사용자를 수정할 수 있는 수정 메뉴
+
 
