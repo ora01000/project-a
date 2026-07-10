@@ -537,6 +537,25 @@ cursor 에사 사용할 plan 초안을 작성합니다.
     - 삭제
         - 삭제 버튼 클릭시 확인 팝업창으로 진행을 물어본 후 삭제 확인이 되면 해당 레코드 삭제
 
+
+## 작업 프로세스 DB
+- 작업 프로세스 저장 DB
+    - DDL
+        - 테이블 : jobs
+        - 컬럼
+            - idx : int, auto increment, primary key
+            - request_date : date
+            - job_title : varchar(200)
+            - request_depart : varchar(50)
+            - requester : varch(50)
+            - requester_email : varchar(50)
+            - request_date : date
+            - job_description : text
+            - approver : varchar(50)
+            - state : int -> 0:접수, 1:계획수립완료, 2:검토중, 3:보류, 4:반려, 5:승인, 6:완료
+        
+
+
 ## DB agent 테이블 정보에 의존하지 않는 시스템 에이전트 생성
 - 다음 시스템 에이전트를 생성한다.
     1. "작업 분석/계획" 에이전트
@@ -553,8 +572,9 @@ cursor 에사 사용할 plan 초안을 작성합니다.
                     - 작업완료요청일시
                     - 작업내용
                     - 작업승인자
+            - 작업을 접수하고 jobs 테이블에 insert 한다. state 값은 0
             - 작업 요청서를 분석하고 어떤 에이전트와 툴을 사용할지 계획을 수립한다.
-            - 작업 계획 수립이 완료되면 작업승인자에게 전달한다.
+            - 작업 계획 수립이 완료되면 state 값을 1 로 업데이트하고 작업승인자에게 전달한다.
                 - 전달 방식은 1. 이메일 발송, 2. MS Teams 채널, 3. 통합 채팅창 알림 세 가지 방식을 선택할 수 있다.
                     - 1, 2번 방식은 코드 정의만 하고 구현하지 않는다.
                     - 3번 방식 구현
