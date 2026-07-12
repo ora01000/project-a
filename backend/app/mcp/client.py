@@ -33,25 +33,37 @@ class MCPClientManager:
     def connection_status(self) -> dict[str, str]:
         return dict(self._connection_status)
 
+    async def _connect_server(self, server_key: str, config: MCPServerConfig) -> None:
+        if not config.enabled:
+            self._connection_status[server_key] = "disabled"
+            self._tools_by_server[server_key] = []
+            return
+
+        try:
+            client = MultiServerMCPClient(_to_client_config(server_key, config))
+            tools = await client.get_tools()
+            self._tool_server_map = {
+                name: mapped_server
+                for name, mapped_server in self._tool_server_map.items()
+                if mapped_server != server_key
+            }
+            self._tools_by_server[server_key] = tools
+            for tool in tools:
+                self._tool_server_map[tool.name] = server_key
+            self._connection_status[server_key] = "connected"
+            logger.info("MCP server '%s' connected with %d tools", server_key, len(tools))
+        except Exception as exc:
+            self._tools_by_server[server_key] = []
+            self._connection_status[server_key] = f"error: {exc}"
+            logger.warning("MCP server '%s' connection failed: %s", server_key, exc)
+
     async def initialize(self) -> None:
         for server_key, config in self._servers.items():
-            if not config.enabled:
-                self._connection_status[server_key] = "disabled"
-                self._tools_by_server[server_key] = []
-                continue
+            await self._connect_server(server_key, config)
 
-            try:
-                client = MultiServerMCPClient(_to_client_config(server_key, config))
-                tools = await client.get_tools()
-                self._tools_by_server[server_key] = tools
-                for tool in tools:
-                    self._tool_server_map[tool.name] = server_key
-                self._connection_status[server_key] = "connected"
-                logger.info("MCP server '%s' connected with %d tools", server_key, len(tools))
-            except Exception as exc:
-                self._tools_by_server[server_key] = []
-                self._connection_status[server_key] = f"error: {exc}"
-                logger.warning("MCP server '%s' connection failed: %s", server_key, exc)
+    async def refresh_health(self) -> None:
+        for server_key, config in self._servers.items():
+            await self._connect_server(server_key, config)
 
     async def get_tools(self, server_key: str) -> list[BaseTool]:
         return self._tools_by_server.get(server_key, [])

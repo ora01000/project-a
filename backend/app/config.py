@@ -25,12 +25,56 @@ class ServerSettings(BaseModel):
     frontend_port: int = 9001
     backend_api_host: str = "localhost"
     backend_api_port: int = 8080
+    health_check_interval_seconds: int = 30
 
 
 class MCPServerConfig(BaseModel):
     transport: str = "streamable_http"
     url: str
     enabled: bool = True
+
+
+class EmailNotificationSettings(BaseModel):
+    enabled: bool = False
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_username: str = ""
+    smtp_password: str = ""
+    from_address: str = ""
+    use_tls: bool = True
+    use_ssl: bool = False
+    timeout_seconds: float = 30.0
+
+
+class TeamsNotificationSettings(BaseModel):
+    enabled: bool = False
+    mode: str = "webhook"
+    webhook_url: str = ""
+    tenant_id: str = ""
+    client_id: str = ""
+    client_secret: str = ""
+    team_id: str = ""
+    channel_id: str = ""
+    timeout_seconds: float = 30.0
+
+
+class NotificationSettings(BaseModel):
+    email: EmailNotificationSettings = Field(default_factory=EmailNotificationSettings)
+    teams: TeamsNotificationSettings = Field(default_factory=TeamsNotificationSettings)
+
+
+class InventorySettings(BaseModel):
+    chroma_data_path: str = "data/chroma"
+    csv_path: str = "data/inventory/inventory.csv"
+
+
+class WhatapSettings(BaseModel):
+    webhook_secret: str = ""
+
+
+class UserCommLogSettings(BaseModel):
+    log_dir: str = "data/user_comm_logs"
+    retention_days: int = 30
 
 
 class AppSettings(BaseSettings):
@@ -51,6 +95,34 @@ class AppSettings(BaseSettings):
     backend_api_host: str = Field(default="localhost", alias="BACKEND_API_HOST")
     backend_api_port: int | None = Field(default=None, alias="BACKEND_API_PORT")
     database_path: str = Field(default="data/app.db", alias="DATABASE_PATH")
+    health_check_interval_seconds: int = Field(default=30, alias="HEALTH_CHECK_INTERVAL_SECONDS")
+
+    email_enabled: bool = Field(default=False, alias="EMAIL_ENABLED")
+    email_smtp_host: str = Field(default="", alias="EMAIL_SMTP_HOST")
+    email_smtp_port: int = Field(default=587, alias="EMAIL_SMTP_PORT")
+    email_smtp_username: str = Field(default="", alias="EMAIL_SMTP_USERNAME")
+    email_smtp_password: str = Field(default="", alias="EMAIL_SMTP_PASSWORD")
+    email_from_address: str = Field(default="", alias="EMAIL_FROM_ADDRESS")
+    email_use_tls: bool = Field(default=True, alias="EMAIL_USE_TLS")
+    email_use_ssl: bool = Field(default=False, alias="EMAIL_USE_SSL")
+    email_timeout_seconds: float = Field(default=30.0, alias="EMAIL_TIMEOUT_SECONDS")
+
+    teams_enabled: bool = Field(default=False, alias="TEAMS_ENABLED")
+    teams_mode: str = Field(default="webhook", alias="TEAMS_MODE")
+    teams_webhook_url: str = Field(default="", alias="TEAMS_WEBHOOK_URL")
+    teams_tenant_id: str = Field(default="", alias="TEAMS_TENANT_ID")
+    teams_client_id: str = Field(default="", alias="TEAMS_CLIENT_ID")
+    teams_client_secret: str = Field(default="", alias="TEAMS_CLIENT_SECRET")
+    teams_team_id: str = Field(default="", alias="TEAMS_TEAM_ID")
+    teams_channel_id: str = Field(default="", alias="TEAMS_CHANNEL_ID")
+    teams_timeout_seconds: float = Field(default=30.0, alias="TEAMS_TIMEOUT_SECONDS")
+
+    chroma_data_path: str = Field(default="data/chroma", alias="CHROMA_DATA_PATH")
+    inventory_csv_path: str = Field(default="data/inventory/inventory.csv", alias="INVENTORY_CSV_PATH")
+    whatap_webhook_secret: str = Field(default="", alias="WHATAP_WEBHOOK_SECRET")
+
+    user_comm_log: str = Field(default="data/user_comm_logs", alias="USER_COMM_LOG")
+    user_comm_retention: int = Field(default=30, alias="USER_COMM_RETENTION")
 
 
 def _merged_env() -> dict[str, str]:
@@ -101,6 +173,84 @@ def _load_yaml(path: Path) -> dict[str, Any]:
         return yaml.safe_load(file) or {}
 
 
+def _as_bool(value: Any, default: bool = False) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def load_notification_settings() -> NotificationSettings:
+    yaml_settings = _load_yaml(CONFIG_DIR / "settings.yaml")
+    notify_yaml = yaml_settings.get("notifications", {})
+    email_yaml = notify_yaml.get("email", {})
+    teams_yaml = notify_yaml.get("teams", {})
+    env_settings = AppSettings()
+
+    email = EmailNotificationSettings(
+        enabled=_as_bool(env_settings.email_enabled, email_yaml.get("enabled", False)),
+        smtp_host=env_settings.email_smtp_host or email_yaml.get("smtp_host", ""),
+        smtp_port=env_settings.email_smtp_port or email_yaml.get("smtp_port", 587),
+        smtp_username=env_settings.email_smtp_username or email_yaml.get("smtp_username", ""),
+        smtp_password=env_settings.email_smtp_password or email_yaml.get("smtp_password", ""),
+        from_address=env_settings.email_from_address or email_yaml.get("from_address", ""),
+        use_tls=_as_bool(env_settings.email_use_tls, email_yaml.get("use_tls", True)),
+        use_ssl=_as_bool(env_settings.email_use_ssl, email_yaml.get("use_ssl", False)),
+        timeout_seconds=env_settings.email_timeout_seconds or email_yaml.get("timeout_seconds", 30.0),
+    )
+    teams = TeamsNotificationSettings(
+        enabled=_as_bool(env_settings.teams_enabled, teams_yaml.get("enabled", False)),
+        mode=(env_settings.teams_mode or teams_yaml.get("mode", "webhook")).strip().lower(),
+        webhook_url=env_settings.teams_webhook_url or teams_yaml.get("webhook_url", ""),
+        tenant_id=env_settings.teams_tenant_id or teams_yaml.get("tenant_id", ""),
+        client_id=env_settings.teams_client_id or teams_yaml.get("client_id", ""),
+        client_secret=env_settings.teams_client_secret or teams_yaml.get("client_secret", ""),
+        team_id=env_settings.teams_team_id or teams_yaml.get("team_id", ""),
+        channel_id=env_settings.teams_channel_id or teams_yaml.get("channel_id", ""),
+        timeout_seconds=env_settings.teams_timeout_seconds or teams_yaml.get("timeout_seconds", 30.0),
+    )
+    return NotificationSettings(email=email, teams=teams)
+
+
+def load_inventory_settings() -> InventorySettings:
+    yaml_settings = _load_yaml(CONFIG_DIR / "settings.yaml")
+    inventory_yaml = yaml_settings.get("inventory", {})
+    env_settings = AppSettings()
+
+    return InventorySettings(
+        chroma_data_path=env_settings.chroma_data_path or inventory_yaml.get("chroma_data_path", "data/chroma"),
+        csv_path=env_settings.inventory_csv_path or inventory_yaml.get("csv_path", "data/inventory/inventory.csv"),
+    )
+
+
+def load_whatap_settings() -> WhatapSettings:
+    yaml_settings = _load_yaml(CONFIG_DIR / "settings.yaml")
+    whatap_yaml = yaml_settings.get("whatap", {})
+    env_settings = AppSettings()
+
+    return WhatapSettings(
+        webhook_secret=env_settings.whatap_webhook_secret or whatap_yaml.get("webhook_secret", ""),
+    )
+
+
+def load_user_comm_log_settings() -> UserCommLogSettings:
+    yaml_settings = _load_yaml(CONFIG_DIR / "settings.yaml")
+    comm_yaml = yaml_settings.get("user_comm_log", {})
+    env_settings = AppSettings()
+
+    retention_raw = env_settings.user_comm_retention or comm_yaml.get("retention_days", 30)
+    try:
+        retention_days = int(retention_raw)
+    except (TypeError, ValueError):
+        retention_days = 30
+
+    return UserCommLogSettings(
+        log_dir=env_settings.user_comm_log or comm_yaml.get("log_dir", "data/user_comm_logs"),
+        retention_days=max(1, retention_days),
+    )
+
+
 def load_settings() -> tuple[LLMSettings, ServerSettings, dict[str, MCPServerConfig], str]:
     yaml_settings = _load_yaml(CONFIG_DIR / "settings.yaml")
     mcp_yaml = _load_yaml(CONFIG_DIR / "mcp_servers.yaml")
@@ -129,6 +279,10 @@ def load_settings() -> tuple[LLMSettings, ServerSettings, dict[str, MCPServerCon
             or server_yaml.get("backend_api_port")
             or env_settings.backend_port
             or server_yaml.get("backend_port", 8080)
+        ),
+        health_check_interval_seconds=(
+            env_settings.health_check_interval_seconds
+            or server_yaml.get("health_check_interval_seconds", 30)
         ),
     )
 

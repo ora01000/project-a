@@ -5,11 +5,10 @@ export interface AgentInfo {
   mcp_servers: string[];
   mcp_status: Record<string, string>;
   status: string;
+  operation_status: "working" | "idle" | "error";
+  operation_error?: string | null;
   input_tokens: number;
   output_tokens: number;
-  total_tokens: number;
-  max_context_tokens: number;
-  token_usage_percent: number;
 }
 
 export interface HealthInfo {

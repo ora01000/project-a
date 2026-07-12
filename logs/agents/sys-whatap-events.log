@@ -1,0 +1,1 @@
+{"timestamp": "2026-07-11T04:20:46.720336+00:00", "agent_id": "sys-whatap-events", "input_message": "{'eventType': 'alert', 'serverName': 'srv-001', 'level': 'critical'}", "output_message": "Whatap 이벤트 수신: type=alert, project=unknown, server=srv-001, level=critical", "tools": []}

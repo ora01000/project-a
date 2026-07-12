@@ -1,23 +1,43 @@
 import json
+import logging
+from datetime import date
 from typing import AsyncIterator
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
 from backend.app.agents.base import (
     AgentInvokeResult,
     ToolUsage,
-    extract_token_usage_from_text,
-    invoke_agent,
 )
 from backend.app.logging.agent_logger import log_agent_interaction
+from backend.app.logging.user_comm_logger import list_user_communications, log_user_communication
+from backend.app.services.agent_invocation import invoke_agent_by_id
 
 router = APIRouter(tags=["chat"])
+
+logger = logging.getLogger(__name__)
 
 
 class ChatRequest(BaseModel):
     message: str = Field(min_length=1)
+    userid: str | None = Field(default=None, max_length=50)
+
+
+class UserCommLogEntry(BaseModel):
+    timestamp: str
+    agent_id: str
+    agent_name: str
+    user_message: str
+    assistant_message: str
+    tools: list[dict[str, str | None]]
+
+
+class UserCommLogResponse(BaseModel):
+    user_id: str
+    date: str
+    entries: list[UserCommLogEntry]
 
 
 def _serialize_tools(tools_used: list[ToolUsage]) -> list[dict[str, str | None]]:
@@ -44,24 +64,6 @@ async def _stream_response(result: AgentInvokeResult) -> AsyncIterator[dict[str,
     }
 
 
-async def _stream_text_only(text: str) -> AsyncIterator[dict[str, str]]:
-    chunk_size = 80
-    for index in range(0, len(text), chunk_size):
-        chunk = text[index : index + chunk_size]
-        yield {"event": "token", "data": json.dumps({"content": chunk})}
-    yield {"event": "done", "data": json.dumps({"content": "", "tools": []})}
-
-
-def _build_mcp_disabled_message(mcp_server_keys: list[str]) -> str:
-    env_hints = ", ".join(f"MCP_{key.upper()}_ENABLED=true" for key in mcp_server_keys)
-    yaml_hints = ", ".join(f"{key}.enabled=true" for key in mcp_server_keys)
-    return (
-        "연결된 MCP 서버가 없습니다. "
-        f"환경변수({env_hints}) 또는 config/mcp_servers.yaml({yaml_hints})에서 "
-        "활성화 및 endpoint URL을 설정한 뒤 백엔드를 재시작해 주세요."
-    )
-
-
 @router.post("/agents/{agent_id}/chat")
 async def chat_with_agent(agent_id: str, payload: ChatRequest, request: Request):
     manager = request.app.state.agent_manager
@@ -69,29 +71,11 @@ async def chat_with_agent(agent_id: str, payload: ChatRequest, request: Request)
     if agent_id not in manager.agents:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
 
-    agent = manager.get_agent(agent_id)
-    definition = manager.get_definition(agent_id)
-    mcp_statuses = {
-        key: manager.mcp_manager.connection_status.get(key, "unknown")
-        for key in definition.mcp_server_keys
-    }
-
-    if mcp_statuses and all(status == "disabled" for status in mcp_statuses.values()):
-        disabled_message = _build_mcp_disabled_message(definition.mcp_server_keys)
-        input_tokens, output_tokens = extract_token_usage_from_text(payload.message, disabled_message)
-        if manager.token_tracker:
-            manager.token_tracker.record(agent_id, input_tokens, output_tokens)
-        log_agent_interaction(
-            agent_id=agent_id,
-            input_message=payload.message,
-            output_message=disabled_message,
-            tools_used=[],
-        )
-        return EventSourceResponse(_stream_text_only(disabled_message))
-
+    manager.mark_agent_working(agent_id)
     try:
-        result = await invoke_agent(agent, payload.message, manager.mcp_manager)
+        result = await invoke_agent_by_id(manager, agent_id, payload.message)
     except Exception as exc:
+        manager.mark_agent_error(agent_id, str(exc), input_message=payload.message)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     if manager.token_tracker:
@@ -104,4 +88,50 @@ async def chat_with_agent(agent_id: str, payload: ChatRequest, request: Request)
         tools_used=result.tools_used,
     )
 
+    if payload.userid:
+        try:
+            definition = manager.get_definition(agent_id)
+            log_user_communication(
+                payload.userid,
+                agent_id=agent_id,
+                agent_name=definition.name,
+                user_message=payload.message,
+                assistant_message=result.content,
+                tools_used=result.tools_used,
+            )
+        except ValueError as exc:
+            logger.warning("Skipped user comm log for %s: %s", payload.userid, exc)
+
+    manager.mark_agent_idle(agent_id)
     return EventSourceResponse(_stream_response(result))
+
+
+@router.get("/chat/logs/{userid}", response_model=UserCommLogResponse)
+async def get_user_chat_logs(
+    userid: str,
+    log_date: str | None = Query(default=None, alias="date"),
+) -> UserCommLogResponse:
+    try:
+        target_date = date.fromisoformat(log_date) if log_date else None
+        payload = list_user_communications(userid, log_date=target_date)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    entries = [
+        UserCommLogEntry(
+            timestamp=str(entry.get("timestamp", "")),
+            agent_id=str(entry.get("agent_id", "")),
+            agent_name=str(entry.get("agent_name", "")),
+            user_message=str(entry.get("user_message", "")),
+            assistant_message=str(entry.get("assistant_message", "")),
+            tools=entry.get("tools", []) if isinstance(entry.get("tools"), list) else [],
+        )
+        for entry in payload.get("entries", [])
+        if isinstance(entry, dict)
+    ]
+
+    return UserCommLogResponse(
+        user_id=str(payload.get("user_id", userid)),
+        date=str(payload.get("date", "")),
+        entries=entries,
+    )

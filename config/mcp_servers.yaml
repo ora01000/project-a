@@ -10,6 +10,10 @@ servers:
     transport: streamable_http
     url: "http://kubectl-ai.ora01000.pe.kr:32716/mcp"
     enabled: true
+  kubevirt:
+    transport: streamable_http
+    url: "http://k8smcp.ora01000.pe.kr:32716/mcp"
+    enabled: true
   vcenter:
     transport: streamable_http
     url: "http://localhost:9090/mcp"

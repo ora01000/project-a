@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from backend.app.db.roles import ROLE_PENDING
 from backend.app.db.users import User, authenticate_user
 
 router = APIRouter(tags=["auth"])
@@ -37,4 +38,9 @@ async def login(payload: LoginRequest, request: Request) -> UserResponse:
     user = authenticate_user(database_path, payload.userid, payload.password)
     if user is None:
         raise HTTPException(status_code=401, detail="아이디 또는 비밀번호가 올바르지 않습니다.")
+    if user.role == ROLE_PENDING:
+        raise HTTPException(
+            status_code=403,
+            detail="가입 승인 대기 중입니다. 관리자에게 문의해 주세요.",
+        )
     return UserResponse.from_user(user)

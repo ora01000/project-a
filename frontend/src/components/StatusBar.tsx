@@ -4,8 +4,10 @@ interface StatusBarProps {
   health: HealthInfo | null;
 }
 
+import { isHealthyConnectionStatus } from "../utils/agentStatusStyle";
+
 function statusBadge(value: string): string {
-  if (value === "connected" || value === "ok") {
+  if (isHealthyConnectionStatus(value) || value === "ok") {
     return "text-emerald-300";
   }
   if (value === "disabled") {

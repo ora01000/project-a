@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { TopologyProvider } from "./context/TopologyContext";
+import { AgentListPage } from "./components/agents/AgentListPage";
 import { DashboardPage } from "./components/DashboardPage";
 import { LoginPage } from "./components/LoginPage";
 import { MenuBar } from "./components/MenuBar";
@@ -107,6 +108,7 @@ export default function App() {
               agents={agents}
               health={health}
               error={error}
+              user={user}
               integratedChatFullscreen={integratedChatFullscreen}
               onToggleIntegratedChatFullscreen={toggleIntegratedChatFullscreen}
               onChatComplete={loadDashboardData}
@@ -114,8 +116,10 @@ export default function App() {
           </>
         ) : null}
 
+        {activeView === "agent-list" ? <AgentListPage /> : null}
+
         {activeView === "user-list" ? (
-          <UserListPage currentUserIdx={user.idx} />
+          <UserListPage currentUserIdx={user.idx} currentUserRole={user.role} />
         ) : null}
 
         {activeView === "agent-assignment" ? <AgentAssignmentPage /> : null}

@@ -7,6 +7,7 @@ import { roleLabel } from "../../types/user";
 
 interface UserListPageProps {
   currentUserIdx: number;
+  currentUserRole: number;
 }
 
 async function parseError(response: Response, fallback: string): Promise<string> {
@@ -14,7 +15,7 @@ async function parseError(response: Response, fallback: string): Promise<string>
   return payload?.detail ?? fallback;
 }
 
-export function UserListPage({ currentUserIdx }: UserListPageProps) {
+export function UserListPage({ currentUserIdx, currentUserRole }: UserListPageProps) {
   const [users, setUsers] = useState<UserRecord[]>([]);
   const [selectedIdxSet, setSelectedIdxSet] = useState<Set<number>>(new Set());
   const [error, setError] = useState<string | null>(null);
@@ -31,7 +32,7 @@ export function UserListPage({ currentUserIdx }: UserListPageProps) {
     setIsLoading(true);
     setError(null);
     try {
-      const response = await fetch("/api/users");
+      const response = await fetch(`/api/users?viewer_role=${currentUserRole}`);
       if (!response.ok) {
         throw new Error(await parseError(response, "사용자 목록을 불러오지 못했습니다."));
       }
@@ -46,7 +47,7 @@ export function UserListPage({ currentUserIdx }: UserListPageProps) {
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [currentUserRole]);
 
   useEffect(() => {
     void loadUsers();

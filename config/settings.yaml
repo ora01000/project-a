@@ -14,3 +14,41 @@ server:
   backend_api_host: "localhost"
   backend_api_port: 8080
   database_path: "data/app.db"
+  health_check_interval_seconds: 30
+
+# 작업 알림 채널 (환경변수로 오버라이드 가능)
+notifications:
+  email:
+    enabled: false
+    smtp_host: ""
+    smtp_port: 587
+    smtp_username: ""
+    smtp_password: ""
+    from_address: ""
+    use_tls: true
+    use_ssl: false
+    timeout_seconds: 30
+  teams:
+    enabled: false
+    mode: "webhook"   # webhook | graph
+    webhook_url: ""
+    tenant_id: ""
+    client_id: ""
+    client_secret: ""
+    team_id: ""
+    channel_id: ""
+    timeout_seconds: 30
+
+# 시스템 인벤토리 (ChromaDB) - 환경변수로 오버라이드 가능
+inventory:
+  chroma_data_path: "data/chroma"
+  csv_path: "data/inventory/inventory.csv"
+
+# Whatap 이벤트 수신 webhook
+whatap:
+  webhook_secret: ""
+
+# 통합 채팅 사용자 대화 로그
+user_comm_log:
+  log_dir: "data/user_comm_logs"
+  retention_days: 30

@@ -67,7 +67,11 @@ export function MenuBar({ activeView, userLabel, onNavigate, onLogout }: MenuBar
             대시보드
           </button>
           <span className="text-slate-600">|</span>
-          <button type="button" className={menuButtonClass(false)}>
+          <button
+            type="button"
+            onClick={() => onNavigate("agent-list")}
+            className={menuButtonClass(activeView === "agent-list")}
+          >
             에이전트 관리
           </button>
           <span className="text-slate-600">|</span>

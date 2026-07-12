@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from backend.app.db.database import get_connection
+from backend.app.db.roles import ROLE_ADMIN, ROLE_PENDING
 
 
 @dataclass(frozen=True)
@@ -25,7 +26,7 @@ def _row_to_user(row) -> User:
     )
 
 
-def list_users(database_path: str | Path) -> list[User]:
+def list_users(database_path: str | Path, *, viewer_role: int | None = None) -> list[User]:
     with get_connection(database_path) as connection:
         rows = connection.execute(
             """
@@ -34,7 +35,14 @@ def list_users(database_path: str | Path) -> list[User]:
             ORDER BY idx
             """
         ).fetchall()
-    return [_row_to_user(row) for row in rows]
+    users = [_row_to_user(row) for row in rows]
+    if viewer_role != ROLE_ADMIN:
+        users = [user for user in users if user.role != ROLE_PENDING]
+    return users
+
+
+def list_admin_users(database_path: str | Path) -> list[User]:
+    return [user for user in list_users(database_path, viewer_role=ROLE_ADMIN) if user.role == ROLE_ADMIN]
 
 
 def get_user_by_idx(database_path: str | Path, idx: int) -> User | None:

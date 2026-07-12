@@ -4,6 +4,7 @@ import type { AgentInfo, HealthInfo } from "../types/agent";
 import type { TopologyEdge, TopologyNode } from "../types/topology";
 import { LLM_NODE_ID, agentNodeId, mcpNodeId } from "../types/topology";
 import { useTopology } from "../context/TopologyContext";
+import { connectionStatusFill, connectionStatusStroke } from "../utils/agentStatusStyle";
 
 interface TopologyMapProps {
   agents: AgentInfo[];
@@ -18,26 +19,6 @@ interface NodePosition {
 
 const SVG_WIDTH = 960;
 const SVG_HEIGHT = 240;
-
-function statusStroke(status: string): string {
-  if (status === "connected") {
-    return "#34d399";
-  }
-  if (status === "partial" || status === "disabled") {
-    return "#fbbf24";
-  }
-  return "#f87171";
-}
-
-function statusFill(status: string): string {
-  if (status === "connected") {
-    return "#064e3b";
-  }
-  if (status === "partial" || status === "disabled") {
-    return "#451a03";
-  }
-  return "#450a0a";
-}
 
 function buildNodes(agents: AgentInfo[], health: HealthInfo | null): TopologyNode[] {
   const mcpIds = new Set<string>();
@@ -190,8 +171,8 @@ export function TopologyMap({ agents, health, embedded = false }: TopologyMapPro
             const height = 44;
             const x = position.x - width / 2;
             const y = position.y - height / 2;
-            const stroke = statusStroke(node.status);
-            const fill = statusFill(node.status);
+            const stroke = connectionStatusStroke(node.status);
+            const fill = connectionStatusFill(node.status);
 
             return (
               <g key={node.id}>

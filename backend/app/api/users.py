@@ -41,7 +41,7 @@ class CreateUserRequest(BaseModel):
     username: str = Field(min_length=1, max_length=50)
     password: str = Field(min_length=1, max_length=50)
     depart: str = Field(min_length=1, max_length=100)
-    role: int = Field(ge=0, le=1)
+    role: int = Field(ge=0, le=5)
 
 
 class UpdateUserRequest(BaseModel):
@@ -49,7 +49,7 @@ class UpdateUserRequest(BaseModel):
     username: str = Field(min_length=1, max_length=50)
     password: str | None = Field(default=None, max_length=50)
     depart: str = Field(min_length=1, max_length=100)
-    role: int = Field(ge=0, le=1)
+    role: int = Field(ge=0, le=5)
 
 
 class DeleteUsersRequest(BaseModel):
@@ -57,9 +57,9 @@ class DeleteUsersRequest(BaseModel):
 
 
 @router.get("/users", response_model=list[UserResponse])
-async def get_users(request: Request) -> list[UserResponse]:
+async def get_users(request: Request, viewer_role: int | None = None) -> list[UserResponse]:
     database_path = request.app.state.database_path
-    return [UserResponse.from_user(user) for user in list_users(database_path)]
+    return [UserResponse.from_user(user) for user in list_users(database_path, viewer_role=viewer_role)]
 
 
 @router.post("/users", response_model=UserResponse, status_code=201)

@@ -135,6 +135,7 @@ export function UserFormModal({ mode, user, onClose, onSave }: UserFormModalProp
             >
               <option value={0}>0: admin</option>
               <option value={1}>1: user</option>
+              <option value={5}>5: 보류</option>
             </select>
           </label>
 

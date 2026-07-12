@@ -55,6 +55,8 @@ def _aggregate_mcp_status(mcp_manager: MCPClientManager, server_keys: list[str])
 
 
 def extract_tools_used(messages: list[Any], mcp_manager: MCPClientManager | None = None) -> list[ToolUsage]:
+    from backend.app.agents.inventory_tool import QUERY_INVENTORY_TOOL_NAME
+
     seen: set[str] = set()
     tools_used: list[ToolUsage] = []
 
@@ -73,6 +75,10 @@ def extract_tools_used(messages: list[Any], mcp_manager: MCPClientManager | None
                 sanitized_args = sanitize_tool_arguments(raw_args)
                 if sanitized_args != raw_args:
                     logger.warning("Sanitized tool call args for %s: %s -> %s", name, raw_args, sanitized_args)
+
+            if name == QUERY_INVENTORY_TOOL_NAME:
+                tools_used.append(ToolUsage(name=name, mcp_server="inventory"))
+                continue
 
             mcp_server = mcp_manager.get_tool_server(name) if mcp_manager else None
             tools_used.append(ToolUsage(name=name, mcp_server=mcp_server))
@@ -150,16 +156,33 @@ async def build_agent(
     definition: AgentDefinition,
     mcp_manager: MCPClientManager,
 ) -> Any:
+    from backend.app.agents.inventory_tool import (
+        INVENTORY_AGENT_ID,
+        INVENTORY_TOOL_PROMPT_HINT,
+        QUERY_INVENTORY_TOOL_NAME,
+        create_inventory_tool,
+    )
+
     llm = get_llm()
     tools = [
         wrap_tool_with_argument_sanitizer(tool)
         for tool in await mcp_manager.get_tools_for_servers(definition.mcp_server_keys)
     ]
+
+    if definition.agent_id != INVENTORY_AGENT_ID:
+        tools.append(create_inventory_tool(caller_agent_id=definition.agent_id))
+
     prompt = definition.system_prompt
-    if not tools:
+    if definition.agent_id != INVENTORY_AGENT_ID:
+        prompt = f"{prompt}\n\n{INVENTORY_TOOL_PROMPT_HINT}"
+
+    mcp_tools = [
+        tool for tool in tools if getattr(tool, "name", None) != QUERY_INVENTORY_TOOL_NAME
+    ]
+    if not mcp_tools and definition.mcp_server_keys:
         server_keys = ", ".join(definition.mcp_server_keys)
         prompt = (
-            f"{definition.system_prompt}\n\n"
+            f"{prompt}\n\n"
             f"The MCP server(s) for this agent ({server_keys}) are not connected yet. "
             "Inform the user that MCP endpoints must be configured via environment variables "
             "(MCP_<SERVER>_URL, MCP_<SERVER>_ENABLED) or config/mcp_servers.yaml."

@@ -1,30 +1,92 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { AgentInfo, IntegratedChatResponse, ToolUsage } from "../types/agent";
+import type { AuthUser } from "../types/auth";
 import { agentNodeId, LLM_NODE_ID, mcpNodeId } from "../types/topology";
 import { useTopology } from "../context/TopologyContext";
 import { appendInputHistory, loadInputHistory } from "../utils/inputHistory";
 import { formatResponseTimestamp } from "../utils/messageIndex";
 import { flushSseBuffer, parseSseChunk } from "../utils/parseSse";
 import { AssistantMessageContent } from "./AssistantMessageContent";
+import { JobNotificationCard } from "./jobs/JobNotificationCard";
+import { SignupNotificationCard } from "./users/SignupNotificationCard";
 import { ToolUsageList } from "./ToolUsageList";
+import type { JobNotification } from "../types/job";
+import type { SignupNotification } from "../types/signup";
 
 interface IntegratedChatPanelProps {
   agents: AgentInfo[];
+  user: AuthUser;
   isFullscreen: boolean;
   onToggleFullscreen: () => void;
   onChatComplete?: () => void;
+  jobNotifications?: JobNotification[];
+  signupNotifications?: SignupNotification[];
+  onJobReview?: (jobIdx: number) => void;
+  onJobApprove?: (jobIdx: number) => void;
+  onJobPending?: (jobIdx: number) => void;
+  onJobReject?: (jobIdx: number) => void;
+  onSignupApprove?: (userIdx: number) => void;
+  onSignupReject?: (userIdx: number, reason: string) => void;
+  onSignupHold?: (notificationIdx: number) => void;
+  isJobActionProcessing?: boolean;
+  isSignupActionProcessing?: boolean;
 }
 
 function createResponseId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
+function StopIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" className="h-4 w-4" aria-hidden="true">
+      <rect x="6" y="6" width="12" height="12" rx="1" />
+    </svg>
+  );
+}
+
+function isAbortError(err: unknown): boolean {
+  return err instanceof DOMException && err.name === "AbortError";
+}
+
+interface UserCommLogEntry {
+  timestamp: string;
+  agent_id: string;
+  agent_name: string;
+  user_message: string;
+  assistant_message: string;
+  tools: ToolUsage[];
+}
+
+function mapLogEntryToResponse(entry: UserCommLogEntry, index: number): IntegratedChatResponse {
+  return {
+    id: `${entry.timestamp}-${index}`,
+    agentId: entry.agent_id,
+    agentName: entry.agent_name,
+    userContent: entry.user_message,
+    assistantContent: entry.assistant_message,
+    toolsUsed: entry.tools ?? [],
+    createdAt: entry.timestamp,
+  };
+}
+
 export function IntegratedChatPanel({
   agents,
+  user,
   isFullscreen,
   onToggleFullscreen,
   onChatComplete,
+  jobNotifications = [],
+  signupNotifications = [],
+  onJobReview,
+  onJobApprove,
+  onJobPending,
+  onJobReject,
+  onSignupApprove,
+  onSignupReject,
+  onSignupHold,
+  isJobActionProcessing = false,
+  isSignupActionProcessing = false,
 }: IntegratedChatPanelProps) {
   const { emitFlow } = useTopology();
   const [selectedAgentId, setSelectedAgentId] = useState("");
@@ -35,6 +97,7 @@ export function IntegratedChatPanel({
   const [historyIndex, setHistoryIndex] = useState(-1);
   const assistantScrollRef = useRef<HTMLDivElement>(null);
   const layoutRef = useRef<HTMLDivElement>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   const selectedAgent = useMemo(
     () => agents.find((agent) => agent.id === selectedAgentId) ?? null,
@@ -42,6 +105,38 @@ export function IntegratedChatPanel({
   );
 
   const isDisabled = !selectedAgent || selectedAgent.status === "disabled";
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadChatHistory = async () => {
+      try {
+        const response = await fetch(`/api/chat/logs/${encodeURIComponent(user.userid)}`);
+        if (!response.ok) {
+          return;
+        }
+
+        const payload = (await response.json()) as {
+          entries?: UserCommLogEntry[];
+        };
+        if (cancelled) {
+          return;
+        }
+
+        const restored = (payload.entries ?? []).map(mapLogEntryToResponse);
+        setResponses(restored);
+      } catch {
+        if (!cancelled) {
+          setResponses([]);
+        }
+      }
+    };
+
+    void loadChatHistory();
+    return () => {
+      cancelled = true;
+    };
+  }, [user.userid]);
 
   useEffect(() => {
     if (agents.length === 0) {
@@ -69,8 +164,13 @@ export function IntegratedChatPanel({
   }, [selectedAgentId]);
 
   const assistantScrollKey = useMemo(
-    () => responses.map((response) => response.assistantContent).join("\0"),
-    [responses],
+    () =>
+      [
+        jobNotifications.map((notification) => notification.idx).join(","),
+        signupNotifications.map((notification) => notification.idx).join(","),
+        responses.map((response) => response.assistantContent).join("\0"),
+      ].join("\0"),
+    [jobNotifications, signupNotifications, responses],
   );
 
   useEffect(() => {
@@ -132,6 +232,10 @@ export function IntegratedChatPanel({
     }
   };
 
+  const handleStop = () => {
+    abortControllerRef.current?.abort();
+  };
+
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     const trimmed = input.trim();
@@ -161,11 +265,15 @@ export function IntegratedChatPanel({
       },
     ]);
 
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
+
     try {
       const response = await fetch(`/api/agents/${selectedAgent.id}/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: trimmed }),
+        body: JSON.stringify({ message: trimmed, userid: user.userid }),
+        signal: abortController.signal,
       });
 
       if (!response.ok) {
@@ -231,9 +339,13 @@ export function IntegratedChatPanel({
         }
       }
     } catch (err) {
+      if (isAbortError(err)) {
+        return;
+      }
       const message = err instanceof Error ? err.message : "Unknown error";
       updateLastResponse(`오류: ${message}`, []);
     } finally {
+      abortControllerRef.current = null;
       setIsLoading(false);
       onChatComplete?.();
     }
@@ -270,10 +382,34 @@ export function IntegratedChatPanel({
             ref={assistantScrollRef}
             className="min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain rounded-md border border-slate-800 bg-slate-900/70 p-2 text-sm"
           >
-            {responses.length === 0 ? (
+            {jobNotifications.length === 0 && signupNotifications.length === 0 && responses.length === 0 ? (
               <p className="text-slate-500">에이전트 응답이 여기에 표시됩니다.</p>
-            ) : (
-              responses.map((response) => (
+            ) : null}
+
+            {signupNotifications.map((notification) => (
+              <SignupNotificationCard
+                key={`signup-${notification.idx}`}
+                notification={notification}
+                isProcessing={isSignupActionProcessing}
+                onApprove={(userIdx) => onSignupApprove?.(userIdx)}
+                onReject={(userIdx, reason) => onSignupReject?.(userIdx, reason)}
+                onHold={(notificationIdx) => onSignupHold?.(notificationIdx)}
+              />
+            ))}
+
+            {jobNotifications.map((notification) => (
+              <JobNotificationCard
+                key={notification.idx}
+                notification={notification}
+                isProcessing={isJobActionProcessing}
+                onReview={(jobIdx) => onJobReview?.(jobIdx)}
+                onApprove={(jobIdx) => onJobApprove?.(jobIdx)}
+                onPending={(jobIdx) => onJobPending?.(jobIdx)}
+                onReject={(jobIdx) => onJobReject?.(jobIdx)}
+              />
+            ))}
+
+            {responses.map((response) => (
                 <div
                   key={response.id}
                   className="rounded-md bg-slate-800/80 px-2 py-2 text-slate-100 break-words"
@@ -291,8 +427,7 @@ export function IntegratedChatPanel({
                     <span className="text-slate-500">응답 생성 중...</span>
                   )}
                 </div>
-              ))
-            )}
+              ))}
           </div>
         </div>
 
@@ -354,13 +489,25 @@ export function IntegratedChatPanel({
               disabled={isDisabled || isLoading}
               className="min-h-0 flex-1 resize-none rounded-md border border-slate-700 bg-slate-900 px-3 py-2 text-sm outline-none focus:border-sky-500"
             />
-            <button
-              type="submit"
-              disabled={isDisabled || isLoading || !input.trim()}
-              className="rounded-md bg-sky-600 px-3 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-slate-700"
-            >
-              {isLoading ? "..." : "전송"}
-            </button>
+            {isLoading ? (
+              <button
+                type="button"
+                onClick={handleStop}
+                title="응답 중단"
+                aria-label="응답 중단"
+                className="flex items-center justify-center rounded-md bg-rose-600 px-3 py-2 text-white hover:bg-rose-500"
+              >
+                <StopIcon />
+              </button>
+            ) : (
+              <button
+                type="submit"
+                disabled={isDisabled || !input.trim()}
+                className="rounded-md bg-sky-600 px-3 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-slate-700"
+              >
+                전송
+              </button>
+            )}
           </div>
         </form>
       </div>
