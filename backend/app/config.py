@@ -66,6 +66,7 @@ class NotificationSettings(BaseModel):
 class InventorySettings(BaseModel):
     chroma_data_path: str = "data/chroma"
     csv_path: str = "data/inventory/inventory.csv"
+    upload_path: str = "data/inventory/uploads"
 
 
 class WhatapSettings(BaseModel):
@@ -119,6 +120,7 @@ class AppSettings(BaseSettings):
 
     chroma_data_path: str = Field(default="data/chroma", alias="CHROMA_DATA_PATH")
     inventory_csv_path: str = Field(default="data/inventory/inventory.csv", alias="INVENTORY_CSV_PATH")
+    inventory_upload_path: str = Field(default="data/inventory/uploads", alias="INVENTORY_UPLOAD_PATH")
     whatap_webhook_secret: str = Field(default="", alias="WHATAP_WEBHOOK_SECRET")
 
     user_comm_log: str = Field(default="data/user_comm_logs", alias="USER_COMM_LOG")
@@ -221,6 +223,7 @@ def load_inventory_settings() -> InventorySettings:
     return InventorySettings(
         chroma_data_path=env_settings.chroma_data_path or inventory_yaml.get("chroma_data_path", "data/chroma"),
         csv_path=env_settings.inventory_csv_path or inventory_yaml.get("csv_path", "data/inventory/inventory.csv"),
+        upload_path=env_settings.inventory_upload_path or inventory_yaml.get("upload_path", "data/inventory/uploads"),
     )
 
 

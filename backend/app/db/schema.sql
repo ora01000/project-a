@@ -17,6 +17,16 @@ CREATE TABLE IF NOT EXISTS agents (
     mcp_server_keys VARCHAR(200) NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS inventory (
+    idx INTEGER PRIMARY KEY AUTOINCREMENT,
+    inventory_name VARCHAR(100) NOT NULL,
+    inventory_file VARCHAR(300) NOT NULL,
+    file_ext VARCHAR(15) NOT NULL,
+    chunk_type INTEGER NOT NULL,
+    chunk_size INTEGER NOT NULL DEFAULT 0,
+    modified INTEGER NOT NULL DEFAULT 0
+);
+
 CREATE TABLE IF NOT EXISTS jobs (
     idx INTEGER PRIMARY KEY AUTOINCREMENT,
     request_date DATE NOT NULL,

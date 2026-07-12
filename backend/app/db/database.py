@@ -3,7 +3,7 @@ import sqlite3
 from pathlib import Path
 
 from backend.app.agents.registry import AGENT_DEFINITIONS
-from backend.app.config import PROJECT_ROOT
+from backend.app.config import PROJECT_ROOT, load_inventory_settings
 from backend.app.db.seed import INITIAL_USERS
 
 logger = logging.getLogger(__name__)
@@ -71,6 +71,28 @@ def _apply_migrations(connection: sqlite3.Connection) -> None:
             )
             """
         )
+    if "inventory" not in tables:
+        connection.execute(
+            """
+            CREATE TABLE inventory (
+                idx INTEGER PRIMARY KEY AUTOINCREMENT,
+                inventory_name VARCHAR(100) NOT NULL,
+                inventory_file VARCHAR(300) NOT NULL,
+                file_ext VARCHAR(15) NOT NULL,
+                chunk_type INTEGER NOT NULL,
+                chunk_size INTEGER NOT NULL DEFAULT 0,
+                modified INTEGER NOT NULL DEFAULT 0
+            )
+            """
+        )
+    else:
+        inventory_columns = {
+            row["name"] for row in connection.execute("PRAGMA table_info(inventory)").fetchall()
+        }
+        if "chunk_size" not in inventory_columns:
+            connection.execute(
+                "ALTER TABLE inventory ADD COLUMN chunk_size INTEGER NOT NULL DEFAULT 0"
+            )
 
 
 def seed_initial_users(connection: sqlite3.Connection) -> int:
@@ -154,6 +176,31 @@ def sync_missing_agents(connection: sqlite3.Connection) -> int:
     return len(seed_rows)
 
 
+def seed_initial_inventory(connection: sqlite3.Connection) -> int:
+    inventory_settings = load_inventory_settings()
+    inventory_file = inventory_settings.csv_path
+    row = connection.execute(
+        "SELECT COUNT(*) AS count FROM inventory WHERE inventory_file = ?",
+        (inventory_file,),
+    ).fetchone()
+    existing_count = int(row["count"]) if row else 0
+    if existing_count > 0:
+        logger.info("Skip inventory seeding: %s already exists", inventory_file)
+        return 0
+
+    file_ext = Path(inventory_file).suffix.removeprefix(".") or "csv"
+    connection.execute(
+        """
+        INSERT INTO inventory (inventory_name, inventory_file, file_ext, chunk_type, chunk_size, modified)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        ("샘플 인벤토리", inventory_file, file_ext, 1, 0, 0),
+    )
+    connection.commit()
+    logger.info("Seeded initial inventory record for %s", inventory_file)
+    return 1
+
+
 def init_database(database_path: str | Path | None = None) -> Path:
     path = resolve_database_path(database_path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -165,6 +212,7 @@ def init_database(database_path: str | Path | None = None) -> Path:
         seed_initial_users(connection)
         seed_initial_agents(connection)
         sync_missing_agents(connection)
+        seed_initial_inventory(connection)
 
     logger.info("SQLite database initialized at %s", path)
     return path

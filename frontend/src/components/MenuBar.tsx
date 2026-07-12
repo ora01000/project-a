@@ -32,7 +32,9 @@ function menuButtonClass(isActive: boolean): string {
 export function MenuBar({ activeView, userLabel, onNavigate, onLogout }: MenuBarProps) {
   const [currentTime, setCurrentTime] = useState(formatCurrentTime(new Date()));
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+  const [showAgentMenu, setShowAgentMenu] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
+  const agentMenuRef = useRef<HTMLDivElement>(null);
   const userMenuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -44,6 +46,9 @@ export function MenuBar({ activeView, userLabel, onNavigate, onLogout }: MenuBar
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
+      if (!agentMenuRef.current?.contains(event.target as Node)) {
+        setShowAgentMenu(false);
+      }
       if (!userMenuRef.current?.contains(event.target as Node)) {
         setShowUserMenu(false);
       }
@@ -51,6 +56,8 @@ export function MenuBar({ activeView, userLabel, onNavigate, onLogout }: MenuBar
     window.addEventListener("mousedown", handleClickOutside);
     return () => window.removeEventListener("mousedown", handleClickOutside);
   }, []);
+
+  const isAgentMenuActive = activeView === "agent-list" || activeView === "inventory-csv";
 
   const isUserManagementActive =
     activeView === "user-list" || activeView === "agent-assignment";
@@ -67,13 +74,49 @@ export function MenuBar({ activeView, userLabel, onNavigate, onLogout }: MenuBar
             대시보드
           </button>
           <span className="text-slate-600">|</span>
-          <button
-            type="button"
-            onClick={() => onNavigate("agent-list")}
-            className={menuButtonClass(activeView === "agent-list")}
-          >
-            에이전트 관리
-          </button>
+
+          <div ref={agentMenuRef} className="relative">
+            <button
+              type="button"
+              onClick={() => setShowAgentMenu((current) => !current)}
+              className={menuButtonClass(isAgentMenuActive)}
+            >
+              에이전트 ▾
+            </button>
+            {showAgentMenu ? (
+              <div className="absolute left-0 top-full z-20 mt-1 min-w-[160px] rounded-md border border-slate-700 bg-slate-900 py-1 shadow-lg">
+                <button
+                  type="button"
+                  onClick={() => {
+                    onNavigate("agent-list");
+                    setShowAgentMenu(false);
+                  }}
+                  className={`block w-full px-3 py-2 text-left text-sm ${
+                    activeView === "agent-list"
+                      ? "bg-slate-800 text-sky-200"
+                      : "text-slate-200 hover:bg-slate-800"
+                  }`}
+                >
+                  에이전트 관리
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onNavigate("inventory-csv");
+                    setShowAgentMenu(false);
+                  }}
+                  className={`block w-full px-3 py-2 text-left text-sm ${
+                    activeView === "inventory-csv"
+                      ? "bg-slate-800 text-sky-200"
+                      : "text-slate-200 hover:bg-slate-800"
+                  }`}
+                >
+                  인벤토리 CSV
+                </button>
+              </div>
+            ) : null}
+          </div>
+
           <span className="text-slate-600">|</span>
           <button type="button" className={menuButtonClass(false)}>
             LLM 관리

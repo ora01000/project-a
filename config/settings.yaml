@@ -43,6 +43,7 @@ notifications:
 inventory:
   chroma_data_path: "data/chroma"
   csv_path: "data/inventory/inventory.csv"
+  upload_path: "data/inventory/uploads"
 
 # Whatap 이벤트 수신 webhook
 whatap:

@@ -65,11 +65,18 @@ def _row_to_document(row: dict[str, str]) -> str:
     return " | ".join(parts)
 
 
+def _chunk_text(text: str, chunk_size: int) -> list[str]:
+    if chunk_size <= 0:
+        raise ValueError("chunk_size must be greater than 0 for custom chunking")
+    return [text[index : index + chunk_size] for index in range(0, len(text), chunk_size)]
+
+
 class InventoryService:
     def __init__(self, settings: InventorySettings) -> None:
         self.settings = settings
         self.chroma_path = _resolve_path(settings.chroma_data_path)
         self.csv_path = _resolve_path(settings.csv_path)
+        self.upload_path = _resolve_path(settings.upload_path)
         self._client: chromadb.ClientAPI | None = None
         self._collection: chromadb.Collection | None = None
         self._status = "uninitialized"
@@ -91,6 +98,7 @@ class InventoryService:
     def initialize(self) -> None:
         try:
             self.chroma_path.mkdir(parents=True, exist_ok=True)
+            self.upload_path.mkdir(parents=True, exist_ok=True)
             self._client = chromadb.PersistentClient(
                 path=str(self.chroma_path),
                 settings=ChromaSettings(anonymized_telemetry=False),
@@ -121,6 +129,156 @@ class InventoryService:
             self._status = "error"
             self._error = str(exc)
             logger.exception("Failed to initialize inventory service: %s", exc)
+
+    def resolve_uploaded_file_path(self, filename: str) -> Path:
+        return self.upload_path / Path(filename).name
+
+    def save_uploaded_file(self, *, filename: str, content: bytes) -> str:
+        safe_filename = Path(filename).name
+        if not safe_filename:
+            raise ValueError("A valid filename is required")
+
+        self.upload_path.mkdir(parents=True, exist_ok=True)
+        target_path = self.upload_path / safe_filename
+        target_path.write_bytes(content)
+        return safe_filename
+
+    def delete_uploaded_file(self, filename: str) -> None:
+        file_path = self.resolve_uploaded_file_path(filename)
+        if file_path.exists():
+            file_path.unlink()
+
+    def _ensure_collection(self) -> chromadb.Collection:
+        if self._collection is None:
+            raise RuntimeError("Inventory service is not initialized")
+        return self._collection
+
+    def _delete_embeddings_for_idx(self, inventory_idx: int) -> None:
+        collection = self._ensure_collection()
+        collection.delete(where={"inventory_idx": str(inventory_idx)})
+        self._document_count = collection.count()
+
+    def delete_inventory_embeddings(self, inventory_idx: int) -> None:
+        self._delete_embeddings_for_idx(inventory_idx)
+
+    def _build_row_documents(
+        self,
+        *,
+        inventory_idx: int,
+        file_path: Path,
+        filename: str,
+    ) -> tuple[list[str], list[dict[str, str]], list[str]]:
+        documents: list[str] = []
+        metadatas: list[dict[str, str]] = []
+        ids: list[str] = []
+
+        with file_path.open(encoding="utf-8-sig", newline="") as file:
+            reader = csv.DictReader(file)
+            for index, row in enumerate(reader):
+                normalized = {key: (value or "").strip() for key, value in row.items() if key}
+                if not any(normalized.values()):
+                    continue
+                doc_id = (
+                    normalized.get("id")
+                    or normalized.get("host_id")
+                    or normalized.get("hostname")
+                    or f"row-{index}"
+                )
+                documents.append(_row_to_document(normalized))
+                metadatas.append(
+                    {
+                        **normalized,
+                        "inventory_idx": str(inventory_idx),
+                        "inventory_file": filename,
+                    }
+                )
+                ids.append(f"inv-{inventory_idx}-row-{index}-{doc_id}")
+
+        return documents, metadatas, ids
+
+    def _build_custom_documents(
+        self,
+        *,
+        inventory_idx: int,
+        file_path: Path,
+        filename: str,
+        chunk_size: int,
+    ) -> tuple[list[str], list[dict[str, str]], list[str]]:
+        text = file_path.read_text(encoding="utf-8-sig")
+        if not text.strip():
+            return [], [], []
+
+        documents: list[str] = []
+        metadatas: list[dict[str, str]] = []
+        ids: list[str] = []
+
+        for index, chunk in enumerate(_chunk_text(text, chunk_size)):
+            if not chunk.strip():
+                continue
+            documents.append(chunk)
+            metadatas.append(
+                {
+                    "inventory_idx": str(inventory_idx),
+                    "inventory_file": filename,
+                    "chunk_index": str(index),
+                }
+            )
+            ids.append(f"inv-{inventory_idx}-chunk-{index}")
+
+        return documents, metadatas, ids
+
+    def embed_inventory_record(
+        self,
+        *,
+        inventory_idx: int,
+        filename: str,
+        chunk_type: int,
+        chunk_size: int,
+    ) -> int:
+        from backend.app.db.inventory_records import CHUNK_TYPE_CUSTOM, CHUNK_TYPE_ROW
+
+        collection = self._ensure_collection()
+        file_path = self.resolve_uploaded_file_path(filename)
+        if not file_path.exists():
+            raise FileNotFoundError(f"Uploaded inventory file not found: {file_path}")
+
+        self._delete_embeddings_for_idx(inventory_idx)
+
+        if chunk_type == CHUNK_TYPE_ROW:
+            documents, metadatas, ids = self._build_row_documents(
+                inventory_idx=inventory_idx,
+                file_path=file_path,
+                filename=filename,
+            )
+        elif chunk_type == CHUNK_TYPE_CUSTOM:
+            documents, metadatas, ids = self._build_custom_documents(
+                inventory_idx=inventory_idx,
+                file_path=file_path,
+                filename=filename,
+                chunk_size=chunk_size,
+            )
+        else:
+            raise ValueError(f"Unsupported chunk_type: {chunk_type}")
+
+        if not documents:
+            raise ValueError("No embeddable content found in the uploaded file")
+
+        collection.add(documents=documents, metadatas=metadatas, ids=ids)
+        self._document_count = collection.count()
+        self._status = "ready"
+        self._error = None
+        logger.info(
+            "Embedded inventory idx=%s file=%s documents=%s",
+            inventory_idx,
+            filename,
+            len(documents),
+        )
+        return len(documents)
+
+    def refresh_document_count(self) -> int:
+        collection = self._ensure_collection()
+        self._document_count = collection.count()
+        return self._document_count
 
     def reload_csv(self) -> int:
         if self._collection is None:
@@ -248,6 +406,7 @@ class InventoryService:
             "document_count": self._document_count,
             "chroma_data_path": str(self.chroma_path),
             "csv_path": str(self.csv_path),
+            "upload_path": str(self.upload_path),
         }
 
 
