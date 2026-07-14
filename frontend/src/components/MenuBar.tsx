@@ -1,13 +1,21 @@
 import { useEffect, useRef, useState } from "react";
 
-import { ConfirmDialog } from "./ConfirmDialog";
+import type { AuthUser } from "../types/auth";
 import type { AppView } from "../types/navigation";
+import { ROLE_ADMIN } from "../types/user";
+import { formatUserLabel } from "../utils/authSession";
+import { AboutModal } from "./AboutModal";
+import { ConfirmDialog } from "./ConfirmDialog";
+import { ProfileEditModal } from "./ProfileEditModal";
+import { TableDebugModal } from "./TableDebugModal";
+import { TestJobSendModal } from "./jobs/TestJobSendModal";
 
 interface MenuBarProps {
   activeView: AppView;
-  userLabel: string;
+  user: AuthUser;
   onNavigate: (view: AppView) => void;
   onLogout: () => void;
+  onUserUpdated: (user: AuthUser) => void;
 }
 
 function formatCurrentTime(date: Date): string {
@@ -29,13 +37,22 @@ function menuButtonClass(isActive: boolean): string {
   }`;
 }
 
-export function MenuBar({ activeView, userLabel, onNavigate, onLogout }: MenuBarProps) {
+export function MenuBar({ activeView, user, onNavigate, onLogout, onUserUpdated }: MenuBarProps) {
   const [currentTime, setCurrentTime] = useState(formatCurrentTime(new Date()));
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+  const [showAbout, setShowAbout] = useState(false);
+  const [showTestJobSend, setShowTestJobSend] = useState(false);
+  const [showTableDebug, setShowTableDebug] = useState(false);
+  const [showProfileEdit, setShowProfileEdit] = useState(false);
+  const [showSaveSuccess, setShowSaveSuccess] = useState(false);
   const [showAgentMenu, setShowAgentMenu] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
+  const [showSettingsMenu, setShowSettingsMenu] = useState(false);
   const agentMenuRef = useRef<HTMLDivElement>(null);
   const userMenuRef = useRef<HTMLDivElement>(null);
+  const settingsMenuRef = useRef<HTMLDivElement>(null);
+  const userLabel = formatUserLabel(user);
+  const isAdmin = user.role === ROLE_ADMIN;
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -51,6 +68,9 @@ export function MenuBar({ activeView, userLabel, onNavigate, onLogout }: MenuBar
       }
       if (!userMenuRef.current?.contains(event.target as Node)) {
         setShowUserMenu(false);
+      }
+      if (!settingsMenuRef.current?.contains(event.target as Node)) {
+        setShowSettingsMenu(false);
       }
     };
     window.addEventListener("mousedown", handleClickOutside);
@@ -166,14 +186,66 @@ export function MenuBar({ activeView, userLabel, onNavigate, onLogout }: MenuBar
           </div>
 
           <span className="text-slate-600">|</span>
-          <button type="button" className={menuButtonClass(false)}>
-            환경설정
-          </button>
+
+          <div ref={settingsMenuRef} className="relative">
+            <button
+              type="button"
+              onClick={() => setShowSettingsMenu((current) => !current)}
+              className={menuButtonClass(showAbout || showTestJobSend || showTableDebug)}
+            >
+              환경설정 ▾
+            </button>
+            {showSettingsMenu ? (
+              <div className="absolute left-0 top-full z-20 mt-1 min-w-[180px] rounded-md border border-slate-700 bg-slate-900 py-1 shadow-lg">
+                {isAdmin ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowSettingsMenu(false);
+                        setShowTestJobSend(true);
+                      }}
+                      className="block w-full px-3 py-2 text-left text-sm text-slate-200 hover:bg-slate-800"
+                    >
+                      테스트 작업 발송
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowSettingsMenu(false);
+                        setShowTableDebug(true);
+                      }}
+                      className="block w-full px-3 py-2 text-left text-sm text-slate-200 hover:bg-slate-800"
+                    >
+                      테이블 조회(디버깅)
+                    </button>
+                  </>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowSettingsMenu(false);
+                    setShowAbout(true);
+                  }}
+                  className="block w-full px-3 py-2 text-left text-sm text-slate-200 hover:bg-slate-800"
+                >
+                  About
+                </button>
+              </div>
+            ) : null}
+          </div>
         </div>
 
         <div className="flex flex-wrap items-center gap-3 text-sm text-slate-300">
           <time className="font-mono text-slate-400">{currentTime}</time>
-          <span className="text-slate-200">{userLabel}</span>
+          <button
+            type="button"
+            onClick={() => setShowProfileEdit(true)}
+            className="rounded-md border border-slate-700 px-3 py-1.5 text-slate-200 transition hover:bg-slate-800"
+            title="개인정보 수정"
+          >
+            {userLabel}
+          </button>
           <button
             type="button"
             onClick={() => setShowLogoutConfirm(true)}
@@ -195,6 +267,35 @@ export function MenuBar({ activeView, userLabel, onNavigate, onLogout }: MenuBar
             setShowLogoutConfirm(false);
             onLogout();
           }}
+        />
+      ) : null}
+
+      {showAbout ? <AboutModal onClose={() => setShowAbout(false)} /> : null}
+      {showTestJobSend && isAdmin ? (
+        <TestJobSendModal onClose={() => setShowTestJobSend(false)} />
+      ) : null}
+      {showTableDebug && isAdmin ? (
+        <TableDebugModal onClose={() => setShowTableDebug(false)} />
+      ) : null}
+      {showProfileEdit ? (
+        <ProfileEditModal
+          user={user}
+          onClose={() => setShowProfileEdit(false)}
+          onSaved={(updated) => {
+            onUserUpdated(updated);
+            setShowProfileEdit(false);
+            setShowSaveSuccess(true);
+          }}
+        />
+      ) : null}
+      {showSaveSuccess ? (
+        <ConfirmDialog
+          title="저장 완료"
+          message="개인정보가 저장되었습니다."
+          confirmLabel="확인"
+          cancelLabel="닫기"
+          onCancel={() => setShowSaveSuccess(false)}
+          onConfirm={() => setShowSaveSuccess(false)}
         />
       ) : null}
     </>

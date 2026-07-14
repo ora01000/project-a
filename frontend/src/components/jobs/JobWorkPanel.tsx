@@ -180,7 +180,17 @@ export function JobWorkPanel({ tab }: JobWorkPanelProps) {
         <p className="mt-3 text-xs text-slate-500">{selectedJobs.length}개 작업 선택됨</p>
       ) : null}
 
-      {detailJob ? <JobDetailModal job={detailJob} onClose={() => setDetailJob(null)} /> : null}
+      {detailJob ? (
+        <JobDetailModal
+          job={detailJob}
+          editable={tab === "review"}
+          onClose={() => setDetailJob(null)}
+          onJobUpdated={(updated) => {
+            setDetailJob(updated);
+            void loadJobs();
+          }}
+        />
+      ) : null}
     </>
   );
 }

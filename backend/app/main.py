@@ -13,22 +13,29 @@ from backend.app.agents.base import AgentDefinition, _aggregate_mcp_status, buil
 from backend.app.agents.inventory_agent import INVENTORY_AGENT_MARKER
 from backend.app.agents.inventory_tool import INVENTORY_AGENT_ID
 from backend.app.agents.registry import load_agent_definitions
+from backend.app.agents.system_agents import (
+    SYSTEM_AGENT_MARKER,
+    is_dashboard_system_agent_id,
+    list_dashboard_system_agent_definitions,
+)
 from backend.app.api.agent_logs import router as agent_logs_router
 from backend.app.api.agent_records import router as agent_records_router
 from backend.app.api.agents import router as agents_router
 from backend.app.api.auth import router as auth_router
 from backend.app.api.chat import router as chat_router
+from backend.app.api.debug import router as debug_router
 from backend.app.api.inventory import router as inventory_router
 from backend.app.api.jobs import router as jobs_router
 from backend.app.api.signup import router as signup_router
 from backend.app.api.users import router as users_router
 from backend.app.api.whatap_webhook import router as whatap_webhook_router
-from backend.app.config import load_settings
+from backend.app.config import load_job_requester_settings, load_settings
 from backend.app.db import init_database
 from backend.app.logging.agent_logger import ensure_agent_logs_dir, log_agent_error
 from backend.app.logging.user_comm_logger import initialize_user_comm_logs
 from backend.app.mcp.client import MCPClientManager
 from backend.app.services.inventory import initialize_inventory_service
+from backend.app.services.job_requester import run_job_requester_loop
 from backend.app.usage.token_tracker import TokenTracker
 
 logger = logging.getLogger(__name__)
@@ -38,6 +45,7 @@ class AgentManager:
     def __init__(self) -> None:
         self.agents: dict[str, Any] = {}
         self.agent_definitions: list[AgentDefinition] = []
+        self.system_agent_definitions: list[AgentDefinition] = []
         self.agent_definitions_by_id: dict[str, AgentDefinition] = {}
         self.agent_operation_status: dict[str, str] = {}
         self.agent_operation_errors: dict[str, str] = {}
@@ -48,6 +56,14 @@ class AgentManager:
         self.token_tracker: TokenTracker | None = None
         self.max_context_tokens: int = 32768
         self._health_check_lock = asyncio.Lock()
+
+    def _register_system_agents(self) -> None:
+        self.system_agent_definitions = list_dashboard_system_agent_definitions()
+        for definition in self.system_agent_definitions:
+            self.agent_definitions_by_id[definition.agent_id] = definition
+            self.agent_operation_status.setdefault(definition.agent_id, "idle")
+            self.agent_active_counts.setdefault(definition.agent_id, 0)
+            self.agents[definition.agent_id] = SYSTEM_AGENT_MARKER
 
     async def initialize(self, database_path: Path) -> None:
         llm_settings, _, mcp_servers, _ = load_settings()
@@ -75,6 +91,7 @@ class AgentManager:
                     f"Agent build failed: {exc}",
                 )
 
+        self._register_system_agents()
         self.llm_status = await self._check_llm(llm_settings.base_url)
         self._refresh_agent_health_status()
 
@@ -88,10 +105,13 @@ class AgentManager:
 
     def _refresh_agent_health_status(self) -> None:
         statuses: dict[str, str] = {}
-        for definition in self.agent_definitions:
+        for definition in [*self.agent_definitions, *self.system_agent_definitions]:
             agent_id = definition.agent_id
             if agent_id == INVENTORY_AGENT_ID:
                 statuses[agent_id] = self.get_inventory_health_status()
+                continue
+            if is_dashboard_system_agent_id(agent_id):
+                statuses[agent_id] = "ready"
                 continue
             if agent_id not in self.agents:
                 statuses[agent_id] = "unavailable"
@@ -123,7 +143,10 @@ class AgentManager:
             definition.agent_id: definition for definition in self.agent_definitions
         }
 
-        next_agent_ids = {definition.agent_id for definition in self.agent_definitions}
+        next_agent_ids = {
+            definition.agent_id
+            for definition in [*self.agent_definitions, *list_dashboard_system_agent_definitions()]
+        }
         for agent_id in list(self.agents.keys()):
             if agent_id not in next_agent_ids:
                 del self.agents[agent_id]
@@ -150,6 +173,7 @@ class AgentManager:
                     f"Agent rebuild failed: {exc}",
                 )
 
+        self._register_system_agents()
         self._refresh_agent_health_status()
 
     async def _check_llm(self, base_url: str) -> str:
@@ -236,12 +260,26 @@ async def lifespan(app: FastAPI):
             server_settings.health_check_interval_seconds,
         )
     )
+    job_requester_settings = load_job_requester_settings()
+    job_requester_task: asyncio.Task | None = None
+    if job_requester_settings.enabled:
+        job_requester_task = asyncio.create_task(
+            run_job_requester_loop(
+                app.state.database_path,
+                job_requester_settings,
+                agent_manager=agent_manager,
+            )
+        )
     try:
         yield
     finally:
         health_task.cancel()
         with suppress(asyncio.CancelledError):
             await health_task
+        if job_requester_task is not None:
+            job_requester_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await job_requester_task
 
 
 def create_app() -> FastAPI:
@@ -261,6 +299,7 @@ def create_app() -> FastAPI:
     app.include_router(agents_router, prefix="/api")
     app.include_router(jobs_router, prefix="/api")
     app.include_router(chat_router, prefix="/api")
+    app.include_router(debug_router, prefix="/api")
     app.include_router(inventory_router, prefix="/api")
     app.include_router(whatap_webhook_router, prefix="/api")
     return app

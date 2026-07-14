@@ -60,6 +60,21 @@ def get_user_by_idx(database_path: str | Path, idx: int) -> User | None:
     return _row_to_user(row)
 
 
+def get_user_by_userid(database_path: str | Path, userid: str) -> User | None:
+    with get_connection(database_path) as connection:
+        row = connection.execute(
+            """
+            SELECT idx, userid, email, username, depart, role
+            FROM users
+            WHERE userid = ?
+            """,
+            (userid.strip(),),
+        ).fetchone()
+    if row is None:
+        return None
+    return _row_to_user(row)
+
+
 def authenticate_user(database_path: str | Path, userid: str, password: str) -> User | None:
     with get_connection(database_path) as connection:
         row = connection.execute(

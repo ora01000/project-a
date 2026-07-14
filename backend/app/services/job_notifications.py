@@ -15,12 +15,18 @@ def parse_notify_channel(value: str | None) -> NotifyChannel:
 
 
 def resolve_user_targets(database_path: Path, identifier: str) -> list[str]:
-    targets = {identifier.strip()}
+    """Resolve a recipient identifier to a single integrated-chat target.
+
+    Registered users are stored by userid only (never username), so the same
+    job notification is not inserted twice.
+    """
+    normalized = identifier.strip()
+    if not normalized:
+        return []
     for user in list_users(database_path):
-        if user.username == identifier or user.userid == identifier:
-            targets.add(user.userid)
-            targets.add(user.username)
-    return [target for target in targets if target]
+        if user.userid == normalized or user.username == normalized:
+            return [user.userid]
+    return [normalized]
 
 
 def resolve_user_emails(database_path: Path, identifier: str) -> list[str]:

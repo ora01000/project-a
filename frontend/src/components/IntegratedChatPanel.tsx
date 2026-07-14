@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { AgentInfo, IntegratedChatResponse, ToolUsage } from "../types/agent";
 import type { AuthUser } from "../types/auth";
@@ -8,6 +8,7 @@ import { appendInputHistory, loadInputHistory } from "../utils/inputHistory";
 import { formatResponseTimestamp } from "../utils/messageIndex";
 import { flushSseBuffer, parseSseChunk } from "../utils/parseSse";
 import { AssistantMessageContent } from "./AssistantMessageContent";
+import { CollapsibleUserMessage } from "./CollapsibleUserMessage";
 import { JobNotificationCard } from "./jobs/JobNotificationCard";
 import { SignupNotificationCard } from "./users/SignupNotificationCard";
 import { ToolUsageList } from "./ToolUsageList";
@@ -26,6 +27,8 @@ interface IntegratedChatPanelProps {
   onJobApprove?: (jobIdx: number) => void;
   onJobPending?: (jobIdx: number) => void;
   onJobReject?: (jobIdx: number) => void;
+  onJobDismiss?: (notificationIdx: number) => void;
+  onJobRetry?: (jobIdx: number, notificationIdx: number) => void;
   onSignupApprove?: (userIdx: number) => void;
   onSignupReject?: (userIdx: number, reason: string) => void;
   onSignupHold?: (notificationIdx: number) => void;
@@ -48,6 +51,12 @@ function StopIcon() {
 function isAbortError(err: unknown): boolean {
   return err instanceof DOMException && err.name === "AbortError";
 }
+
+const DEFAULT_COMPOSER_HEIGHT = 260;
+const MIN_COMPOSER_HEIGHT = 160;
+const MIN_CONVERSATION_HEIGHT = 120;
+const RESIZE_HANDLE_HEIGHT = 8;
+const CHAT_HEADER_HEIGHT = 100;
 
 interface UserCommLogEntry {
   timestamp: string;
@@ -82,6 +91,8 @@ export function IntegratedChatPanel({
   onJobApprove,
   onJobPending,
   onJobReject,
+  onJobDismiss,
+  onJobRetry,
   onSignupApprove,
   onSignupReject,
   onSignupHold,
@@ -95,13 +106,83 @@ export function IntegratedChatPanel({
   const [isLoading, setIsLoading] = useState(false);
   const [inputHistory, setInputHistory] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
-  const assistantScrollRef = useRef<HTMLDivElement>(null);
+  const conversationScrollRef = useRef<HTMLDivElement>(null);
   const layoutRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const [composerHeight, setComposerHeight] = useState(DEFAULT_COMPOSER_HEIGHT);
+  const isResizingRef = useRef(false);
+  const resizeStartYRef = useRef(0);
+  const resizeStartHeightRef = useRef(DEFAULT_COMPOSER_HEIGHT);
+
+  const clampComposerHeight = useCallback((nextHeight: number) => {
+    const layoutHeight = layoutRef.current?.clientHeight ?? window.innerHeight;
+    const maxComposerHeight = Math.max(
+      MIN_COMPOSER_HEIGHT,
+      layoutHeight - CHAT_HEADER_HEIGHT - MIN_CONVERSATION_HEIGHT - RESIZE_HANDLE_HEIGHT,
+    );
+    return Math.min(maxComposerHeight, Math.max(MIN_COMPOSER_HEIGHT, nextHeight));
+  }, []);
+
+  useEffect(() => {
+    const handleMouseMove = (event: MouseEvent) => {
+      if (!isResizingRef.current) {
+        return;
+      }
+      const deltaY = event.clientY - resizeStartYRef.current;
+      setComposerHeight(clampComposerHeight(resizeStartHeightRef.current - deltaY));
+    };
+
+    const handleMouseUp = () => {
+      if (!isResizingRef.current) {
+        return;
+      }
+      isResizingRef.current = false;
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+    return () => {
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+    };
+  }, [clampComposerHeight]);
+
+  useEffect(() => {
+    const node = layoutRef.current;
+    if (!node) {
+      return;
+    }
+
+    const onLayoutResize = () => {
+      setComposerHeight((current) => clampComposerHeight(current));
+    };
+
+    const observer = new ResizeObserver(() => {
+      window.requestAnimationFrame(onLayoutResize);
+    });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [clampComposerHeight]);
+
+  const handleComposerResizeStart = (event: React.MouseEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    isResizingRef.current = true;
+    resizeStartYRef.current = event.clientY;
+    resizeStartHeightRef.current = composerHeight;
+    document.body.style.cursor = "row-resize";
+    document.body.style.userSelect = "none";
+  };
+
+  const chatAgents = useMemo(
+    () => agents.filter((agent) => !agent.is_system),
+    [agents],
+  );
 
   const selectedAgent = useMemo(
-    () => agents.find((agent) => agent.id === selectedAgentId) ?? null,
-    [agents, selectedAgentId],
+    () => chatAgents.find((agent) => agent.id === selectedAgentId) ?? null,
+    [chatAgents, selectedAgentId],
   );
 
   const isDisabled = !selectedAgent || selectedAgent.status === "disabled";
@@ -139,18 +220,18 @@ export function IntegratedChatPanel({
   }, [user.userid]);
 
   useEffect(() => {
-    if (agents.length === 0) {
+    if (chatAgents.length === 0) {
       setSelectedAgentId("");
       return;
     }
 
     setSelectedAgentId((current) => {
-      if (current && agents.some((agent) => agent.id === current)) {
+      if (current && chatAgents.some((agent) => agent.id === current)) {
         return current;
       }
-      return agents[0]?.id ?? "";
+      return chatAgents[0]?.id ?? "";
     });
-  }, [agents]);
+  }, [chatAgents]);
 
   useEffect(() => {
     if (!selectedAgentId) {
@@ -163,41 +244,20 @@ export function IntegratedChatPanel({
     setHistoryIndex(-1);
   }, [selectedAgentId]);
 
-  const assistantScrollKey = useMemo(
+  const responseScrollKey = useMemo(
     () =>
-      [
-        jobNotifications.map((notification) => notification.idx).join(","),
-        signupNotifications.map((notification) => notification.idx).join(","),
-        responses.map((response) => response.assistantContent).join("\0"),
-      ].join("\0"),
-    [jobNotifications, signupNotifications, responses],
+      responses
+        .map((response) => `${response.userContent}\0${response.assistantContent}`)
+        .join("\0"),
+    [responses],
   );
 
   useEffect(() => {
-    assistantScrollRef.current?.scrollTo({
-      top: assistantScrollRef.current.scrollHeight,
+    conversationScrollRef.current?.scrollTo({
+      top: conversationScrollRef.current.scrollHeight,
       behavior: "smooth",
     });
-  }, [assistantScrollKey]);
-
-  useEffect(() => {
-    const node = layoutRef.current;
-    if (!node) {
-      return;
-    }
-
-    const reflow = () => {
-      if (assistantScrollRef.current) {
-        assistantScrollRef.current.scrollTop = assistantScrollRef.current.scrollHeight;
-      }
-    };
-
-    const observer = new ResizeObserver(() => {
-      window.requestAnimationFrame(reflow);
-    });
-    observer.observe(node);
-    return () => observer.disconnect();
-  }, []);
+  }, [responseScrollKey]);
 
   const updateLastResponse = (content: string, toolsUsed?: ToolUsage[]) => {
     setResponses((prev) => {
@@ -377,13 +437,13 @@ export function IntegratedChatPanel({
 
       <div className="flex min-h-0 flex-1 flex-col">
         <div className="flex min-h-0 flex-1 flex-col gap-1 px-3 pt-3">
-          <div className="text-xs font-medium uppercase tracking-wide text-emerald-300">Assistant</div>
+          <div className="text-xs font-medium tracking-wide text-slate-300">대화창</div>
           <div
-            ref={assistantScrollRef}
-            className="min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain rounded-md border border-slate-800 bg-slate-900/70 p-2 text-sm"
+            ref={conversationScrollRef}
+            className="min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain rounded-md border border-slate-800 bg-slate-950/50 p-2 text-sm"
           >
             {jobNotifications.length === 0 && signupNotifications.length === 0 && responses.length === 0 ? (
-              <p className="text-slate-500">에이전트 응답이 여기에 표시됩니다.</p>
+              <p className="text-slate-500">대화 내용이 여기에 표시됩니다.</p>
             ) : null}
 
             {signupNotifications.map((notification) => (
@@ -406,16 +466,20 @@ export function IntegratedChatPanel({
                 onApprove={(jobIdx) => onJobApprove?.(jobIdx)}
                 onPending={(jobIdx) => onJobPending?.(jobIdx)}
                 onReject={(jobIdx) => onJobReject?.(jobIdx)}
+                onDismiss={(notificationIdx) => onJobDismiss?.(notificationIdx)}
+                onRetry={(jobIdx, notificationIdx) => onJobRetry?.(jobIdx, notificationIdx)}
               />
             ))}
 
             {responses.map((response) => (
-                <div
-                  key={response.id}
-                  className="rounded-md bg-slate-800/80 px-2 py-2 text-slate-100 break-words"
-                >
-                  <div className="mb-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] leading-tight text-slate-400">
-                    <span className="rounded-full border border-sky-700/60 bg-sky-950/50 px-2 py-0.5 text-sky-200">
+              <div key={response.id} className="space-y-2">
+                <CollapsibleUserMessage
+                  content={response.userContent}
+                  createdAt={response.createdAt}
+                />
+                <div className="rounded-md border border-emerald-800/40 bg-emerald-950/35 px-2 py-2 text-slate-100 break-words">
+                  <div className="mb-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] leading-tight text-emerald-300/80">
+                    <span className="rounded-full border border-emerald-700/50 bg-emerald-950/60 px-2 py-0.5 text-emerald-200">
                       {response.agentName}
                     </span>
                     <span>{formatResponseTimestamp(new Date(response.createdAt))}</span>
@@ -427,35 +491,68 @@ export function IntegratedChatPanel({
                     <span className="text-slate-500">응답 생성 중...</span>
                   )}
                 </div>
-              ))}
+              </div>
+            ))}
           </div>
+        </div>
+
+        <div
+          role="separator"
+          aria-orientation="horizontal"
+          aria-label="대화창과 에이전트 영역 높이 조절"
+          aria-valuenow={Math.round(composerHeight)}
+          aria-valuemin={MIN_COMPOSER_HEIGHT}
+          onMouseDown={handleComposerResizeStart}
+          className="group flex h-2 shrink-0 cursor-row-resize items-center justify-center border-y border-slate-700 bg-slate-900 hover:bg-slate-800"
+        >
+          <span className="h-1 w-12 rounded-full bg-slate-600 group-hover:bg-slate-400" />
         </div>
 
         <form
           onSubmit={handleSubmit}
-          className="flex h-[200px] shrink-0 flex-col gap-2 border-t border-slate-700 p-3"
+          className="flex shrink-0 flex-col gap-2 p-3"
+          style={{ height: composerHeight }}
         >
-          <label className="flex flex-col gap-1 text-xs text-slate-400">
+          <div className="flex min-h-0 flex-[1.1] flex-col gap-1 text-xs text-slate-400">
             <span>에이전트</span>
-            <select
-              value={selectedAgentId}
-              onChange={(event) => setSelectedAgentId(event.target.value)}
-              disabled={agents.length === 0 || isLoading}
-              className="rounded-md border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none focus:border-sky-500"
-            >
-              {agents.length === 0 ? (
-                <option value="">등록된 에이전트 없음</option>
-              ) : (
-                agents.map((agent) => (
-                  <option key={agent.id} value={agent.id}>
-                    {agent.name} ({agent.status})
-                  </option>
-                ))
-              )}
-            </select>
-          </label>
+            {chatAgents.length === 0 ? (
+              <p className="rounded-md border border-slate-800 bg-slate-950/50 px-3 py-2 text-sm text-slate-500">
+                등록된 에이전트 없음
+              </p>
+            ) : (
+              <div
+                className="min-h-0 flex-1 overflow-y-auto rounded-md border border-slate-800 bg-slate-950/40 p-2"
+                role="radiogroup"
+                aria-label="에이전트 선택"
+              >
+                <div className="flex flex-wrap gap-1.5">
+                  {chatAgents.map((agent) => {
+                    const isSelected = selectedAgentId === agent.id;
+                    return (
+                      <button
+                        key={agent.id}
+                        type="button"
+                        role="radio"
+                        aria-checked={isSelected}
+                        disabled={isLoading}
+                        title={`${agent.name} (${agent.status})`}
+                        onClick={() => setSelectedAgentId(agent.id)}
+                        className={`rounded-md border px-2.5 py-1 text-left text-xs transition disabled:cursor-not-allowed disabled:opacity-50 ${
+                          isSelected
+                            ? "border-sky-500 bg-sky-950/70 text-sky-100"
+                            : "border-slate-700 bg-slate-900 text-slate-300 hover:border-slate-500 hover:bg-slate-800"
+                        }`}
+                      >
+                        <span className="font-medium">{agent.name}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
 
-          <div className="flex min-h-0 flex-1 gap-2">
+          <div className="flex min-h-[88px] flex-1 gap-2">
             <button
               type="button"
               onClick={handlePreviousMessage}

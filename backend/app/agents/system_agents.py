@@ -1,10 +1,14 @@
 from dataclasses import dataclass
 from enum import Enum
 
+from backend.app.agents.base import AgentDefinition
+
 JOB_PLANNING_AGENT_ID = "sys-job-planning"
 JOB_EXECUTION_AGENT_ID = "sys-job-execution"
 INVENTORY_AGENT_ID = "sys-inventory"
 WHATAP_EVENT_AGENT_ID = "sys-whatap-events"
+
+SYSTEM_AGENT_MARKER = object()
 
 
 class NotifyChannel(str, Enum):
@@ -50,3 +54,28 @@ SYSTEM_AGENTS: list[SystemAgentInfo] = [
     INVENTORY_SYSTEM_AGENT,
     WHATAP_EVENT_AGENT,
 ]
+
+# DB/registry inventory agent already has a tile; keep these for dashboard display.
+DASHBOARD_SYSTEM_AGENTS: list[SystemAgentInfo] = [
+    JOB_PLANNING_AGENT,
+    JOB_EXECUTION_AGENT,
+    WHATAP_EVENT_AGENT,
+]
+
+
+def system_agent_to_definition(agent: SystemAgentInfo) -> AgentDefinition:
+    return AgentDefinition(
+        agent_id=agent.agent_id,
+        name=agent.name,
+        role=agent.role,
+        mcp_server_keys=[],
+        system_prompt=f"System agent: {agent.name}. {agent.role}",
+    )
+
+
+def list_dashboard_system_agent_definitions() -> list[AgentDefinition]:
+    return [system_agent_to_definition(agent) for agent in DASHBOARD_SYSTEM_AGENTS]
+
+
+def is_dashboard_system_agent_id(agent_id: str) -> bool:
+    return any(agent.agent_id == agent_id for agent in DASHBOARD_SYSTEM_AGENTS)

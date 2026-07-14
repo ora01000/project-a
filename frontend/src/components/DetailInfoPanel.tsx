@@ -122,7 +122,11 @@ export function DetailInfoPanel({
         ))}
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4">
+      <div
+        className={`min-h-0 flex-1 overscroll-contain p-4 ${
+          activeTab === "topology" ? "flex flex-col overflow-hidden" : "overflow-y-auto"
+        }`}
+      >
         {activeTab === "topology" ? (
           <TopologyMap agents={agents} health={health} embedded />
         ) : activeTab === "logs" ? (

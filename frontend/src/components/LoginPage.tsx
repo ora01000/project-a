@@ -1,11 +1,21 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import type { AuthUser } from "../types/auth";
+import { ProfileCompleteModal } from "./ProfileCompleteModal";
 import { RegisterUserModal } from "./users/RegisterUserModal";
 import { ConfirmDialog } from "./ConfirmDialog";
 
 interface LoginPageProps {
   onLoginSuccess: (user: AuthUser) => void;
+}
+
+interface AuthProviderInfo {
+  provider_type: string;
+  registration_enabled: boolean;
+}
+
+interface LoginResponse extends AuthUser {
+  profile_required?: boolean;
 }
 
 export function LoginPage({ onLoginSuccess }: LoginPageProps) {
@@ -16,6 +26,30 @@ export function LoginPage({ onLoginSuccess }: LoginPageProps) {
   const [showRegisterModal, setShowRegisterModal] = useState(false);
   const [pendingMessage, setPendingMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [registrationEnabled, setRegistrationEnabled] = useState(true);
+  const [pendingProfileUser, setPendingProfileUser] = useState<AuthUser | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadProvider = async () => {
+      try {
+        const response = await fetch("/api/auth/provider");
+        if (!response.ok) {
+          return;
+        }
+        const data = (await response.json()) as AuthProviderInfo;
+        if (!cancelled) {
+          setRegistrationEnabled(Boolean(data.registration_enabled));
+        }
+      } catch {
+        // default: keep registration enabled (db mode)
+      }
+    };
+    void loadProvider();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -46,7 +80,21 @@ export function LoginPage({ onLoginSuccess }: LoginPageProps) {
         throw new Error(payload?.detail ?? "로그인에 실패했습니다.");
       }
 
-      const user = (await response.json()) as AuthUser;
+      const payload = (await response.json()) as LoginResponse;
+      const user: AuthUser = {
+        idx: payload.idx,
+        userid: payload.userid,
+        email: payload.email,
+        username: payload.username,
+        depart: payload.depart,
+        role: payload.role,
+      };
+
+      if (payload.profile_required) {
+        setPendingProfileUser(user);
+        return;
+      }
+
       onLoginSuccess(user);
     } catch (err) {
       setError(err instanceof Error ? err.message : "로그인에 실패했습니다.");
@@ -60,7 +108,7 @@ export function LoginPage({ onLoginSuccess }: LoginPageProps) {
       <div className="flex min-h-screen items-center justify-center bg-slate-950 px-6 py-10">
         <div className="w-full max-w-md rounded-xl border border-slate-700 bg-slate-900/90 p-8 shadow-lg">
           <div className="mb-6 text-center">
-            <h1 className="text-2xl font-bold text-slate-100">LangGraph Multi-Agent Dashboard</h1>
+            <h1 className="text-2xl font-bold text-slate-100">AX 인프라 운영 콘솔</h1>
             <p className="mt-2 text-sm text-slate-400">로그인 후 대시보드를 이용할 수 있습니다.</p>
           </div>
 
@@ -108,26 +156,38 @@ export function LoginPage({ onLoginSuccess }: LoginPageProps) {
               {isLoading ? "로그인 중..." : "로그인"}
             </button>
 
-            <button
-              type="button"
-              disabled={isLoading}
-              onClick={() => {
-                setError(null);
-                setSuccessMessage(null);
-                setShowRegisterModal(true);
-              }}
-              className="w-full rounded-md border border-slate-600 px-4 py-2.5 text-sm font-medium text-slate-200 transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:text-slate-500"
-            >
-              신규 등록
-            </button>
+            {registrationEnabled ? (
+              <button
+                type="button"
+                disabled={isLoading}
+                onClick={() => {
+                  setError(null);
+                  setSuccessMessage(null);
+                  setShowRegisterModal(true);
+                }}
+                className="w-full rounded-md border border-slate-600 px-4 py-2.5 text-sm font-medium text-slate-200 transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:text-slate-500"
+              >
+                신규 등록
+              </button>
+            ) : null}
           </form>
         </div>
       </div>
 
-      {showRegisterModal ? (
+      {showRegisterModal && registrationEnabled ? (
         <RegisterUserModal
           onClose={() => setShowRegisterModal(false)}
           onSuccess={(message) => setSuccessMessage(message)}
+        />
+      ) : null}
+
+      {pendingProfileUser ? (
+        <ProfileCompleteModal
+          user={pendingProfileUser}
+          onSaved={(updated) => {
+            setPendingProfileUser(null);
+            onLoginSuccess(updated);
+          }}
         />
       ) : null}
 

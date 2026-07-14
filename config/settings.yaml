@@ -53,3 +53,14 @@ whatap:
 user_comm_log:
   log_dir: "data/user_comm_logs"
   retention_days: 30
+
+# 작업요청자 데몬 (수동 "테스트 작업 발송"으로 대체됨, 기본 중지)
+job_requester:
+  enabled: false
+  interval_minutes: 60
+  initial_delay_seconds: 60
+
+# 인증 프로바이더 (환경변수 AUTH_PROVIDER_TYPE / OAUTH_PROXY 로 오버라이드)
+auth:
+  provider_type: "db"   # db | madang
+  oauth_proxy: ""

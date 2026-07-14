@@ -1,5 +1,5 @@
 import type { AgentInfo } from "../types/agent";
-import { AgentTile } from "./AgentTile";
+import { AGENT_TILE_WIDTH_PX, AgentTile } from "./AgentTile";
 
 interface AgentGridProps {
   agents: AgentInfo[];
@@ -7,7 +7,12 @@ interface AgentGridProps {
 
 export function AgentGrid({ agents }: AgentGridProps) {
   return (
-    <div className="grid w-full grid-cols-[repeat(auto-fill,500px)] justify-start gap-4">
+    <div
+      className="grid w-full items-start justify-start gap-4"
+      style={{
+        gridTemplateColumns: `repeat(auto-fill, ${AGENT_TILE_WIDTH_PX}px)`,
+      }}
+    >
       {agents.map((agent) => (
         <AgentTile key={agent.id} agent={agent} />
       ))}

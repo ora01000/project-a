@@ -5,6 +5,7 @@ export interface TopologyNode {
   kind: TopologyNodeKind;
   label: string;
   status: string;
+  isSystem?: boolean;
 }
 
 export interface TopologyEdge {

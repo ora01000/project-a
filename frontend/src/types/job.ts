@@ -39,6 +39,7 @@ export interface JobRecord {
   state_label: string;
   notify_channel: string;
   job_plan?: JobPlan | null;
+  original_job_plan?: JobPlan | null;
   execution_result?: JobExecutionResult | null;
 }
 
@@ -55,4 +56,5 @@ export type JobDetailTab = "review" | "pending" | "completed";
 
 export const JOB_NOTIFICATION_REVIEW = "review_request";
 export const JOB_NOTIFICATION_RESULT = "execution_result";
+export const JOB_NOTIFICATION_FAILURE = "execution_failure";
 export const JOB_NOTIFICATION_REJECTION = "rejection";

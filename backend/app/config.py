@@ -78,6 +78,12 @@ class UserCommLogSettings(BaseModel):
     retention_days: int = 30
 
 
+class JobRequesterSettings(BaseModel):
+    enabled: bool = True
+    interval_minutes: int = 60
+    initial_delay_seconds: int = 60
+
+
 class AppSettings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=ENV_FILE,
@@ -125,6 +131,16 @@ class AppSettings(BaseSettings):
 
     user_comm_log: str = Field(default="data/user_comm_logs", alias="USER_COMM_LOG")
     user_comm_retention: int = Field(default=30, alias="USER_COMM_RETENTION")
+
+    job_requester_enabled: bool | None = Field(default=None, alias="JOB_REQUESTER_ENABLED")
+    job_requester_interval_minutes: int | None = Field(default=None, alias="JOB_REQUESTER_INTERVAL_MINUTES")
+    job_requester_initial_delay_seconds: int | None = Field(
+        default=None,
+        alias="JOB_REQUESTER_INITIAL_DELAY_SECONDS",
+    )
+
+    auth_provider_type: str = Field(default="db", alias="AUTH_PROVIDER_TYPE")
+    oauth_proxy: str = Field(default="", alias="OAUTH_PROXY")
 
 
 def _merged_env() -> dict[str, str]:
@@ -252,6 +268,60 @@ def load_user_comm_log_settings() -> UserCommLogSettings:
         log_dir=env_settings.user_comm_log or comm_yaml.get("log_dir", "data/user_comm_logs"),
         retention_days=max(1, retention_days),
     )
+
+
+def load_job_requester_settings() -> JobRequesterSettings:
+    yaml_settings = _load_yaml(CONFIG_DIR / "settings.yaml")
+    requester_yaml = yaml_settings.get("job_requester", {})
+    env_settings = AppSettings()
+
+    if env_settings.job_requester_interval_minutes is not None:
+        interval_raw = env_settings.job_requester_interval_minutes
+    else:
+        interval_raw = requester_yaml.get("interval_minutes", 60)
+
+    if env_settings.job_requester_initial_delay_seconds is not None:
+        delay_raw = env_settings.job_requester_initial_delay_seconds
+    else:
+        delay_raw = requester_yaml.get("initial_delay_seconds", 60)
+
+    try:
+        interval_minutes = int(interval_raw)
+    except (TypeError, ValueError):
+        interval_minutes = 60
+    try:
+        initial_delay_seconds = int(delay_raw)
+    except (TypeError, ValueError):
+        initial_delay_seconds = 60
+
+    if env_settings.job_requester_enabled is not None:
+        enabled = env_settings.job_requester_enabled
+    else:
+        enabled = _as_bool(requester_yaml.get("enabled"), False)
+
+    return JobRequesterSettings(
+        enabled=enabled,
+        interval_minutes=max(1, interval_minutes),
+        initial_delay_seconds=max(0, initial_delay_seconds),
+    )
+
+
+class AuthProviderSettings(BaseModel):
+    provider_type: str = "db"
+    oauth_proxy: str = ""
+
+
+def load_auth_provider_settings() -> AuthProviderSettings:
+    env_settings = AppSettings()
+    yaml_settings = _load_yaml(CONFIG_DIR / "settings.yaml")
+    auth_yaml = yaml_settings.get("auth", {})
+
+    raw_type = (env_settings.auth_provider_type or auth_yaml.get("provider_type") or "db").strip().lower()
+    if raw_type not in {"db", "madang"}:
+        raw_type = "db"
+
+    oauth_proxy = (env_settings.oauth_proxy or auth_yaml.get("oauth_proxy") or "").strip()
+    return AuthProviderSettings(provider_type=raw_type, oauth_proxy=oauth_proxy)
 
 
 def load_settings() -> tuple[LLMSettings, ServerSettings, dict[str, MCPServerConfig], str]:

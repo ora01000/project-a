@@ -12,7 +12,7 @@ import { UserListPage } from "./components/users/UserListPage";
 import type { AgentInfo, HealthInfo } from "./types/agent";
 import type { AuthUser } from "./types/auth";
 import type { AppView } from "./types/navigation";
-import { clearAuthUser, formatUserLabel, loadAuthUser, saveAuthUser } from "./utils/authSession";
+import { clearAuthUser, loadAuthUser, saveAuthUser } from "./utils/authSession";
 
 export default function App() {
   const [user, setUser] = useState<AuthUser | null>(() => loadAuthUser());
@@ -30,6 +30,11 @@ export default function App() {
     saveAuthUser(loggedInUser);
     setUser(loggedInUser);
     setActiveView("dashboard");
+  }, []);
+
+  const handleUserUpdated = useCallback((updatedUser: AuthUser) => {
+    saveAuthUser(updatedUser);
+    setUser(updatedUser);
   }, []);
 
   const handleLogout = useCallback(() => {
@@ -87,7 +92,7 @@ export default function App() {
     <TopologyProvider>
       <div className="flex h-screen flex-col overflow-hidden bg-slate-950 px-6 py-6">
         <header className="mb-4 shrink-0">
-          <h1 className="text-2xl font-bold text-slate-100">LangGraph Multi-Agent Dashboard</h1>
+          <h1 className="text-2xl font-bold text-slate-100">AX 인프라 운영 콘솔</h1>
           <p className="mt-1 text-sm text-slate-400">
             에이전트 노드와 오른쪽 통합 채팅 창으로 멀티 에이전트를 관리합니다.
           </p>
@@ -95,9 +100,10 @@ export default function App() {
 
         <MenuBar
           activeView={activeView}
-          userLabel={formatUserLabel(user)}
+          user={user}
           onNavigate={setActiveView}
           onLogout={handleLogout}
+          onUserUpdated={handleUserUpdated}
         />
 
         {activeView === "dashboard" ? (

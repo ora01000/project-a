@@ -46,6 +46,16 @@ def _apply_migrations(connection: sqlite3.Connection) -> None:
     }
     if "job_plan" not in job_columns:
         connection.execute("ALTER TABLE jobs ADD COLUMN job_plan TEXT")
+    if "original_job_plan" not in job_columns:
+        connection.execute("ALTER TABLE jobs ADD COLUMN original_job_plan TEXT")
+        # Backfill existing plans as the original baseline for restore.
+        connection.execute(
+            """
+            UPDATE jobs
+            SET original_job_plan = job_plan
+            WHERE original_job_plan IS NULL AND job_plan IS NOT NULL
+            """
+        )
     if "execution_result" not in job_columns:
         connection.execute("ALTER TABLE jobs ADD COLUMN execution_result TEXT")
     if "notify_channel" not in job_columns:

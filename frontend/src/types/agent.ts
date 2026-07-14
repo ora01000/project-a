@@ -9,6 +9,7 @@ export interface AgentInfo {
   operation_error?: string | null;
   input_tokens: number;
   output_tokens: number;
+  is_system?: boolean;
 }
 
 export interface HealthInfo {

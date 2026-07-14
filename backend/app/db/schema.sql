@@ -40,6 +40,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     state INTEGER NOT NULL DEFAULT 0,
     notify_channel VARCHAR(30) NOT NULL DEFAULT 'integrated_chat',
     job_plan TEXT,
+    original_job_plan TEXT,
     execution_result TEXT
 );
 

@@ -10,6 +10,7 @@ JOB_STATE_PENDING = 3
 JOB_STATE_REJECTED = 4
 JOB_STATE_APPROVED = 5
 JOB_STATE_COMPLETED = 6
+JOB_STATE_FAILED = 7
 
 JOB_STATE_LABELS: dict[int, str] = {
     JOB_STATE_RECEIVED: "접수",
@@ -19,6 +20,7 @@ JOB_STATE_LABELS: dict[int, str] = {
     JOB_STATE_REJECTED: "반려",
     JOB_STATE_APPROVED: "승인",
     JOB_STATE_COMPLETED: "완료",
+    JOB_STATE_FAILED: "실패",
 }
 
 JOB_SELECT_COLUMNS = """
@@ -34,6 +36,7 @@ JOB_SELECT_COLUMNS = """
     state,
     notify_channel,
     job_plan,
+    original_job_plan,
     execution_result
 """
 
@@ -56,10 +59,12 @@ class Job:
     state: int
     notify_channel: str
     job_plan: str | None
+    original_job_plan: str | None
     execution_result: str | None
 
 
 def _row_to_job(row) -> Job:
+    keys = row.keys()
     return Job(
         idx=int(row["idx"]),
         request_date=str(row["request_date"]),
@@ -71,8 +76,13 @@ def _row_to_job(row) -> Job:
         job_description=str(row["job_description"]),
         approver=str(row["approver"]),
         state=int(row["state"]),
-        notify_channel=str(row["notify_channel"]) if "notify_channel" in row.keys() else "integrated_chat",
+        notify_channel=str(row["notify_channel"]) if "notify_channel" in keys else "integrated_chat",
         job_plan=str(row["job_plan"]) if row["job_plan"] is not None else None,
+        original_job_plan=(
+            str(row["original_job_plan"])
+            if "original_job_plan" in keys and row["original_job_plan"] is not None
+            else None
+        ),
         execution_result=str(row["execution_result"]) if row["execution_result"] is not None else None,
     )
 
@@ -209,10 +219,52 @@ def update_job_plan(database_path: str | Path, idx: int, job_plan: str, state: i
         connection.execute(
             """
             UPDATE jobs
-            SET job_plan = ?, state = ?
+            SET job_plan = ?,
+                original_job_plan = COALESCE(original_job_plan, ?),
+                state = ?
             WHERE idx = ?
             """,
-            (job_plan, state, idx),
+            (job_plan, job_plan, state, idx),
+        )
+        connection.commit()
+
+    return get_job_by_idx(database_path, idx)
+
+
+def save_job_plan_edit(database_path: str | Path, idx: int, job_plan: str) -> Job | None:
+    with get_connection(database_path) as connection:
+        connection.execute(
+            """
+            UPDATE jobs
+            SET job_plan = ?,
+                original_job_plan = COALESCE(original_job_plan, job_plan)
+            WHERE idx = ?
+            """,
+            (job_plan, idx),
+        )
+        connection.commit()
+
+    return get_job_by_idx(database_path, idx)
+
+
+def restore_job_plan(database_path: str | Path, idx: int) -> Job | None:
+    with get_connection(database_path) as connection:
+        row = connection.execute(
+            "SELECT original_job_plan FROM jobs WHERE idx = ?",
+            (idx,),
+        ).fetchone()
+        if row is None:
+            return None
+        original = row["original_job_plan"]
+        if original is None:
+            return get_job_by_idx(database_path, idx)
+        connection.execute(
+            """
+            UPDATE jobs
+            SET job_plan = ?
+            WHERE idx = ?
+            """,
+            (str(original), idx),
         )
         connection.commit()
 
