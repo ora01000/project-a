@@ -249,7 +249,7 @@ async def lifespan(app: FastAPI):
     initialize_user_comm_logs()
     _, server_settings, _, database_path = load_settings()
     app.state.database_path = init_database(database_path)
-    inventory_service = initialize_inventory_service()
+    inventory_service = initialize_inventory_service(database_path=app.state.database_path)
     app.state.inventory_service = inventory_service
     await agent_manager.initialize(app.state.database_path)
     agent_manager.inventory_service = inventory_service

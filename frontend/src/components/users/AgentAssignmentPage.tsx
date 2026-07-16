@@ -75,8 +75,7 @@ export function AgentAssignmentPage({ onClose }: AgentAssignmentPageProps) {
   }, [agents]);
 
   const allAgentIds = useMemo(() => agents.map((agent) => agent.agent_id), [agents]);
-  const isAllSelected =
-    allAgentIds.length > 0 && allAgentIds.every((agentId) => selectedAgentIds.has(agentId));
+  const hasSelection = selectedAgentIds.size > 0;
 
   const loadData = useCallback(async () => {
     setIsLoading(true);
@@ -135,7 +134,7 @@ export function AgentAssignmentPage({ onClose }: AgentAssignmentPageProps) {
         return;
       }
 
-      if (event.key === "Escape" && isAllSelected) {
+      if (event.key === "Escape" && hasSelection) {
         event.preventDefault();
         event.stopPropagation();
         setSelectedAgentIds(new Set());
@@ -144,7 +143,7 @@ export function AgentAssignmentPage({ onClose }: AgentAssignmentPageProps) {
 
     window.addEventListener("keydown", handleKeyDown, true);
     return () => window.removeEventListener("keydown", handleKeyDown, true);
-  }, [allAgentIds, isAllSelected]);
+  }, [allAgentIds, hasSelection]);
 
   const toggleAgentSelection = (agentId: string) => {
     setSelectedAgentIds((current) => {
@@ -228,7 +227,7 @@ export function AgentAssignmentPage({ onClose }: AgentAssignmentPageProps) {
               에이전트 할당
             </h2>
             <p className="mt-1 text-xs text-slate-400">
-              왼쪽 에이전트를 클릭해 다중 선택(Ctrl/Cmd+A 전체 선택, 전체 선택 시 Esc 해제)한 뒤 사용자 행으로
+              왼쪽 에이전트를 클릭해 다중 선택(Ctrl/Cmd+A 전체 선택, Esc 선택 해제)한 뒤 사용자 행으로
               드래그하세요. 할당된 에이전트 레이블을 클릭하면 해제됩니다.
             </p>
           </div>

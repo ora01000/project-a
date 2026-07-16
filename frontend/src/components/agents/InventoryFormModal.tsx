@@ -4,7 +4,13 @@ import type { InventoryFormValues, InventoryRecord } from "../../types/inventory
 import {
   CHUNK_TYPE_CUSTOM,
   CHUNK_TYPE_ROW,
+  DB_TYPE_TABLE,
+  DB_TYPE_VECTOR,
+  DEFAULT_CHUNK_OVERLAP,
+  DEFAULT_N_RESULTS,
   EMPTY_INVENTORY_FORM,
+  MAX_INVENTORY_UPLOAD_BYTES,
+  MAX_INVENTORY_UPLOAD_LABEL,
   MODIFIED_NEEDS_EMBED,
 } from "../../types/inventory";
 
@@ -32,13 +38,18 @@ export function InventoryFormModal({
   const [isEmbedding, setIsEmbedding] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const isTableMode = values.db_type === DB_TYPE_TABLE;
+
   useEffect(() => {
     if (mode === "edit" && record) {
       setValues({
         inventory_name: record.inventory_name,
         inventory_file: record.inventory_file,
+        db_type: record.db_type || DB_TYPE_VECTOR,
         chunk_type: record.chunk_type,
         chunk_size: record.chunk_size,
+        chunk_overlap: record.chunk_overlap ?? DEFAULT_CHUNK_OVERLAP,
+        n_results: record.n_results ?? DEFAULT_N_RESULTS,
       });
       setSavedRecord(record);
       setSelectedFile(null);
@@ -56,12 +67,35 @@ export function InventoryFormModal({
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0] ?? null;
+    if (!file) {
+      setSelectedFile(null);
+      return;
+    }
+
+    if (file.size > MAX_INVENTORY_UPLOAD_BYTES) {
+      const message = `업로드 가능한 최대 파일 크기(${MAX_INVENTORY_UPLOAD_LABEL})를 초과했습니다. ${MAX_INVENTORY_UPLOAD_LABEL} 이하 파일을 선택해 주세요.`;
+      window.alert(message);
+      setSelectedFile(file);
+      setError(message);
+      setValues((current) => ({
+        ...current,
+        inventory_file: file.name,
+      }));
+      return;
+    }
+
     setSelectedFile(file);
+    setError(null);
     setValues((current) => ({
       ...current,
       inventory_file: file?.name ?? current.inventory_file,
     }));
   };
+
+  const isFileOversized = selectedFile !== null && selectedFile.size > MAX_INVENTORY_UPLOAD_BYTES;
+  const fileSizeError = isFileOversized
+    ? `업로드 가능한 최대 파일 크기(${MAX_INVENTORY_UPLOAD_LABEL})를 초과했습니다.`
+    : null;
 
   const validateForm = (): string | null => {
     if (!values.inventory_name.trim()) {
@@ -70,8 +104,27 @@ export function InventoryFormModal({
     if (mode === "create" && !selectedFile) {
       return "업로드할 파일을 선택해 주세요.";
     }
+    if (fileSizeError) {
+      return fileSizeError;
+    }
+    if (isTableMode) {
+      const fileName = selectedFile?.name || values.inventory_file;
+      if (fileName && !fileName.toLowerCase().endsWith(".csv")) {
+        return "table 방식은 CSV 파일만 업로드할 수 있습니다.";
+      }
+      return null;
+    }
     if (values.chunk_type === CHUNK_TYPE_CUSTOM && values.chunk_size <= 0) {
       return "custom size를 선택한 경우 chunk size를 입력해 주세요.";
+    }
+    if (values.chunk_type === CHUNK_TYPE_CUSTOM && values.chunk_overlap < 0) {
+      return "chunk overlap은 0 이상이어야 합니다.";
+    }
+    if (values.chunk_type === CHUNK_TYPE_CUSTOM && values.chunk_overlap >= values.chunk_size) {
+      return "chunk overlap은 chunk size보다 작아야 합니다.";
+    }
+    if (values.n_results <= 0) {
+      return "n_results는 1 이상이어야 합니다.";
     }
     return null;
   };
@@ -92,10 +145,17 @@ export function InventoryFormModal({
       setValues({
         inventory_name: uploadedRecord.inventory_name,
         inventory_file: uploadedRecord.inventory_file,
+        db_type: uploadedRecord.db_type || DB_TYPE_VECTOR,
         chunk_type: uploadedRecord.chunk_type,
         chunk_size: uploadedRecord.chunk_size,
+        chunk_overlap: uploadedRecord.chunk_overlap ?? DEFAULT_CHUNK_OVERLAP,
+        n_results: uploadedRecord.n_results ?? DEFAULT_N_RESULTS,
       });
-      setSuccessMessage("업로드가 완료되었습니다. Embedding 버튼을 눌러 ChromaDB에 적재하세요.");
+      if ((uploadedRecord.db_type || DB_TYPE_VECTOR) === DB_TYPE_TABLE) {
+        setSuccessMessage("업로드가 완료되었습니다. CSV 데이터가 SQLite 테이블로 적재되었습니다.");
+      } else {
+        setSuccessMessage("업로드가 완료되었습니다. Embedding 버튼을 눌러 ChromaDB에 적재하세요.");
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "업로드에 실패했습니다.");
     } finally {
@@ -122,7 +182,10 @@ export function InventoryFormModal({
     }
   };
 
-  const canEmbed = savedRecord?.modified === MODIFIED_NEEDS_EMBED;
+  const canEmbed =
+    !isTableMode &&
+    (savedRecord?.db_type || DB_TYPE_VECTOR) !== DB_TYPE_TABLE &&
+    savedRecord?.modified === MODIFIED_NEEDS_EMBED;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 px-4">
@@ -134,8 +197,30 @@ export function InventoryFormModal({
         <h2 className="text-lg font-semibold text-slate-100">
           {mode === "create" ? "인벤토리 추가" : "인벤토리 수정"}
         </h2>
+        {mode === "create" ? (
+          <p className="mt-1 text-xs text-slate-500">
+            인벤토리 파일은 최대 <span className="text-slate-300">{MAX_INVENTORY_UPLOAD_LABEL}</span>까지 업로드할 수
+            있습니다.
+          </p>
+        ) : null}
 
         <div className="mt-4 space-y-3">
+          <label className="block space-y-1 text-sm text-slate-300">
+            <span>db_type</span>
+            <select
+              value={values.db_type}
+              onChange={(event) => updateField("db_type", event.target.value)}
+              disabled={isUploading || isEmbedding || mode === "edit"}
+              className="w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 outline-none focus:border-sky-500"
+            >
+              <option value={DB_TYPE_VECTOR}>vector</option>
+              <option value={DB_TYPE_TABLE}>table</option>
+            </select>
+            <p className="text-xs text-slate-500">
+              vector: ChromaDB 임베딩 / table: SQLite 테이블 적재 (CSV)
+            </p>
+          </label>
+
           <label className="block space-y-1 text-sm text-slate-300">
             <span>인벤토리 이름</span>
             <input
@@ -167,10 +252,14 @@ export function InventoryFormModal({
             <input
               ref={fileInputRef}
               type="file"
-              accept=".csv,.txt,.json"
+              accept={isTableMode ? ".csv" : ".csv,.txt,.json"}
               onChange={handleFileChange}
               className="hidden"
             />
+            <p className="text-xs text-slate-500">
+              최대 업로드 크기: <span className="text-slate-300">{MAX_INVENTORY_UPLOAD_LABEL}</span>
+              {isTableMode ? " · table 방식은 CSV만 지원" : null}
+            </p>
           </label>
 
           {values.inventory_file ? (
@@ -179,31 +268,68 @@ export function InventoryFormModal({
             </p>
           ) : null}
 
-          <label className="block space-y-1 text-sm text-slate-300">
-            <span>chunk type</span>
-            <select
-              value={values.chunk_type}
-              onChange={(event) => updateField("chunk_type", Number(event.target.value))}
-              disabled={isUploading || isEmbedding}
-              className="w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 outline-none focus:border-sky-500"
-            >
-              <option value={CHUNK_TYPE_ROW}>1 : row</option>
-              <option value={CHUNK_TYPE_CUSTOM}>2 : custom size</option>
-            </select>
-          </label>
+          {!isTableMode ? (
+            <>
+              <label className="block space-y-1 text-sm text-slate-300">
+                <span>chunk type</span>
+                <select
+                  value={values.chunk_type}
+                  onChange={(event) => updateField("chunk_type", Number(event.target.value))}
+                  disabled={isUploading || isEmbedding}
+                  className="w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 outline-none focus:border-sky-500"
+                >
+                  <option value={CHUNK_TYPE_ROW}>1 : row</option>
+                  <option value={CHUNK_TYPE_CUSTOM}>2 : custom size</option>
+                </select>
+              </label>
 
-          {values.chunk_type === CHUNK_TYPE_CUSTOM ? (
-            <label className="block space-y-1 text-sm text-slate-300">
-              <span>chunk size</span>
-              <input
-                type="number"
-                min={1}
-                value={values.chunk_size || ""}
-                onChange={(event) => updateField("chunk_size", Number(event.target.value) || 0)}
-                disabled={isUploading || isEmbedding}
-                className="w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 outline-none focus:border-sky-500"
-              />
-            </label>
+              <label className="block space-y-1 text-sm text-slate-300">
+                <span>n_results</span>
+                <input
+                  type="number"
+                  min={1}
+                  value={values.n_results}
+                  onChange={(event) => updateField("n_results", Number(event.target.value) || 0)}
+                  disabled={isUploading || isEmbedding}
+                  className="w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 outline-none focus:border-sky-500"
+                />
+                <p className="text-xs text-slate-500">
+                  ChromaDB 조회 시 반환할 최대 문서 수. 기본값 {DEFAULT_N_RESULTS}.
+                </p>
+              </label>
+
+              {values.chunk_type === CHUNK_TYPE_CUSTOM ? (
+                <>
+                  <label className="block space-y-1 text-sm text-slate-300">
+                    <span>chunk size (문자)</span>
+                    <input
+                      type="number"
+                      min={1}
+                      value={values.chunk_size || ""}
+                      onChange={(event) => updateField("chunk_size", Number(event.target.value) || 0)}
+                      disabled={isUploading || isEmbedding}
+                      className="w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 outline-none focus:border-sky-500"
+                    />
+                  </label>
+                  <label className="block space-y-1 text-sm text-slate-300">
+                    <span>chunk overlap (문자)</span>
+                    <input
+                      type="number"
+                      min={0}
+                      value={values.chunk_overlap}
+                      onChange={(event) =>
+                        updateField("chunk_overlap", Number(event.target.value) || 0)
+                      }
+                      disabled={isUploading || isEmbedding}
+                      className="w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 outline-none focus:border-sky-500"
+                    />
+                    <p className="text-xs text-slate-500">
+                      기본값 {DEFAULT_CHUNK_OVERLAP}. chunk size보다 작아야 합니다.
+                    </p>
+                  </label>
+                </>
+              ) : null}
+            </>
           ) : null}
 
           {error ? (
@@ -230,7 +356,7 @@ export function InventoryFormModal({
             <button
               type="button"
               onClick={() => void handleUpload()}
-              disabled={isUploading || isEmbedding}
+              disabled={Boolean(validateForm()) || isUploading || isEmbedding}
               className="rounded-md bg-sky-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-sky-500 disabled:bg-slate-700"
             >
               {isUploading ? "업로드 중..." : "업로드"}

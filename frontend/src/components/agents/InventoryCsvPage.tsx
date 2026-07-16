@@ -3,7 +3,13 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { ConfirmDialog } from "../ConfirmDialog";
 import { InventoryFormModal } from "./InventoryFormModal";
 import type { InventoryFormValues, InventoryRecord } from "../../types/inventory";
-import { chunkTypeLabel, modifiedLabel } from "../../types/inventory";
+import {
+  chunkTypeLabel,
+  dbTypeLabel,
+  DEFAULT_CHUNK_OVERLAP,
+  DEFAULT_N_RESULTS,
+  modifiedLabel,
+} from "../../types/inventory";
 
 async function parseError(response: Response, fallback: string): Promise<string> {
   const payload = (await response.json().catch(() => null)) as { detail?: string } | null;
@@ -72,8 +78,11 @@ export function InventoryCsvPage() {
   const buildUploadFormData = (values: InventoryFormValues, file: File | null): FormData => {
     const formData = new FormData();
     formData.append("inventory_name", values.inventory_name.trim());
+    formData.append("db_type", values.db_type || "vector");
     formData.append("chunk_type", String(values.chunk_type));
     formData.append("chunk_size", String(values.chunk_size || 0));
+    formData.append("chunk_overlap", String(values.chunk_overlap ?? DEFAULT_CHUNK_OVERLAP));
+    formData.append("n_results", String(values.n_results ?? DEFAULT_N_RESULTS));
     if (file) {
       formData.append("file", file);
     }
@@ -219,11 +228,14 @@ export function InventoryCsvPage() {
                   />
                 </th>
                 <th className="px-3 py-2">idx</th>
+                <th className="px-3 py-2">db_type</th>
                 <th className="px-3 py-2">인벤토리 이름</th>
                 <th className="px-3 py-2">파일명</th>
                 <th className="px-3 py-2">확장자</th>
                 <th className="px-3 py-2">chunk type</th>
                 <th className="px-3 py-2">chunk size</th>
+                <th className="px-3 py-2">chunk overlap</th>
+                <th className="px-3 py-2">n_results</th>
                 <th className="px-3 py-2">modified</th>
               </tr>
             </thead>
@@ -239,12 +251,33 @@ export function InventoryCsvPage() {
                     />
                   </td>
                   <td className="px-3 py-2">{record.idx}</td>
+                  <td className="px-3 py-2">{dbTypeLabel(record.db_type)}</td>
                   <td className="px-3 py-2">{record.inventory_name}</td>
                   <td className="px-3 py-2">{record.inventory_file}</td>
                   <td className="px-3 py-2">{record.file_ext}</td>
-                  <td className="px-3 py-2">{chunkTypeLabel(record.chunk_type)}</td>
-                  <td className="px-3 py-2">{record.chunk_type === 2 ? record.chunk_size : "-"}</td>
-                  <td className="px-3 py-2">{modifiedLabel(record.modified)}</td>
+                  <td className="px-3 py-2">
+                    {dbTypeLabel(record.db_type) === "table" ? "-" : chunkTypeLabel(record.chunk_type)}
+                  </td>
+                  <td className="px-3 py-2">
+                    {dbTypeLabel(record.db_type) === "table"
+                      ? "-"
+                      : record.chunk_type === 2
+                        ? record.chunk_size
+                        : "-"}
+                  </td>
+                  <td className="px-3 py-2">
+                    {dbTypeLabel(record.db_type) === "table"
+                      ? "-"
+                      : record.chunk_type === 2
+                        ? record.chunk_overlap
+                        : "-"}
+                  </td>
+                  <td className="px-3 py-2">
+                    {dbTypeLabel(record.db_type) === "table" ? "-" : record.n_results}
+                  </td>
+                  <td className="px-3 py-2">
+                    {dbTypeLabel(record.db_type) === "table" ? "-" : modifiedLabel(record.modified)}
+                  </td>
                 </tr>
               ))}
             </tbody>

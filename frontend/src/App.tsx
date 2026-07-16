@@ -13,7 +13,7 @@ import type { AgentInfo, HealthInfo } from "./types/agent";
 import type { AuthUser } from "./types/auth";
 import type { AppView } from "./types/navigation";
 import { ROLE_ADMIN } from "./types/user";
-import { clearAuthUser, loadAuthUser, saveAuthUser } from "./utils/authSession";
+import { clearAuthUser, loadAuthUser, saveAuthUser, startAuthSession } from "./utils/authSession";
 
 export default function App() {
   const [user, setUser] = useState<AuthUser | null>(() => loadAuthUser());
@@ -28,7 +28,7 @@ export default function App() {
   }, []);
 
   const handleLoginSuccess = useCallback((loggedInUser: AuthUser) => {
-    saveAuthUser(loggedInUser);
+    startAuthSession(loggedInUser);
     setUser(loggedInUser);
     setActiveView("dashboard");
   }, []);
@@ -48,6 +48,37 @@ export default function App() {
     setIntegratedChatFullscreen(false);
   }, []);
 
+  useEffect(() => {
+    if (!user) {
+      return;
+    }
+
+    const checkSession = () => {
+      const current = loadAuthUser();
+      if (!current) {
+        handleLogout();
+      }
+    };
+
+    checkSession();
+    const interval = window.setInterval(checkSession, 15_000);
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") {
+        checkSession();
+      }
+    };
+    const onFocus = () => {
+      checkSession();
+    };
+
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [user, handleLogout]);
   const userIdx = user?.idx;
   const userRole = user?.role;
 

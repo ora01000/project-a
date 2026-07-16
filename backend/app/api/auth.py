@@ -2,7 +2,14 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from backend.app.config import load_auth_provider_settings
-from backend.app.db.users import User, get_user_by_idx, parse_agent_ids, update_user
+from backend.app.db.jobs import Job, job_state_label, list_jobs_by_approver
+from backend.app.db.users import (
+    User,
+    get_user_by_idx,
+    parse_agent_ids,
+    record_user_login,
+    update_user,
+)
 from backend.app.services.auth_provider import AuthProviderError, login_with_provider
 
 router = APIRouter(tags=["auth"])
@@ -11,6 +18,30 @@ router = APIRouter(tags=["auth"])
 class LoginRequest(BaseModel):
     userid: str = Field(min_length=1, max_length=50)
     password: str = Field(min_length=1, max_length=50)
+
+
+class ApproverJobSummary(BaseModel):
+    idx: int
+    job_title: str
+    request_date: str
+    requester: str
+    request_depart: str
+    state: int
+    state_label: str
+    completion_request_date: str
+
+    @classmethod
+    def from_job(cls, job: Job) -> "ApproverJobSummary":
+        return cls(
+            idx=job.idx,
+            job_title=job.job_title,
+            request_date=job.request_date,
+            requester=job.requester,
+            request_depart=job.request_depart,
+            state=job.state,
+            state_label=job_state_label(job.state),
+            completion_request_date=job.completion_request_date,
+        )
 
 
 class UserResponse(BaseModel):
@@ -22,6 +53,7 @@ class UserResponse(BaseModel):
     role: int
     agents: str = ""
     agent_ids: list[str] = Field(default_factory=list)
+    last_login: str | None = None
 
     @classmethod
     def from_user(cls, user: User) -> "UserResponse":
@@ -35,11 +67,15 @@ class UserResponse(BaseModel):
             role=user.role,
             agents=user.agents or "",
             agent_ids=agent_ids,
+            last_login=user.last_login,
         )
 
 
 class LoginResponse(UserResponse):
     profile_required: bool = False
+    welcome_back: bool = False
+    previous_last_login: str | None = None
+    approver_jobs: list[ApproverJobSummary] = Field(default_factory=list)
 
 
 class AuthProviderResponse(BaseModel):
@@ -76,8 +112,26 @@ async def login(payload: LoginRequest, request: Request) -> LoginResponse:
     except AuthProviderError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
-    base = UserResponse.from_user(result.user)
-    return LoginResponse(**base.model_dump(), profile_required=result.profile_required)
+    previous_last_login, updated_user = record_user_login(database_path, result.user.idx)
+    user = updated_user or result.user
+    welcome_back = previous_last_login is not None and not result.profile_required
+    approver_jobs: list[ApproverJobSummary] = []
+    if welcome_back:
+        jobs = list_jobs_by_approver(
+            database_path,
+            userid=user.userid,
+            username=user.username,
+        )
+        approver_jobs = [ApproverJobSummary.from_job(job) for job in jobs]
+
+    base = UserResponse.from_user(user)
+    return LoginResponse(
+        **base.model_dump(),
+        profile_required=result.profile_required,
+        welcome_back=welcome_back,
+        previous_last_login=previous_last_login,
+        approver_jobs=approver_jobs,
+    )
 
 
 @router.put("/auth/profile", response_model=UserResponse)

@@ -2,6 +2,9 @@ server {
     listen ${FRONTEND_PORT};
     server_name _;
 
+    # Allow inventory uploads up to 100MB (nginx default is 1MB).
+    client_max_body_size 100m;
+
     root /usr/share/nginx/html;
     index index.html;
 

@@ -20,6 +20,9 @@ logger = logging.getLogger(__name__)
 
 COLLECTION_NAME = "system_inventory"
 EMBEDDING_DIMENSION = 384
+# ChromaDB enforces a max batch size (~5461); stay safely below it.
+CHROMA_ADD_BATCH_SIZE = 5000
+DEFAULT_N_RESULTS = 100
 
 
 class LocalHashEmbeddingFunction(EmbeddingFunction[Documents]):
@@ -54,6 +57,32 @@ ANSWER_SYSTEM_PROMPT = (
     "Respond in Korean when possible. Be concise and structured."
 )
 
+TABLE_SQL_SYSTEM_PROMPT = (
+    "You are a SQLite expert for inventory lookup. "
+    "Given registered inventory table schemas and a user question, write one read-only SQLite query. "
+    "Respond with valid JSON only (no markdown) with keys: sql (string), rationale (string). "
+    "Rules: use only SELECT or WITH ... SELECT; query only the listed tables/columns; "
+    "quote identifiers with double quotes; prefer LIMIT <= 200; never modify data. "
+    "Never use SELECT * or SELECT ALL. "
+    "Select at most 10 columns: prioritize columns that show key resource identity/attributes "
+    "(e.g. hostname, host name, IP/address, OS/operating system, type, status, owner, "
+    "environment, location, asset/id/code) when present in the schema, "
+    "and always include every column used in WHERE/JOIN comparisons. "
+    "If fewer than 10 useful columns exist, select only those; do not invent column names. "
+    "When the user question includes search terms for string matching "
+    "(names, codes, hosts, IPs, keywords, etc.), the SQL MUST include those exact terms "
+    "in WHERE filters (prefer LIKE '%term%' for partial match, or = for exact match). "
+    "Do not omit user-provided search parameters, invent unrelated filters, or return an "
+    "unfiltered SELECT when the question clearly asks to find/filter by a value."
+)
+
+COMBINED_ANSWER_SYSTEM_PROMPT = (
+    "You are the Inventory system agent. Answer the user's question using only the provided "
+    "inventory contexts (SQL query results and/or vector search hits). "
+    "If the context is insufficient, say so clearly. "
+    "Respond in Korean when possible. Be concise and structured."
+)
+
 
 def _resolve_path(path: str) -> Path:
     resolved = Path(path)
@@ -67,15 +96,34 @@ def _row_to_document(row: dict[str, str]) -> str:
     return " | ".join(parts)
 
 
-def _chunk_text(text: str, chunk_size: int) -> list[str]:
+def _chunk_text(text: str, chunk_size: int, chunk_overlap: int = 0) -> list[str]:
     if chunk_size <= 0:
         raise ValueError("chunk_size must be greater than 0 for custom chunking")
-    return [text[index : index + chunk_size] for index in range(0, len(text), chunk_size)]
+    if chunk_overlap < 0:
+        raise ValueError("chunk_overlap must be greater than or equal to 0")
+    if chunk_overlap >= chunk_size:
+        raise ValueError("chunk_overlap must be less than chunk_size")
+
+    step = chunk_size - chunk_overlap
+    chunks: list[str] = []
+    for index in range(0, len(text), step):
+        chunk = text[index : index + chunk_size]
+        if chunk.strip():
+            chunks.append(chunk)
+        if index + chunk_size >= len(text):
+            break
+    return chunks
 
 
 class InventoryService:
-    def __init__(self, settings: InventorySettings) -> None:
+    def __init__(
+        self,
+        settings: InventorySettings,
+        *,
+        database_path: str | Path | None = None,
+    ) -> None:
         self.settings = settings
+        self.database_path = _resolve_path(str(database_path)) if database_path is not None else None
         self.chroma_path = _resolve_path(settings.chroma_data_path)
         self.csv_path = _resolve_path(settings.csv_path)
         self.upload_path = _resolve_path(settings.upload_path)
@@ -155,6 +203,32 @@ class InventoryService:
             raise RuntimeError("Inventory service is not initialized")
         return self._collection
 
+    def _add_documents_to_collection(
+        self,
+        collection: chromadb.Collection,
+        *,
+        documents: list[str],
+        metadatas: list[dict[str, str]],
+        ids: list[str],
+        context: str = "",
+    ) -> None:
+        total = len(documents)
+        for start in range(0, total, CHROMA_ADD_BATCH_SIZE):
+            end = min(start + CHROMA_ADD_BATCH_SIZE, total)
+            logger.info(
+                "Chroma add batch context=%s documents=%s/%s range=%s-%s",
+                context or "-",
+                end - start,
+                total,
+                start,
+                end,
+            )
+            collection.add(
+                documents=documents[start:end],
+                metadatas=metadatas[start:end],
+                ids=ids[start:end],
+            )
+
     def _delete_embeddings_for_idx(self, inventory_idx: int) -> None:
         collection = self._ensure_collection()
         collection.delete(where={"inventory_idx": str(inventory_idx)})
@@ -205,6 +279,7 @@ class InventoryService:
         file_path: Path,
         filename: str,
         chunk_size: int,
+        chunk_overlap: int,
     ) -> tuple[list[str], list[dict[str, str]], list[str]]:
         text = file_path.read_text(encoding="utf-8-sig")
         if not text.strip():
@@ -214,7 +289,7 @@ class InventoryService:
         metadatas: list[dict[str, str]] = []
         ids: list[str] = []
 
-        for index, chunk in enumerate(_chunk_text(text, chunk_size)):
+        for index, chunk in enumerate(_chunk_text(text, chunk_size, chunk_overlap)):
             if not chunk.strip():
                 continue
             documents.append(chunk)
@@ -223,6 +298,7 @@ class InventoryService:
                     "inventory_idx": str(inventory_idx),
                     "inventory_file": filename,
                     "chunk_index": str(index),
+                    "chunk_overlap": str(chunk_overlap),
                 }
             )
             ids.append(f"inv-{inventory_idx}-chunk-{index}")
@@ -236,44 +312,145 @@ class InventoryService:
         filename: str,
         chunk_type: int,
         chunk_size: int,
+        chunk_overlap: int = 50,
     ) -> int:
         from backend.app.db.inventory_records import CHUNK_TYPE_CUSTOM, CHUNK_TYPE_ROW
 
-        collection = self._ensure_collection()
         file_path = self.resolve_uploaded_file_path(filename)
+        file_size = file_path.stat().st_size if file_path.exists() else None
+        logger.info(
+            "Inventory embed start idx=%s file=%s chunk_type=%s chunk_size=%s chunk_overlap=%s "
+            "file_path=%s file_exists=%s file_size=%s service_status=%s chroma_path=%s",
+            inventory_idx,
+            filename,
+            chunk_type,
+            chunk_size,
+            chunk_overlap,
+            file_path,
+            file_path.exists(),
+            file_size,
+            self._status,
+            self.chroma_path,
+        )
+
+        collection = self._ensure_collection()
         if not file_path.exists():
+            logger.error(
+                "Inventory embed uploaded file missing idx=%s file=%s resolved_path=%s upload_path=%s",
+                inventory_idx,
+                filename,
+                file_path,
+                self.upload_path,
+            )
             raise FileNotFoundError(f"Uploaded inventory file not found: {file_path}")
 
-        self._delete_embeddings_for_idx(inventory_idx)
+        try:
+            self._delete_embeddings_for_idx(inventory_idx)
+        except Exception as exc:
+            logger.exception(
+                "Inventory embed failed while deleting existing embeddings idx=%s file=%s",
+                inventory_idx,
+                filename,
+            )
+            raise RuntimeError(f"Failed to delete existing embeddings for idx={inventory_idx}: {exc}") from exc
 
-        if chunk_type == CHUNK_TYPE_ROW:
-            documents, metadatas, ids = self._build_row_documents(
-                inventory_idx=inventory_idx,
-                file_path=file_path,
-                filename=filename,
+        try:
+            if chunk_type == CHUNK_TYPE_ROW:
+                documents, metadatas, ids = self._build_row_documents(
+                    inventory_idx=inventory_idx,
+                    file_path=file_path,
+                    filename=filename,
+                )
+            elif chunk_type == CHUNK_TYPE_CUSTOM:
+                documents, metadatas, ids = self._build_custom_documents(
+                    inventory_idx=inventory_idx,
+                    file_path=file_path,
+                    filename=filename,
+                    chunk_size=chunk_size,
+                    chunk_overlap=chunk_overlap,
+                )
+            else:
+                raise ValueError(f"Unsupported chunk_type: {chunk_type}")
+        except UnicodeDecodeError as exc:
+            logger.error(
+                "Inventory embed file encoding error idx=%s file=%s encoding=%s detail=%s",
+                inventory_idx,
+                filename,
+                exc.encoding,
+                exc,
             )
-        elif chunk_type == CHUNK_TYPE_CUSTOM:
-            documents, metadatas, ids = self._build_custom_documents(
-                inventory_idx=inventory_idx,
-                file_path=file_path,
-                filename=filename,
-                chunk_size=chunk_size,
+            raise ValueError(
+                "업로드 파일 인코딩을 UTF-8로 읽을 수 없습니다. UTF-8 CSV/TXT 파일인지 확인해 주세요."
+            ) from exc
+        except csv.Error as exc:
+            logger.error(
+                "Inventory embed CSV parse error idx=%s file=%s detail=%s",
+                inventory_idx,
+                filename,
+                exc,
             )
-        else:
-            raise ValueError(f"Unsupported chunk_type: {chunk_type}")
+            raise ValueError(f"CSV 파싱에 실패했습니다: {exc}") from exc
 
         if not documents:
+            logger.warning(
+                "Inventory embed no embeddable content idx=%s file=%s chunk_type=%s chunk_size=%s file_size=%s",
+                inventory_idx,
+                filename,
+                chunk_type,
+                chunk_size,
+                file_size,
+            )
             raise ValueError("No embeddable content found in the uploaded file")
 
-        collection.add(documents=documents, metadatas=metadatas, ids=ids)
+        duplicate_ids = {doc_id for doc_id in ids if ids.count(doc_id) > 1}
+        if duplicate_ids:
+            sample = sorted(duplicate_ids)[:5]
+            logger.error(
+                "Inventory embed duplicate document ids idx=%s file=%s duplicate_count=%s sample=%s",
+                inventory_idx,
+                filename,
+                len(duplicate_ids),
+                sample,
+            )
+            raise ValueError(
+                "임베딩 ID가 중복되었습니다. CSV의 id/host_id/hostname 값이 고유한지 확인해 주세요."
+            )
+
+        logger.info(
+            "Inventory embed adding to Chroma idx=%s file=%s documents=%s ids_sample=%s",
+            inventory_idx,
+            filename,
+            len(documents),
+            ids[:3],
+        )
+
+        try:
+            self._add_documents_to_collection(
+                collection,
+                documents=documents,
+                metadatas=metadatas,
+                ids=ids,
+                context=f"idx={inventory_idx} file={filename}",
+            )
+        except Exception as exc:
+            logger.exception(
+                "Inventory embed Chroma add failed idx=%s file=%s documents=%s chroma_path=%s",
+                inventory_idx,
+                filename,
+                len(documents),
+                self.chroma_path,
+            )
+            raise RuntimeError(f"ChromaDB add failed: {exc}") from exc
+
         self._document_count = collection.count()
         self._status = "ready"
         self._error = None
         logger.info(
-            "Embedded inventory idx=%s file=%s documents=%s",
+            "Embedded inventory idx=%s file=%s documents=%s document_count=%s",
             inventory_idx,
             filename,
             len(documents),
+            self._document_count,
         )
         return len(documents)
 
@@ -320,7 +497,13 @@ class InventoryService:
             logger.warning("Inventory CSV has no embeddable rows: %s", self.csv_path)
             return 0
 
-        self._collection.add(documents=documents, metadatas=metadatas, ids=ids)
+        self._add_documents_to_collection(
+            self._collection,
+            documents=documents,
+            metadatas=metadatas,
+            ids=ids,
+            context=f"csv={self.csv_path.name}",
+        )
         self._document_count = self._collection.count()
         logger.info("Loaded %s inventory rows from %s", len(documents), self.csv_path)
         return len(documents)
@@ -340,37 +523,194 @@ class InventoryService:
         content = str(response.content).strip().upper()
         return content.startswith("INVENTORY")
 
-    def _search(self, query: str, *, n_results: int = 5) -> list[dict[str, Any]]:
+    def _query_collection(
+        self,
+        collection: chromadb.Collection,
+        query: str,
+        *,
+        n_results: int,
+        where: dict[str, str] | None = None,
+    ) -> list[dict[str, Any]]:
+        requested = max(n_results, 1)
+
+        while requested >= 1:
+            query_kwargs: dict[str, Any] = {
+                "query_texts": [query],
+                "n_results": min(requested, max(self._document_count, 1)),
+            }
+            if where is not None:
+                query_kwargs["where"] = where
+
+            try:
+                results = collection.query(**query_kwargs)
+            except Exception as exc:
+                if requested <= 1:
+                    logger.warning(
+                        "Chroma query failed n_results=%s where=%s error=%s",
+                        requested,
+                        where,
+                        exc,
+                    )
+                    return []
+                requested = requested // 2
+                continue
+
+            hits: list[dict[str, Any]] = []
+            documents = results.get("documents") or [[]]
+            metadatas = results.get("metadatas") or [[]]
+            distances = results.get("distances") or [[]]
+
+            for document, metadata, distance in zip(
+                documents[0], metadatas[0], distances[0], strict=False
+            ):
+                hits.append(
+                    {
+                        "document": document,
+                        "metadata": metadata or {},
+                        "distance": distance,
+                    }
+                )
+            return hits
+
+        return []
+
+    def _search(self, query: str) -> list[dict[str, Any]]:
         if self._collection is None or self._document_count == 0:
             return []
 
-        results = self._collection.query(query_texts=[query], n_results=min(n_results, self._document_count))
+        collection = self._ensure_collection()
         hits: list[dict[str, Any]] = []
-        documents = results.get("documents") or [[]]
-        metadatas = results.get("metadatas") or [[]]
-        distances = results.get("distances") or [[]]
 
-        for document, metadata, distance in zip(documents[0], metadatas[0], distances[0], strict=False):
-            hits.append(
-                {
-                    "document": document,
-                    "metadata": metadata or {},
-                    "distance": distance,
-                }
+        records: list[Any] = []
+        if self.database_path is not None:
+            try:
+                from backend.app.db.inventory_records import DB_TYPE_TABLE, list_stored_inventory
+
+                records = [
+                    record
+                    for record in list_stored_inventory(self.database_path)
+                    if record.effective_db_type != DB_TYPE_TABLE
+                ]
+            except Exception:
+                logger.exception(
+                    "Failed to load inventory records for Chroma search (database_path=%s)",
+                    self.database_path,
+                )
+
+        if records:
+            for record in records:
+                n_results = max(int(getattr(record, "n_results", DEFAULT_N_RESULTS)), 1)
+                try:
+                    file_hits = self._query_collection(
+                        collection,
+                        query,
+                        n_results=n_results,
+                        where={"inventory_idx": str(record.idx)},
+                    )
+                except Exception:
+                    logger.exception(
+                        "Chroma query failed for inventory_idx=%s n_results=%s",
+                        record.idx,
+                        n_results,
+                    )
+                    continue
+                logger.info(
+                    "Chroma search inventory_idx=%s file=%s n_results=%s hits=%s",
+                    record.idx,
+                    record.inventory_file,
+                    n_results,
+                    len(file_hits),
+                )
+                hits.extend(file_hits)
+
+            hits.sort(key=lambda item: float(item.get("distance") or 0.0))
+            if hits:
+                return hits
+
+        return self._query_collection(collection, query, n_results=DEFAULT_N_RESULTS)
+
+    async def _generate_inventory_sql(
+        self,
+        message: str,
+        schemas_text: str,
+    ) -> tuple[str, str]:
+        from backend.app.db.inventory_table_query import extract_sql_from_llm_response
+
+        prompt = (
+            f"User question:\n{message}\n\n"
+            f"Available inventory tables:\n{schemas_text}\n\n"
+            "Do not use SELECT *. Pick up to 10 columns: key resource fields "
+            "(hostname, ip, OS, etc. when available) plus any columns used in WHERE filters.\n"
+            "If the user question contains string search parameters, include them in the SQL "
+            "WHERE clause (e.g. LIKE '%value%' or = 'value') using the same terms from the question.\n"
+            "Return JSON: {\"sql\": \"SELECT ...\", \"rationale\": \"...\"}"
+        )
+        llm = wrap_llm_for_prompt_debug(
+            get_llm(),
+            agent_id=INVENTORY_AGENT_ID,
+            agent_name=INVENTORY_AGENT.name,
+        )
+        response = await llm.ainvoke(
+            [
+                SystemMessage(content=TABLE_SQL_SYSTEM_PROMPT),
+                HumanMessage(content=prompt),
+            ],
+        )
+        content = response.content if isinstance(response.content, str) else str(response.content)
+        return extract_sql_from_llm_response(content)
+
+    async def _query_table_inventories(self, message: str) -> str | None:
+        if self.database_path is None:
+            return None
+
+        from backend.app.db.inventory_table_query import (
+            execute_inventory_sql,
+            format_table_query_result,
+            list_inventory_table_schemas,
+            schemas_to_prompt_text,
+        )
+
+        schemas = list_inventory_table_schemas(self.database_path)
+        if not schemas:
+            return None
+
+        schemas_text = schemas_to_prompt_text(schemas)
+        allowed_tables = {schema.table_name for schema in schemas}
+        logger.info(
+            "Inventory table SQL routing tables=%s question_chars=%s",
+            sorted(allowed_tables),
+            len(message),
+        )
+
+        try:
+            sql, rationale = await self._generate_inventory_sql(message, schemas_text)
+            result = execute_inventory_sql(
+                self.database_path,
+                sql,
+                allowed_tables=allowed_tables,
             )
-        return hits
+            if rationale:
+                from dataclasses import replace
+
+                result = replace(result, rationale=rationale)
+            formatted = format_table_query_result(result)
+            logger.info(
+                "Inventory table SQL executed rows=%s truncated=%s sql=%s",
+                len(result.rows),
+                result.truncated,
+                result.sql.replace("\n", " ")[:300],
+            )
+            return formatted
+        except Exception as exc:
+            logger.exception("Inventory table SQL query failed: %s", exc)
+            return (
+                "table 타입 인벤토리 SQL 조회에 실패했습니다. "
+                f"원인: {exc}"
+            )
 
     async def query(self, message: str) -> AgentInvokeResult:
         if self._status == "error":
             content = f"인벤토리 서비스 오류: {self._error}"
-            input_tokens, output_tokens = extract_token_usage_from_text(message, content)
-            return AgentInvokeResult(content=content, tools_used=[], input_tokens=input_tokens, output_tokens=output_tokens)
-
-        if self._status == "waiting_for_csv":
-            content = (
-                f"인벤토리 CSV 파일을 찾을 수 없습니다. "
-                f"INVENTORY_CSV_PATH 환경변수로 경로를 설정해 주세요. (현재: {self.csv_path})"
-            )
             input_tokens, output_tokens = extract_token_usage_from_text(message, content)
             return AgentInvokeResult(content=content, tools_used=[], input_tokens=input_tokens, output_tokens=output_tokens)
 
@@ -380,19 +720,54 @@ class InventoryService:
             input_tokens, output_tokens = extract_token_usage_from_text(message, content)
             return AgentInvokeResult(content=content, tools_used=[], input_tokens=input_tokens, output_tokens=output_tokens)
 
-        hits = self._search(message)
-        if not hits:
-            content = "인벤토리 DB에 조회 가능한 데이터가 없습니다. CSV 파일을 확인하거나 reload를 실행해 주세요."
+        table_context = await self._query_table_inventories(message)
+
+        vector_hits: list[dict[str, Any]] = []
+        if self._collection is not None and self._document_count > 0:
+            vector_hits = self._search(message)
+        elif self._status == "waiting_for_csv" and not table_context:
+            content = (
+                f"인벤토리 CSV 파일을 찾을 수 없습니다. "
+                f"INVENTORY_CSV_PATH 환경변수로 경로를 설정해 주세요. (현재: {self.csv_path})"
+            )
+            input_tokens, output_tokens = extract_token_usage_from_text(message, content)
+            return AgentInvokeResult(
+                content=content,
+                tools_used=[],
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+            )
+
+        if not table_context and not vector_hits:
+            content = (
+                "인벤토리 DB에 조회 가능한 데이터가 없습니다. "
+                "table/vector 인벤토리 등록 및 Embedding 상태를 확인해 주세요."
+            )
             input_tokens, output_tokens = extract_token_usage_from_text(message, content)
             return AgentInvokeResult(content=content, tools_used=[], input_tokens=input_tokens, output_tokens=output_tokens)
 
-        context_lines = []
-        for index, hit in enumerate(hits, start=1):
-            metadata = hit.get("metadata") or {}
-            metadata_text = ", ".join(f"{key}={value}" for key, value in metadata.items())
-            context_lines.append(f"[{index}] {hit['document']} ({metadata_text})")
+        # table-only: return SQL execution result directly.
+        if table_context and not vector_hits:
+            input_tokens, output_tokens = extract_token_usage_from_text(message, table_context)
+            return AgentInvokeResult(
+                content=table_context,
+                tools_used=[],
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+            )
 
-        context = "\n".join(context_lines)
+        context_sections: list[str] = []
+        if table_context:
+            context_sections.append(f"[table SQL 결과]\n{table_context}")
+        if vector_hits:
+            vector_lines = []
+            for index, hit in enumerate(vector_hits, start=1):
+                metadata = hit.get("metadata") or {}
+                metadata_text = ", ".join(f"{key}={value}" for key, value in metadata.items())
+                vector_lines.append(f"[{index}] {hit['document']} ({metadata_text})")
+            context_sections.append("[vector 검색 결과]\n" + "\n".join(vector_lines))
+
+        context = "\n\n".join(context_sections)
         llm = wrap_llm_for_prompt_debug(
             get_llm(),
             agent_id=INVENTORY_AGENT_ID,
@@ -400,7 +775,9 @@ class InventoryService:
         )
         response = await llm.ainvoke(
             [
-                SystemMessage(content=ANSWER_SYSTEM_PROMPT),
+                SystemMessage(
+                    content=COMBINED_ANSWER_SYSTEM_PROMPT if table_context else ANSWER_SYSTEM_PROMPT
+                ),
                 HumanMessage(content=f"질문: {message}\n\n인벤토리 컨텍스트:\n{context}"),
             ],
         )
@@ -429,9 +806,16 @@ def get_inventory_service() -> InventoryService:
     return _inventory_service
 
 
-def initialize_inventory_service(settings: InventorySettings | None = None) -> InventoryService:
+def initialize_inventory_service(
+    settings: InventorySettings | None = None,
+    *,
+    database_path: str | Path | None = None,
+) -> InventoryService:
     global _inventory_service
-    service = InventoryService(settings or load_inventory_settings())
+    service = InventoryService(
+        settings or load_inventory_settings(),
+        database_path=database_path,
+    )
     service.initialize()
     _inventory_service = service
     return service

@@ -154,6 +154,32 @@ def list_jobs_by_states(database_path: str | Path, states: list[int]) -> list[Jo
     return [_row_to_job(row) for row in rows]
 
 
+def list_jobs_by_approver(
+    database_path: str | Path,
+    *,
+    userid: str,
+    username: str,
+) -> list[Job]:
+    """Jobs where approver matches userid or username (legacy samples use username)."""
+    candidates = [value.strip() for value in (userid, username) if value and value.strip()]
+    if not candidates:
+        return []
+
+    unique_candidates = list(dict.fromkeys(candidates))
+    placeholders = ", ".join("?" for _ in unique_candidates)
+    with get_connection(database_path) as connection:
+        rows = connection.execute(
+            f"""
+            SELECT {JOB_SELECT_COLUMNS}
+            FROM jobs
+            WHERE approver IN ({placeholders})
+            ORDER BY idx DESC
+            """,
+            unique_candidates,
+        ).fetchall()
+    return [_row_to_job(row) for row in rows]
+
+
 def get_job_by_idx(database_path: str | Path, idx: int) -> Job | None:
     with get_connection(database_path) as connection:
         row = connection.execute(

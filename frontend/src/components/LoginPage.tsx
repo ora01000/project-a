@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
 
 import type { AuthUser } from "../types/auth";
-import { ProfileCompleteModal } from "./ProfileCompleteModal";
-import { RegisterUserModal } from "./users/RegisterUserModal";
 import { ConfirmDialog } from "./ConfirmDialog";
+import { PasswordInput } from "./PasswordInput";
+import { ProfileCompleteModal } from "./ProfileCompleteModal";
+import { WelcomeBackModal } from "./WelcomeBackModal";
+import { RegisterUserModal } from "./users/RegisterUserModal";
 
 interface LoginPageProps {
   onLoginSuccess: (user: AuthUser) => void;
@@ -14,8 +16,28 @@ interface AuthProviderInfo {
   registration_enabled: boolean;
 }
 
+interface ApproverJobSummary {
+  idx: number;
+  job_title: string;
+  request_date: string;
+  requester: string;
+  request_depart: string;
+  state: number;
+  state_label: string;
+  completion_request_date: string;
+}
+
 interface LoginResponse extends AuthUser {
   profile_required?: boolean;
+  welcome_back?: boolean;
+  previous_last_login?: string | null;
+  approver_jobs?: ApproverJobSummary[];
+}
+
+interface WelcomeBackState {
+  user: AuthUser;
+  previousLastLogin: string | null;
+  jobs: ApproverJobSummary[];
 }
 
 export function LoginPage({ onLoginSuccess }: LoginPageProps) {
@@ -28,6 +50,7 @@ export function LoginPage({ onLoginSuccess }: LoginPageProps) {
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [registrationEnabled, setRegistrationEnabled] = useState(true);
   const [pendingProfileUser, setPendingProfileUser] = useState<AuthUser | null>(null);
+  const [welcomeBack, setWelcomeBack] = useState<WelcomeBackState | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -97,6 +120,15 @@ export function LoginPage({ onLoginSuccess }: LoginPageProps) {
         return;
       }
 
+      if (payload.welcome_back) {
+        setWelcomeBack({
+          user,
+          previousLastLogin: payload.previous_last_login ?? null,
+          jobs: payload.approver_jobs ?? [],
+        });
+        return;
+      }
+
       onLoginSuccess(user);
     } catch (err) {
       setError(err instanceof Error ? err.message : "로그인에 실패했습니다.");
@@ -128,13 +160,11 @@ export function LoginPage({ onLoginSuccess }: LoginPageProps) {
 
             <label className="block space-y-1 text-sm text-slate-300">
               <span>패스워드</span>
-              <input
-                type="password"
+              <PasswordInput
                 value={password}
-                onChange={(event) => setPassword(event.target.value)}
+                onChange={setPassword}
                 autoComplete="current-password"
                 disabled={isLoading}
-                className="w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 outline-none focus:border-sky-500"
               />
             </label>
 
@@ -189,6 +219,19 @@ export function LoginPage({ onLoginSuccess }: LoginPageProps) {
           onSaved={(updated) => {
             setPendingProfileUser(null);
             onLoginSuccess(updated);
+          }}
+        />
+      ) : null}
+
+      {welcomeBack ? (
+        <WelcomeBackModal
+          username={welcomeBack.user.username}
+          previousLastLogin={welcomeBack.previousLastLogin}
+          jobs={welcomeBack.jobs}
+          onClose={() => {
+            const user = welcomeBack.user;
+            setWelcomeBack(null);
+            onLoginSuccess(user);
           }}
         />
       ) : null}

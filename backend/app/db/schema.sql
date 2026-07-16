@@ -6,7 +6,8 @@ CREATE TABLE IF NOT EXISTS users (
     password VARCHAR(50) NOT NULL,
     depart VARCHAR(100) NOT NULL,
     role INTEGER NOT NULL,
-    agents VARCHAR(200) NOT NULL DEFAULT ''
+    agents VARCHAR(200) NOT NULL DEFAULT '',
+    last_login TEXT
 );
 
 CREATE TABLE IF NOT EXISTS agents (
@@ -25,6 +26,9 @@ CREATE TABLE IF NOT EXISTS inventory (
     file_ext VARCHAR(15) NOT NULL,
     chunk_type INTEGER NOT NULL,
     chunk_size INTEGER NOT NULL DEFAULT 0,
+    chunk_overlap INTEGER NOT NULL DEFAULT 50,
+    n_results INTEGER NOT NULL DEFAULT 100,
+    db_type VARCHAR(10),
     modified INTEGER NOT NULL DEFAULT 0
 );
 

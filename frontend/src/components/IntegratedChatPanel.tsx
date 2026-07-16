@@ -57,6 +57,15 @@ const MIN_COMPOSER_HEIGHT = 160;
 const MIN_CONVERSATION_HEIGHT = 120;
 const RESIZE_HANDLE_HEIGHT = 8;
 const CHAT_HEADER_HEIGHT = 100;
+/** 대화창에 유지·렌더링할 최근 질의/응답 쌍 개수 */
+const VISIBLE_CHAT_RESPONSE_LIMIT = 10;
+
+function keepRecentResponses(entries: IntegratedChatResponse[]): IntegratedChatResponse[] {
+  if (entries.length <= VISIBLE_CHAT_RESPONSE_LIMIT) {
+    return entries;
+  }
+  return entries.slice(-VISIBLE_CHAT_RESPONSE_LIMIT);
+}
 
 interface UserCommLogEntry {
   timestamp: string;
@@ -225,7 +234,7 @@ export function IntegratedChatPanel({
         }
 
         const restored = (payload.entries ?? []).map(mapLogEntryToResponse);
-        setResponses(restored);
+        setResponses(keepRecentResponses(restored));
       } catch {
         if (!cancelled) {
           setResponses([]);
@@ -333,18 +342,20 @@ export function IntegratedChatPanel({
 
     const createdAt = new Date().toISOString();
     const responseId = createResponseId();
-    setResponses((prev) => [
-      ...prev,
-      {
-        id: responseId,
-        agentId: selectedAgent.id,
-        agentName: selectedAgent.name,
-        userContent: trimmed,
-        assistantContent: "",
-        toolsUsed: [],
-        createdAt,
-      },
-    ]);
+    setResponses((prev) =>
+      keepRecentResponses([
+        ...prev,
+        {
+          id: responseId,
+          agentId: selectedAgent.id,
+          agentName: selectedAgent.name,
+          userContent: trimmed,
+          assistantContent: "",
+          toolsUsed: [],
+          createdAt,
+        },
+      ]),
+    );
 
     const abortController = new AbortController();
     abortControllerRef.current = abortController;

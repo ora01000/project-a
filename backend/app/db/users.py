@@ -16,6 +16,7 @@ class User:
     depart: str
     role: int
     agents: str = ""
+    last_login: str | None = None
 
 
 def parse_agent_ids(raw: str | None) -> list[str]:
@@ -48,6 +49,13 @@ def _row_to_user(row) -> User:
         agents_value = str(row["agents"] or "")
     except (KeyError, IndexError):
         agents_value = ""
+    last_login: str | None = None
+    try:
+        raw_login = row["last_login"]
+        if raw_login is not None and str(raw_login).strip():
+            last_login = str(raw_login).strip()
+    except (KeyError, IndexError):
+        last_login = None
     return User(
         idx=int(row["idx"]),
         userid=str(row["userid"]),
@@ -56,10 +64,13 @@ def _row_to_user(row) -> User:
         depart=str(row["depart"]),
         role=int(row["role"]),
         agents=agents_value,
+        last_login=last_login,
     )
 
 
-_USER_SELECT = "SELECT idx, userid, email, username, depart, role, agents FROM users"
+_USER_SELECT = (
+    "SELECT idx, userid, email, username, depart, role, agents, last_login FROM users"
+)
 
 
 def list_users(database_path: str | Path, *, viewer_role: int | None = None) -> list[User]:
@@ -213,6 +224,31 @@ def update_user_agents(
         if cursor.rowcount == 0:
             return None
     return get_user_by_idx(database_path, idx)
+
+
+def record_user_login(database_path: str | Path, idx: int) -> tuple[str | None, User | None]:
+    """Persist current login time. Returns (previous_last_login, updated_user)."""
+    from backend.app.db.job_datetime import now_job_datetime
+
+    existing = get_user_by_idx(database_path, idx)
+    if existing is None:
+        return None, None
+
+    previous = existing.last_login
+    login_at = now_job_datetime()
+    with get_connection(database_path) as connection:
+        connection.execute(
+            """
+            UPDATE users
+            SET last_login = ?
+            WHERE idx = ?
+            """,
+            (login_at, idx),
+        )
+        connection.commit()
+
+    updated = get_user_by_idx(database_path, idx)
+    return previous, updated
 
 
 def delete_users(database_path: str | Path, idx_list: list[int]) -> int:
