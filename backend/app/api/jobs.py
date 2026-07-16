@@ -1,10 +1,11 @@
 import json
-from datetime import date, timedelta
+from datetime import datetime, timedelta
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from backend.app.agents.system_agents import NotifyChannel
+from backend.app.db.job_datetime import now_job_datetime
 from backend.app.db.jobs import (
     JOB_STATE_COMPLETED,
     JOB_STATE_PENDING,
@@ -67,6 +68,7 @@ class JobResponse(BaseModel):
     job_plan: dict | None = None
     original_job_plan: dict | None = None
     execution_result: dict | None = None
+    actual_completion_time: str | None = None
 
     @classmethod
     def from_job(cls, job: Job) -> "JobResponse":
@@ -103,6 +105,7 @@ class JobResponse(BaseModel):
             job_plan=job_plan,
             original_job_plan=original_job_plan,
             execution_result=execution_result,
+            actual_completion_time=job.actual_completion_time,
         )
 
 
@@ -191,19 +194,21 @@ async def send_job_test_sample(payload: SendJobTestSampleRequest, request: Reque
     if sample is None:
         raise HTTPException(status_code=404, detail="테스트 샘플을 찾을 수 없습니다.")
 
-    today = date.today()
     database_path = request.app.state.database_path
+    request_date = now_job_datetime()
+    completion_request_date = (datetime.now() + timedelta(days=3)).strftime("%Y-%m-%d %H:%M:%S")
     job = await submit_job_request(
         database_path,
-        request_date=today.isoformat(),
+        request_date=request_date,
         job_title=payload.job_title,
         request_depart=payload.request_depart,
         requester=payload.requester,
         requester_email=_resolve_requester_email(payload.requester, payload.requester_email),
-        completion_request_date=(today + timedelta(days=3)).isoformat(),
+        completion_request_date=completion_request_date,
         job_description=payload.job_description,
         approver=payload.approver,
         notify_channel=payload.notify_channel,
+        agent_manager=request.app.state.agent_manager,
     )
     return JobResponse.from_job(job)
 
@@ -222,6 +227,7 @@ async def create_job_request(payload: JobRequestPayload, request: Request) -> Jo
         job_description=payload.job_description,
         approver=payload.approver,
         notify_channel=payload.notify_channel,
+        agent_manager=request.app.state.agent_manager,
     )
     return JobResponse.from_job(job)
 

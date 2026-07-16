@@ -318,6 +318,7 @@ export function JobDetailModal({
               <div className="grid gap-2 rounded-md border border-slate-800 bg-slate-950/40 p-3 sm:grid-cols-2">
                 <div>기안일시: {job.request_date}</div>
                 <div>작업완료요청일시: {job.completion_request_date}</div>
+                <div>실제작업완료시간: {job.actual_completion_time ?? "-"}</div>
                 <div>기안자: {job.requester}</div>
                 <div>기안자 조직: {job.request_depart}</div>
                 <div>승인자: {job.approver}</div>

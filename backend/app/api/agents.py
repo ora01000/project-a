@@ -2,7 +2,10 @@ from fastapi import APIRouter, HTTPException, Request
 
 from backend.app.agents.base import AgentDefinition, _aggregate_mcp_status
 from backend.app.agents.inventory_tool import INVENTORY_AGENT_ID, QUERY_INVENTORY_TOOL_NAME
-from backend.app.agents.system_agents import is_dashboard_system_agent_id
+from backend.app.agents.system_agents import (
+    is_chat_enabled_system_agent_id,
+    is_dashboard_system_agent_id,
+)
 
 router = APIRouter(tags=["agents"])
 
@@ -41,6 +44,7 @@ def _agent_payload(
         "input_tokens": usage.input_tokens if usage else 0,
         "output_tokens": usage.output_tokens if usage else 0,
         "is_system": is_system,
+        "chat_enabled": (not is_system) or is_chat_enabled_system_agent_id(definition.agent_id),
     }
 
 

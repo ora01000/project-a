@@ -26,6 +26,8 @@ from backend.app.api.chat import router as chat_router
 from backend.app.api.debug import router as debug_router
 from backend.app.api.inventory import router as inventory_router
 from backend.app.api.jobs import router as jobs_router
+from backend.app.api.prompt_debug import router as prompt_debug_router
+from backend.app.api.release import router as release_router
 from backend.app.api.signup import router as signup_router
 from backend.app.api.users import router as users_router
 from backend.app.api.whatap_webhook import router as whatap_webhook_router
@@ -295,11 +297,13 @@ def create_app() -> FastAPI:
     app.include_router(signup_router, prefix="/api")
     app.include_router(users_router, prefix="/api")
     app.include_router(agent_logs_router, prefix="/api")
+    app.include_router(prompt_debug_router, prefix="/api")
     app.include_router(agent_records_router, prefix="/api")
     app.include_router(agents_router, prefix="/api")
     app.include_router(jobs_router, prefix="/api")
     app.include_router(chat_router, prefix="/api")
     app.include_router(debug_router, prefix="/api")
+    app.include_router(release_router, prefix="/api")
     app.include_router(inventory_router, prefix="/api")
     app.include_router(whatap_webhook_router, prefix="/api")
     return app

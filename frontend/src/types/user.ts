@@ -5,6 +5,8 @@ export interface UserRecord {
   username: string;
   depart: string;
   role: number;
+  agents?: string;
+  agent_ids?: string[];
 }
 
 export interface UserFormValues {

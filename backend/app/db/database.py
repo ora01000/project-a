@@ -41,6 +41,14 @@ def _apply_schema(connection: sqlite3.Connection) -> None:
 
 
 def _apply_migrations(connection: sqlite3.Connection) -> None:
+    user_columns = {
+        row["name"] for row in connection.execute("PRAGMA table_info(users)").fetchall()
+    }
+    if "agents" not in user_columns:
+        connection.execute(
+            "ALTER TABLE users ADD COLUMN agents VARCHAR(200) NOT NULL DEFAULT ''"
+        )
+
     job_columns = {
         row["name"] for row in connection.execute("PRAGMA table_info(jobs)").fetchall()
     }
@@ -62,6 +70,28 @@ def _apply_migrations(connection: sqlite3.Connection) -> None:
         connection.execute(
             "ALTER TABLE jobs ADD COLUMN notify_channel VARCHAR(30) NOT NULL DEFAULT 'integrated_chat'"
         )
+    if "actual_completion_time" not in job_columns:
+        connection.execute("ALTER TABLE jobs ADD COLUMN actual_completion_time TEXT")
+
+    # Backfill date-only request/completion fields with 00:00:00.
+    connection.execute(
+        """
+        UPDATE jobs
+        SET request_date = request_date || ' 00:00:00'
+        WHERE request_date IS NOT NULL
+          AND length(trim(request_date)) = 10
+          AND request_date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'
+        """
+    )
+    connection.execute(
+        """
+        UPDATE jobs
+        SET completion_request_date = completion_request_date || ' 00:00:00'
+        WHERE completion_request_date IS NOT NULL
+          AND length(trim(completion_request_date)) = 10
+          AND completion_request_date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'
+        """
+    )
 
     tables = {
         str(row[0])

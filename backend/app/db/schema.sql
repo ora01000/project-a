@@ -5,7 +5,8 @@ CREATE TABLE IF NOT EXISTS users (
     username VARCHAR(50) NOT NULL,
     password VARCHAR(50) NOT NULL,
     depart VARCHAR(100) NOT NULL,
-    role INTEGER NOT NULL
+    role INTEGER NOT NULL,
+    agents VARCHAR(200) NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS agents (
@@ -29,19 +30,20 @@ CREATE TABLE IF NOT EXISTS inventory (
 
 CREATE TABLE IF NOT EXISTS jobs (
     idx INTEGER PRIMARY KEY AUTOINCREMENT,
-    request_date DATE NOT NULL,
+    request_date TEXT NOT NULL,
     job_title VARCHAR(200) NOT NULL,
     request_depart VARCHAR(50) NOT NULL,
     requester VARCHAR(50) NOT NULL,
     requester_email VARCHAR(50) NOT NULL,
-    completion_request_date DATE NOT NULL,
+    completion_request_date TEXT NOT NULL,
     job_description TEXT NOT NULL,
     approver VARCHAR(50) NOT NULL,
     state INTEGER NOT NULL DEFAULT 0,
     notify_channel VARCHAR(30) NOT NULL DEFAULT 'integrated_chat',
     job_plan TEXT,
     original_job_plan TEXT,
-    execution_result TEXT
+    execution_result TEXT,
+    actual_completion_time TEXT
 );
 
 CREATE TABLE IF NOT EXISTS job_notifications (

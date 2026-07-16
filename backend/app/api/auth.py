@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from backend.app.config import load_auth_provider_settings
-from backend.app.db.users import User, get_user_by_idx, update_user
+from backend.app.db.users import User, get_user_by_idx, parse_agent_ids, update_user
 from backend.app.services.auth_provider import AuthProviderError, login_with_provider
 
 router = APIRouter(tags=["auth"])
@@ -20,9 +20,12 @@ class UserResponse(BaseModel):
     username: str
     depart: str
     role: int
+    agents: str = ""
+    agent_ids: list[str] = Field(default_factory=list)
 
     @classmethod
     def from_user(cls, user: User) -> "UserResponse":
+        agent_ids = parse_agent_ids(user.agents)
         return cls(
             idx=user.idx,
             userid=user.userid,
@@ -30,6 +33,8 @@ class UserResponse(BaseModel):
             username=user.username,
             depart=user.depart,
             role=user.role,
+            agents=user.agents or "",
+            agent_ids=agent_ids,
         )
 
 

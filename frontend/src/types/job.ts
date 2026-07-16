@@ -41,6 +41,7 @@ export interface JobRecord {
   job_plan?: JobPlan | null;
   original_job_plan?: JobPlan | null;
   execution_result?: JobExecutionResult | null;
+  actual_completion_time?: string | null;
 }
 
 export interface JobNotification {

@@ -100,7 +100,7 @@ export function IntegratedChatPanel({
   isSignupActionProcessing = false,
 }: IntegratedChatPanelProps) {
   const { emitFlow } = useTopology();
-  const [selectedAgentId, setSelectedAgentId] = useState("");
+  const [selectedAgentId, setSelectedAgentId] = useState("sys-helpdesk");
   const [input, setInput] = useState("");
   const [responses, setResponses] = useState<IntegratedChatResponse[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -175,10 +175,30 @@ export function IntegratedChatPanel({
     document.body.style.userSelect = "none";
   };
 
-  const chatAgents = useMemo(
-    () => agents.filter((agent) => !agent.is_system),
-    [agents],
-  );
+  const chatAgents = useMemo(() => {
+    const assignedIds = new Set(
+      (user.agent_ids ?? []).map((id) => id.trim()).filter(Boolean),
+    );
+    const enabled = agents.filter((agent) => {
+      if (agent.chat_enabled !== true) {
+        return false;
+      }
+      // System chat agents (e.g. helpdesk) stay available to everyone.
+      if (agent.is_system) {
+        return true;
+      }
+      return assignedIds.has(agent.id);
+    });
+    return [...enabled].sort((left, right) => {
+      if (left.id === "sys-helpdesk") {
+        return -1;
+      }
+      if (right.id === "sys-helpdesk") {
+        return 1;
+      }
+      return left.name.localeCompare(right.name, "ko");
+    });
+  }, [agents, user.agent_ids]);
 
   const selectedAgent = useMemo(
     () => chatAgents.find((agent) => agent.id === selectedAgentId) ?? null,
@@ -229,7 +249,8 @@ export function IntegratedChatPanel({
       if (current && chatAgents.some((agent) => agent.id === current)) {
         return current;
       }
-      return chatAgents[0]?.id ?? "";
+      const helpdesk = chatAgents.find((agent) => agent.id === "sys-helpdesk");
+      return helpdesk?.id ?? chatAgents[0]?.id ?? "";
     });
   }, [chatAgents]);
 
@@ -417,7 +438,7 @@ export function IntegratedChatPanel({
     <aside
       ref={layoutRef}
       className={`flex self-stretch flex-col overflow-hidden rounded-xl border border-slate-700 bg-slate-900/90 shadow-lg ${
-        isFullscreen ? "min-h-0 w-full" : "min-h-0 w-[500px] shrink-0"
+        isFullscreen ? "min-h-0 w-full" : "min-h-0 w-[650px] shrink-0"
       }`}
     >
       <header className="flex h-[100px] shrink-0 items-center justify-between border-b border-slate-700 px-4">

@@ -9,11 +9,12 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
-from datetime import date, timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from backend.app.agents.system_agents import JOB_PLANNING_AGENT_ID, NotifyChannel
 from backend.app.config import JobRequesterSettings, load_job_requester_settings
+from backend.app.db.job_datetime import now_job_datetime
 from backend.app.services.job_planning import submit_job_request
 from backend.app.testing.job_request_samples import (
     JOB_REQUEST_SAMPLES,
@@ -60,9 +61,8 @@ class JobRequester:
 
     async def dispatch_once(self) -> JobRequestSample:
         sample = self._pick_sample()
-        today = date.today()
-        request_date = today.isoformat()
-        completion_request_date = (today + timedelta(days=3)).isoformat()
+        request_date = now_job_datetime()
+        completion_request_date = (datetime.now() + timedelta(days=3)).strftime("%Y-%m-%d %H:%M:%S")
 
         if self.agent_manager is not None:
             self.agent_manager.mark_agent_working(JOB_PLANNING_AGENT_ID)
@@ -79,6 +79,7 @@ class JobRequester:
                 job_description=sample.job_description,
                 approver=sample.approver,
                 notify_channel=NotifyChannel.INTEGRATED_CHAT,
+                agent_manager=self.agent_manager,
             )
             self._dispatch_count += 1
             logger.info(

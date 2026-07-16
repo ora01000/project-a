@@ -11,6 +11,8 @@ from backend.app.agents.base import (
     AgentInvokeResult,
     ToolUsage,
 )
+from backend.app.agents.system_agents import is_chat_enabled_system_agent_id
+from backend.app.db.users import get_user_by_userid, parse_agent_ids
 from backend.app.logging.agent_logger import log_agent_interaction
 from backend.app.logging.user_comm_logger import list_user_communications, log_user_communication
 from backend.app.services.agent_invocation import invoke_agent_by_id
@@ -70,6 +72,14 @@ async def chat_with_agent(agent_id: str, payload: ChatRequest, request: Request)
 
     if agent_id not in manager.agents:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
+
+    if payload.userid and not is_chat_enabled_system_agent_id(agent_id):
+        user = get_user_by_userid(request.app.state.database_path, payload.userid)
+        if user is None:
+            raise HTTPException(status_code=404, detail="사용자를 찾을 수 없습니다.")
+        allowed = set(parse_agent_ids(user.agents))
+        if agent_id not in allowed:
+            raise HTTPException(status_code=403, detail="할당되지 않은 에이전트입니다.")
 
     manager.mark_agent_working(agent_id)
     try:

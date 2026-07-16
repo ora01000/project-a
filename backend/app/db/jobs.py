@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from backend.app.db.database import get_connection
+from backend.app.db.job_datetime import normalize_job_datetime, now_job_datetime
 
 JOB_STATE_RECEIVED = 0
 JOB_STATE_PLAN_COMPLETED = 1
@@ -37,7 +38,8 @@ JOB_SELECT_COLUMNS = """
     notify_channel,
     job_plan,
     original_job_plan,
-    execution_result
+    execution_result,
+    actual_completion_time
 """
 
 
@@ -61,18 +63,38 @@ class Job:
     job_plan: str | None
     original_job_plan: str | None
     execution_result: str | None
+    actual_completion_time: str | None
 
 
 def _row_to_job(row) -> Job:
     keys = row.keys()
+    request_date = str(row["request_date"])
+    completion_request_date = str(row["completion_request_date"])
+    try:
+        request_date = normalize_job_datetime(request_date)
+    except ValueError:
+        pass
+    try:
+        completion_request_date = normalize_job_datetime(completion_request_date)
+    except ValueError:
+        pass
+
+    actual_completion_time = None
+    if "actual_completion_time" in keys and row["actual_completion_time"] is not None:
+        actual_completion_time = str(row["actual_completion_time"])
+        try:
+            actual_completion_time = normalize_job_datetime(actual_completion_time)
+        except ValueError:
+            pass
+
     return Job(
         idx=int(row["idx"]),
-        request_date=str(row["request_date"]),
+        request_date=request_date,
         job_title=str(row["job_title"]),
         request_depart=str(row["request_depart"]),
         requester=str(row["requester"]),
         requester_email=str(row["requester_email"]),
-        completion_request_date=str(row["completion_request_date"]),
+        completion_request_date=completion_request_date,
         job_description=str(row["job_description"]),
         approver=str(row["approver"]),
         state=int(row["state"]),
@@ -84,6 +106,7 @@ def _row_to_job(row) -> Job:
             else None
         ),
         execution_result=str(row["execution_result"]) if row["execution_result"] is not None else None,
+        actual_completion_time=actual_completion_time,
     )
 
 
@@ -159,7 +182,13 @@ def create_job(
     approver: str,
     state: int = JOB_STATE_RECEIVED,
     notify_channel: str = "integrated_chat",
+    actual_completion_time: str | None = None,
 ) -> Job:
+    normalized_request_date = normalize_job_datetime(request_date)
+    normalized_completion_request_date = normalize_job_datetime(completion_request_date)
+    normalized_actual = (
+        normalize_job_datetime(actual_completion_time) if actual_completion_time else None
+    )
     with get_connection(database_path) as connection:
         cursor = connection.execute(
             """
@@ -173,21 +202,23 @@ def create_job(
                 job_description,
                 approver,
                 state,
-                notify_channel
+                notify_channel,
+                actual_completion_time
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                request_date,
+                normalized_request_date,
                 job_title.strip(),
                 request_depart.strip(),
                 requester.strip(),
                 requester_email.strip(),
-                completion_request_date,
+                normalized_completion_request_date,
                 job_description,
                 approver.strip(),
                 state,
                 notify_channel,
+                normalized_actual,
             ),
         )
         connection.commit()
@@ -276,16 +307,38 @@ def update_job_execution_result(
     idx: int,
     execution_result: str,
     state: int,
+    *,
+    actual_completion_time: str | None = None,
 ) -> Job | None:
+    """Persist execution payload/state. Sets actual_completion_time when provided or on COMPLETED."""
+    completion_time = actual_completion_time
+    if completion_time is None and state == JOB_STATE_COMPLETED:
+        completion_time = now_job_datetime()
+    elif completion_time is not None:
+        completion_time = normalize_job_datetime(completion_time)
+
     with get_connection(database_path) as connection:
-        connection.execute(
-            """
-            UPDATE jobs
-            SET execution_result = ?, state = ?
-            WHERE idx = ?
-            """,
-            (execution_result, state, idx),
-        )
+        if completion_time is not None:
+            connection.execute(
+                """
+                UPDATE jobs
+                SET execution_result = ?,
+                    state = ?,
+                    actual_completion_time = ?
+                WHERE idx = ?
+                """,
+                (execution_result, state, completion_time, idx),
+            )
+        else:
+            connection.execute(
+                """
+                UPDATE jobs
+                SET execution_result = ?,
+                    state = ?
+                WHERE idx = ?
+                """,
+                (execution_result, state, idx),
+            )
         connection.commit()
 
     return get_job_by_idx(database_path, idx)

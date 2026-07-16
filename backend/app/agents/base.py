@@ -11,6 +11,15 @@ from langgraph.prebuilt import create_react_agent
 
 logger = logging.getLogger(__name__)
 
+JOB_STEP_EXECUTION_POLICY = (
+    "You are executing a single planned job step delegated by the Job Execution system agent. "
+    "Use ONLY the tool provided to you for this step. Do not invent, discover, or call any other tool. "
+    "Call the planned tool with the supplied parameters. "
+    "If the tool was successfully called and executed but yielded no result (empty or null), "
+    "do not attempt anything else; simply output that empty result as successful completion. "
+    "Empty results are valid and complete — never retry or try alternate approaches."
+)
+
 
 @dataclass(frozen=True)
 class AgentDefinition:
@@ -162,8 +171,15 @@ async def build_agent(
         QUERY_INVENTORY_TOOL_NAME,
         create_inventory_tool,
     )
+    from backend.app.logging.prompt_debug import wrap_llm_for_prompt_debug
 
-    llm = get_llm()
+    # wrap_llm_for_prompt_debug hooks _agenerate so capture survives LangGraph bind_tools
+    # (model.with_config(callbacks=...) is stripped by bind_tools).
+    llm = wrap_llm_for_prompt_debug(
+        get_llm(),
+        agent_id=definition.agent_id,
+        agent_name=definition.name,
+    )
     tools = [
         wrap_tool_with_argument_sanitizer(tool)
         for tool in await mcp_manager.get_tools_for_servers(definition.mcp_server_keys)
@@ -195,11 +211,70 @@ async def build_agent(
     )
 
 
+async def build_planned_step_agent(
+    definition: AgentDefinition,
+    mcp_manager: MCPClientManager,
+    *,
+    tool_name: str | None,
+) -> Any:
+    """Build a one-shot agent that may only use the single tool chosen in the job plan."""
+    from backend.app.agents.inventory_tool import (
+        QUERY_INVENTORY_TOOL_NAME,
+        create_inventory_tool,
+    )
+    from backend.app.logging.prompt_debug import wrap_llm_for_prompt_debug
+
+    llm = wrap_llm_for_prompt_debug(
+        get_llm(),
+        agent_id=definition.agent_id,
+        agent_name=definition.name,
+    )
+
+    selected_tools: list[Any] = []
+    planned_name = (tool_name or "").strip()
+    if planned_name and planned_name != "agent_invoke":
+        if planned_name == QUERY_INVENTORY_TOOL_NAME:
+            selected_tools = [create_inventory_tool(caller_agent_id=definition.agent_id)]
+        else:
+            available = [
+                wrap_tool_with_argument_sanitizer(tool)
+                for tool in await mcp_manager.get_tools_for_servers(definition.mcp_server_keys)
+            ]
+            selected_tools = [tool for tool in available if getattr(tool, "name", None) == planned_name]
+            if not selected_tools:
+                raise ValueError(
+                    f"Planned tool '{planned_name}' is not available for agent '{definition.agent_id}'"
+                )
+
+    prompt = f"{definition.system_prompt}\n\n{JOB_STEP_EXECUTION_POLICY}"
+    if planned_name and planned_name != "agent_invoke":
+        prompt = (
+            f"{prompt}\n\n"
+            f"The only tool available for this step is '{planned_name}'. Use it once as instructed."
+        )
+    else:
+        prompt = (
+            f"{prompt}\n\n"
+            "No MCP tool is bound for this step. Answer from role knowledge only; do not invent tool calls."
+        )
+
+    return create_react_agent(
+        model=llm,
+        tools=selected_tools,
+        prompt=SystemMessage(content=prompt),
+    )
+
+
 async def invoke_agent(
     agent: Any,
     message: str,
     mcp_manager: MCPClientManager | None = None,
+    *,
+    agent_id: str | None = None,
+    agent_name: str | None = None,
 ) -> AgentInvokeResult:
+    # agent_id/agent_name kept for call-site compatibility; capture is via wrap_llm_for_prompt_debug
+    del agent_id, agent_name
     result = await agent.ainvoke({"messages": [HumanMessage(content=message)]})
     messages = result.get("messages", [])
     if not messages:

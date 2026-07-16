@@ -3,13 +3,17 @@ import sqlite3
 from fastapi import APIRouter, Body, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from backend.app.db.agents import list_stored_agents
 from backend.app.db.users import (
     User,
     create_user,
     delete_users,
+    encode_agent_ids,
     get_user_by_idx,
     list_users,
+    parse_agent_ids,
     update_user,
+    update_user_agents,
 )
 
 router = APIRouter(tags=["users"])
@@ -22,9 +26,12 @@ class UserResponse(BaseModel):
     username: str
     depart: str
     role: int
+    agents: str = ""
+    agent_ids: list[str] = Field(default_factory=list)
 
     @classmethod
     def from_user(cls, user: User) -> "UserResponse":
+        agent_ids = parse_agent_ids(user.agents)
         return cls(
             idx=user.idx,
             userid=user.userid,
@@ -32,6 +39,8 @@ class UserResponse(BaseModel):
             username=user.username,
             depart=user.depart,
             role=user.role,
+            agents=user.agents or "",
+            agent_ids=agent_ids,
         )
 
 
@@ -56,6 +65,36 @@ class DeleteUsersRequest(BaseModel):
     idx_list: list[int] = Field(min_length=1)
 
 
+class UserAgentAssignmentItem(BaseModel):
+    idx: int
+    agent_ids: list[str] = Field(default_factory=list)
+
+
+class SaveUserAgentAssignmentsRequest(BaseModel):
+    assignments: list[UserAgentAssignmentItem] = Field(min_length=1)
+
+
+class SaveUserAgentAssignmentsResponse(BaseModel):
+    updated: int
+    users: list[UserResponse]
+
+
+def _validate_agent_ids(database_path: str, agent_ids: list[str]) -> list[str]:
+    normalized = parse_agent_ids(",".join(agent_ids))
+    known = {agent.agent_id for agent in list_stored_agents(database_path)}
+    unknown = [agent_id for agent_id in normalized if agent_id not in known]
+    if unknown:
+        raise HTTPException(
+            status_code=400,
+            detail=f"알 수 없는 에이전트 ID: {', '.join(unknown)}",
+        )
+    try:
+        encode_agent_ids(normalized)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return normalized
+
+
 @router.get("/users", response_model=list[UserResponse])
 async def get_users(request: Request, viewer_role: int | None = None) -> list[UserResponse]:
     database_path = request.app.state.database_path
@@ -77,8 +116,34 @@ async def add_user(payload: CreateUserRequest, request: Request) -> UserResponse
         )
     except sqlite3.IntegrityError as exc:
         raise HTTPException(status_code=409, detail="이미 사용 중인 아이디입니다.") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     return UserResponse.from_user(user)
+
+
+@router.put("/users/agent-assignments", response_model=SaveUserAgentAssignmentsResponse)
+async def save_user_agent_assignments(
+    payload: SaveUserAgentAssignmentsRequest,
+    request: Request,
+) -> SaveUserAgentAssignmentsResponse:
+    database_path = request.app.state.database_path
+    updated_users: list[User] = []
+
+    for item in payload.assignments:
+        existing = get_user_by_idx(database_path, item.idx)
+        if existing is None:
+            raise HTTPException(status_code=404, detail=f"사용자를 찾을 수 없습니다: idx={item.idx}")
+        agent_ids = _validate_agent_ids(database_path, item.agent_ids)
+        updated = update_user_agents(database_path, item.idx, agent_ids)
+        if updated is None:
+            raise HTTPException(status_code=404, detail=f"사용자를 찾을 수 없습니다: idx={item.idx}")
+        updated_users.append(updated)
+
+    return SaveUserAgentAssignmentsResponse(
+        updated=len(updated_users),
+        users=[UserResponse.from_user(user) for user in updated_users],
+    )
 
 
 @router.put("/users/{idx}", response_model=UserResponse)

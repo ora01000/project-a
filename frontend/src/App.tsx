@@ -12,6 +12,7 @@ import { UserListPage } from "./components/users/UserListPage";
 import type { AgentInfo, HealthInfo } from "./types/agent";
 import type { AuthUser } from "./types/auth";
 import type { AppView } from "./types/navigation";
+import { ROLE_ADMIN } from "./types/user";
 import { clearAuthUser, loadAuthUser, saveAuthUser } from "./utils/authSession";
 
 export default function App() {
@@ -47,11 +48,19 @@ export default function App() {
     setIntegratedChatFullscreen(false);
   }, []);
 
+  const userIdx = user?.idx;
+  const userRole = user?.role;
+
   const loadDashboardData = useCallback(async () => {
+    if (userIdx == null || userRole == null) {
+      return;
+    }
+
     try {
-      const [agentsResponse, healthResponse] = await Promise.all([
+      const [agentsResponse, healthResponse, usersResponse] = await Promise.all([
         fetch("/api/agents"),
         fetch("/api/health"),
+        fetch(`/api/users?viewer_role=${userRole}`),
       ]);
 
       if (!agentsResponse.ok || !healthResponse.ok) {
@@ -63,10 +72,36 @@ export default function App() {
       setAgents(agentsData);
       setHealth(healthData);
       setError(null);
+
+      if (usersResponse.ok) {
+        const usersData = (await usersResponse.json()) as AuthUser[];
+        const me = usersData.find((entry) => entry.idx === userIdx);
+        if (me) {
+          setUser((current) => {
+            if (!current || current.idx !== userIdx) {
+              return current;
+            }
+            const nextAgents = me.agents ?? "";
+            const nextAgentIds = me.agent_ids ?? [];
+            const prevIds = (current.agent_ids ?? []).join(",");
+            const nextIds = nextAgentIds.join(",");
+            if (prevIds === nextIds && (current.agents ?? "") === nextAgents) {
+              return current;
+            }
+            const nextUser: AuthUser = {
+              ...current,
+              agents: nextAgents,
+              agent_ids: nextAgentIds,
+            };
+            saveAuthUser(nextUser);
+            return nextUser;
+          });
+        }
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
     }
-  }, []);
+  }, [userIdx, userRole]);
 
   useEffect(() => {
     if (!user || activeView !== "dashboard") {
@@ -83,6 +118,16 @@ export default function App() {
       setIntegratedChatFullscreen(false);
     }
   }, [activeView]);
+
+  useEffect(() => {
+    if (!user) {
+      return;
+    }
+    const adminOnlyViews: AppView[] = ["agent-list", "inventory-csv", "agent-assignment"];
+    if (user.role !== ROLE_ADMIN && adminOnlyViews.includes(activeView)) {
+      setActiveView("dashboard");
+    }
+  }, [activeView, user]);
 
   if (!user) {
     return <LoginPage onLoginSuccess={handleLoginSuccess} />;
@@ -123,15 +168,17 @@ export default function App() {
           </>
         ) : null}
 
-        {activeView === "agent-list" ? <AgentListPage /> : null}
+        {activeView === "agent-list" && user.role === ROLE_ADMIN ? <AgentListPage /> : null}
 
-        {activeView === "inventory-csv" ? <InventoryCsvPage /> : null}
+        {activeView === "inventory-csv" && user.role === ROLE_ADMIN ? <InventoryCsvPage /> : null}
 
         {activeView === "user-list" ? (
           <UserListPage currentUserIdx={user.idx} currentUserRole={user.role} />
         ) : null}
 
-        {activeView === "agent-assignment" ? <AgentAssignmentPage /> : null}
+        {activeView === "agent-assignment" && user.role === ROLE_ADMIN ? (
+          <AgentAssignmentPage onClose={() => setActiveView("dashboard")} />
+        ) : null}
       </div>
     </TopologyProvider>
   );

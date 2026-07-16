@@ -15,7 +15,9 @@ export function AgentNodeListPanel({ children }: AgentNodeListPanelProps) {
       <div className="relative z-10 flex min-h-0 flex-1 flex-col">
         <header className="shrink-0 border-b border-slate-700/80 px-4 py-3">
           <h2 className="text-sm font-semibold text-slate-200">에이전트 노드 목록</h2>
-          <p className="mt-0.5 text-xs text-slate-500">등록된 에이전트 노드를 확인하고 관리합니다.</p>
+          <p className="mt-0.5 text-xs text-slate-500">
+            시스템 에이전트와 할당된 일반 에이전트 노드를 확인합니다.
+          </p>
         </header>
 
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4">{children}</div>

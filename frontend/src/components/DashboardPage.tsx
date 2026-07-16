@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import type { AgentInfo, HealthInfo } from "../types/agent";
 import type { AuthUser } from "../types/auth";
@@ -51,6 +51,18 @@ export function DashboardPage({
   const [jobActionError, setJobActionError] = useState<string | null>(null);
   const [isJobActionProcessing, setIsJobActionProcessing] = useState(false);
   const [isSignupActionProcessing, setIsSignupActionProcessing] = useState(false);
+
+  const assignedAgents = useMemo(() => {
+    const assignedIds = new Set(
+      (user.agent_ids ?? []).map((id) => id.trim()).filter(Boolean),
+    );
+    return agents.filter((agent) => {
+      if (agent.is_system) {
+        return true;
+      }
+      return assignedIds.has(agent.id);
+    });
+  }, [agents, user.agent_ids]);
 
   const loadJobNotifications = useCallback(async () => {
     try {
@@ -254,12 +266,13 @@ export function DashboardPage({
         {!integratedChatFullscreen ? (
           <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-4 self-stretch">
             <AgentNodeListPanel>
-              {agents.length > 0 ? <AgentGrid agents={agents} /> : null}
+              {assignedAgents.length > 0 ? <AgentGrid agents={assignedAgents} /> : null}
             </AgentNodeListPanel>
 
             <DetailInfoPanel
-              agents={agents}
+              agents={assignedAgents}
               health={health}
+              viewerRole={user.role}
               activeTab={detailTab}
               onActiveTabChange={setDetailTab}
             />

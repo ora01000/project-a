@@ -7,6 +7,7 @@ import { formatUserLabel } from "../utils/authSession";
 import { AboutModal } from "./AboutModal";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { ProfileEditModal } from "./ProfileEditModal";
+import { ReleaseNotesModal } from "./ReleaseNotesModal";
 import { TableDebugModal } from "./TableDebugModal";
 import { TestJobSendModal } from "./jobs/TestJobSendModal";
 
@@ -41,6 +42,7 @@ export function MenuBar({ activeView, user, onNavigate, onLogout, onUserUpdated 
   const [currentTime, setCurrentTime] = useState(formatCurrentTime(new Date()));
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
+  const [showReleaseNotes, setShowReleaseNotes] = useState(false);
   const [showTestJobSend, setShowTestJobSend] = useState(false);
   const [showTableDebug, setShowTableDebug] = useState(false);
   const [showProfileEdit, setShowProfileEdit] = useState(false);
@@ -77,10 +79,13 @@ export function MenuBar({ activeView, user, onNavigate, onLogout, onUserUpdated 
     return () => window.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  const isAgentMenuActive = activeView === "agent-list" || activeView === "inventory-csv";
+  const isAgentMenuActive =
+    isAdmin &&
+    (activeView === "agent-list" ||
+      activeView === "inventory-csv" ||
+      activeView === "agent-assignment");
 
-  const isUserManagementActive =
-    activeView === "user-list" || activeView === "agent-assignment";
+  const isUserManagementActive = activeView === "user-list";
 
   return (
     <>
@@ -95,49 +100,65 @@ export function MenuBar({ activeView, user, onNavigate, onLogout, onUserUpdated 
           </button>
           <span className="text-slate-600">|</span>
 
-          <div ref={agentMenuRef} className="relative">
-            <button
-              type="button"
-              onClick={() => setShowAgentMenu((current) => !current)}
-              className={menuButtonClass(isAgentMenuActive)}
-            >
-              에이전트 ▾
-            </button>
-            {showAgentMenu ? (
-              <div className="absolute left-0 top-full z-20 mt-1 min-w-[160px] rounded-md border border-slate-700 bg-slate-900 py-1 shadow-lg">
-                <button
-                  type="button"
-                  onClick={() => {
-                    onNavigate("agent-list");
-                    setShowAgentMenu(false);
-                  }}
-                  className={`block w-full px-3 py-2 text-left text-sm ${
-                    activeView === "agent-list"
-                      ? "bg-slate-800 text-sky-200"
-                      : "text-slate-200 hover:bg-slate-800"
-                  }`}
-                >
-                  에이전트 관리
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    onNavigate("inventory-csv");
-                    setShowAgentMenu(false);
-                  }}
-                  className={`block w-full px-3 py-2 text-left text-sm ${
-                    activeView === "inventory-csv"
-                      ? "bg-slate-800 text-sky-200"
-                      : "text-slate-200 hover:bg-slate-800"
-                  }`}
-                >
-                  인벤토리 CSV
-                </button>
-              </div>
-            ) : null}
-          </div>
+          {isAdmin ? (
+            <div ref={agentMenuRef} className="relative">
+              <button
+                type="button"
+                onClick={() => setShowAgentMenu((current) => !current)}
+                className={menuButtonClass(isAgentMenuActive)}
+              >
+                에이전트 ▾
+              </button>
+              {showAgentMenu ? (
+                <div className="absolute left-0 top-full z-20 mt-1 min-w-[160px] rounded-md border border-slate-700 bg-slate-900 py-1 shadow-lg">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onNavigate("agent-list");
+                      setShowAgentMenu(false);
+                    }}
+                    className={`block w-full px-3 py-2 text-left text-sm ${
+                      activeView === "agent-list"
+                        ? "bg-slate-800 text-sky-200"
+                        : "text-slate-200 hover:bg-slate-800"
+                    }`}
+                  >
+                    에이전트 관리
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onNavigate("inventory-csv");
+                      setShowAgentMenu(false);
+                    }}
+                    className={`block w-full px-3 py-2 text-left text-sm ${
+                      activeView === "inventory-csv"
+                        ? "bg-slate-800 text-sky-200"
+                        : "text-slate-200 hover:bg-slate-800"
+                    }`}
+                  >
+                    인벤토리 CSV
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onNavigate("agent-assignment");
+                      setShowAgentMenu(false);
+                    }}
+                    className={`block w-full px-3 py-2 text-left text-sm ${
+                      activeView === "agent-assignment"
+                        ? "bg-slate-800 text-sky-200"
+                        : "text-slate-200 hover:bg-slate-800"
+                    }`}
+                  >
+                    에이전트 할당
+                  </button>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
 
-          <span className="text-slate-600">|</span>
+          {isAdmin ? <span className="text-slate-600">|</span> : null}
           <button type="button" className={menuButtonClass(false)}>
             LLM 관리
           </button>
@@ -167,20 +188,6 @@ export function MenuBar({ activeView, user, onNavigate, onLogout, onUserUpdated 
                 >
                   사용자 조회
                 </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    onNavigate("agent-assignment");
-                    setShowUserMenu(false);
-                  }}
-                  className={`block w-full px-3 py-2 text-left text-sm ${
-                    activeView === "agent-assignment"
-                      ? "bg-slate-800 text-sky-200"
-                      : "text-slate-200 hover:bg-slate-800"
-                  }`}
-                >
-                  에이전트 할당
-                </button>
               </div>
             ) : null}
           </div>
@@ -191,7 +198,9 @@ export function MenuBar({ activeView, user, onNavigate, onLogout, onUserUpdated 
             <button
               type="button"
               onClick={() => setShowSettingsMenu((current) => !current)}
-              className={menuButtonClass(showAbout || showTestJobSend || showTableDebug)}
+              className={menuButtonClass(
+                showAbout || showReleaseNotes || showTestJobSend || showTableDebug,
+              )}
             >
               환경설정 ▾
             </button>
@@ -221,6 +230,16 @@ export function MenuBar({ activeView, user, onNavigate, onLogout, onUserUpdated 
                     </button>
                   </>
                 ) : null}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowSettingsMenu(false);
+                    setShowReleaseNotes(true);
+                  }}
+                  className="block w-full px-3 py-2 text-left text-sm text-slate-200 hover:bg-slate-800"
+                >
+                  변경이력
+                </button>
                 <button
                   type="button"
                   onClick={() => {
@@ -271,6 +290,7 @@ export function MenuBar({ activeView, user, onNavigate, onLogout, onUserUpdated 
       ) : null}
 
       {showAbout ? <AboutModal onClose={() => setShowAbout(false)} /> : null}
+      {showReleaseNotes ? <ReleaseNotesModal onClose={() => setShowReleaseNotes(false)} /> : null}
       {showTestJobSend && isAdmin ? (
         <TestJobSendModal onClose={() => setShowTestJobSend(false)} />
       ) : null}

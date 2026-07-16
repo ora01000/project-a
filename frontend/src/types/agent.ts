@@ -10,6 +10,7 @@ export interface AgentInfo {
   input_tokens: number;
   output_tokens: number;
   is_system?: boolean;
+  chat_enabled?: boolean;
 }
 
 export interface HealthInfo {

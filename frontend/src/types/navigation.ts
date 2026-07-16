@@ -5,6 +5,6 @@ export type AppView =
   | "user-list"
   | "agent-assignment";
 
-export type AgentSubMenu = "agent-list" | "inventory-csv";
+export type AgentSubMenu = "agent-list" | "inventory-csv" | "agent-assignment";
 
-export type UserManagementSubMenu = "user-list" | "agent-assignment";
+export type UserManagementSubMenu = "user-list";

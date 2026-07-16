@@ -13,6 +13,7 @@ RUN uv sync --frozen --no-dev --no-install-project
 
 COPY backend ./backend
 COPY config ./config
+COPY RELEASE.md ./RELEASE.md
 
 ENV PATH="/app/.venv/bin:${PATH}" \
     PYTHONPATH=/app

@@ -1,14 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { ConfirmDialog } from "./ConfirmDialog";
-
-interface TableSnapshot {
-  name: string;
-  columns: string[];
-  rows: Record<string, unknown>[];
-  row_count: number;
-  primary_key: string | null;
-}
+import { TableDebugEditModal, type TableDebugSnapshot } from "./TableDebugEditModal";
 
 interface TableDebugModalProps {
   onClose: () => void;
@@ -41,9 +34,10 @@ function rowIdx(row: Record<string, unknown>): number | null {
 }
 
 export function TableDebugModal({ onClose }: TableDebugModalProps) {
-  const [tables, setTables] = useState<TableSnapshot[]>([]);
+  const [tables, setTables] = useState<TableDebugSnapshot[]>([]);
   const [selectedName, setSelectedName] = useState<string | null>(null);
   const [selectedIdxSet, setSelectedIdxSet] = useState<Set<number>>(new Set());
+  const [editingRow, setEditingRow] = useState<Record<string, unknown> | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -57,7 +51,7 @@ export function TableDebugModal({ onClose }: TableDebugModalProps) {
       if (!response.ok) {
         throw new Error(await parseError(response, "테이블을 불러오지 못했습니다."));
       }
-      const data = (await response.json()) as { tables: TableSnapshot[] };
+      const data = (await response.json()) as { tables: TableDebugSnapshot[] };
       setTables(data.tables);
       setSelectedName((current) => {
         if (current && data.tables.some((table) => table.name === current)) {
@@ -91,6 +85,7 @@ export function TableDebugModal({ onClose }: TableDebugModalProps) {
   const selectTable = (name: string) => {
     setSelectedName(name);
     setSelectedIdxSet(new Set());
+    setEditingRow(null);
     setError(null);
   };
 
@@ -229,6 +224,9 @@ export function TableDebugModal({ onClose }: TableDebugModalProps) {
                             aria-label="전체 선택"
                           />
                         </th>
+                        <th className="whitespace-nowrap border-b border-slate-700 px-3 py-2 font-medium text-slate-300">
+                          수정
+                        </th>
                         {selected.columns.map((column) => (
                           <th
                             key={column}
@@ -252,6 +250,17 @@ export function TableDebugModal({ onClose }: TableDebugModalProps) {
                                   onChange={() => toggleRow(idx)}
                                   aria-label={`레코드 ${idx} 선택`}
                                 />
+                              )}
+                            </td>
+                            <td className="border-b border-slate-800 px-3 py-1.5">
+                              {idx === null ? null : (
+                                <button
+                                  type="button"
+                                  onClick={() => setEditingRow(row)}
+                                  className="rounded border border-sky-800 px-2 py-0.5 text-[11px] text-sky-200 hover:bg-sky-950/50"
+                                >
+                                  수정
+                                </button>
                               )}
                             </td>
                             {selected.columns.map((column) => (
@@ -291,6 +300,15 @@ export function TableDebugModal({ onClose }: TableDebugModalProps) {
               void handleDelete();
             }
           }}
+        />
+      ) : null}
+
+      {selected && editingRow ? (
+        <TableDebugEditModal
+          table={selected}
+          row={editingRow}
+          onClose={() => setEditingRow(null)}
+          onUpdated={loadTables}
         />
       ) : null}
     </div>

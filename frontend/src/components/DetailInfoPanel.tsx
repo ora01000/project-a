@@ -1,21 +1,24 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { AgentInfo, HealthInfo } from "../types/agent";
 import type { JobDetailTab } from "../types/job";
+import { ROLE_ADMIN } from "../types/user";
 import { AgentLogsPanel } from "./AgentLogsPanel";
+import { PromptDebugPanel } from "./PromptDebugPanel";
 import { JobWorkPanel } from "./jobs/JobWorkPanel";
 import { TopologyMap } from "./TopologyMap";
 
 interface DetailInfoPanelProps {
   agents: AgentInfo[];
   health: HealthInfo | null;
+  viewerRole: number;
   activeTab?: DetailTab;
   onActiveTabChange?: (tab: DetailTab) => void;
 }
 
-type DetailTab = "topology" | "logs" | JobDetailTab;
+type DetailTab = "topology" | "logs" | "debug" | JobDetailTab;
 
-const TABS: { id: DetailTab; label: string }[] = [
+const BASE_TABS: { id: DetailTab; label: string }[] = [
   { id: "topology", label: "Topology 맵" },
   { id: "logs", label: "로그" },
   { id: "review", label: "검토 작업" },
@@ -30,9 +33,18 @@ const MAX_HEIGHT_RATIO = 0.85;
 export function DetailInfoPanel({
   agents,
   health,
+  viewerRole,
   activeTab: controlledActiveTab,
   onActiveTabChange,
 }: DetailInfoPanelProps) {
+  const isAdmin = viewerRole === ROLE_ADMIN;
+  const tabs = useMemo(() => {
+    if (!isAdmin) {
+      return BASE_TABS;
+    }
+    return [...BASE_TABS, { id: "debug" as const, label: "디버깅" }];
+  }, [isAdmin]);
+
   const [internalActiveTab, setInternalActiveTab] = useState<DetailTab>("topology");
   const activeTab = controlledActiveTab ?? internalActiveTab;
   const [height, setHeight] = useState(DEFAULT_HEIGHT);
@@ -47,6 +59,16 @@ export function DetailInfoPanel({
     }
     setInternalActiveTab(tab);
   };
+
+  useEffect(() => {
+    if (!isAdmin && activeTab === "debug") {
+      if (onActiveTabChange) {
+        onActiveTabChange("topology");
+      } else {
+        setInternalActiveTab("topology");
+      }
+    }
+  }, [activeTab, isAdmin, onActiveTabChange]);
 
   const clampHeight = useCallback((nextHeight: number) => {
     const maxHeight = Math.max(MIN_HEIGHT, window.innerHeight * MAX_HEIGHT_RATIO);
@@ -106,7 +128,7 @@ export function DetailInfoPanel({
       </header>
 
       <div className="flex shrink-0 gap-1 overflow-x-auto border-b border-slate-700 px-3 pt-2">
-        {TABS.map((tab) => (
+        {tabs.map((tab) => (
           <button
             key={tab.id}
             type="button"
@@ -124,15 +146,19 @@ export function DetailInfoPanel({
 
       <div
         className={`min-h-0 flex-1 overscroll-contain p-4 ${
-          activeTab === "topology" ? "flex flex-col overflow-hidden" : "overflow-y-auto"
+          activeTab === "topology" || activeTab === "debug"
+            ? "flex flex-col overflow-hidden"
+            : "overflow-y-auto"
         }`}
       >
         {activeTab === "topology" ? (
           <TopologyMap agents={agents} health={health} embedded />
         ) : activeTab === "logs" ? (
           <AgentLogsPanel />
+        ) : activeTab === "debug" && isAdmin ? (
+          <PromptDebugPanel />
         ) : (
-          <JobWorkPanel key={activeTab} tab={activeTab} />
+          <JobWorkPanel key={activeTab} tab={activeTab as JobDetailTab} />
         )}
       </div>
     </section>

@@ -88,6 +88,8 @@ export function LoginPage({ onLoginSuccess }: LoginPageProps) {
         username: payload.username,
         depart: payload.depart,
         role: payload.role,
+        agents: payload.agents ?? "",
+        agent_ids: payload.agent_ids ?? [],
       };
 
       if (payload.profile_required) {

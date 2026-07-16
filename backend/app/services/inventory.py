@@ -10,9 +10,11 @@ from chromadb.config import Settings as ChromaSettings
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from backend.app.agents.base import AgentInvokeResult, extract_token_usage_from_text
+from backend.app.agents.inventory_agent import INVENTORY_AGENT
 from backend.app.agents.inventory_tool import INVENTORY_AGENT_ID
 from backend.app.config import InventorySettings, PROJECT_ROOT, load_inventory_settings
 from backend.app.llm.factory import get_llm
+from backend.app.logging.prompt_debug import wrap_llm_for_prompt_debug
 
 logger = logging.getLogger(__name__)
 
@@ -324,12 +326,16 @@ class InventoryService:
         return len(documents)
 
     async def _is_inventory_query(self, message: str) -> bool:
-        llm = get_llm()
+        llm = wrap_llm_for_prompt_debug(
+            get_llm(),
+            agent_id=INVENTORY_AGENT_ID,
+            agent_name=INVENTORY_AGENT.name,
+        )
         response = await llm.ainvoke(
             [
                 SystemMessage(content=CLASSIFICATION_SYSTEM_PROMPT),
                 HumanMessage(content=message),
-            ]
+            ],
         )
         content = str(response.content).strip().upper()
         return content.startswith("INVENTORY")
@@ -387,12 +393,16 @@ class InventoryService:
             context_lines.append(f"[{index}] {hit['document']} ({metadata_text})")
 
         context = "\n".join(context_lines)
-        llm = get_llm()
+        llm = wrap_llm_for_prompt_debug(
+            get_llm(),
+            agent_id=INVENTORY_AGENT_ID,
+            agent_name=INVENTORY_AGENT.name,
+        )
         response = await llm.ainvoke(
             [
                 SystemMessage(content=ANSWER_SYSTEM_PROMPT),
                 HumanMessage(content=f"질문: {message}\n\n인벤토리 컨텍스트:\n{context}"),
-            ]
+            ],
         )
         content = str(response.content)
         input_tokens, output_tokens = extract_token_usage_from_text(f"{message}\n{context}", content)

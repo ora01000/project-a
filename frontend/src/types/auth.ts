@@ -5,4 +5,6 @@ export interface AuthUser {
   username: string;
   depart: string;
   role: number;
+  agents?: string;
+  agent_ids?: string[];
 }
