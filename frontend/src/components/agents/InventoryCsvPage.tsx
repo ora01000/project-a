@@ -227,16 +227,15 @@ export function InventoryCsvPage() {
                     aria-label="전체 선택"
                   />
                 </th>
-                <th className="px-3 py-2">idx</th>
-                <th className="px-3 py-2">db_type</th>
+                <th className="px-3 py-2">문서DB 형태</th>
                 <th className="px-3 py-2">인벤토리 이름</th>
                 <th className="px-3 py-2">파일명</th>
                 <th className="px-3 py-2">확장자</th>
-                <th className="px-3 py-2">chunk type</th>
-                <th className="px-3 py-2">chunk size</th>
-                <th className="px-3 py-2">chunk overlap</th>
-                <th className="px-3 py-2">n_results</th>
-                <th className="px-3 py-2">modified</th>
+                <th className="px-3 py-2">청크 형태</th>
+                <th className="px-3 py-2">청킹 크기</th>
+                <th className="px-3 py-2">청크 오버랩</th>
+                <th className="px-3 py-2">NResult 값</th>
+                <th className="px-3 py-2">임베딩 필요 여부</th>
               </tr>
             </thead>
             <tbody>
@@ -250,7 +249,6 @@ export function InventoryCsvPage() {
                       aria-label={`${record.inventory_name} 선택`}
                     />
                   </td>
-                  <td className="px-3 py-2">{record.idx}</td>
                   <td className="px-3 py-2">{dbTypeLabel(record.db_type)}</td>
                   <td className="px-3 py-2">{record.inventory_name}</td>
                   <td className="px-3 py-2">{record.inventory_file}</td>

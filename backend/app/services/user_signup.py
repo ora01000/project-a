@@ -89,6 +89,7 @@ def approve_signup(database_path: Path, user_idx: int) -> User | None:
         password=None,
         depart=user.depart,
         role=ROLE_USER,
+        band=user.band,
     )
     delete_signup_notifications_for_user(database_path, user_idx)
     logger.info("Signup approved for userid=%s", user.userid)

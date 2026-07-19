@@ -256,7 +256,7 @@ async def handle_helpdesk_query(agent_manager: Any, message: str) -> AgentInvoke
     rationale = decision.rationale
 
     if hasattr(agent_manager, "mark_agent_working"):
-        agent_manager.mark_agent_working(target_id)
+        agent_manager.mark_agent_working(target_id, f"헬프데스크→{target_name}")
 
     try:
         with prompt_debug_scope(

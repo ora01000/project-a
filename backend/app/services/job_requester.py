@@ -65,7 +65,7 @@ class JobRequester:
         completion_request_date = (datetime.now() + timedelta(days=3)).strftime("%Y-%m-%d %H:%M:%S")
 
         if self.agent_manager is not None:
-            self.agent_manager.mark_agent_working(JOB_PLANNING_AGENT_ID)
+            self.agent_manager.mark_agent_working(JOB_PLANNING_AGENT_ID, "작업 계획 수립")
 
         try:
             job = await submit_job_request(

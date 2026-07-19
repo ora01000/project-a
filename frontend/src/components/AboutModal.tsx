@@ -1,9 +1,9 @@
 import {
   APP_AUTHOR,
-  APP_BUILD_NUMBER,
   APP_CONTACT,
   APP_LICENSE_NOTICE,
   APP_NAME,
+  APP_RELEASE,
   APP_VERSION,
 } from "../constants/about";
 
@@ -34,8 +34,8 @@ export function AboutModal({ onClose }: AboutModalProps) {
             <dd className="mt-0.5 text-slate-100">{APP_VERSION}</dd>
           </div>
           <div>
-            <dt className="text-slate-400">빌드 번호</dt>
-            <dd className="mt-0.5 font-mono text-slate-100">{APP_BUILD_NUMBER}</dd>
+            <dt className="text-slate-400">릴리즈 버전</dt>
+            <dd className="mt-0.5 font-mono text-slate-100">{APP_RELEASE}</dd>
           </div>
           <div>
             <dt className="text-slate-400">작성자</dt>

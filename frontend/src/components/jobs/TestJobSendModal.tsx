@@ -25,7 +25,10 @@ interface TestJobSendModalProps {
   onClose: () => void;
 }
 
-const APPROVER_OPTIONS = ["윤인수", "안세훈"];
+const APPROVER_OPTIONS: { userid: string; label: string }[] = [
+  { userid: "isyun", label: "isyun (윤인수)" },
+  { userid: "loadan", label: "loadan (안세훈)" },
+];
 
 async function parseError(response: Response, fallback: string): Promise<string> {
   const payload = (await response.json().catch(() => null)) as { detail?: string } | null;
@@ -197,29 +200,30 @@ export function TestJobSendModal({ onClose }: TestJobSendModalProps) {
               </label>
 
               <label className="block space-y-1 text-sm text-slate-300">
-                <span>기안자</span>
+                <span>기안자 (userid)</span>
                 <input
                   value={form.requester}
                   onChange={(event) => updateField("requester", event.target.value)}
                   disabled={isSending}
+                  placeholder="예: isyun"
                   className="w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 outline-none focus:border-sky-500"
                 />
               </label>
 
               <label className="block space-y-1 text-sm text-slate-300 sm:col-span-2">
-                <span>작업승인자</span>
+                <span>작업승인자 (userid)</span>
                 <select
                   value={form.approver}
                   onChange={(event) => updateField("approver", event.target.value)}
                   disabled={isSending}
                   className="w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 outline-none focus:border-sky-500"
                 >
-                  {!APPROVER_OPTIONS.includes(form.approver) ? (
+                  {!APPROVER_OPTIONS.some((option) => option.userid === form.approver) ? (
                     <option value={form.approver}>{form.approver}</option>
                   ) : null}
-                  {APPROVER_OPTIONS.map((approver) => (
-                    <option key={approver} value={approver}>
-                      {approver}
+                  {APPROVER_OPTIONS.map((option) => (
+                    <option key={option.userid} value={option.userid}>
+                      {option.label}
                     </option>
                   ))}
                 </select>

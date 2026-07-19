@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from backend.app.db.database import get_connection
+from backend.app.db.bands import DEFAULT_BAND
 from backend.app.db.roles import ROLE_ADMIN, ROLE_PENDING
 
 AGENTS_COLUMN_MAX_LENGTH = 200
@@ -15,6 +16,7 @@ class User:
     username: str
     depart: str
     role: int
+    band: int = DEFAULT_BAND
     agents: str = ""
     last_login: str | None = None
 
@@ -56,6 +58,12 @@ def _row_to_user(row) -> User:
             last_login = str(raw_login).strip()
     except (KeyError, IndexError):
         last_login = None
+    band = DEFAULT_BAND
+    try:
+        if row["band"] is not None:
+            band = int(row["band"])
+    except (KeyError, IndexError, TypeError, ValueError):
+        band = DEFAULT_BAND
     return User(
         idx=int(row["idx"]),
         userid=str(row["userid"]),
@@ -63,13 +71,14 @@ def _row_to_user(row) -> User:
         username=str(row["username"]),
         depart=str(row["depart"]),
         role=int(row["role"]),
+        band=band,
         agents=agents_value,
         last_login=last_login,
     )
 
 
 _USER_SELECT = (
-    "SELECT idx, userid, email, username, depart, role, agents, last_login FROM users"
+    "SELECT idx, userid, email, username, depart, role, band, agents, last_login FROM users"
 )
 
 
@@ -119,6 +128,26 @@ def get_user_by_userid(database_path: str | Path, userid: str) -> User | None:
     return _row_to_user(row)
 
 
+def build_userid_username_map(database_path: str | Path) -> dict[str, str]:
+    """Map userid (and legacy username keys) to display username."""
+    mapping: dict[str, str] = {}
+    for user in list_users(database_path, viewer_role=ROLE_ADMIN):
+        userid = user.userid.strip()
+        username = user.username.strip()
+        if userid:
+            mapping[userid] = username or userid
+        if username:
+            mapping[username] = username
+    return mapping
+
+
+def resolve_username(value: str, username_by_key: dict[str, str]) -> str:
+    key = value.strip()
+    if not key:
+        return value
+    return username_by_key.get(key, value)
+
+
 def authenticate_user(database_path: str | Path, userid: str, password: str) -> User | None:
     with get_connection(database_path) as connection:
         row = connection.execute(
@@ -143,14 +172,15 @@ def create_user(
     password: str,
     depart: str,
     role: int,
+    band: int = DEFAULT_BAND,
     agents: str = "",
 ) -> User:
     encoded_agents = encode_agent_ids(parse_agent_ids(agents))
     with get_connection(database_path) as connection:
         cursor = connection.execute(
             """
-            INSERT INTO users (userid, email, username, password, depart, role, agents)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO users (userid, email, username, password, depart, role, band, agents)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 userid.strip(),
@@ -159,6 +189,7 @@ def create_user(
                 password,
                 depart.strip(),
                 role,
+                int(band),
                 encoded_agents,
             ),
         )
@@ -180,25 +211,31 @@ def update_user(
     password: str | None,
     depart: str,
     role: int,
+    band: int | None = None,
 ) -> User | None:
+    existing = get_user_by_idx(database_path, idx)
+    if existing is None:
+        return None
+    next_band = existing.band if band is None else int(band)
+
     with get_connection(database_path) as connection:
         if password:
             connection.execute(
                 """
                 UPDATE users
-                SET email = ?, username = ?, password = ?, depart = ?, role = ?
+                SET email = ?, username = ?, password = ?, depart = ?, role = ?, band = ?
                 WHERE idx = ?
                 """,
-                (email.strip(), username.strip(), password, depart.strip(), role, idx),
+                (email.strip(), username.strip(), password, depart.strip(), role, next_band, idx),
             )
         else:
             connection.execute(
                 """
                 UPDATE users
-                SET email = ?, username = ?, depart = ?, role = ?
+                SET email = ?, username = ?, depart = ?, role = ?, band = ?
                 WHERE idx = ?
                 """,
-                (email.strip(), username.strip(), depart.strip(), role, idx),
+                (email.strip(), username.strip(), depart.strip(), role, next_band, idx),
             )
         connection.commit()
 

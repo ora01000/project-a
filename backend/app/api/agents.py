@@ -41,6 +41,7 @@ def _agent_payload(
         "status": status,
         "operation_status": manager.get_operation_status(definition.agent_id),
         "operation_error": manager.get_operation_error(definition.agent_id),
+        "operation_detail": manager.get_operation_detail(definition.agent_id),
         "input_tokens": usage.input_tokens if usage else 0,
         "output_tokens": usage.output_tokens if usage else 0,
         "is_system": is_system,

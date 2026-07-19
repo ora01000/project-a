@@ -48,9 +48,11 @@ export function MenuBar({ activeView, user, onNavigate, onLogout, onUserUpdated 
   const [showProfileEdit, setShowProfileEdit] = useState(false);
   const [showSaveSuccess, setShowSaveSuccess] = useState(false);
   const [showAgentMenu, setShowAgentMenu] = useState(false);
+  const [showJobMenu, setShowJobMenu] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showSettingsMenu, setShowSettingsMenu] = useState(false);
   const agentMenuRef = useRef<HTMLDivElement>(null);
+  const jobMenuRef = useRef<HTMLDivElement>(null);
   const userMenuRef = useRef<HTMLDivElement>(null);
   const settingsMenuRef = useRef<HTMLDivElement>(null);
   const userLabel = formatUserLabel(user);
@@ -67,6 +69,9 @@ export function MenuBar({ activeView, user, onNavigate, onLogout, onUserUpdated 
     const handleClickOutside = (event: MouseEvent) => {
       if (!agentMenuRef.current?.contains(event.target as Node)) {
         setShowAgentMenu(false);
+      }
+      if (!jobMenuRef.current?.contains(event.target as Node)) {
+        setShowJobMenu(false);
       }
       if (!userMenuRef.current?.contains(event.target as Node)) {
         setShowUserMenu(false);
@@ -85,6 +90,7 @@ export function MenuBar({ activeView, user, onNavigate, onLogout, onUserUpdated 
       activeView === "inventory-csv" ||
       activeView === "agent-assignment");
 
+  const isJobManagementActive = activeView === "job-list" || activeView === "job-create";
   const isUserManagementActive = activeView === "user-list";
 
   return (
@@ -159,9 +165,49 @@ export function MenuBar({ activeView, user, onNavigate, onLogout, onUserUpdated 
           ) : null}
 
           {isAdmin ? <span className="text-slate-600">|</span> : null}
-          <button type="button" className={menuButtonClass(false)}>
-            LLM 관리
-          </button>
+
+          <div ref={jobMenuRef} className="relative">
+            <button
+              type="button"
+              onClick={() => setShowJobMenu((current) => !current)}
+              className={menuButtonClass(isJobManagementActive)}
+            >
+              작업관리 ▾
+            </button>
+            {showJobMenu ? (
+              <div className="absolute left-0 top-full z-20 mt-1 min-w-[160px] rounded-md border border-slate-700 bg-slate-900 py-1 shadow-lg">
+                <button
+                  type="button"
+                  onClick={() => {
+                    onNavigate("job-list");
+                    setShowJobMenu(false);
+                  }}
+                  className={`block w-full px-3 py-2 text-left text-sm ${
+                    activeView === "job-list"
+                      ? "bg-slate-800 text-sky-200"
+                      : "text-slate-200 hover:bg-slate-800"
+                  }`}
+                >
+                  작업 목록
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onNavigate("job-create");
+                    setShowJobMenu(false);
+                  }}
+                  className={`block w-full px-3 py-2 text-left text-sm ${
+                    activeView === "job-create"
+                      ? "bg-slate-800 text-sky-200"
+                      : "text-slate-200 hover:bg-slate-800"
+                  }`}
+                >
+                  작업 생성
+                </button>
+              </div>
+            ) : null}
+          </div>
+
           <span className="text-slate-600">|</span>
 
           <div ref={userMenuRef} className="relative">
@@ -253,6 +299,16 @@ export function MenuBar({ activeView, user, onNavigate, onLogout, onUserUpdated 
               </div>
             ) : null}
           </div>
+
+          <span className="text-slate-600">|</span>
+
+          <button
+            type="button"
+            onClick={() => onNavigate("notice-board")}
+            className={menuButtonClass(activeView === "notice-board")}
+          >
+            공지사항
+          </button>
         </div>
 
         <div className="flex flex-wrap items-center gap-3 text-sm text-slate-300">

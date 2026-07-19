@@ -81,7 +81,7 @@ async def chat_with_agent(agent_id: str, payload: ChatRequest, request: Request)
         if agent_id not in allowed:
             raise HTTPException(status_code=403, detail="할당되지 않은 에이전트입니다.")
 
-    manager.mark_agent_working(agent_id)
+    manager.mark_agent_working(agent_id, "채팅 응답")
     try:
         result = await invoke_agent_by_id(manager, agent_id, payload.message)
     except Exception as exc:

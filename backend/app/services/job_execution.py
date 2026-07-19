@@ -355,7 +355,10 @@ async def run_approved_job(database_path: Path, job_idx: int, agent_manager: Any
 
             try:
                 if hasattr(agent_manager, "mark_agent_working"):
-                    agent_manager.mark_agent_working(agent_id)
+                    step_label = str(step.get("description") or step.get("tool_name") or agent_id).strip()
+                    if len(step_label) > 28:
+                        step_label = f"{step_label[:27]}…"
+                    agent_manager.mark_agent_working(agent_id, f"작업실행: {step_label}")
                 with prompt_debug_scope(
                     job_idx=job_idx,
                     caller_agent_id=JOB_EXECUTION_AGENT.agent_id,

@@ -7,6 +7,9 @@ import { DashboardPage } from "./components/DashboardPage";
 import { LoginPage } from "./components/LoginPage";
 import { MenuBar } from "./components/MenuBar";
 import { StatusBar } from "./components/StatusBar";
+import { JobCreatePage } from "./components/jobs/JobCreatePage";
+import { JobListPage } from "./components/jobs/JobListPage";
+import { NoticeBoardPage } from "./components/notices/NoticeBoardPage";
 import { AgentAssignmentPage } from "./components/users/AgentAssignmentPage";
 import { UserListPage } from "./components/users/UserListPage";
 import type { AgentInfo, HealthInfo } from "./types/agent";
@@ -203,6 +206,10 @@ export default function App() {
 
         {activeView === "inventory-csv" && user.role === ROLE_ADMIN ? <InventoryCsvPage /> : null}
 
+        {activeView === "job-list" ? <JobListPage user={user} /> : null}
+
+        {activeView === "job-create" ? <JobCreatePage user={user} /> : null}
+
         {activeView === "user-list" ? (
           <UserListPage currentUserIdx={user.idx} currentUserRole={user.role} />
         ) : null}
@@ -210,6 +217,8 @@ export default function App() {
         {activeView === "agent-assignment" && user.role === ROLE_ADMIN ? (
           <AgentAssignmentPage onClose={() => setActiveView("dashboard")} />
         ) : null}
+
+        {activeView === "notice-board" ? <NoticeBoardPage user={user} /> : null}
       </div>
     </TopologyProvider>
   );

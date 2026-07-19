@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 
 import { PasswordInput } from "../PasswordInput";
 import type { UserFormValues, UserRecord } from "../../types/user";
-import { EMPTY_USER_FORM } from "../../types/user";
+import { BAND_OPTIONS, EMPTY_USER_FORM } from "../../types/user";
 
 interface UserFormModalProps {
   mode: "create" | "edit";
@@ -25,6 +25,7 @@ export function UserFormModal({ mode, user, onClose, onSave }: UserFormModalProp
         password: "",
         depart: user.depart,
         role: user.role,
+        band: user.band ?? 1,
       });
       return;
     }
@@ -123,6 +124,22 @@ export function UserFormModal({ mode, user, onClose, onSave }: UserFormModalProp
               disabled={isSaving}
               className="w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 outline-none focus:border-sky-500"
             />
+          </label>
+
+          <label className="block space-y-1 text-sm text-slate-300">
+            <span>직책 (band)</span>
+            <select
+              value={values.band}
+              onChange={(event) => updateField("band", Number(event.target.value))}
+              disabled={isSaving}
+              className="w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 outline-none focus:border-sky-500"
+            >
+              {BAND_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.value}: {option.label}
+                </option>
+              ))}
+            </select>
           </label>
 
           <label className="block space-y-1 text-sm text-slate-300">

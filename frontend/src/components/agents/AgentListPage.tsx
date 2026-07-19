@@ -3,7 +3,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { ConfirmDialog } from "../ConfirmDialog";
 import { AgentFormModal } from "./AgentFormModal";
 import type { AgentFormValues, AgentRecord, McpServerOption } from "../../types/agent-admin";
-import { formatMcpServerKeys, truncateText } from "../../types/agent-admin";
 
 async function parseError(response: Response, fallback: string): Promise<string> {
   const payload = (await response.json().catch(() => null)) as { detail?: string } | null;
@@ -194,7 +193,6 @@ export function AgentListPage() {
                     aria-label="전체 선택"
                   />
                 </th>
-                <th className="px-3 py-2">idx</th>
                 <th className="px-3 py-2">에이전트 ID</th>
                 <th className="px-3 py-2">Display 이름</th>
                 <th className="px-3 py-2">역할(간략)</th>
@@ -204,7 +202,7 @@ export function AgentListPage() {
             </thead>
             <tbody>
               {agents.map((agent) => (
-                <tr key={agent.idx} className="border-b border-slate-800 text-slate-200">
+                <tr key={agent.idx} className="border-b border-slate-800 text-slate-200 align-top">
                   <td className="px-3 py-2">
                     <input
                       type="checkbox"
@@ -213,13 +211,31 @@ export function AgentListPage() {
                       aria-label={`${agent.agent_id} 선택`}
                     />
                   </td>
-                  <td className="px-3 py-2">{agent.idx}</td>
                   <td className="px-3 py-2">{agent.agent_id}</td>
                   <td className="px-3 py-2">{agent.name}</td>
                   <td className="px-3 py-2">{agent.role}</td>
-                  <td className="px-3 py-2">{formatMcpServerKeys(agent.mcp_server_keys)}</td>
-                  <td className="px-3 py-2" title={agent.system_prompt}>
-                    {truncateText(agent.system_prompt)}
+                  <td className="px-3 py-2">
+                    {agent.mcp_server_keys.length === 0 ? (
+                      <span className="text-slate-500">-</span>
+                    ) : (
+                      <div className="flex flex-wrap gap-1.5">
+                        {agent.mcp_server_keys.map((key) => (
+                          <button
+                            key={key}
+                            type="button"
+                            tabIndex={-1}
+                            className="cursor-default rounded-md border border-slate-600 bg-slate-800 px-2.5 py-1 text-xs font-medium text-slate-200"
+                          >
+                            {key}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </td>
+                  <td className="max-w-xl px-3 py-2">
+                    <pre className="whitespace-pre-wrap break-words font-sans text-sm text-slate-200">
+                      {agent.system_prompt}
+                    </pre>
                   </td>
                 </tr>
               ))}

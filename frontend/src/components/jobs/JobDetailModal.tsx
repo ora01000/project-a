@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import type { JobPlan, JobPlanStep, JobRecord } from "../../types/job";
+import { jobApproverLabel, jobRequesterLabel } from "../../types/job";
 import { ConfirmDialog } from "../ConfirmDialog";
 
 interface JobDetailModalProps {
@@ -316,12 +317,15 @@ export function JobDetailModal({
             <section className="space-y-2">
               <h3 className="font-medium text-slate-300">작업 정보</h3>
               <div className="grid gap-2 rounded-md border border-slate-800 bg-slate-950/40 p-3 sm:grid-cols-2">
+                <div>
+                  SR 번호: <span className="font-mono text-sky-200">{job.sr_num ?? "-"}</span>
+                </div>
                 <div>기안일시: {job.request_date}</div>
                 <div>작업완료요청일시: {job.completion_request_date}</div>
                 <div>실제작업완료시간: {job.actual_completion_time ?? "-"}</div>
-                <div>기안자: {job.requester}</div>
+                <div>기안자: {jobRequesterLabel(job)}</div>
                 <div>기안자 조직: {job.request_depart}</div>
-                <div>승인자: {job.approver}</div>
+                <div>승인자: {jobApproverLabel(job)}</div>
                 <div>상태: {job.state_label}</div>
               </div>
             </section>

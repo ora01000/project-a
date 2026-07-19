@@ -16,10 +16,13 @@ from backend.app.db.jobs import (
     list_jobs,
     list_jobs_by_state,
     list_jobs_by_states,
+    list_jobs_for_participant,
     restore_job_plan,
     save_job_plan_edit,
 )
+from backend.app.db.roles import ROLE_ADMIN
 from backend.app.db.notifications import delete_job_notification, list_notifications_for_user
+from backend.app.db.users import build_userid_username_map, resolve_username
 from backend.app.services.job_execution import (
     JobExecutionConflictError,
     JobExecutionNotAllowedError,
@@ -69,9 +72,17 @@ class JobResponse(BaseModel):
     original_job_plan: dict | None = None
     execution_result: dict | None = None
     actual_completion_time: str | None = None
+    requester_name: str | None = None
+    approver_name: str | None = None
+    sr_num: str | None = None
 
     @classmethod
-    def from_job(cls, job: Job) -> "JobResponse":
+    def from_job(
+        cls,
+        job: Job,
+        *,
+        username_by_key: dict[str, str] | None = None,
+    ) -> "JobResponse":
         def _parse_plan(raw: str | None) -> dict | None:
             if not raw:
                 return None
@@ -88,6 +99,12 @@ class JobResponse(BaseModel):
                 execution_result = json.loads(job.execution_result)
             except json.JSONDecodeError:
                 execution_result = {"summary": job.execution_result, "results": []}
+
+        requester_name = job.requester
+        approver_name = job.approver
+        if username_by_key is not None:
+            requester_name = resolve_username(job.requester, username_by_key)
+            approver_name = resolve_username(job.approver, username_by_key)
 
         return cls(
             idx=job.idx,
@@ -106,7 +123,23 @@ class JobResponse(BaseModel):
             original_job_plan=original_job_plan,
             execution_result=execution_result,
             actual_completion_time=job.actual_completion_time,
+            requester_name=requester_name,
+            approver_name=approver_name,
+            sr_num=job.sr_num,
         )
+
+
+def _username_map(request: Request) -> dict[str, str]:
+    return build_userid_username_map(request.app.state.database_path)
+
+
+def _job_response(request: Request, job: Job) -> JobResponse:
+    return JobResponse.from_job(job, username_by_key=_username_map(request))
+
+
+def _job_responses(request: Request, jobs: list[Job]) -> list[JobResponse]:
+    username_by_key = _username_map(request)
+    return [JobResponse.from_job(job, username_by_key=username_by_key) for job in jobs]
 
 
 class JobNotificationResponse(BaseModel):
@@ -158,16 +191,16 @@ class SendJobTestSampleRequest(BaseModel):
     notify_channel: NotifyChannel = NotifyChannel.INTEGRATED_CHAT
 
 
-REQUESTER_EMAIL_BY_NAME = {
-    "윤인수": "isyun@lguplus.co.kr",
-    "안세훈": "loadan@lguplus.co.kr",
+REQUESTER_EMAIL_BY_USERID = {
+    "isyun": "isyun@lguplus.co.kr",
+    "loadan": "loadan@lguplus.co.kr",
 }
 
 
 def _resolve_requester_email(requester: str, requester_email: str | None) -> str:
     if requester_email and requester_email.strip():
         return requester_email.strip()
-    return REQUESTER_EMAIL_BY_NAME.get(requester.strip(), REQUESTER_EMAIL)
+    return REQUESTER_EMAIL_BY_USERID.get(requester.strip(), REQUESTER_EMAIL)
 
 
 @router.get("/jobs/test-samples", response_model=list[JobTestSampleResponse])
@@ -210,7 +243,7 @@ async def send_job_test_sample(payload: SendJobTestSampleRequest, request: Reque
         notify_channel=payload.notify_channel,
         agent_manager=request.app.state.agent_manager,
     )
-    return JobResponse.from_job(job)
+    return _job_response(request, job)
 
 
 @router.post("/jobs", response_model=JobResponse, status_code=201)
@@ -229,20 +262,34 @@ async def create_job_request(payload: JobRequestPayload, request: Request) -> Jo
         notify_channel=payload.notify_channel,
         agent_manager=request.app.state.agent_manager,
     )
-    return JobResponse.from_job(job)
+    return _job_response(request, job)
 
 
 @router.get("/jobs", response_model=list[JobResponse])
 async def get_jobs(
     request: Request,
     state: int | None = Query(default=None),
+    viewer_role: int | None = Query(default=None),
+    viewer_userid: str | None = Query(default=None),
+    viewer_username: str | None = Query(default=None),
 ) -> list[JobResponse]:
     database_path = request.app.state.database_path
-    if state is None:
+    if viewer_role is not None and viewer_role != ROLE_ADMIN:
+        userid = (viewer_userid or "").strip()
+        if not userid:
+            raise HTTPException(status_code=400, detail="viewer_userid가 필요합니다.")
+        jobs = list_jobs_for_participant(
+            database_path,
+            userid=userid,
+            username=(viewer_username or "").strip(),
+        )
+        if state is not None:
+            jobs = [job for job in jobs if job.state == state]
+    elif state is None:
         jobs = list_jobs(database_path)
     else:
         jobs = list_jobs_by_state(database_path, state)
-    return [JobResponse.from_job(job) for job in jobs]
+    return _job_responses(request, jobs)
 
 
 @router.get("/jobs/review", response_model=list[JobResponse])
@@ -252,21 +299,21 @@ async def get_review_jobs(request: Request) -> list[JobResponse]:
         database_path,
         [JOB_STATE_PLAN_COMPLETED, JOB_STATE_UNDER_REVIEW],
     )
-    return [JobResponse.from_job(job) for job in jobs]
+    return _job_responses(request, jobs)
 
 
 @router.get("/jobs/pending", response_model=list[JobResponse])
 async def get_pending_jobs(request: Request) -> list[JobResponse]:
     database_path = request.app.state.database_path
     jobs = list_jobs_by_state(database_path, JOB_STATE_PENDING)
-    return [JobResponse.from_job(job) for job in jobs]
+    return _job_responses(request, jobs)
 
 
 @router.get("/jobs/completed", response_model=list[JobResponse])
 async def get_completed_jobs(request: Request) -> list[JobResponse]:
     database_path = request.app.state.database_path
     jobs = list_jobs_by_state(database_path, JOB_STATE_COMPLETED)
-    return [JobResponse.from_job(job) for job in jobs]
+    return _job_responses(request, jobs)
 
 
 @router.get("/jobs/notifications/{target_user}", response_model=list[JobNotificationResponse])
@@ -303,7 +350,7 @@ async def get_job(idx: int, request: Request) -> JobResponse:
     job = get_job_by_idx(database_path, idx)
     if job is None:
         raise HTTPException(status_code=404, detail="작업을 찾을 수 없습니다.")
-    return JobResponse.from_job(job)
+    return _job_response(request, job)
 
 
 @router.put("/jobs/{idx}/plan", response_model=JobResponse)
@@ -327,7 +374,7 @@ async def update_job_plan_endpoint(idx: int, payload: JobPlanUpdateRequest, requ
     updated = save_job_plan_edit(database_path, idx, plan_json)
     if updated is None:
         raise HTTPException(status_code=404, detail="작업을 찾을 수 없습니다.")
-    return JobResponse.from_job(updated)
+    return _job_response(request, updated)
 
 
 @router.post("/jobs/{idx}/plan/restore", response_model=JobResponse)
@@ -344,7 +391,7 @@ async def restore_job_plan_endpoint(idx: int, request: Request) -> JobResponse:
     updated = restore_job_plan(database_path, idx)
     if updated is None:
         raise HTTPException(status_code=404, detail="작업을 찾을 수 없습니다.")
-    return JobResponse.from_job(updated)
+    return _job_response(request, updated)
 
 
 @router.post("/jobs/{idx}/actions/review", response_model=JobResponse)
@@ -353,7 +400,7 @@ async def review_job(idx: int, request: Request) -> JobResponse:
     job = await mark_job_under_review(database_path, idx)
     if job is None:
         raise HTTPException(status_code=404, detail="작업을 찾을 수 없습니다.")
-    return JobResponse.from_job(job)
+    return _job_response(request, job)
 
 
 @router.post("/jobs/{idx}/actions/approve", response_model=JobResponse, status_code=202)
@@ -368,7 +415,7 @@ async def approve_job(idx: int, request: Request) -> JobResponse:
         raise HTTPException(status_code=409, detail=exc.detail) from exc
     if job is None:
         raise HTTPException(status_code=404, detail="작업을 찾을 수 없습니다.")
-    return JobResponse.from_job(job)
+    return _job_response(request, job)
 
 
 @router.post("/jobs/{idx}/actions/retry", response_model=JobResponse, status_code=202)
@@ -383,7 +430,7 @@ async def retry_job(idx: int, request: Request) -> JobResponse:
         raise HTTPException(status_code=409, detail=exc.detail) from exc
     if job is None:
         raise HTTPException(status_code=404, detail="작업을 찾을 수 없습니다.")
-    return JobResponse.from_job(job)
+    return _job_response(request, job)
 
 
 @router.post("/jobs/{idx}/actions/pending", response_model=JobResponse)
@@ -392,7 +439,7 @@ async def pending_job(idx: int, request: Request) -> JobResponse:
     job = await hold_job(database_path, idx)
     if job is None:
         raise HTTPException(status_code=404, detail="작업을 찾을 수 없습니다.")
-    return JobResponse.from_job(job)
+    return _job_response(request, job)
 
 
 @router.post("/jobs/{idx}/actions/reject", response_model=JobResponse)
@@ -401,4 +448,4 @@ async def reject_job_action(idx: int, payload: RejectJobRequest, request: Reques
     job = await reject_job(database_path, idx, payload.reason)
     if job is None:
         raise HTTPException(status_code=404, detail="작업을 찾을 수 없습니다.")
-    return JobResponse.from_job(job)
+    return _job_response(request, job)

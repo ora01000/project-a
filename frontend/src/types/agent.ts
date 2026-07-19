@@ -7,6 +7,8 @@ export interface AgentInfo {
   status: string;
   operation_status: "working" | "idle" | "error";
   operation_error?: string | null;
+  /** Brief label of current work while operation_status is working. */
+  operation_detail?: string | null;
   input_tokens: number;
   output_tokens: number;
   is_system?: boolean;

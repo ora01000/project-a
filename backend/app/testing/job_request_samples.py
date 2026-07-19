@@ -26,12 +26,13 @@ class JobRequestSample:
 
 
 REQUEST_DEPART = "IT플랫폼운영팀"
-REQUESTER = "윤인수"
+# jobs.requester / jobs.approver store userid (not username).
+REQUESTER = "isyun"
 REQUESTER_EMAIL = "isyun@lguplus.co.kr"
 
-# Approvers match usernames in seed users (윤인수 / 안세훈).
-APPROVER_YUN = "윤인수"
-APPROVER_AHN = "안세훈"
+# Approvers match userids in seed users (isyun / loadan).
+APPROVER_YUN = "isyun"
+APPROVER_AHN = "loadan"
 
 JOB_REQUEST_SAMPLES: list[JobRequestSample] = [
     JobRequestSample(

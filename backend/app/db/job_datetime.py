@@ -13,6 +13,29 @@ def now_job_datetime() -> str:
     return datetime.now().strftime(_JOB_DATETIME_FORMAT)
 
 
+def request_date_yyyymmdd(request_date: str) -> str:
+    """Extract YYYYMMDD from a job request_date value."""
+    raw = (request_date or "").strip()
+    if not raw:
+        raise ValueError("request_date is empty")
+
+    digits = re.sub(r"\D", "", raw)
+    if len(digits) >= 8:
+        return digits[:8]
+
+    raise ValueError(f"cannot derive YYYYMMDD from request_date: {request_date!r}")
+
+
+def build_sr_num(request_date: str, idx: int) -> str:
+    """SR + YYYYMMDD + _ + 5-digit sequence from idx % 100000.
+
+    The trailing 5 digits are always fixed width (00000..99999).
+    Example: idx 1 -> SR20260717_00001, idx 100000 -> SR20260717_00000
+    """
+    sequence = int(idx) % 100_000
+    return f"SR{request_date_yyyymmdd(request_date)}_{sequence:05d}"
+
+
 def normalize_job_datetime(value: str, *, default_time: str = "00:00:00") -> str:
     """Ensure datetime includes HH:MM:SS. Date-only values get default_time."""
     raw = (value or "").strip()

@@ -84,6 +84,19 @@ class JobRequesterSettings(BaseModel):
     initial_delay_seconds: int = 60
 
 
+class K8sCollectorSettings(BaseModel):
+    enabled: bool = True
+    # Daily local schedule: first agent at HH:MM, then +stagger_minutes per agent order.
+    schedule_hour: int = 0
+    schedule_minute: int = 10
+    stagger_minutes: int = 5
+    collect_on_startup: bool = True
+    kubeconfig: str = ""
+    fallback_to_current_context: bool = True
+    # Optional map: cluster_id -> kubeconfig context name
+    contexts: dict[str, str] = {}
+
+
 class AppSettings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=ENV_FILE,
@@ -137,6 +150,26 @@ class AppSettings(BaseSettings):
     job_requester_initial_delay_seconds: int | None = Field(
         default=None,
         alias="JOB_REQUESTER_INITIAL_DELAY_SECONDS",
+    )
+
+    k8s_collector_enabled: bool | None = Field(default=None, alias="K8S_COLLECTOR_ENABLED")
+    k8s_collector_schedule_hour: int | None = Field(default=None, alias="K8S_COLLECTOR_SCHEDULE_HOUR")
+    k8s_collector_schedule_minute: int | None = Field(
+        default=None,
+        alias="K8S_COLLECTOR_SCHEDULE_MINUTE",
+    )
+    k8s_collector_stagger_minutes: int | None = Field(
+        default=None,
+        alias="K8S_COLLECTOR_STAGGER_MINUTES",
+    )
+    k8s_collector_collect_on_startup: bool | None = Field(
+        default=None,
+        alias="K8S_COLLECTOR_COLLECT_ON_STARTUP",
+    )
+    k8s_collector_kubeconfig: str | None = Field(default=None, alias="K8S_COLLECTOR_KUBECONFIG")
+    k8s_collector_fallback_current_context: bool | None = Field(
+        default=None,
+        alias="K8S_COLLECTOR_FALLBACK_CURRENT_CONTEXT",
     )
 
     auth_provider_type: str = Field(default="db", alias="AUTH_PROVIDER_TYPE")
@@ -303,6 +336,72 @@ def load_job_requester_settings() -> JobRequesterSettings:
         enabled=enabled,
         interval_minutes=max(1, interval_minutes),
         initial_delay_seconds=max(0, initial_delay_seconds),
+    )
+
+
+def load_k8s_collector_settings() -> K8sCollectorSettings:
+    yaml_settings = _load_yaml(CONFIG_DIR / "settings.yaml")
+    collector_yaml = yaml_settings.get("k8s_collector", {})
+    env_settings = AppSettings()
+
+    def _int_setting(env_value: int | None, yaml_key: str, default: int) -> int:
+        raw = env_value if env_value is not None else collector_yaml.get(yaml_key, default)
+        try:
+            return int(raw)
+        except (TypeError, ValueError):
+            return default
+
+    schedule_hour = _int_setting(env_settings.k8s_collector_schedule_hour, "schedule_hour", 0)
+    schedule_minute = _int_setting(
+        env_settings.k8s_collector_schedule_minute,
+        "schedule_minute",
+        10,
+    )
+    stagger_minutes = _int_setting(
+        env_settings.k8s_collector_stagger_minutes,
+        "stagger_minutes",
+        5,
+    )
+
+    if env_settings.k8s_collector_enabled is not None:
+        enabled = env_settings.k8s_collector_enabled
+    else:
+        enabled = _as_bool(collector_yaml.get("enabled"), True)
+
+    if env_settings.k8s_collector_collect_on_startup is not None:
+        collect_on_startup = env_settings.k8s_collector_collect_on_startup
+    else:
+        collect_on_startup = _as_bool(collector_yaml.get("collect_on_startup"), True)
+
+    if env_settings.k8s_collector_fallback_current_context is not None:
+        fallback = env_settings.k8s_collector_fallback_current_context
+    else:
+        fallback = _as_bool(collector_yaml.get("fallback_to_current_context"), True)
+
+    kubeconfig = (
+        env_settings.k8s_collector_kubeconfig
+        if env_settings.k8s_collector_kubeconfig is not None
+        else str(collector_yaml.get("kubeconfig") or "")
+    ).strip()
+
+    raw_contexts = collector_yaml.get("contexts") or {}
+    contexts: dict[str, str] = {}
+    if isinstance(raw_contexts, dict):
+        for key, value in raw_contexts.items():
+            cluster_id = str(key).strip()
+            context_name = str(value).strip()
+            if cluster_id and context_name:
+                contexts[cluster_id] = context_name
+
+    return K8sCollectorSettings(
+        enabled=enabled,
+        schedule_hour=min(23, max(0, schedule_hour)),
+        schedule_minute=min(59, max(0, schedule_minute)),
+        stagger_minutes=max(1, stagger_minutes),
+        collect_on_startup=collect_on_startup,
+        kubeconfig=kubeconfig,
+        fallback_to_current_context=fallback,
+        contexts=contexts,
     )
 
 

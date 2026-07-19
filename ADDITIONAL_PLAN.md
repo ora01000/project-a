@@ -967,4 +967,223 @@ cursor 에사 사용할 plan 초안을 작성합니다.
 
 - front, backend 모두 도커 빌드, tag : 260716-2, 성공 시 push
 
+# 메이저 버전 : 0, 마이너 버전 : 3, 릴리즈 버전 : 260718 에 대한 변경 사항 기록
+## Kubernetes 에이전트의 주기적인 정보수집
+- Kubernetes 에이전트는 각 에이전트가 관리하는 클러스터의 정보를 주기적으로 수집 저장하기 위해 우선 테이블을 아래와 같이 생성한다.
+  - 저장 테이블
+    - 테이블#1 명 : k8s_nodes
+      - 컬럼
+        - idx : int, auto increment, pk
+        - cluster_id : varchar(50) : 각 에이전트 관리 클러스터 명 -> int 로 변경, k8s_cluster > idx 값으로 대체
+        - node_name : varchar(50)
+        - node_cpu : int
+        - node_mem : int
+        - node_os : varchar(50)
+        - node_k8s_ver : varchar(50)
+    - 테이블#2 명 : k8s_namespaces
+      - 컬럼
+        - idx : int, auto increment, pk
+        - cluster_id : varchar(50) : 각 에이전트 관리 클러스터 명 -> int 로 변경, k8s_cluster > idx 값으로 대체
+        - namespace : varchar(50)
+        - okd_display_name : varchar(100)
+        - resource_quota_cpu_limit : float, 개 단위로 환산
+        - resource_quota_mem_limit : int, Gi 단위로 환산
+        - resource_quota_pod_limit : int
+        - okd_egressip1 : varchar(20)
+        - okd_egressip2 : varchar(20)
+    - 테이블#3 명 : k8s_deployments
+      - 컬럼
+        - idx : int, auto increment, pk
+        - cluster_id : varchar(50) : 각 에이전트 관리 클러스터 명 -> int 로 변경, k8s_cluster > idx 값으로 대체
+        - namespace_id : int -> k8s_namespaces : idx 컬럼 값
+        - name : varchar(50)
+        - type : varchar(20), deployment | statusfulset | deploymentconfig | daemonset 중 1
+        - replicas : int
+        - resource_cpu_request : float, 개 단위로 환산
+        - resource_mem_request : int, Gi 단위로 환산
+        - resource_cpu_limit : float, 개 단위로 환산
+        - resource_mem_limit : int, Gi 단위로 환산
+        - containers_cnt : int
+        - containers_name : varchar(300) -> json list 
+        - containers_image : varchar(500) -> json list
+    - 테이블#4 명 : k8s_pvcs
+      - 컬럼
+        - idx : int, auto increment, pk
+        - cluster_id : varchar(50) : 각 에이전트 관리 클러스터 명 -> int 로 변경, k8s_cluster > idx 값으로 대체
+        - namespace_id : int -> k8s_namespaces : idx 컬럼 값
+        - deployment_id : int -> k8s_deployments : idx 컬럼 값
+        - name : varchar(50)
+        - storage_class : varchar(20)
+        - capacity : int. Gi 단위로 환산
+        - used : int, Gi 단위로 환산
+        - access_mode : varchar(20)
+    - 테이블#5 명 : k8s_pods
+      - 컬럼
+        - idx : int, auto increment, pk
+        - cluster_id : varchar(50) : 각 에이전트 관리 클러스터 명 -> int 로 변경, k8s_cluster > idx 값으로 대체
+        - namespace_id : int -> k8s_namespaces : idx 컬럼 값
+        - deployment_id : int -> k8s_deployments : idx 컬럼 값
+        - name : varchar(50)
+        - scheduled_node : int -> k8s_nodes : idx 컬럼 값
+  - Kubernetes 에이전트 동작
+    - 데이터 수집은 openshift, k8s client 라이브러리를 사용하려고 한다. 사용 가능한 라이브러리를 제안
+      - openshift 라이브러리로 선택하고 수집 방식은 비동기 통신은 사용하지 않는다.
+      - 로컬 테스트의 경우 ocp/okd 가 아닌 일반 kubernetes(orbstack)으로 ocp/okd 용 커스텀api(ex. DeployemtnConfig, egressIPs 등) 수집하고자 하는 object가 없으므로, 값이 없는 경우 이를 무시하고 동작하도록 구성
+        - authentication은 MCP 가 사용하는 kubeconfig 를 그대로 사용할 예정이므로 kubeconfig 가 제공된다고 가정한다.
+
+      - 각 에이전트는 1분 주기로 데이터를 수집, 업데이트한다.
+  - 저장 테이블 추가
+    - 테이블#6 명 : k8s_cluster
+      - 컬럼
+        - idx : int, auto increment, pk
+        - cluster_name : varchar(50)
+        - last_update : date
+      - 테이블#6을 추가하고 다음 테이블의 컬럼을 변경, 실제 데이터를 cluster 이름에서 k8s_cluster 테이블의 idx 값으로 변경한다.
+        - k8s_nodes > cluster_id varchar -> int
+        - k8s_namespaces > cluster_id varchar -> int
+        - k8s_deployments > cluster_id varchar -> int
+        - k8s_pvcs > cluster_id varchar -> int
+        - k8s_pods > cluster_id varchar -> int
+
+    - 각 Kubernetes 에이전트의 클러스터 정보 수집 주기 변경
+      - 백엔드 기동시 최초 수집, 업데이트 하고 이후 00:10:00 부터 수집을 시작한다.
+      - 모든 Kubernetes 에이전트가 한꺼번에 수집할 경우 부하가 있을 수 있으므로, 에이전트의 등록 순서대로 5분의 간격을 둔다.
+        - ex. dprv6-k8s -> 00:10:00 시작, pcicd-k8s -> 00:15:00 시작
+      - 수집이 완료되면 k8s_cluster > last_update (시각)을 업데이트한다.
+
+
+- Release Note 작성
+  - 현재까지 개발된 변경 이력을 RELEASE.md 마크다운으로 저장
+    - 변경된 날짜, 변경된 기능 에 대한 요약 정리
+    - 변경 이력은 26년 7월 8일(최초 개발) 이후부터 찾을 수 있으면 그렇게 하고, 정보가 없을 경우 찾을 수 있는 시점부터 정리
+- About 메뉴 정보 수정
+  - 메이저 버전 : 0, 마이너 버전 : 3, 릴리즈 버전 : 260718 로 about 정보 수정
+
+## LLM 관리 메뉴 삭제 
+- LLM 관리 메뉴는 삭제한다.
+
+## 작업관리 메뉴 추가
+- jobs 테이블의 입력 값 변경
+  - requester, approver 에 username 이 이력되는데 userid 가 입력되도록 변경
+  - jobs 테이블 컬럼 추가
+    - sr_num : varchar(20) -> "SR" + {request_date 를 YYYYMMDD 포맷으로} + "_" + {idx 컬럼 값을 5자리로 masking} -> ex) SR20260717_00001
+    - 이미 존재하는 레코드에 대해서는 request_date 와 idx 값을 바탕으로 작성후 update
+    - SR 번호의 마지막 5자리는 고정이야, 그래서 만약 idx 가 100000(6자리) 이상인 경우는 다시 00001로 rotate 되도록 변경
+  - "작업 분석/계획" 에이전트가 jobs 에 최초 입력시(작업 접수 시) 위 포맷으로 자동 입력하고, 향후 사람이 식별할 수 있는 작업의 SR(service request) 번호로 활용
+
+
+- 메뉴바 에이전트, 사용자 관리 사이에 "작업관리" 메뉴를 추가한다.
+  - 다음 sub menu 를 생성
+    - 작업 목록
+    - 작업 생성
+  - "작업 목록" sub menu
+    - jobs 테이블을 표로 출력한다.
+      - 로그인 한 사용자 role 이 0:admin 인 경우 모두 출력한다.
+      - 그 외에는 로그인 한 사용자가 기안자 이거나 승인자 인 경우에만 출력한다.
+    - state(0:접수, 1:계획수립완료, 2:검토중, 3:보류, 4:반려, 5:승인, 6:완료) 상태 별로 분리하여 표를 출력한다.
+    - 표 출력시 requester, approver 의 값을 users 테이블에서 userid 에 해당하는 username 으로 출력
+
+## UI 개선
+- Webcome back 팝업
+  - 로그인 시 welcome back 팝업창의 가로/세로 길이를 현재 대비 2배 확대한다.
+    - 출력할 작업 목록의 컬럼을 변경한다.
+      - sr_num 을 제일 앞에 추가
+
+- 에이전트 관리 화면
+  - idx 컬럼은 표에 노출하지 않는다.
+  - 역할(상세) 는 멀티라인으로 출력해서 모든 내용을 출력하도록 변경한다.
+  - 사용도구는 텍스트 레이블 버튼 형식으로 표현한다.
+
+- 인벤토리 CSV 화면
+  - idx 컬럼은 표에 노출하지 않는다.
+  - 표의 헤더를 수정한다.
+    - db_type -> 문서DB 형태
+    - chunk type -> 청크 형태
+    - chunk size -> 청킹 크기
+    - chunk overlap -> 청크 오버랩
+    - n_results -> NResult 값
+    - modified -> 임베딩 필요 여부
+
+- 사용자 정보 -> users 테이블
+  - users > band : int 컬럼 추가 -> 1 : 사원, 2 : 선임, 3 : 책임
+  - 사용자 추가, 수정 팝업, 개인정보 수정 팝업에서 band 를 입력/수정하도록 변경
+  - 대시보드 메뉴바의 오른쪽 현재 로그인 사용자 정보에서도 이름 뒤에 band 값에 따라 다음 직책명을 출력
+    - 1 : 사원
+    - 2 : 선임
+    - 3 : 책임
+  - 사용자 조회 화면에서 idx 컬럼은 노출하지 않는다.
+  - 사용자 조회 화면에서 band 컬럼(헤더명 : 직책) 을 추가한다. 추가 위치는 이름 컬럼 다음이다
+  - Welcome back 페이지에서 header 타이틀 부분의 문구를 다음과 같이 수정
+    - "Welcom back, {username} {band} 님"
+    - "이전 로그인" -> "최근 로그인", 오른쪽 정렬
+
+- 공지사항 메뉴 추가
+  - 메뉴 바 제일 끝에 공지사항 메뉴 추가
+  - 테이블 추가 : 테이블명 : notice_board
+    - 컬럼
+      - idx int, auto increment, pk
+      - writer varchar(50) : users > userid 컬럼
+      - write_date : date
+      - from_date : date
+      - until_date : date
+      - title : varchar(100)
+      - notice : text
+      - welcome_popup : boolean
+  - 공지사항 메뉴
+    - notice_board 테이블 조회 화면
+      - table colume : 표 header
+        - idx : 글번호
+        - title : 제목
+        - writer : 작성자
+        - write_date : 작성일시
+        - from : 공지시작
+        - until : 공지기한
+        - welcome_popup : 웰컴백 팝업 표시여부
+      - welcome_popup 에 대한 값은 turn on/off 스위치 로 표현한다.
+      - 표의 마지막 컬럼에 수정 버튼 추가 - 수정 버튼의 노출은 users > role = 0(admin) 인 사용자만 표시됨
+      - 표의 처음 컬럼에 checkbox 표시 - 선택된 레코드에 대한 삭제 버튼을 표 의 우상단에 추가
+  - 공지사항 추가
+    - 공지사항 -> 추가 버튼 클릭시 팝업에 대한 수정
+      - 작성일시는 입력(insert) 시점의 date를 백엔드에서 넣도록 하고 UI에서는 입력받지 않는다.
+      - 작성자(userid) : 레이블을 "작성자" 로 변경. 작성자는 로그인한 사용자이다. 따라서 수정불가 하도록하고 users > username 으로 표시
+      - 공지시작 : 시분초가 포함되어야 한다. 시분초도 입력받도록 수정, 시분초는 default "00:00:00" 
+      - 공지기한 : 시분초가 포함되어야 한다. 시분초도 입력받도록 수정, 시분초는 default "00:00:00"
+      - 공지 내용은 markup 텍스트를 입력/처리할 수 있도록 한다.
+      - 공지기한은 공지시작일로 부터 1주일 뒤를 default로 표시
+    - notice_board 테이블 조회 화면
+      - 다음 컬럼을 표에 추가해 주세요
+        - writer : 작성자, "제목" 헤더 다음에 위치
+      - 레코드의 from_date, until_date 에 대해
+        - 현재 시각이 from_date 보다 이전인 경우 -> 공지예정인 글로 "수정" 컬럼의 수정 버튼 옆에 텍스트 레이블 버튼으로 "공지예정" 이라고 표시, 버튼은 동작없음
+        - 현재 시각이 until_date 보다 이후인 경우 -> 만료 글로 "수정" 컬럼의 수정 버튼 옆에 텍스트 레이블 버튼으로 "만료" 라고 표시, 버튼은 동작없음
+
+  - Welcomeback 창에 공지사항 내용 출력
+    - 다음 조건에 부합하는 notice_board 의 게시물을 표시
+      - notice_board > welcome_popup 이 true
+      - notice_board > from_date, untile_date 사이의 date 에 로그인 한 경우
+    - welcomeback popup 에서 공지사항 패널의 위치
+      - 작업 목록 상단에 패널을 위치한다
+      - 표시 내용은 다음과 같다.
+        - 작성자
+        - 제목
+        - 공지시작 ~ 공지기한
+        - notice text를 markup 하여 표시
+      - 제목은 폰트를 3px 키우고 텍스트 블럭 처리, 배경색을 변경
+      - 제목 텍스트의 블럭은 가로 길이를 공지사항 패널의 가로길이(100%)로 설정
+
+- 에이전트 타일 표시내용
+  - 에이전트 동작 : working 일때 어떤 동작을 하는지 토큰 사용량 옆에 간략하게 표시할 수 있을까?
+
+
+
+
+
+
+    
+
+
+
+
+
+
 

@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from backend.app.db.database import get_connection
-from backend.app.db.job_datetime import normalize_job_datetime, now_job_datetime
+from backend.app.db.job_datetime import build_sr_num, normalize_job_datetime, now_job_datetime
 
 JOB_STATE_RECEIVED = 0
 JOB_STATE_PLAN_COMPLETED = 1
@@ -26,6 +26,7 @@ JOB_STATE_LABELS: dict[int, str] = {
 
 JOB_SELECT_COLUMNS = """
     idx,
+    sr_num,
     request_date,
     job_title,
     request_depart,
@@ -64,6 +65,7 @@ class Job:
     original_job_plan: str | None
     execution_result: str | None
     actual_completion_time: str | None
+    sr_num: str | None = None
 
 
 def _row_to_job(row) -> Job:
@@ -87,6 +89,11 @@ def _row_to_job(row) -> Job:
         except ValueError:
             pass
 
+    sr_num = None
+    if "sr_num" in keys and row["sr_num"] is not None:
+        value = str(row["sr_num"]).strip()
+        sr_num = value or None
+
     return Job(
         idx=int(row["idx"]),
         request_date=request_date,
@@ -107,6 +114,7 @@ def _row_to_job(row) -> Job:
         ),
         execution_result=str(row["execution_result"]) if row["execution_result"] is not None else None,
         actual_completion_time=actual_completion_time,
+        sr_num=sr_num,
     )
 
 
@@ -160,7 +168,7 @@ def list_jobs_by_approver(
     userid: str,
     username: str,
 ) -> list[Job]:
-    """Jobs where approver matches userid or username (legacy samples use username)."""
+    """Jobs where approver matches userid (username kept for legacy rows)."""
     candidates = [value.strip() for value in (userid, username) if value and value.strip()]
     if not candidates:
         return []
@@ -176,6 +184,34 @@ def list_jobs_by_approver(
             ORDER BY idx DESC
             """,
             unique_candidates,
+        ).fetchall()
+    return [_row_to_job(row) for row in rows]
+
+
+def list_jobs_for_participant(
+    database_path: str | Path,
+    *,
+    userid: str,
+    username: str = "",
+) -> list[Job]:
+    """Jobs where the user is requester or approver (userid; username for legacy rows)."""
+    candidates = [value.strip() for value in (userid, username) if value and value.strip()]
+    if not candidates:
+        return []
+
+    unique_candidates = list(dict.fromkeys(candidates))
+    placeholders = ", ".join("?" for _ in unique_candidates)
+    params = [*unique_candidates, *unique_candidates]
+    with get_connection(database_path) as connection:
+        rows = connection.execute(
+            f"""
+            SELECT {JOB_SELECT_COLUMNS}
+            FROM jobs
+            WHERE requester IN ({placeholders})
+               OR approver IN ({placeholders})
+            ORDER BY idx DESC
+            """,
+            params,
         ).fetchall()
     return [_row_to_job(row) for row in rows]
 
@@ -247,8 +283,17 @@ def create_job(
                 normalized_actual,
             ),
         )
-        connection.commit()
         idx = int(cursor.lastrowid)
+        sr_num = build_sr_num(normalized_request_date, idx)
+        connection.execute(
+            """
+            UPDATE jobs
+            SET sr_num = ?
+            WHERE idx = ?
+            """,
+            (sr_num, idx),
+        )
+        connection.commit()
 
     job = get_job_by_idx(database_path, idx)
     if job is None:

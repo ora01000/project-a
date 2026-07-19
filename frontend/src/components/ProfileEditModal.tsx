@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 
 import type { AuthUser } from "../types/auth";
-import { roleLabel } from "../types/user";
+import { BAND_OPTIONS, roleLabel } from "../types/user";
 import { PasswordInput } from "./PasswordInput";
 
 interface ProfileEditModalProps {
@@ -14,6 +14,7 @@ export function ProfileEditModal({ user, onClose, onSaved }: ProfileEditModalPro
   const [email, setEmail] = useState(user.email);
   const [username, setUsername] = useState(user.username);
   const [depart, setDepart] = useState(user.depart);
+  const [band, setBand] = useState(user.band ?? 1);
   const [password, setPassword] = useState("");
   const [passwordConfirm, setPasswordConfirm] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -23,6 +24,7 @@ export function ProfileEditModal({ user, onClose, onSaved }: ProfileEditModalPro
     setEmail(user.email);
     setUsername(user.username);
     setDepart(user.depart);
+    setBand(user.band ?? 1);
     setPassword("");
     setPasswordConfirm("");
     setError(null);
@@ -59,6 +61,7 @@ export function ProfileEditModal({ user, onClose, onSaved }: ProfileEditModalPro
           email: email.trim(),
           username: username.trim(),
           depart: depart.trim(),
+          band,
           password: nextPassword ? nextPassword : null,
         }),
       });
@@ -124,6 +127,22 @@ export function ProfileEditModal({ user, onClose, onSaved }: ProfileEditModalPro
               disabled={isSaving}
               className="w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 outline-none focus:border-sky-500"
             />
+          </label>
+
+          <label className="block space-y-1 text-sm text-slate-300">
+            <span>직책 (band)</span>
+            <select
+              value={band}
+              onChange={(event) => setBand(Number(event.target.value))}
+              disabled={isSaving}
+              className="w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 outline-none focus:border-sky-500"
+            >
+              {BAND_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.value}: {option.label}
+                </option>
+              ))}
+            </select>
           </label>
 
           <label className="block space-y-1 text-sm text-slate-300">

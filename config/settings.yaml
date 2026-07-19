@@ -60,6 +60,20 @@ job_requester:
   interval_minutes: 60
   initial_delay_seconds: 60
 
+# Kubernetes/OpenShift 클러스터 주기 수집 (openshift DynamicClient, 동기)
+# - 기동 시 전체 1회 수집
+# - 이후 매일 00:10 부터 등록 순서대로 5분 간격 (예: dprv6 00:10, pcicd 00:15)
+k8s_collector:
+  enabled: true
+  collect_on_startup: true
+  schedule_hour: 0
+  schedule_minute: 10
+  stagger_minutes: 5
+  kubeconfig: ""
+  fallback_to_current_context: true
+  # contexts:
+  #   dtest-k8s: orbstack
+
 # 인증 프로바이더 (환경변수 AUTH_PROVIDER_TYPE / OAUTH_PROXY 로 오버라이드)
 auth:
   provider_type: "db"   # db | madang

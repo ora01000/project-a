@@ -4,7 +4,7 @@ import type { AuthUser } from "../types/auth";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { PasswordInput } from "./PasswordInput";
 import { ProfileCompleteModal } from "./ProfileCompleteModal";
-import { WelcomeBackModal } from "./WelcomeBackModal";
+import { WelcomeBackModal, type WelcomeNoticeItem } from "./WelcomeBackModal";
 import { RegisterUserModal } from "./users/RegisterUserModal";
 
 interface LoginPageProps {
@@ -18,6 +18,7 @@ interface AuthProviderInfo {
 
 interface ApproverJobSummary {
   idx: number;
+  sr_num?: string | null;
   job_title: string;
   request_date: string;
   requester: string;
@@ -32,12 +33,14 @@ interface LoginResponse extends AuthUser {
   welcome_back?: boolean;
   previous_last_login?: string | null;
   approver_jobs?: ApproverJobSummary[];
+  welcome_notices?: WelcomeNoticeItem[];
 }
 
 interface WelcomeBackState {
   user: AuthUser;
   previousLastLogin: string | null;
   jobs: ApproverJobSummary[];
+  notices: WelcomeNoticeItem[];
 }
 
 export function LoginPage({ onLoginSuccess }: LoginPageProps) {
@@ -111,6 +114,7 @@ export function LoginPage({ onLoginSuccess }: LoginPageProps) {
         username: payload.username,
         depart: payload.depart,
         role: payload.role,
+        band: payload.band ?? 1,
         agents: payload.agents ?? "",
         agent_ids: payload.agent_ids ?? [],
       };
@@ -125,6 +129,7 @@ export function LoginPage({ onLoginSuccess }: LoginPageProps) {
           user,
           previousLastLogin: payload.previous_last_login ?? null,
           jobs: payload.approver_jobs ?? [],
+          notices: payload.welcome_notices ?? [],
         });
         return;
       }
@@ -226,7 +231,9 @@ export function LoginPage({ onLoginSuccess }: LoginPageProps) {
       {welcomeBack ? (
         <WelcomeBackModal
           username={welcomeBack.user.username}
+          band={welcomeBack.user.band}
           previousLastLogin={welcomeBack.previousLastLogin}
+          notices={welcomeBack.notices}
           jobs={welcomeBack.jobs}
           onClose={() => {
             const user = welcomeBack.user;

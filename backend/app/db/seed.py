@@ -8,6 +8,7 @@ class SeedUser(TypedDict):
     password: str
     depart: str
     role: int
+    band: int
 
 
 INITIAL_USERS: list[SeedUser] = [
@@ -18,6 +19,7 @@ INITIAL_USERS: list[SeedUser] = [
         "password": "isyun",
         "depart": "IT플랫폼운영팀",
         "role": 0,
+        "band": 3,
     },
     {
         "userid": "loadan",
@@ -26,5 +28,6 @@ INITIAL_USERS: list[SeedUser] = [
         "password": "loadan",
         "depart": "IT플랫폼운영팀",
         "role": 0,
+        "band": 3,
     },
 ]

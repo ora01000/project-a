@@ -26,18 +26,20 @@ from backend.app.api.chat import router as chat_router
 from backend.app.api.debug import router as debug_router
 from backend.app.api.inventory import router as inventory_router
 from backend.app.api.jobs import router as jobs_router
+from backend.app.api.notices import router as notices_router
 from backend.app.api.prompt_debug import router as prompt_debug_router
 from backend.app.api.release import router as release_router
 from backend.app.api.signup import router as signup_router
 from backend.app.api.users import router as users_router
 from backend.app.api.whatap_webhook import router as whatap_webhook_router
-from backend.app.config import load_job_requester_settings, load_settings
+from backend.app.config import load_job_requester_settings, load_k8s_collector_settings, load_settings
 from backend.app.db import init_database
 from backend.app.logging.agent_logger import ensure_agent_logs_dir, log_agent_error
 from backend.app.logging.user_comm_logger import initialize_user_comm_logs
 from backend.app.mcp.client import MCPClientManager
 from backend.app.services.inventory import initialize_inventory_service
 from backend.app.services.job_requester import run_job_requester_loop
+from backend.app.services.k8s_collector_loop import run_k8s_collector_loop
 from backend.app.usage.token_tracker import TokenTracker
 
 logger = logging.getLogger(__name__)
@@ -51,6 +53,7 @@ class AgentManager:
         self.agent_definitions_by_id: dict[str, AgentDefinition] = {}
         self.agent_operation_status: dict[str, str] = {}
         self.agent_operation_errors: dict[str, str] = {}
+        self.agent_operation_details: dict[str, str] = {}
         self.agent_active_counts: dict[str, int] = {}
         self.agent_health_status: dict[str, str] = {}
         self.mcp_manager: MCPClientManager | None = None
@@ -204,16 +207,28 @@ class AgentManager:
     def get_operation_error(self, agent_id: str) -> str | None:
         return self.agent_operation_errors.get(agent_id)
 
-    def mark_agent_working(self, agent_id: str) -> None:
+    def get_operation_detail(self, agent_id: str) -> str | None:
+        detail = self.agent_operation_details.get(agent_id)
+        if not detail:
+            return None
+        return detail
+
+    def mark_agent_working(self, agent_id: str, detail: str | None = None) -> None:
         self.agent_active_counts[agent_id] = self.agent_active_counts.get(agent_id, 0) + 1
         self.agent_operation_status[agent_id] = "working"
         self.agent_operation_errors.pop(agent_id, None)
+        label = (detail or "").strip()
+        if label:
+            self.agent_operation_details[agent_id] = label
+        elif agent_id not in self.agent_operation_details:
+            self.agent_operation_details[agent_id] = "처리 중"
 
     def mark_agent_idle(self, agent_id: str) -> None:
         active_count = max(0, self.agent_active_counts.get(agent_id, 0) - 1)
         self.agent_active_counts[agent_id] = active_count
         if active_count == 0 and self.agent_operation_status.get(agent_id) != "error":
             self.agent_operation_status[agent_id] = "idle"
+            self.agent_operation_details.pop(agent_id, None)
 
     def mark_agent_error(
         self,
@@ -225,6 +240,7 @@ class AgentManager:
         self.agent_active_counts[agent_id] = 0
         self.agent_operation_status[agent_id] = "error"
         self.agent_operation_errors[agent_id] = reason
+        self.agent_operation_details.pop(agent_id, None)
         log_agent_error(agent_id, reason=reason, input_message=input_message)
 
 
@@ -272,6 +288,17 @@ async def lifespan(app: FastAPI):
                 agent_manager=agent_manager,
             )
         )
+
+    k8s_collector_settings = load_k8s_collector_settings()
+    k8s_collector_task: asyncio.Task | None = None
+    if k8s_collector_settings.enabled:
+        k8s_collector_task = asyncio.create_task(
+            run_k8s_collector_loop(
+                Path(app.state.database_path),
+                k8s_collector_settings,
+                agent_manager=agent_manager,
+            )
+        )
     try:
         yield
     finally:
@@ -282,6 +309,10 @@ async def lifespan(app: FastAPI):
             job_requester_task.cancel()
             with suppress(asyncio.CancelledError):
                 await job_requester_task
+        if k8s_collector_task is not None:
+            k8s_collector_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await k8s_collector_task
 
 
 def create_app() -> FastAPI:
@@ -301,6 +332,7 @@ def create_app() -> FastAPI:
     app.include_router(agent_records_router, prefix="/api")
     app.include_router(agents_router, prefix="/api")
     app.include_router(jobs_router, prefix="/api")
+    app.include_router(notices_router, prefix="/api")
     app.include_router(chat_router, prefix="/api")
     app.include_router(debug_router, prefix="/api")
     app.include_router(release_router, prefix="/api")

@@ -1,4 +1,5 @@
 import type { AuthUser } from "../types/auth";
+import { bandLabel } from "../types/user";
 
 const AUTH_SESSION_KEY = "project-a-auth-user";
 
@@ -108,5 +109,7 @@ export function clearAuthUser(): void {
 }
 
 export function formatUserLabel(user: AuthUser): string {
-  return `${user.depart}/${user.username}`;
+  const title = bandLabel(user.band);
+  const name = title ? `${user.username} ${title}` : user.username;
+  return `${user.depart}/${name}`;
 }

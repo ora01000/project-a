@@ -50,6 +50,9 @@ def _apply_migrations(connection: sqlite3.Connection) -> None:
         )
     if "last_login" not in user_columns:
         connection.execute("ALTER TABLE users ADD COLUMN last_login TEXT")
+    if "band" not in user_columns:
+        connection.execute("ALTER TABLE users ADD COLUMN band INTEGER NOT NULL DEFAULT 1")
+        connection.execute("UPDATE users SET band = 1 WHERE band IS NULL OR band = 0")
 
     job_columns = {
         row["name"] for row in connection.execute("PRAGMA table_info(jobs)").fetchall()
@@ -74,6 +77,23 @@ def _apply_migrations(connection: sqlite3.Connection) -> None:
         )
     if "actual_completion_time" not in job_columns:
         connection.execute("ALTER TABLE jobs ADD COLUMN actual_completion_time TEXT")
+    if "sr_num" not in job_columns:
+        # Format length is 16 (e.g. SR20260717_00001); use 20 for headroom.
+        connection.execute("ALTER TABLE jobs ADD COLUMN sr_num VARCHAR(20)")
+
+    # Prefer userid in jobs.requester / jobs.approver (legacy rows used username).
+    connection.execute(
+        "UPDATE jobs SET requester = 'isyun' WHERE requester = '윤인수'"
+    )
+    connection.execute(
+        "UPDATE jobs SET requester = 'loadan' WHERE requester = '안세훈'"
+    )
+    connection.execute(
+        "UPDATE jobs SET approver = 'isyun' WHERE approver = '윤인수'"
+    )
+    connection.execute(
+        "UPDATE jobs SET approver = 'loadan' WHERE approver = '안세훈'"
+    )
 
     # Backfill date-only request/completion fields with 00:00:00.
     connection.execute(
@@ -95,6 +115,30 @@ def _apply_migrations(connection: sqlite3.Connection) -> None:
         """
     )
 
+    # Backfill SR numbers from request_date + idx (e.g. SR20260717_00001).
+    from backend.app.db.job_datetime import build_sr_num
+
+    for row in connection.execute(
+        """
+        SELECT idx, request_date
+        FROM jobs
+        WHERE sr_num IS NULL OR trim(sr_num) = ''
+        """
+    ).fetchall():
+        try:
+            sr_num = build_sr_num(str(row["request_date"]), int(row["idx"]))
+        except ValueError:
+            logger.warning(
+                "Skipped sr_num backfill for jobs.idx=%s request_date=%r",
+                row["idx"],
+                row["request_date"],
+            )
+            continue
+        connection.execute(
+            "UPDATE jobs SET sr_num = ? WHERE idx = ?",
+            (sr_num, int(row["idx"])),
+        )
+
     tables = {
         str(row[0])
         for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
@@ -110,6 +154,21 @@ def _apply_migrations(connection: sqlite3.Connection) -> None:
                 message TEXT NOT NULL,
                 created_at TEXT NOT NULL,
                 FOREIGN KEY (user_idx) REFERENCES users(idx)
+            )
+            """
+        )
+    if "notice_board" not in tables:
+        connection.execute(
+            """
+            CREATE TABLE notice_board (
+                idx INTEGER PRIMARY KEY AUTOINCREMENT,
+                writer VARCHAR(50) NOT NULL,
+                write_date TEXT NOT NULL,
+                from_date TEXT NOT NULL,
+                until_date TEXT NOT NULL,
+                title VARCHAR(100) NOT NULL,
+                notice TEXT NOT NULL,
+                welcome_popup INTEGER NOT NULL DEFAULT 0
             )
             """
         )
@@ -149,6 +208,152 @@ def _apply_migrations(connection: sqlite3.Connection) -> None:
         if "db_type" not in inventory_columns:
             connection.execute("ALTER TABLE inventory ADD COLUMN db_type VARCHAR(10)")
 
+    _ensure_k8s_inventory_tables(connection)
+
+
+def _ensure_k8s_inventory_tables(connection: sqlite3.Connection) -> None:
+    tables = {
+        str(row[0])
+        for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+    }
+
+    if "k8s_cluster" not in tables:
+        connection.execute(
+            """
+            CREATE TABLE k8s_cluster (
+                idx INTEGER PRIMARY KEY AUTOINCREMENT,
+                cluster_name VARCHAR(50) NOT NULL UNIQUE,
+                last_update TEXT
+            )
+            """
+        )
+
+    needs_rebuild = False
+    if "k8s_nodes" not in tables:
+        needs_rebuild = True
+    else:
+        node_columns = {
+            row["name"]: str(row["type"]).upper()
+            for row in connection.execute("PRAGMA table_info(k8s_nodes)").fetchall()
+        }
+        cluster_type = node_columns.get("cluster_id", "")
+        # Legacy schema stored cluster name as VARCHAR(50).
+        if "VARCHAR" in cluster_type or "CHAR" in cluster_type or "TEXT" in cluster_type:
+            needs_rebuild = True
+            logger.info("Migrating k8s_* tables: cluster_id VARCHAR -> INTEGER (k8s_cluster.idx)")
+
+    if needs_rebuild:
+        for table_name in (
+            "k8s_pods",
+            "k8s_pvcs",
+            "k8s_deployments",
+            "k8s_namespaces",
+            "k8s_nodes",
+        ):
+            connection.execute(f"DROP TABLE IF EXISTS {table_name}")
+
+        connection.execute(
+            """
+            CREATE TABLE k8s_nodes (
+                idx INTEGER PRIMARY KEY AUTOINCREMENT,
+                cluster_id INTEGER NOT NULL,
+                node_name VARCHAR(50) NOT NULL,
+                node_cpu INTEGER,
+                node_mem INTEGER,
+                node_os VARCHAR(50),
+                node_k8s_ver VARCHAR(50),
+                FOREIGN KEY (cluster_id) REFERENCES k8s_cluster(idx)
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE k8s_namespaces (
+                idx INTEGER PRIMARY KEY AUTOINCREMENT,
+                cluster_id INTEGER NOT NULL,
+                namespace VARCHAR(50) NOT NULL,
+                okd_display_name VARCHAR(100),
+                resource_quota_cpu_limit REAL,
+                resource_quota_mem_limit INTEGER,
+                resource_quota_pod_limit INTEGER,
+                okd_egressip1 VARCHAR(20),
+                okd_egressip2 VARCHAR(20),
+                FOREIGN KEY (cluster_id) REFERENCES k8s_cluster(idx)
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE k8s_deployments (
+                idx INTEGER PRIMARY KEY AUTOINCREMENT,
+                cluster_id INTEGER NOT NULL,
+                namespace_id INTEGER NOT NULL,
+                name VARCHAR(50) NOT NULL,
+                type VARCHAR(20) NOT NULL,
+                replicas INTEGER,
+                resource_cpu_request REAL,
+                resource_mem_request INTEGER,
+                resource_cpu_limit REAL,
+                resource_mem_limit INTEGER,
+                containers_cnt INTEGER,
+                containers_name VARCHAR(300),
+                containers_image VARCHAR(500),
+                FOREIGN KEY (cluster_id) REFERENCES k8s_cluster(idx),
+                FOREIGN KEY (namespace_id) REFERENCES k8s_namespaces(idx)
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE k8s_pvcs (
+                idx INTEGER PRIMARY KEY AUTOINCREMENT,
+                cluster_id INTEGER NOT NULL,
+                namespace_id INTEGER NOT NULL,
+                deployment_id INTEGER,
+                name VARCHAR(50) NOT NULL,
+                storage_class VARCHAR(20),
+                capacity INTEGER,
+                used INTEGER,
+                access_mode VARCHAR(20),
+                FOREIGN KEY (cluster_id) REFERENCES k8s_cluster(idx),
+                FOREIGN KEY (namespace_id) REFERENCES k8s_namespaces(idx),
+                FOREIGN KEY (deployment_id) REFERENCES k8s_deployments(idx)
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE k8s_pods (
+                idx INTEGER PRIMARY KEY AUTOINCREMENT,
+                cluster_id INTEGER NOT NULL,
+                namespace_id INTEGER NOT NULL,
+                deployment_id INTEGER,
+                name VARCHAR(50) NOT NULL,
+                scheduled_node INTEGER,
+                FOREIGN KEY (cluster_id) REFERENCES k8s_cluster(idx),
+                FOREIGN KEY (namespace_id) REFERENCES k8s_namespaces(idx),
+                FOREIGN KEY (deployment_id) REFERENCES k8s_deployments(idx),
+                FOREIGN KEY (scheduled_node) REFERENCES k8s_nodes(idx)
+            )
+            """
+        )
+
+    _sync_k8s_cluster_rows(connection)
+
+
+def _sync_k8s_cluster_rows(connection: sqlite3.Connection) -> None:
+    from backend.app.agents.k8s_agent import K8S_CLUSTER_SPECS
+
+    for cluster_name, _display_name in K8S_CLUSTER_SPECS:
+        connection.execute(
+            """
+            INSERT INTO k8s_cluster (cluster_name, last_update)
+            VALUES (?, NULL)
+            ON CONFLICT(cluster_name) DO NOTHING
+            """,
+            (cluster_name,),
+        )
+
 
 def seed_initial_users(connection: sqlite3.Connection) -> int:
     row = connection.execute("SELECT COUNT(*) AS count FROM users").fetchone()
@@ -159,8 +364,8 @@ def seed_initial_users(connection: sqlite3.Connection) -> int:
 
     connection.executemany(
         """
-        INSERT INTO users (userid, email, username, password, depart, role)
-        VALUES (:userid, :email, :username, :password, :depart, :role)
+        INSERT INTO users (userid, email, username, password, depart, role, band)
+        VALUES (:userid, :email, :username, :password, :depart, :role, :band)
         """,
         INITIAL_USERS,
     )

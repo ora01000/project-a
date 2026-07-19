@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { JobDetailModal } from "./JobDetailModal";
 import type { JobDetailTab, JobRecord } from "../../types/job";
+import { jobRequesterLabel } from "../../types/job";
 
 interface JobWorkPanelProps {
   tab: JobDetailTab;
@@ -174,7 +175,7 @@ export function JobWorkPanel({ tab }: JobWorkPanelProps) {
                 <td className="px-3 py-2">{job.job_title}</td>
                 <td className="px-3 py-2">{job.request_date}</td>
                 <td className="px-3 py-2">{job.request_depart}</td>
-                <td className="px-3 py-2">{job.requester}</td>
+                <td className="px-3 py-2">{jobRequesterLabel(job)}</td>
                 <td className="px-3 py-2">{job.state_label}</td>
                 <td className="px-3 py-2">{job.completion_request_date}</td>
                 <td className="px-3 py-2">{job.actual_completion_time ?? "-"}</td>
@@ -198,7 +199,7 @@ export function JobWorkPanel({ tab }: JobWorkPanelProps) {
                   <td className="px-3 py-2">{job.completion_request_date}</td>
                 ) : null}
                 {showReviewColumns ? <td className="px-3 py-2">{job.request_depart}</td> : null}
-                {showReviewColumns ? <td className="px-3 py-2">{job.requester}</td> : null}
+                {showReviewColumns ? <td className="px-3 py-2">{jobRequesterLabel(job)}</td> : null}
                 {!showReviewColumns ? <td className="px-3 py-2">{job.state_label}</td> : null}
                 <td className="px-3 py-2">{detailButton(job)}</td>
               </tr>
