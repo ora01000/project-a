@@ -6,6 +6,7 @@ import { ROLE_ADMIN } from "../types/user";
 import { formatUserLabel } from "../utils/authSession";
 import { AboutModal } from "./AboutModal";
 import { ConfirmDialog } from "./ConfirmDialog";
+import { InfraCollectModal } from "./admin/InfraCollectModal";
 import { ProfileEditModal } from "./ProfileEditModal";
 import { ReleaseNotesModal } from "./ReleaseNotesModal";
 import { TableDebugModal } from "./TableDebugModal";
@@ -45,12 +46,14 @@ export function MenuBar({ activeView, user, onNavigate, onLogout, onUserUpdated 
   const [showReleaseNotes, setShowReleaseNotes] = useState(false);
   const [showTestJobSend, setShowTestJobSend] = useState(false);
   const [showTableDebug, setShowTableDebug] = useState(false);
+  const [showInfraCollect, setShowInfraCollect] = useState(false);
   const [showProfileEdit, setShowProfileEdit] = useState(false);
   const [showSaveSuccess, setShowSaveSuccess] = useState(false);
   const [showAgentMenu, setShowAgentMenu] = useState(false);
   const [showJobMenu, setShowJobMenu] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showSettingsMenu, setShowSettingsMenu] = useState(false);
+  const [showAdminWorkMenu, setShowAdminWorkMenu] = useState(false);
   const agentMenuRef = useRef<HTMLDivElement>(null);
   const jobMenuRef = useRef<HTMLDivElement>(null);
   const userMenuRef = useRef<HTMLDivElement>(null);
@@ -78,6 +81,7 @@ export function MenuBar({ activeView, user, onNavigate, onLogout, onUserUpdated 
       }
       if (!settingsMenuRef.current?.contains(event.target as Node)) {
         setShowSettingsMenu(false);
+        setShowAdminWorkMenu(false);
       }
     };
     window.addEventListener("mousedown", handleClickOutside);
@@ -243,9 +247,21 @@ export function MenuBar({ activeView, user, onNavigate, onLogout, onUserUpdated 
           <div ref={settingsMenuRef} className="relative">
             <button
               type="button"
-              onClick={() => setShowSettingsMenu((current) => !current)}
+              onClick={() => {
+                setShowSettingsMenu((current) => {
+                  const next = !current;
+                  if (!next) {
+                    setShowAdminWorkMenu(false);
+                  }
+                  return next;
+                });
+              }}
               className={menuButtonClass(
-                showAbout || showReleaseNotes || showTestJobSend || showTableDebug,
+                showAbout ||
+                  showReleaseNotes ||
+                  showTestJobSend ||
+                  showTableDebug ||
+                  showInfraCollect,
               )}
             >
               환경설정 ▾
@@ -253,33 +269,66 @@ export function MenuBar({ activeView, user, onNavigate, onLogout, onUserUpdated 
             {showSettingsMenu ? (
               <div className="absolute left-0 top-full z-20 mt-1 min-w-[180px] rounded-md border border-slate-700 bg-slate-900 py-1 shadow-lg">
                 {isAdmin ? (
-                  <>
+                  <div className="relative">
                     <button
                       type="button"
-                      onClick={() => {
-                        setShowSettingsMenu(false);
-                        setShowTestJobSend(true);
-                      }}
-                      className="block w-full px-3 py-2 text-left text-sm text-slate-200 hover:bg-slate-800"
+                      onClick={() => setShowAdminWorkMenu((current) => !current)}
+                      className={`flex w-full items-center justify-between px-3 py-2 text-left text-sm ${
+                        showAdminWorkMenu ||
+                        showTestJobSend ||
+                        showTableDebug ||
+                        showInfraCollect
+                          ? "bg-slate-800 text-sky-200"
+                          : "text-slate-200 hover:bg-slate-800"
+                      }`}
                     >
-                      테스트 작업 발송
+                      <span>관리자 작업</span>
+                      <span className="text-slate-500">▸</span>
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setShowSettingsMenu(false);
-                        setShowTableDebug(true);
-                      }}
-                      className="block w-full px-3 py-2 text-left text-sm text-slate-200 hover:bg-slate-800"
-                    >
-                      테이블 조회(디버깅)
-                    </button>
-                  </>
+                    {showAdminWorkMenu ? (
+                      <div className="absolute left-full top-0 z-30 ml-1 min-w-[180px] rounded-md border border-slate-700 bg-slate-900 py-1 shadow-lg">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowSettingsMenu(false);
+                            setShowAdminWorkMenu(false);
+                            setShowInfraCollect(true);
+                          }}
+                          className="block w-full px-3 py-2 text-left text-sm text-slate-200 hover:bg-slate-800"
+                        >
+                          인프라 정보 수집
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowSettingsMenu(false);
+                            setShowAdminWorkMenu(false);
+                            setShowTestJobSend(true);
+                          }}
+                          className="block w-full px-3 py-2 text-left text-sm text-slate-200 hover:bg-slate-800"
+                        >
+                          테스트 작업 발송
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowSettingsMenu(false);
+                            setShowAdminWorkMenu(false);
+                            setShowTableDebug(true);
+                          }}
+                          className="block w-full px-3 py-2 text-left text-sm text-slate-200 hover:bg-slate-800"
+                        >
+                          테이블 조회(디버깅)
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
                 ) : null}
                 <button
                   type="button"
                   onClick={() => {
                     setShowSettingsMenu(false);
+                    setShowAdminWorkMenu(false);
                     setShowReleaseNotes(true);
                   }}
                   className="block w-full px-3 py-2 text-left text-sm text-slate-200 hover:bg-slate-800"
@@ -290,6 +339,7 @@ export function MenuBar({ activeView, user, onNavigate, onLogout, onUserUpdated 
                   type="button"
                   onClick={() => {
                     setShowSettingsMenu(false);
+                    setShowAdminWorkMenu(false);
                     setShowAbout(true);
                   }}
                   className="block w-full px-3 py-2 text-left text-sm text-slate-200 hover:bg-slate-800"
@@ -352,6 +402,9 @@ export function MenuBar({ activeView, user, onNavigate, onLogout, onUserUpdated 
       ) : null}
       {showTableDebug && isAdmin ? (
         <TableDebugModal onClose={() => setShowTableDebug(false)} />
+      ) : null}
+      {showInfraCollect && isAdmin ? (
+        <InfraCollectModal viewerRole={user.role} onClose={() => setShowInfraCollect(false)} />
       ) : null}
       {showProfileEdit ? (
         <ProfileEditModal

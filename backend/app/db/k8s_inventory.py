@@ -302,6 +302,18 @@ def replace_cluster_snapshot(database_path: str | Path, snapshot: K8sClusterSnap
     return counts
 
 
+def get_k8s_cluster_last_updates(database_path: str | Path) -> dict[str, str | None]:
+    """Return map of cluster_name -> last_update (ISO-like local stamp or None)."""
+    with get_connection(database_path) as connection:
+        rows = connection.execute(
+            "SELECT cluster_name, last_update FROM k8s_cluster ORDER BY cluster_name"
+        ).fetchall()
+    return {
+        str(row["cluster_name"]): (str(row["last_update"]) if row["last_update"] else None)
+        for row in rows
+    }
+
+
 def snapshot_to_debug_dict(snapshot: K8sClusterSnapshot) -> dict[str, Any]:
     return {
         "cluster_name": snapshot.cluster_name,

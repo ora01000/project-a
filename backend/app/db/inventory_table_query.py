@@ -21,6 +21,25 @@ _FORBIDDEN_SQL_RE = re.compile(
     r"TRUNCATE|GRANT|REVOKE|VACUUM|REINDEX|EXEC|EXECUTE)\b",
     re.IGNORECASE,
 )
+
+# Always-queryable Kubernetes inventory tables (not registered in inventory CSV).
+DEFAULT_K8S_INVENTORY_TABLES: tuple[str, ...] = (
+    "k8s_cluster",
+    "k8s_namespaces",
+    "k8s_deployments",
+    "k8s_nodes",
+    "k8s_pods",
+    "k8s_pvcs",
+)
+
+_DEFAULT_K8S_RELATION_NOTE = (
+    "기본 Kubernetes 수집 테이블 (inventory CSV 등록 없이 항상 참조 가능). "
+    "관계: k8s_nodes/namespaces/deployments/pvcs/pods.cluster_id -> k8s_cluster.idx; "
+    "deployments/pvcs/pods.namespace_id -> k8s_namespaces.idx; "
+    "pvcs/pods.deployment_id -> k8s_deployments.idx; "
+    "pods.scheduled_node -> k8s_nodes.idx."
+)
+
 _SYSTEM_TABLES = {
     "users",
     "agents",
@@ -28,15 +47,11 @@ _SYSTEM_TABLES = {
     "jobs",
     "job_notifications",
     "signup_notifications",
-    "k8s_cluster",
-    "k8s_nodes",
-    "k8s_namespaces",
-    "k8s_deployments",
-    "k8s_pvcs",
-    "k8s_pods",
+    "notice_board",
     "sqlite_master",
     "sqlite_sequence",
     "sqlite_schema",
+    # k8s_* tables are intentionally NOT listed here — they are default inventory sources.
 }
 
 
@@ -47,6 +62,9 @@ class InventoryTableSchema:
     inventory_file: str
     table_name: str
     columns: list[str]
+    column_types: list[str] | None = None
+    is_builtin: bool = False
+    notes: str | None = None
 
 
 @dataclass(frozen=True)
@@ -58,6 +76,43 @@ class TableQueryResult:
     truncated: bool
 
 
+def _read_table_columns(connection, table_name: str) -> tuple[list[str], list[str]]:
+    column_rows = connection.execute(f'PRAGMA table_info("{table_name}")').fetchall()
+    columns = [str(row["name"]) for row in column_rows]
+    types = [str(row["type"] or "TEXT") for row in column_rows]
+    return columns, types
+
+
+def list_default_k8s_table_schemas(connection) -> list[InventoryTableSchema]:
+    existing_tables = {
+        str(row[0]).lower()
+        for row in connection.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        ).fetchall()
+    }
+    schemas: list[InventoryTableSchema] = []
+    for table_name in DEFAULT_K8S_INVENTORY_TABLES:
+        if table_name.lower() not in existing_tables:
+            logger.warning("Default k8s inventory table missing: %s", table_name)
+            continue
+        columns, types = _read_table_columns(connection, table_name)
+        if not columns:
+            continue
+        schemas.append(
+            InventoryTableSchema(
+                inventory_idx=0,
+                inventory_name="Kubernetes 기본 인벤토리",
+                inventory_file="(builtin)",
+                table_name=table_name,
+                columns=columns,
+                column_types=types,
+                is_builtin=True,
+                notes=_DEFAULT_K8S_RELATION_NOTE,
+            )
+        )
+    return schemas
+
+
 def list_inventory_table_schemas(database_path: str | Path) -> list[InventoryTableSchema]:
     records = [
         record
@@ -66,6 +121,8 @@ def list_inventory_table_schemas(database_path: str | Path) -> list[InventoryTab
     ]
     schemas: list[InventoryTableSchema] = []
     with get_connection(database_path) as connection:
+        schemas.extend(list_default_k8s_table_schemas(connection))
+
         existing_tables = {
             str(row[0]).lower()
             for row in connection.execute(
@@ -82,8 +139,7 @@ def list_inventory_table_schemas(database_path: str | Path) -> list[InventoryTab
                     table_name,
                 )
                 continue
-            column_rows = connection.execute(f'PRAGMA table_info("{table_name}")').fetchall()
-            columns = [str(row["name"]) for row in column_rows]
+            columns, types = _read_table_columns(connection, table_name)
             if not columns:
                 continue
             schemas.append(
@@ -93,6 +149,8 @@ def list_inventory_table_schemas(database_path: str | Path) -> list[InventoryTab
                     inventory_file=record.inventory_file,
                     table_name=table_name,
                     columns=columns,
+                    column_types=types,
+                    is_builtin=False,
                 )
             )
     return schemas
@@ -101,13 +159,24 @@ def list_inventory_table_schemas(database_path: str | Path) -> list[InventoryTab
 def schemas_to_prompt_text(schemas: list[InventoryTableSchema]) -> str:
     blocks: list[str] = []
     for schema in schemas:
-        columns = ", ".join(f'"{column}" VARCHAR(100)' for column in schema.columns)
-        blocks.append(
-            f"- inventory_name={schema.inventory_name}\n"
+        if schema.column_types and len(schema.column_types) == len(schema.columns):
+            columns = ", ".join(
+                f'"{name}" {col_type}'
+                for name, col_type in zip(schema.columns, schema.column_types, strict=True)
+            )
+        else:
+            columns = ", ".join(f'"{column}" VARCHAR(100)' for column in schema.columns)
+        source = "builtin" if schema.is_builtin else "inventory"
+        block = (
+            f"- source={source}\n"
+            f"  inventory_name={schema.inventory_name}\n"
             f"  file={schema.inventory_file}\n"
             f"  table=\"{schema.table_name}\"\n"
             f"  columns=[{columns}]"
         )
+        if schema.notes:
+            block = f"{block}\n  notes={schema.notes}"
+        blocks.append(block)
     return "\n".join(blocks)
 
 
@@ -173,7 +242,9 @@ def validate_readonly_select_sql(sql: str, *, allowed_tables: set[str]) -> str:
         re.search(rf'(?i)(?:FROM|JOIN)\s+"?{re.escape(table)}"?\b', cleaned)
         for table in allowed_tables
     ):
-        raise ValueError("등록된 inventory table만 FROM/JOIN 할 수 있습니다.")
+        raise ValueError(
+            "허용된 inventory/table(기본 k8s 테이블 포함)만 FROM/JOIN 할 수 있습니다."
+        )
 
     if not re.search(r"(?i)\bLIMIT\b", cleaned):
         cleaned = f"{cleaned}\nLIMIT {MAX_SQL_RESULT_ROWS}"

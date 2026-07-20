@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
+from pathlib import Path
 from typing import Any
 
 from kubernetes import config as k8s_config
@@ -22,6 +23,9 @@ from backend.app.db.k8s_inventory import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Deployed environments mount kubeconfig here; local test usually has no such file.
+DEFAULT_K8S_KUBECONFIG_PATH = "/etc/k8s-kubeconfig/k8s-kubeconfig"
 
 # (connect timeout seconds, read timeout seconds) for kubernetes API calls
 _K8S_REQUEST_TIMEOUT = (5, 60)
@@ -110,6 +114,24 @@ def _safe_list(dyn: DynamicClient, api_version: str, kind: str) -> list[Any]:
         return []
 
 
+def resolve_kubeconfig_path(configured: str | None) -> str | None:
+    """Prefer the configured/default mounted kubeconfig; else local kubernetes access.
+
+    When ``/etc/k8s-kubeconfig/k8s-kubeconfig`` (or an override path) is missing,
+    return None so client-python uses the local default (KUBECONFIG/~/.kube/config).
+    """
+    candidate = (configured or "").strip() or DEFAULT_K8S_KUBECONFIG_PATH
+    path = Path(candidate)
+    if path.is_file():
+        return str(path)
+    logger.info(
+        "kubeconfig not found at %s; treating as local kubernetes access "
+        "(default KUBECONFIG/~/.kube/config)",
+        candidate,
+    )
+    return None
+
+
 def build_dynamic_client(
     *,
     kubeconfig: str | None,
@@ -119,7 +141,7 @@ def build_dynamic_client(
     """Load kubeconfig and return (client, resolved_context_name)."""
     from kubernetes.client import Configuration
 
-    config_file = kubeconfig or None
+    config_file = resolve_kubeconfig_path(kubeconfig)
     tried_context = context
     configuration = Configuration()
 
@@ -485,16 +507,18 @@ def collect_cluster_snapshot(
 ) -> K8sClusterSnapshot:
     collector = settings or load_k8s_collector_settings()
     context_name = collector.contexts.get(cluster_id, cluster_id)
+    resolved_kubeconfig = resolve_kubeconfig_path(collector.kubeconfig or None)
     dyn, resolved = build_dynamic_client(
         kubeconfig=collector.kubeconfig or None,
         context=context_name,
         fallback_to_current_context=collector.fallback_to_current_context,
     )
     logger.info(
-        "Collecting k8s inventory cluster_id=%s context=%s resolved=%s",
+        "Collecting k8s inventory cluster_id=%s context=%s resolved=%s kubeconfig=%s",
         cluster_id,
         context_name,
         resolved or "current-context",
+        resolved_kubeconfig or f"(local default; missing {DEFAULT_K8S_KUBECONFIG_PATH})",
     )
 
     nodes = _collect_nodes(dyn)

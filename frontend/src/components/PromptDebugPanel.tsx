@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+
+import type { AgentInfo } from "../types/agent";
 
 export interface PromptDebugEntry {
   idx: number;
@@ -15,6 +17,17 @@ export interface PromptDebugEntry {
   caller_agent_id?: string | null;
   caller_agent_name?: string | null;
   step_index?: number | null;
+}
+
+interface PromptDebugPanelProps {
+  agents: AgentInfo[];
+}
+
+type AgentFilterId = "all" | string;
+
+interface FilterOption {
+  id: AgentFilterId;
+  label: string;
 }
 
 interface PromptMessage {
@@ -102,6 +115,14 @@ function bubbleClass(role: string): string {
   return "border-slate-700 bg-slate-900/80 text-slate-200";
 }
 
+function filterButtonClass(isSelected: boolean): string {
+  const base = "rounded-md border px-2.5 py-1 text-xs font-medium transition";
+  if (isSelected) {
+    return `${base} border-sky-600 bg-sky-950/70 text-sky-100`;
+  }
+  return `${base} border-slate-700 bg-slate-800 text-slate-300 hover:border-slate-500 hover:bg-slate-700 hover:text-slate-100`;
+}
+
 function EntryMeta({ entry }: { entry: PromptDebugEntry }) {
   const isOrchestration = entry.kind === "orchestration";
   return (
@@ -150,11 +171,41 @@ function EntryMeta({ entry }: { entry: PromptDebugEntry }) {
   );
 }
 
-export function PromptDebugPanel() {
+export function PromptDebugPanel({ agents }: PromptDebugPanelProps) {
   const [entries, setEntries] = useState<PromptDebugEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isClearing, setIsClearing] = useState(false);
+  const [selectedAgentId, setSelectedAgentId] = useState<AgentFilterId>("all");
+
+  const filterOptions = useMemo((): FilterOption[] => {
+    const regular = agents
+      .filter((agent) => !agent.is_system)
+      .map((agent) => ({ id: agent.id, label: agent.name }));
+    const system = agents
+      .filter((agent) => Boolean(agent.is_system))
+      .map((agent) => ({ id: agent.id, label: agent.name }));
+
+    const knownIds = new Set(agents.map((agent) => agent.id));
+    const extras: FilterOption[] = [];
+    const seenExtra = new Set<string>();
+    for (const entry of entries) {
+      if (!entry.agent_id || knownIds.has(entry.agent_id) || seenExtra.has(entry.agent_id)) {
+        continue;
+      }
+      seenExtra.add(entry.agent_id);
+      extras.push({ id: entry.agent_id, label: entry.agent_name || entry.agent_id });
+    }
+
+    return [{ id: "all", label: "전체" }, ...regular, ...system, ...extras];
+  }, [agents, entries]);
+
+  const filteredEntries = useMemo(() => {
+    if (selectedAgentId === "all") {
+      return entries;
+    }
+    return entries.filter((entry) => entry.agent_id === selectedAgentId);
+  }, [entries, selectedAgentId]);
 
   const loadEntries = useCallback(async () => {
     try {
@@ -179,6 +230,16 @@ export function PromptDebugPanel() {
     }, 5000);
     return () => window.clearInterval(interval);
   }, [loadEntries]);
+
+  useEffect(() => {
+    if (selectedAgentId === "all") {
+      return;
+    }
+    const stillExists = filterOptions.some((option) => option.id === selectedAgentId);
+    if (!stillExists) {
+      setSelectedAgentId("all");
+    }
+  }, [filterOptions, selectedAgentId]);
 
   const handleClear = async () => {
     setIsClearing(true);
@@ -224,19 +285,36 @@ export function PromptDebugPanel() {
         </div>
       </div>
 
+      <div className="flex flex-wrap items-center gap-1.5" role="list" aria-label="에이전트 필터">
+        {filterOptions.map((option) => (
+          <button
+            key={option.id}
+            type="button"
+            role="listitem"
+            onClick={() => setSelectedAgentId(option.id)}
+            className={filterButtonClass(selectedAgentId === option.id)}
+            title={option.id === "all" ? "전체 로그" : option.id}
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
+
       {error ? (
         <div className="rounded-md border border-rose-800 bg-rose-950/40 px-3 py-2 text-sm text-rose-200">
           {error}
         </div>
       ) : null}
 
-      {entries.length === 0 ? (
+      {filteredEntries.length === 0 ? (
         <div className="flex min-h-[120px] flex-1 items-center justify-center rounded-md border border-dashed border-slate-700 bg-slate-950/40 text-sm text-slate-500">
-          표시할 항목이 없습니다. 에이전트 질의 또는 작업 요청/수행 시 여기에 기록됩니다.
+          {entries.length === 0
+            ? "표시할 항목이 없습니다. 에이전트 질의 또는 작업 요청/수행 시 여기에 기록됩니다."
+            : "선택한 에이전트의 디버깅 로그가 없습니다."}
         </div>
       ) : (
         <div className="min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
-          {entries.map((entry) => {
+          {filteredEntries.map((entry) => {
             const isOrchestration = entry.kind === "orchestration";
             const messages = parsePromptMessages(entry.prompt);
             const response = entry.response?.trim() ?? "";

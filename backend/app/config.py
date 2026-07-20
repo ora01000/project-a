@@ -90,8 +90,11 @@ class K8sCollectorSettings(BaseModel):
     schedule_hour: int = 0
     schedule_minute: int = 10
     stagger_minutes: int = 5
-    collect_on_startup: bool = True
-    kubeconfig: str = ""
+    collect_on_startup: bool = False
+    # Periodic schedule is paused until explicitly re-enabled.
+    schedule_enabled: bool = False
+    # Default mounted kubeconfig; missing file => local kubernetes access.
+    kubeconfig: str = "/etc/k8s-kubeconfig/k8s-kubeconfig"
     fallback_to_current_context: bool = True
     # Optional map: cluster_id -> kubeconfig context name
     contexts: dict[str, str] = {}
@@ -165,6 +168,10 @@ class AppSettings(BaseSettings):
     k8s_collector_collect_on_startup: bool | None = Field(
         default=None,
         alias="K8S_COLLECTOR_COLLECT_ON_STARTUP",
+    )
+    k8s_collector_schedule_enabled: bool | None = Field(
+        default=None,
+        alias="K8S_COLLECTOR_SCHEDULE_ENABLED",
     )
     k8s_collector_kubeconfig: str | None = Field(default=None, alias="K8S_COLLECTOR_KUBECONFIG")
     k8s_collector_fallback_current_context: bool | None = Field(
@@ -371,7 +378,12 @@ def load_k8s_collector_settings() -> K8sCollectorSettings:
     if env_settings.k8s_collector_collect_on_startup is not None:
         collect_on_startup = env_settings.k8s_collector_collect_on_startup
     else:
-        collect_on_startup = _as_bool(collector_yaml.get("collect_on_startup"), True)
+        collect_on_startup = _as_bool(collector_yaml.get("collect_on_startup"), False)
+
+    if env_settings.k8s_collector_schedule_enabled is not None:
+        schedule_enabled = env_settings.k8s_collector_schedule_enabled
+    else:
+        schedule_enabled = _as_bool(collector_yaml.get("schedule_enabled"), False)
 
     if env_settings.k8s_collector_fallback_current_context is not None:
         fallback = env_settings.k8s_collector_fallback_current_context
@@ -381,7 +393,7 @@ def load_k8s_collector_settings() -> K8sCollectorSettings:
     kubeconfig = (
         env_settings.k8s_collector_kubeconfig
         if env_settings.k8s_collector_kubeconfig is not None
-        else str(collector_yaml.get("kubeconfig") or "")
+        else str(collector_yaml.get("kubeconfig") or "/etc/k8s-kubeconfig/k8s-kubeconfig")
     ).strip()
 
     raw_contexts = collector_yaml.get("contexts") or {}
@@ -399,6 +411,7 @@ def load_k8s_collector_settings() -> K8sCollectorSettings:
         schedule_minute=min(59, max(0, schedule_minute)),
         stagger_minutes=max(1, stagger_minutes),
         collect_on_startup=collect_on_startup,
+        schedule_enabled=schedule_enabled,
         kubeconfig=kubeconfig,
         fallback_to_current_context=fallback,
         contexts=contexts,

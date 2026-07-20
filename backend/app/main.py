@@ -26,6 +26,7 @@ from backend.app.api.chat import router as chat_router
 from backend.app.api.debug import router as debug_router
 from backend.app.api.inventory import router as inventory_router
 from backend.app.api.jobs import router as jobs_router
+from backend.app.api.k8s_collector import router as k8s_collector_router
 from backend.app.api.notices import router as notices_router
 from backend.app.api.prompt_debug import router as prompt_debug_router
 from backend.app.api.release import router as release_router
@@ -332,6 +333,7 @@ def create_app() -> FastAPI:
     app.include_router(agent_records_router, prefix="/api")
     app.include_router(agents_router, prefix="/api")
     app.include_router(jobs_router, prefix="/api")
+    app.include_router(k8s_collector_router, prefix="/api")
     app.include_router(notices_router, prefix="/api")
     app.include_router(chat_router, prefix="/api")
     app.include_router(debug_router, prefix="/api")

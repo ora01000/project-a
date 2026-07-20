@@ -156,7 +156,7 @@ export function DetailInfoPanel({
         ) : activeTab === "logs" ? (
           <AgentLogsPanel />
         ) : activeTab === "debug" && isAdmin ? (
-          <PromptDebugPanel />
+          <PromptDebugPanel agents={agents} />
         ) : (
           <JobWorkPanel key={activeTab} tab={activeTab as JobDetailTab} />
         )}

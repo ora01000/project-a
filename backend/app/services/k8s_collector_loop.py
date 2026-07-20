@@ -142,6 +142,13 @@ async def run_k8s_collector_loop(
         logger.info("k8s collector is disabled")
         return
 
+    if not collector.collect_on_startup and not collector.schedule_enabled:
+        logger.info(
+            "k8s collector auto loop is paused "
+            "(collect_on_startup=false, schedule_enabled=false); use manual collect API"
+        )
+        return
+
     schedule_preview = [
         (
             cluster_id,
@@ -155,13 +162,14 @@ async def run_k8s_collector_loop(
         for index, (cluster_id, _) in enumerate(K8S_CLUSTER_SPECS)
     ]
     logger.info(
-        "k8s collector started (daily=%02d:%02d +%smin stagger, startup=%s, clusters=%s, kubeconfig=%s, slots=%s)",
+        "k8s collector started (daily=%02d:%02d +%smin stagger, startup=%s, schedule=%s, clusters=%s, kubeconfig=%s, slots=%s)",
         collector.schedule_hour,
         collector.schedule_minute,
         collector.stagger_minutes,
         collector.collect_on_startup,
+        collector.schedule_enabled,
         len(K8S_CLUSTER_SPECS),
-        collector.kubeconfig or "(default KUBECONFIG/~/.kube/config)",
+        collector.kubeconfig or "/etc/k8s-kubeconfig/k8s-kubeconfig",
         schedule_preview,
     )
 
@@ -177,6 +185,10 @@ async def run_k8s_collector_loop(
                 )
             except Exception as exc:
                 logger.exception("k8s collector startup cycle failed: %s", exc)
+
+        if not collector.schedule_enabled:
+            logger.info("k8s collector schedule is disabled; skipping daily schedule tasks")
+            return
 
         tasks = [
             asyncio.create_task(
