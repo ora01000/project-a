@@ -1252,7 +1252,7 @@ cursor 에사 사용할 plan 초안을 작성합니다.
 ## 표시시각 타임존 정의
 - 로컬에서는 발생하지 않으나 실제 서버에서는 타임존이 맞지 않아 타임존을 Asia/Seoul 로 고정한다. 
 
-
+{"job_title":{"etag":"1784789589562","messageType":"message","createdDateTime":"2026-07-23T06:53:09.562Z","lastModifiedDateTime":"2026-07-23T06:53:09.562Z","subject":"[테스트] 팀즈 메시지 전송","importance":"normal","locale":"en-us","webUrl":"https://teams.microsoft.com/l/message/19%3ABYenL-cQTC1SX76v4E8aW26hD-spAN_rdfYbNGpw09k1%40thread.tacv2/1784789589562?groupId=a73b9b17-f8d5-435c-87cb-35077ce2296d&tenantId=01622868-7846-4ff6-8e31-fdc8937a8c01&createdTime=1784789589562&parentMessageId=1784789589562","id":"1784789589562","from":{"user":{"@odata.type":"#microsoft.graph.teamworkUserIdentity","id":"d75bcd72-d9d0-4a62-b19c-ced400dad5b4","displayName":"윤인수 IT플랫폼운영팀","userIdentityType":"aadUser","tenantId":"01622868-7846-4ff6-8e31-fdc8937a8c01"}},"body":{"contentType":"html","content":"<p>내용&nbsp;</p>"},"channelIdentity":{"teamId":"a73b9b17-f8d5-435c-87cb-35077ce2296d","channelId":"19:BYenL-cQTC1SX76v4E8aW26hD-spAN_rdfYbNGpw09k1@thread.tacv2"},"attachments":[],"mentions":[],"reactions":[]},"requester":"d75bcd72-d9d0-4a62-b19c-ced400dad5b4"}
 
 
 
