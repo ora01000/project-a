@@ -40,7 +40,10 @@ JOB_SELECT_COLUMNS = """
     job_plan,
     original_job_plan,
     execution_result,
-    actual_completion_time
+    actual_completion_time,
+    approval_date,
+    pending_date,
+    reject_date
 """
 
 
@@ -66,6 +69,19 @@ class Job:
     execution_result: str | None
     actual_completion_time: str | None
     sr_num: str | None = None
+    approval_date: str | None = None
+    pending_date: str | None = None
+    reject_date: str | None = None
+
+
+def _optional_job_datetime(row, key: str) -> str | None:
+    if key not in row.keys() or row[key] is None:
+        return None
+    value = str(row[key])
+    try:
+        return normalize_job_datetime(value)
+    except ValueError:
+        return value
 
 
 def _row_to_job(row) -> Job:
@@ -81,13 +97,7 @@ def _row_to_job(row) -> Job:
     except ValueError:
         pass
 
-    actual_completion_time = None
-    if "actual_completion_time" in keys and row["actual_completion_time"] is not None:
-        actual_completion_time = str(row["actual_completion_time"])
-        try:
-            actual_completion_time = normalize_job_datetime(actual_completion_time)
-        except ValueError:
-            pass
+    actual_completion_time = _optional_job_datetime(row, "actual_completion_time")
 
     sr_num = None
     if "sr_num" in keys and row["sr_num"] is not None:
@@ -115,6 +125,9 @@ def _row_to_job(row) -> Job:
         execution_result=str(row["execution_result"]) if row["execution_result"] is not None else None,
         actual_completion_time=actual_completion_time,
         sr_num=sr_num,
+        approval_date=_optional_job_datetime(row, "approval_date"),
+        pending_date=_optional_job_datetime(row, "pending_date"),
+        reject_date=_optional_job_datetime(row, "reject_date"),
     )
 
 
@@ -302,18 +315,66 @@ def create_job(
 
 
 def update_job_state(database_path: str | Path, idx: int, state: int) -> Job | None:
+    set_parts = ["state = ?"]
+    params: list[object] = [state]
+
+    if state == JOB_STATE_APPROVED:
+        set_parts.append("approval_date = ?")
+        params.append(now_job_datetime())
+    elif state == JOB_STATE_PENDING:
+        set_parts.append("pending_date = ?")
+        params.append(now_job_datetime())
+    elif state == JOB_STATE_REJECTED:
+        set_parts.append("reject_date = ?")
+        params.append(now_job_datetime())
+
+    params.append(idx)
     with get_connection(database_path) as connection:
         connection.execute(
-            """
+            f"""
             UPDATE jobs
-            SET state = ?
+            SET {", ".join(set_parts)}
             WHERE idx = ?
             """,
-            (state, idx),
+            tuple(params),
         )
         connection.commit()
 
     return get_job_by_idx(database_path, idx)
+
+
+def get_job_notification_times(
+    database_path: str | Path,
+    job_idxs: list[int],
+) -> dict[int, dict[str, str | None]]:
+    if not job_idxs:
+        return {}
+
+    unique_idxs = sorted({int(value) for value in job_idxs})
+    placeholders = ", ".join("?" for _ in unique_idxs)
+    with get_connection(database_path) as connection:
+        rows = connection.execute(
+            f"""
+            SELECT idx, request_date, actual_completion_time
+            FROM jobs
+            WHERE idx IN ({placeholders})
+            """,
+            tuple(unique_idxs),
+        ).fetchall()
+
+    result: dict[int, dict[str, str | None]] = {}
+    for row in rows:
+        job_idx = int(row["idx"])
+        request_date = str(row["request_date"])
+        try:
+            request_date = normalize_job_datetime(request_date)
+        except ValueError:
+            pass
+        result[job_idx] = {
+            "request_date": request_date,
+            "actual_completion_time": _optional_job_datetime(row, "actual_completion_time"),
+        }
+    return result
 
 
 def update_job_plan(database_path: str | Path, idx: int, job_plan: str, state: int) -> Job | None:
@@ -413,3 +474,10 @@ def update_job_execution_result(
         connection.commit()
 
     return get_job_by_idx(database_path, idx)
+
+
+def delete_job_by_idx(database_path: str | Path, idx: int) -> bool:
+    with get_connection(database_path) as connection:
+        cursor = connection.execute("DELETE FROM jobs WHERE idx = ?", (idx,))
+        connection.commit()
+        return int(cursor.rowcount) > 0

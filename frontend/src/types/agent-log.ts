@@ -1,3 +1,5 @@
+import { formatLocaleDateTime } from "../utils/datetime";
+
 export interface AgentLogEntry {
   timestamp: string;
   agent_id: string;
@@ -33,7 +35,7 @@ export function formatLogTimestamp(iso: string): string {
   if (Number.isNaN(date.getTime())) {
     return iso;
   }
-  return date.toLocaleString("ko-KR");
+  return formatLocaleDateTime(date);
 }
 
 export function truncateLogText(value: string, maxLength = 120): string {

@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react
 import type { AuthUser } from "../../types/auth";
 import type { UserRecord } from "../../types/user";
 import { ROLE_ADMIN } from "../../types/user";
+import { dateOnlyAfterDays, formatJobDatetime } from "../../utils/datetime";
 
 interface JobCreatePageProps {
   user: AuthUser;
@@ -24,17 +25,9 @@ async function parseError(response: Response, fallback: string): Promise<string>
   return payload?.detail ?? fallback;
 }
 
-function formatNowLocal(): string {
-  const now = new Date();
-  const pad = (value: number) => String(value).padStart(2, "0");
-  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
-}
-
 function defaultCompletionDate(): string {
-  const date = new Date();
-  date.setDate(date.getDate() + 3);
-  const pad = (value: number) => String(value).padStart(2, "0");
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+  const date = new Date(`${dateOnlyAfterDays(3)}T12:00:00+09:00`);
+  return formatJobDatetime(date);
 }
 
 function buildInitialForm(user: AuthUser): JobCreateForm {
@@ -115,7 +108,7 @@ export function JobCreatePage({ user, onCreated }: JobCreatePageProps) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          request_date: formatNowLocal(),
+          request_date: formatJobDatetime(new Date()),
           job_title: form.job_title.trim(),
           request_depart: form.request_depart.trim(),
           requester: form.requester.trim(),

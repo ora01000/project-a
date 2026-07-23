@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from backend.app.db.database import get_connection
+from backend.app.timezone import format_display_datetime, now_display_datetime
 
 logger = logging.getLogger(__name__)
 
@@ -125,7 +126,7 @@ def touch_k8s_cluster_last_update(
     *,
     when: datetime | None = None,
 ) -> str:
-    stamp = (when or datetime.now().astimezone()).strftime("%Y-%m-%d %H:%M:%S")
+    stamp = format_display_datetime(when) if when is not None else format_display_datetime()
     connection.execute(
         """
         UPDATE k8s_cluster

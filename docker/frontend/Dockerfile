@@ -10,7 +10,9 @@ RUN npm run build
 
 FROM nginx:1.27-alpine
 
-RUN apk add --no-cache gettext
+ENV TZ=Asia/Seoul
+
+RUN apk add --no-cache gettext tzdata
 
 COPY docker/frontend/nginx.conf.template /etc/nginx/templates/default.conf.template
 COPY docker/frontend/docker-entrypoint.sh /docker-entrypoint.sh

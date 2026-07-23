@@ -4,6 +4,7 @@ import type { AuthUser } from "../types/auth";
 import type { AppView } from "../types/navigation";
 import { ROLE_ADMIN } from "../types/user";
 import { formatUserLabel } from "../utils/authSession";
+import { formatCurrentTime } from "../utils/datetime";
 import { AboutModal } from "./AboutModal";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { InfraCollectModal } from "./admin/InfraCollectModal";
@@ -18,17 +19,6 @@ interface MenuBarProps {
   onNavigate: (view: AppView) => void;
   onLogout: () => void;
   onUserUpdated: (user: AuthUser) => void;
-}
-
-function formatCurrentTime(date: Date): string {
-  const year = String(date.getFullYear()).slice(-2);
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  const hours = String(date.getHours()).padStart(2, "0");
-  const minutes = String(date.getMinutes()).padStart(2, "0");
-  const seconds = String(date.getSeconds()).padStart(2, "0");
-
-  return `${year}년 ${month}월 ${day}일 ${hours}:${minutes}:${seconds}`;
 }
 
 function menuButtonClass(isActive: boolean): string {
@@ -92,7 +82,8 @@ export function MenuBar({ activeView, user, onNavigate, onLogout, onUserUpdated 
     isAdmin &&
     (activeView === "agent-list" ||
       activeView === "inventory-csv" ||
-      activeView === "agent-assignment");
+      activeView === "agent-assignment" ||
+      activeView === "token-management");
 
   const isJobManagementActive = activeView === "job-list" || activeView === "job-create";
   const isUserManagementActive = activeView === "user-list";
@@ -162,6 +153,20 @@ export function MenuBar({ activeView, user, onNavigate, onLogout, onUserUpdated 
                     }`}
                   >
                     에이전트 할당
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onNavigate("token-management");
+                      setShowAgentMenu(false);
+                    }}
+                    className={`block w-full px-3 py-2 text-left text-sm ${
+                      activeView === "token-management"
+                        ? "bg-slate-800 text-sky-200"
+                        : "text-slate-200 hover:bg-slate-800"
+                    }`}
+                  >
+                    토큰관리
                   </button>
                 </div>
               ) : null}

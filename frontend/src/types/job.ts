@@ -43,6 +43,9 @@ export interface JobRecord {
   original_job_plan?: JobPlan | null;
   execution_result?: JobExecutionResult | null;
   actual_completion_time?: string | null;
+  approval_date?: string | null;
+  pending_date?: string | null;
+  reject_date?: string | null;
   /** users.username resolved from requester userid (fallback: userid). */
   requester_name?: string | null;
   /** users.username resolved from approver userid (fallback: userid). */
@@ -56,6 +59,8 @@ export interface JobNotification {
   title: string;
   message: string;
   created_at: string;
+  request_date?: string | null;
+  actual_completion_time?: string | null;
 }
 
 export type JobDetailTab = "review" | "pending" | "completed";

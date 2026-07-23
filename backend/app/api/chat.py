@@ -88,9 +88,6 @@ async def chat_with_agent(agent_id: str, payload: ChatRequest, request: Request)
         manager.mark_agent_error(agent_id, str(exc), input_message=payload.message)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
-    if manager.token_tracker:
-        manager.token_tracker.record(agent_id, result.input_tokens, result.output_tokens)
-
     log_agent_interaction(
         agent_id=agent_id,
         input_message=payload.message,

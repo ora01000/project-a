@@ -8,6 +8,7 @@ from typing import Any
 
 from backend.app.agents.base import ToolUsage
 from backend.app.config import PROJECT_ROOT, UserCommLogSettings, load_user_comm_log_settings
+from backend.app.timezone import now_display_datetime
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +33,7 @@ def _resolve_log_dir(settings: UserCommLogSettings) -> Path:
 
 
 def _local_date() -> date:
-    return datetime.now().astimezone().date()
+    return now_display_datetime().date()
 
 
 def _log_file_path(log_dir: Path, user_id: str, log_date: date) -> Path:
@@ -144,7 +145,7 @@ def log_user_communication(
     log_path = _log_file_path(log_dir, safe_user_id, log_date)
     lock_key = f"{safe_user_id}:{log_date.isoformat()}"
     entry = {
-        "timestamp": datetime.now().astimezone().isoformat(),
+        "timestamp": now_display_datetime().isoformat(),
         "agent_id": agent_id,
         "agent_name": agent_name,
         "user_message": user_message,

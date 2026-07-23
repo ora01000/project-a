@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import type { AgentInfo } from "../types/agent";
+import { ROLE_ADMIN } from "../types/user";
+import { formatLocaleDateTime, toDatetimeLocalValue } from "../utils/datetime";
 
 export interface PromptDebugEntry {
   idx: number;
@@ -21,6 +23,16 @@ export interface PromptDebugEntry {
 
 interface PromptDebugPanelProps {
   agents: AgentInfo[];
+  viewerRole: number;
+}
+
+interface TokenUsageRow {
+  agent_id: string;
+  agent_name: string;
+  input_tokens: number;
+  output_tokens: number;
+  total_tokens: number;
+  call_count?: number | null;
 }
 
 type AgentFilterId = "all" | string;
@@ -45,7 +57,7 @@ function formatTimestamp(value: string): string {
   if (Number.isNaN(date.getTime())) {
     return value;
   }
-  return date.toLocaleString("ko-KR", {
+  return formatLocaleDateTime(date, {
     year: "2-digit",
     month: "2-digit",
     day: "2-digit",
@@ -123,6 +135,14 @@ function filterButtonClass(isSelected: boolean): string {
   return `${base} border-slate-700 bg-slate-800 text-slate-300 hover:border-slate-500 hover:bg-slate-700 hover:text-slate-100`;
 }
 
+function defaultPeriodSince(): string {
+  return toDatetimeLocalValue(new Date(Date.now() - 24 * 60 * 60 * 1000));
+}
+
+function defaultPeriodUntil(): string {
+  return toDatetimeLocalValue(new Date());
+}
+
 function EntryMeta({ entry }: { entry: PromptDebugEntry }) {
   const isOrchestration = entry.kind === "orchestration";
   return (
@@ -171,12 +191,20 @@ function EntryMeta({ entry }: { entry: PromptDebugEntry }) {
   );
 }
 
-export function PromptDebugPanel({ agents }: PromptDebugPanelProps) {
+export function PromptDebugPanel({ agents, viewerRole }: PromptDebugPanelProps) {
+  const isAdmin = viewerRole === ROLE_ADMIN;
   const [entries, setEntries] = useState<PromptDebugEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isClearing, setIsClearing] = useState(false);
   const [selectedAgentId, setSelectedAgentId] = useState<AgentFilterId>("all");
+  const [cumulativeUsage, setCumulativeUsage] = useState<TokenUsageRow[]>([]);
+  const [periodUsage, setPeriodUsage] = useState<TokenUsageRow[]>([]);
+  const [periodSince, setPeriodSince] = useState(defaultPeriodSince);
+  const [periodUntil, setPeriodUntil] = useState(defaultPeriodUntil);
+  const [isLoadingPeriod, setIsLoadingPeriod] = useState(false);
+  const [isResettingTokens, setIsResettingTokens] = useState(false);
+  const [tokenMessage, setTokenMessage] = useState<string | null>(null);
 
   const filterOptions = useMemo((): FilterOption[] => {
     const regular = agents
@@ -223,13 +251,58 @@ export function PromptDebugPanel({ agents }: PromptDebugPanelProps) {
     }
   }, []);
 
+  const loadCumulativeUsage = useCallback(async () => {
+    try {
+      const response = await fetch("/api/agents/token-usage");
+      if (!response.ok) {
+        throw new Error(await parseError(response, "누적 토큰 사용량을 불러오지 못했습니다."));
+      }
+      const data = (await response.json()) as { agents: TokenUsageRow[] };
+      setCumulativeUsage(data.agents ?? []);
+    } catch (err) {
+      setTokenMessage(err instanceof Error ? err.message : "누적 토큰 사용량을 불러오지 못했습니다.");
+    }
+  }, []);
+
+  const loadPeriodUsage = useCallback(async () => {
+    setIsLoadingPeriod(true);
+    setTokenMessage(null);
+    try {
+      const params = new URLSearchParams();
+      if (periodSince) {
+        params.set("since", new Date(periodSince).toISOString());
+      }
+      if (periodUntil) {
+        params.set("until", new Date(periodUntil).toISOString());
+      }
+      if (selectedAgentId !== "all") {
+        params.set("agent_id", selectedAgentId);
+      }
+      const response = await fetch(`/api/agents/token-usage/period?${params.toString()}`);
+      if (!response.ok) {
+        throw new Error(await parseError(response, "기간별 토큰 사용량을 불러오지 못했습니다."));
+      }
+      const data = (await response.json()) as { agents: TokenUsageRow[] };
+      setPeriodUsage(data.agents ?? []);
+    } catch (err) {
+      setTokenMessage(
+        err instanceof Error ? err.message : "기간별 토큰 사용량을 불러오지 못했습니다.",
+      );
+      setPeriodUsage([]);
+    } finally {
+      setIsLoadingPeriod(false);
+    }
+  }, [periodSince, periodUntil, selectedAgentId]);
+
   useEffect(() => {
     void loadEntries();
+    void loadCumulativeUsage();
     const interval = window.setInterval(() => {
       void loadEntries();
+      void loadCumulativeUsage();
     }, 5000);
     return () => window.clearInterval(interval);
-  }, [loadEntries]);
+  }, [loadEntries, loadCumulativeUsage]);
 
   useEffect(() => {
     if (selectedAgentId === "all") {
@@ -254,6 +327,68 @@ export function PromptDebugPanel({ agents }: PromptDebugPanelProps) {
     } finally {
       setIsClearing(false);
     }
+  };
+
+  const handleResetCumulativeTokens = async () => {
+    if (!isAdmin) {
+      return;
+    }
+    setIsResettingTokens(true);
+    setTokenMessage(null);
+    try {
+      const response = await fetch("/api/agents/token-usage/reset", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ viewer_role: viewerRole }),
+      });
+      if (!response.ok) {
+        throw new Error(await parseError(response, "토큰 누적 초기화에 실패했습니다."));
+      }
+      const data = (await response.json()) as { cleared_agents: number };
+      setTokenMessage(`누적 토큰을 초기화했습니다. (${data.cleared_agents}개 에이전트)`);
+      await loadCumulativeUsage();
+    } catch (err) {
+      setTokenMessage(err instanceof Error ? err.message : "토큰 누적 초기화에 실패했습니다.");
+    } finally {
+      setIsResettingTokens(false);
+    }
+  };
+
+  const renderUsageTable = (rows: TokenUsageRow[], emptyLabel: string) => {
+    if (rows.length === 0) {
+      return <p className="text-xs text-slate-500">{emptyLabel}</p>;
+    }
+    return (
+      <div className="overflow-x-auto">
+        <table className="min-w-full border-collapse text-xs">
+          <thead>
+            <tr className="border-b border-slate-800 text-left text-slate-400">
+              <th className="px-2 py-1">에이전트</th>
+              <th className="px-2 py-1">입력</th>
+              <th className="px-2 py-1">출력</th>
+              <th className="px-2 py-1">합계</th>
+              <th className="px-2 py-1">호출</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr key={row.agent_id} className="border-b border-slate-800/80 text-slate-200">
+                <td className="px-2 py-1">
+                  <span className="font-medium">{row.agent_name}</span>
+                  <span className="ml-1 font-mono text-[10px] text-slate-500">{row.agent_id}</span>
+                </td>
+                <td className="px-2 py-1 font-mono">{formatTokenCount(row.input_tokens)}</td>
+                <td className="px-2 py-1 font-mono">{formatTokenCount(row.output_tokens)}</td>
+                <td className="px-2 py-1 font-mono">{formatTokenCount(row.total_tokens)}</td>
+                <td className="px-2 py-1 font-mono text-slate-400">
+                  {row.call_count != null ? formatTokenCount(row.call_count) : "-"}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    );
   };
 
   if (isLoading) {
@@ -284,6 +419,76 @@ export function PromptDebugPanel({ agents }: PromptDebugPanelProps) {
           </button>
         </div>
       </div>
+
+      <section className="shrink-0 rounded-lg border border-slate-800 bg-slate-950/40 p-3">
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+          <h3 className="text-xs font-semibold text-slate-200">토큰 사용량</h3>
+          <div className="flex flex-wrap items-center gap-2">
+            {isAdmin ? (
+              <button
+                type="button"
+                onClick={() => void handleResetCumulativeTokens()}
+                disabled={isResettingTokens}
+                className="rounded-md border border-amber-800 px-2.5 py-1 text-xs text-amber-100 hover:bg-amber-950/40 disabled:opacity-40"
+              >
+                {isResettingTokens ? "초기화 중…" : "누적 초기화"}
+              </button>
+            ) : null}
+            <button
+              type="button"
+              onClick={() => void loadCumulativeUsage()}
+              className="rounded-md border border-slate-700 px-2.5 py-1 text-xs text-slate-200 hover:bg-slate-800"
+            >
+              누적 새로고침
+            </button>
+          </div>
+        </div>
+        <p className="mb-2 text-[11px] text-slate-500">
+          누적: 서버 기동 후 TokenTracker (에이전트 타일과 동일) · 기간: Prompt Debug LLM 기록 합산
+        </p>
+        {tokenMessage ? (
+          <p className="mb-2 text-xs text-amber-200">{tokenMessage}</p>
+        ) : null}
+        <div className="mb-3">
+          <p className="mb-1 text-[11px] font-medium text-slate-400">누적 (서버 기동 후)</p>
+          {renderUsageTable(cumulativeUsage, "누적 토큰 사용 기록이 없습니다.")}
+        </div>
+        <div className="border-t border-slate-800 pt-3">
+          <p className="mb-2 text-[11px] font-medium text-slate-400">기간별 조회 (LLM 교환)</p>
+          <div className="mb-2 flex flex-wrap items-end gap-2">
+            <label className="flex flex-col gap-0.5 text-[11px] text-slate-400">
+              시작
+              <input
+                type="datetime-local"
+                value={periodSince}
+                onChange={(event) => setPeriodSince(event.target.value)}
+                className="rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-200"
+              />
+            </label>
+            <label className="flex flex-col gap-0.5 text-[11px] text-slate-400">
+              종료
+              <input
+                type="datetime-local"
+                value={periodUntil}
+                onChange={(event) => setPeriodUntil(event.target.value)}
+                className="rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-200"
+              />
+            </label>
+            <button
+              type="button"
+              onClick={() => void loadPeriodUsage()}
+              disabled={isLoadingPeriod}
+              className="rounded-md border border-sky-700 bg-sky-950/40 px-2.5 py-1.5 text-xs text-sky-100 hover:bg-sky-900/50 disabled:opacity-40"
+            >
+              {isLoadingPeriod ? "조회 중…" : "기간 조회"}
+            </button>
+          </div>
+          {renderUsageTable(
+            periodUsage,
+            "조건에 맞는 기간 LLM 토큰 기록이 없습니다. 기간 조회를 실행하세요.",
+          )}
+        </div>
+      </section>
 
       <div className="flex flex-wrap items-center gap-1.5" role="list" aria-label="에이전트 필터">
         {filterOptions.map((option) => (

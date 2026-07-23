@@ -5,12 +5,14 @@ from __future__ import annotations
 import re
 from datetime import datetime
 
-_JOB_DATETIME_FORMAT = "%Y-%m-%d %H:%M:%S"
+from backend.app.timezone import JOB_DATETIME_FORMAT, format_display_datetime
+
+_JOB_DATETIME_FORMAT = JOB_DATETIME_FORMAT
 _DATE_ONLY = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
 def now_job_datetime() -> str:
-    return datetime.now().strftime(_JOB_DATETIME_FORMAT)
+    return format_display_datetime()
 
 
 def request_date_yyyymmdd(request_date: str) -> str:

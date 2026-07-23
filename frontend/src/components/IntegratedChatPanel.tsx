@@ -52,11 +52,14 @@ function isAbortError(err: unknown): boolean {
   return err instanceof DOMException && err.name === "AbortError";
 }
 
-const DEFAULT_COMPOSER_HEIGHT = 260;
-const MIN_COMPOSER_HEIGHT = 160;
+const DEFAULT_AGENT_LIST_HEIGHT = 160;
+const MIN_AGENT_LIST_HEIGHT = 80;
+const FIXED_USER_INPUT_HEIGHT = 100;
 const MIN_CONVERSATION_HEIGHT = 120;
 const RESIZE_HANDLE_HEIGHT = 8;
 const CHAT_HEADER_HEIGHT = 100;
+/** Form padding (p-3 ×2) + gap between agent list and input (gap-2) */
+const COMPOSER_FORM_CHROME = 24 + 8;
 /** 대화창에 유지·렌더링할 최근 질의/응답 쌍 개수 */
 const VISIBLE_CHAT_RESPONSE_LIMIT = 10;
 
@@ -118,18 +121,23 @@ export function IntegratedChatPanel({
   const conversationScrollRef = useRef<HTMLDivElement>(null);
   const layoutRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
-  const [composerHeight, setComposerHeight] = useState(DEFAULT_COMPOSER_HEIGHT);
+  const [agentListHeight, setAgentListHeight] = useState(DEFAULT_AGENT_LIST_HEIGHT);
   const isResizingRef = useRef(false);
   const resizeStartYRef = useRef(0);
-  const resizeStartHeightRef = useRef(DEFAULT_COMPOSER_HEIGHT);
+  const resizeStartHeightRef = useRef(DEFAULT_AGENT_LIST_HEIGHT);
 
-  const clampComposerHeight = useCallback((nextHeight: number) => {
+  const clampAgentListHeight = useCallback((nextHeight: number) => {
     const layoutHeight = layoutRef.current?.clientHeight ?? window.innerHeight;
-    const maxComposerHeight = Math.max(
-      MIN_COMPOSER_HEIGHT,
-      layoutHeight - CHAT_HEADER_HEIGHT - MIN_CONVERSATION_HEIGHT - RESIZE_HANDLE_HEIGHT,
+    const maxAgentListHeight = Math.max(
+      MIN_AGENT_LIST_HEIGHT,
+      layoutHeight
+        - CHAT_HEADER_HEIGHT
+        - MIN_CONVERSATION_HEIGHT
+        - RESIZE_HANDLE_HEIGHT
+        - FIXED_USER_INPUT_HEIGHT
+        - COMPOSER_FORM_CHROME,
     );
-    return Math.min(maxComposerHeight, Math.max(MIN_COMPOSER_HEIGHT, nextHeight));
+    return Math.min(maxAgentListHeight, Math.max(MIN_AGENT_LIST_HEIGHT, nextHeight));
   }, []);
 
   useEffect(() => {
@@ -138,7 +146,7 @@ export function IntegratedChatPanel({
         return;
       }
       const deltaY = event.clientY - resizeStartYRef.current;
-      setComposerHeight(clampComposerHeight(resizeStartHeightRef.current - deltaY));
+      setAgentListHeight(clampAgentListHeight(resizeStartHeightRef.current - deltaY));
     };
 
     const handleMouseUp = () => {
@@ -156,7 +164,7 @@ export function IntegratedChatPanel({
       window.removeEventListener("mousemove", handleMouseMove);
       window.removeEventListener("mouseup", handleMouseUp);
     };
-  }, [clampComposerHeight]);
+  }, [clampAgentListHeight]);
 
   useEffect(() => {
     const node = layoutRef.current;
@@ -165,7 +173,7 @@ export function IntegratedChatPanel({
     }
 
     const onLayoutResize = () => {
-      setComposerHeight((current) => clampComposerHeight(current));
+      setAgentListHeight((current) => clampAgentListHeight(current));
     };
 
     const observer = new ResizeObserver(() => {
@@ -173,13 +181,13 @@ export function IntegratedChatPanel({
     });
     observer.observe(node);
     return () => observer.disconnect();
-  }, [clampComposerHeight]);
+  }, [clampAgentListHeight]);
 
-  const handleComposerResizeStart = (event: React.MouseEvent<HTMLDivElement>) => {
+  const handleAgentListResizeStart = (event: React.MouseEvent<HTMLDivElement>) => {
     event.preventDefault();
     isResizingRef.current = true;
     resizeStartYRef.current = event.clientY;
-    resizeStartHeightRef.current = composerHeight;
+    resizeStartHeightRef.current = agentListHeight;
     document.body.style.cursor = "row-resize";
     document.body.style.userSelect = "none";
   };
@@ -531,24 +539,23 @@ export function IntegratedChatPanel({
         <div
           role="separator"
           aria-orientation="horizontal"
-          aria-label="대화창과 에이전트 영역 높이 조절"
-          aria-valuenow={Math.round(composerHeight)}
-          aria-valuemin={MIN_COMPOSER_HEIGHT}
-          onMouseDown={handleComposerResizeStart}
+          aria-label="대화창과 에이전트 목록 높이 조절"
+          aria-valuenow={Math.round(agentListHeight)}
+          aria-valuemin={MIN_AGENT_LIST_HEIGHT}
+          onMouseDown={handleAgentListResizeStart}
           className="group flex h-2 shrink-0 cursor-row-resize items-center justify-center border-y border-slate-700 bg-slate-900 hover:bg-slate-800"
         >
           <span className="h-1 w-12 rounded-full bg-slate-600 group-hover:bg-slate-400" />
         </div>
 
-        <form
-          onSubmit={handleSubmit}
-          className="flex shrink-0 flex-col gap-2 p-3"
-          style={{ height: composerHeight }}
-        >
-          <div className="flex min-h-0 flex-[1.1] flex-col gap-1 text-xs text-slate-400">
+        <form onSubmit={handleSubmit} className="flex shrink-0 flex-col gap-2 p-3">
+          <div
+            className="flex min-h-0 shrink-0 flex-col gap-1 text-xs text-slate-400"
+            style={{ height: agentListHeight }}
+          >
             <span>에이전트</span>
             {chatAgents.length === 0 ? (
-              <p className="rounded-md border border-slate-800 bg-slate-950/50 px-3 py-2 text-sm text-slate-500">
+              <p className="min-h-0 flex-1 rounded-md border border-slate-800 bg-slate-950/50 px-3 py-2 text-sm text-slate-500">
                 등록된 에이전트 없음
               </p>
             ) : (
@@ -584,7 +591,10 @@ export function IntegratedChatPanel({
             )}
           </div>
 
-          <div className="flex min-h-[88px] flex-1 gap-2">
+          <div
+            className="flex shrink-0 gap-2"
+            style={{ height: FIXED_USER_INPUT_HEIGHT }}
+          >
             <button
               type="button"
               onClick={handlePreviousMessage}

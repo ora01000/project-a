@@ -61,7 +61,7 @@ export function AgentTile({ agent }: AgentTileProps) {
 
       <div className="flex min-h-0 flex-1 flex-col justify-center px-3 py-2">
         <div className="mb-1 flex items-center justify-between gap-2 text-[11px] text-slate-400">
-          <span>토큰 사용량</span>
+          <span title="서버 기동 후 TokenTracker 누적">토큰 (누적)</span>
           {agent.operation_status === "working" && agent.operation_detail ? (
             <span
               className="max-w-[55%] truncate rounded border border-emerald-800/60 bg-emerald-950/40 px-1.5 py-0.5 text-[10px] text-emerald-200"
@@ -72,8 +72,8 @@ export function AgentTile({ agent }: AgentTileProps) {
           ) : null}
         </div>
         <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-slate-500">
-          <span>입력 {formatTokenCount(agent.input_tokens)}</span>
-          <span>출력 {formatTokenCount(agent.output_tokens)}</span>
+          <span>누적 입력 {formatTokenCount(agent.input_tokens)}</span>
+          <span>누적 출력 {formatTokenCount(agent.output_tokens)}</span>
         </div>
       </div>
     </div>

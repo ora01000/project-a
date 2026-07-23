@@ -31,10 +31,12 @@ from backend.app.api.notices import router as notices_router
 from backend.app.api.prompt_debug import router as prompt_debug_router
 from backend.app.api.release import router as release_router
 from backend.app.api.signup import router as signup_router
+from backend.app.api.token_usage import router as token_usage_router
 from backend.app.api.users import router as users_router
 from backend.app.api.whatap_webhook import router as whatap_webhook_router
 from backend.app.config import load_job_requester_settings, load_k8s_collector_settings, load_settings
 from backend.app.db import init_database
+from backend.app.logging.prompt_debug import bind_token_tracker
 from backend.app.logging.agent_logger import ensure_agent_logs_dir, log_agent_error
 from backend.app.logging.user_comm_logger import initialize_user_comm_logs
 from backend.app.mcp.client import MCPClientManager
@@ -75,6 +77,7 @@ class AgentManager:
         llm_settings, _, mcp_servers, _ = load_settings()
         self.max_context_tokens = llm_settings.max_context_tokens
         self.token_tracker = TokenTracker(max_context_tokens=self.max_context_tokens)
+        bind_token_tracker(self.token_tracker)
         self.mcp_manager = MCPClientManager(mcp_servers)
         await self.mcp_manager.initialize()
 
@@ -331,6 +334,7 @@ def create_app() -> FastAPI:
     app.include_router(agent_logs_router, prefix="/api")
     app.include_router(prompt_debug_router, prefix="/api")
     app.include_router(agent_records_router, prefix="/api")
+    app.include_router(token_usage_router, prefix="/api")
     app.include_router(agents_router, prefix="/api")
     app.include_router(jobs_router, prefix="/api")
     app.include_router(k8s_collector_router, prefix="/api")

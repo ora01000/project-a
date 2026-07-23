@@ -11,6 +11,7 @@ from backend.app.agents.k8s_agent import K8S_CLUSTER_SPECS
 from backend.app.config import K8sCollectorSettings, load_k8s_collector_settings
 from backend.app.db.k8s_inventory import replace_cluster_snapshot
 from backend.app.services.k8s_collector import collect_cluster_snapshot
+from backend.app.timezone import DISPLAY_TIMEZONE, now_display_datetime
 
 logger = logging.getLogger(__name__)
 
@@ -24,8 +25,11 @@ def scheduled_time_for_agent(
     now: datetime | None = None,
 ) -> datetime:
     """Next local daily slot: base 00:10 + index * 5 minutes."""
-    current = now or datetime.now().astimezone()
-    local = current.astimezone()
+    current = now or now_display_datetime()
+    if current.tzinfo is None:
+        local = current.replace(tzinfo=DISPLAY_TIMEZONE)
+    else:
+        local = current.astimezone(DISPLAY_TIMEZONE)
     base_minutes = schedule_hour * 60 + schedule_minute + agent_index * stagger_minutes
     day_start = local.replace(hour=0, minute=0, second=0, microsecond=0)
     candidate = day_start + timedelta(minutes=base_minutes)
@@ -105,7 +109,7 @@ async def _run_cluster_schedule(
             schedule_minute=settings.schedule_minute,
             stagger_minutes=settings.stagger_minutes,
         )
-        delay = max(0.0, (next_at - datetime.now().astimezone()).total_seconds())
+        delay = max(0.0, (next_at - now_display_datetime()).total_seconds())
         logger.info(
             "k8s collector schedule cluster=%s next=%s (sleep=%.0fs)",
             cluster_id,

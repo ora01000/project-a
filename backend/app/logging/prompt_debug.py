@@ -9,8 +9,10 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any, Iterator, Literal
+from typing import TYPE_CHECKING, Any, Iterator, Literal
 from uuid import UUID
+
+from backend.app.timezone import now_display_datetime
 
 from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -19,7 +21,18 @@ from langchain_core.outputs import ChatResult, LLMResult
 
 logger = logging.getLogger(__name__)
 
+if TYPE_CHECKING:
+    from backend.app.usage.token_tracker import TokenTracker
+
 EntryKind = Literal["llm", "orchestration"]
+
+_token_tracker: TokenTracker | None = None
+
+
+def bind_token_tracker(tracker: TokenTracker | None) -> None:
+    """Attach the process-wide token accumulator used by agent tiles."""
+    global _token_tracker
+    _token_tracker = tracker
 
 _MAX_ENTRIES = 500
 _lock = threading.Lock()
@@ -276,7 +289,7 @@ def record_prompt_debug(
         _next_idx += 1
         entry = PromptDebugEntry(
             idx=idx,
-            timestamp=datetime.now(UTC).astimezone().isoformat(timespec="seconds"),
+            timestamp=now_display_datetime().isoformat(timespec="seconds"),
             kind=kind,
             agent_id=agent_id.strip() or "unknown",
             agent_name=agent_name.strip() or agent_id,
@@ -337,6 +350,72 @@ def clear_prompt_debug_entries() -> int:
         return count
 
 
+def _parse_entry_timestamp(value: str) -> datetime | None:
+    stripped = value.strip()
+    if not stripped:
+        return None
+    try:
+        parsed = datetime.fromisoformat(stripped)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
+
+
+def aggregate_llm_token_usage(
+    *,
+    since: datetime | None = None,
+    until: datetime | None = None,
+    agent_id: str | None = None,
+) -> list[dict[str, Any]]:
+    """Sum LLM-kind prompt-debug rows by agent (period query; aligns with TokenTracker)."""
+    normalized_agent = (agent_id or "").strip() or None
+    since_utc = since.astimezone(UTC) if since is not None else None
+    until_utc = until.astimezone(UTC) if until is not None else None
+
+    with _lock:
+        items = list(_entries)
+
+    totals: dict[str, dict[str, Any]] = {}
+    for raw in items:
+        if raw.get("kind") != "llm":
+            continue
+        entry_agent_id = str(raw.get("agent_id") or "").strip()
+        if not entry_agent_id:
+            continue
+        if normalized_agent and entry_agent_id != normalized_agent:
+            continue
+
+        timestamp = _parse_entry_timestamp(str(raw.get("timestamp") or ""))
+        if timestamp is not None:
+            if since_utc is not None and timestamp < since_utc:
+                continue
+            if until_utc is not None and timestamp > until_utc:
+                continue
+
+        bucket = totals.setdefault(
+            entry_agent_id,
+            {
+                "agent_id": entry_agent_id,
+                "agent_name": str(raw.get("agent_name") or entry_agent_id),
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "call_count": 0,
+            },
+        )
+        if raw.get("agent_name"):
+            bucket["agent_name"] = str(raw["agent_name"])
+        bucket["input_tokens"] += max(0, int(raw.get("input_tokens") or 0))
+        bucket["output_tokens"] += max(0, int(raw.get("output_tokens") or 0))
+        bucket["call_count"] += 1
+
+    results = sorted(totals.values(), key=lambda item: str(item["agent_id"]))
+    for item in results:
+        item["total_tokens"] = int(item["input_tokens"]) + int(item["output_tokens"])
+    return results
+
+
 def _finalize_usage(prompt: str, response: str, input_tokens: int, output_tokens: int) -> tuple[int, int]:
     if input_tokens <= 0:
         input_tokens = _estimate_tokens(prompt)
@@ -358,6 +437,8 @@ def record_llm_exchange(
     if not prompt and not response_text:
         return None
     input_tokens, output_tokens = _finalize_usage(prompt, response_text, input_tokens, output_tokens)
+    if _token_tracker is not None and (input_tokens > 0 or output_tokens > 0):
+        _token_tracker.record(agent_id, input_tokens, output_tokens)
     return record_prompt_debug(
         agent_id=agent_id,
         agent_name=agent_name,

@@ -215,6 +215,8 @@ async def _consult_agent_for_tools(
         f"{TOOL_CONSULT_SYSTEM_PROMPT}"
     )
 
+    # Token + prompt-debug attribution: sys-job-planning (orchestration cost).
+    # The system prompt still role-plays the consult target for tool selection quality.
     try:
         with prompt_debug_scope(
             job_idx=job_idx,
@@ -224,8 +226,8 @@ async def _consult_agent_for_tools(
         ):
             llm = wrap_llm_for_prompt_debug(
                 get_llm(),
-                agent_id=definition.agent_id,
-                agent_name=definition.name,
+                agent_id=JOB_PLANNING_AGENT.agent_id,
+                agent_name=JOB_PLANNING_AGENT.name,
             )
             response = await llm.ainvoke(
                 [

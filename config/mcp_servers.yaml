@@ -16,8 +16,8 @@ servers:
     enabled: true
   vcenter:
     transport: streamable_http
-    url: "http://localhost:9090/mcp"
-    enabled: false
+    url: "http://vmware-aiops.ora01000.pe.kr:32716/mcp"
+    enabled: true
   ansible:
     transport: streamable_http
     url: "http://localhost:9091/mcp"

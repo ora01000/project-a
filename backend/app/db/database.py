@@ -80,6 +80,12 @@ def _apply_migrations(connection: sqlite3.Connection) -> None:
     if "sr_num" not in job_columns:
         # Format length is 16 (e.g. SR20260717_00001); use 20 for headroom.
         connection.execute("ALTER TABLE jobs ADD COLUMN sr_num VARCHAR(20)")
+    if "approval_date" not in job_columns:
+        connection.execute("ALTER TABLE jobs ADD COLUMN approval_date TEXT")
+    if "pending_date" not in job_columns:
+        connection.execute("ALTER TABLE jobs ADD COLUMN pending_date TEXT")
+    if "reject_date" not in job_columns:
+        connection.execute("ALTER TABLE jobs ADD COLUMN reject_date TEXT")
 
     # Prefer userid in jobs.requester / jobs.approver (legacy rows used username).
     connection.execute(

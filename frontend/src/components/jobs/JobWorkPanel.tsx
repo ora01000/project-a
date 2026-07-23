@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import { ConfirmDialog } from "../ConfirmDialog";
 import { JobDetailModal } from "./JobDetailModal";
 import type { JobDetailTab, JobRecord } from "../../types/job";
 import { jobRequesterLabel } from "../../types/job";
@@ -29,7 +30,10 @@ export function JobWorkPanel({ tab }: JobWorkPanelProps) {
   const [jobs, setJobs] = useState<JobRecord[]>([]);
   const [selectedIdxSet, setSelectedIdxSet] = useState<Set<number>>(new Set());
   const [detailJob, setDetailJob] = useState<JobRecord | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<JobRecord | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
   const loadJobs = useCallback(async () => {
@@ -99,6 +103,31 @@ export function JobWorkPanel({ tab }: JobWorkPanelProps) {
     }
   };
 
+  const handleDeleteCompletedJob = async () => {
+    if (!deleteTarget) {
+      return;
+    }
+    setIsDeleting(true);
+    setDeleteError(null);
+    try {
+      const response = await fetch(`/api/jobs/${deleteTarget.idx}/completed`, {
+        method: "DELETE",
+      });
+      if (!response.ok) {
+        throw new Error(await parseError(response, "완료 작업 삭제에 실패했습니다."));
+      }
+      setDeleteTarget(null);
+      if (detailJob?.idx === deleteTarget.idx) {
+        setDetailJob(null);
+      }
+      await loadJobs();
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : "완료 작업 삭제에 실패했습니다.");
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
   if (isLoading) {
     return <p className="text-sm text-slate-500">작업 목록을 불러오는 중...</p>;
   }
@@ -119,14 +148,28 @@ export function JobWorkPanel({ tab }: JobWorkPanelProps) {
     );
   }
 
-  const detailButton = (job: JobRecord) => (
-    <button
-      type="button"
-      onClick={() => void openDetail(job)}
-      className="rounded-md border border-slate-600 px-2 py-1 text-xs text-slate-200 hover:bg-slate-800"
-    >
-      상세보기
-    </button>
+  const detailActions = (job: JobRecord) => (
+    <div className="flex items-center gap-2">
+      <button
+        type="button"
+        onClick={() => void openDetail(job)}
+        className="rounded-md border border-slate-600 px-2 py-1 text-xs text-slate-200 hover:bg-slate-800"
+      >
+        상세보기
+      </button>
+      {isCompletedTab ? (
+        <button
+          type="button"
+          onClick={() => {
+            setDeleteError(null);
+            setDeleteTarget(job);
+          }}
+          className="rounded-md border border-rose-700 px-2 py-1 text-xs text-rose-200 hover:bg-rose-950/60"
+        >
+          삭제
+        </button>
+      ) : null}
+    </div>
   );
 
   return (
@@ -179,7 +222,7 @@ export function JobWorkPanel({ tab }: JobWorkPanelProps) {
                 <td className="px-3 py-2">{job.state_label}</td>
                 <td className="px-3 py-2">{job.completion_request_date}</td>
                 <td className="px-3 py-2">{job.actual_completion_time ?? "-"}</td>
-                <td className="px-3 py-2">{detailButton(job)}</td>
+                <td className="px-3 py-2">{detailActions(job)}</td>
               </tr>
             ) : (
               <tr key={job.idx} className="border-b border-slate-800 text-slate-200">
@@ -201,7 +244,7 @@ export function JobWorkPanel({ tab }: JobWorkPanelProps) {
                 {showReviewColumns ? <td className="px-3 py-2">{job.request_depart}</td> : null}
                 {showReviewColumns ? <td className="px-3 py-2">{jobRequesterLabel(job)}</td> : null}
                 {!showReviewColumns ? <td className="px-3 py-2">{job.state_label}</td> : null}
-                <td className="px-3 py-2">{detailButton(job)}</td>
+                <td className="px-3 py-2">{detailActions(job)}</td>
               </tr>
             ),
           )}
@@ -221,6 +264,26 @@ export function JobWorkPanel({ tab }: JobWorkPanelProps) {
             setDetailJob(updated);
             void loadJobs();
           }}
+        />
+      ) : null}
+
+      {deleteTarget ? (
+        <ConfirmDialog
+          title="완료 작업 삭제"
+          message={
+            deleteError
+              ? deleteError
+              : `"${deleteTarget.job_title}" 작업을 삭제하시겠습니까?`
+          }
+          confirmLabel={isDeleting ? "삭제 중…" : "삭제"}
+          cancelLabel="취소"
+          onCancel={() => {
+            if (!isDeleting) {
+              setDeleteTarget(null);
+              setDeleteError(null);
+            }
+          }}
+          onConfirm={() => void handleDeleteCompletedJob()}
         />
       ) : null}
     </>

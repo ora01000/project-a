@@ -1,3 +1,5 @@
+import { dateOnlyAfterDays, todayDateOnly } from "../utils/datetime";
+
 export interface NoticeRecord {
   idx: number;
   writer: string;
@@ -19,20 +21,10 @@ export interface NoticeFormValues {
   welcome_popup: boolean;
 }
 
-function pad(value: number): string {
-  return String(value).padStart(2, "0");
-}
-
-function todayDateOnly(): string {
-  const today = new Date();
-  return `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`;
-}
 
 export function emptyNoticeForm(writer: string): NoticeFormValues {
   const fromDate = todayDateOnly();
-  const until = new Date();
-  until.setDate(until.getDate() + 7);
-  const untilDate = `${until.getFullYear()}-${pad(until.getMonth() + 1)}-${pad(until.getDate())}`;
+  const untilDate = dateOnlyAfterDays(7);
   return {
     writer,
     from_date: `${fromDate} 00:00:00`,

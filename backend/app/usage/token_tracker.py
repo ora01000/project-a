@@ -41,6 +41,26 @@ class TokenTracker:
                 output_tokens=usage.output_tokens,
             )
 
+    def get_all_usage(self) -> dict[str, AgentTokenUsage]:
+        with self._lock:
+            return {
+                agent_id: AgentTokenUsage(
+                    input_tokens=usage.input_tokens,
+                    output_tokens=usage.output_tokens,
+                )
+                for agent_id, usage in self._usage_by_agent.items()
+            }
+
+    def reset_all(self) -> int:
+        with self._lock:
+            count = len(self._usage_by_agent)
+            self._usage_by_agent.clear()
+            return count
+
+    def reset_agent(self, agent_id: str) -> bool:
+        with self._lock:
+            return self._usage_by_agent.pop(agent_id, None) is not None
+
     def usage_percent(self, agent_id: str) -> float:
         if self.max_context_tokens <= 0:
             return 0.0

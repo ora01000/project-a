@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import { TopologyProvider } from "./context/TopologyContext";
 import { AgentListPage } from "./components/agents/AgentListPage";
+import { TokenManagementPage } from "./components/agents/TokenManagementPage";
 import { InventoryCsvPage } from "./components/agents/InventoryCsvPage";
 import { DashboardPage } from "./components/DashboardPage";
 import { LoginPage } from "./components/LoginPage";
@@ -157,7 +158,12 @@ export default function App() {
     if (!user) {
       return;
     }
-    const adminOnlyViews: AppView[] = ["agent-list", "inventory-csv", "agent-assignment"];
+    const adminOnlyViews: AppView[] = [
+      "agent-list",
+      "inventory-csv",
+      "agent-assignment",
+      "token-management",
+    ];
     if (user.role !== ROLE_ADMIN && adminOnlyViews.includes(activeView)) {
       setActiveView("dashboard");
     }
@@ -205,6 +211,10 @@ export default function App() {
         {activeView === "agent-list" && user.role === ROLE_ADMIN ? <AgentListPage /> : null}
 
         {activeView === "inventory-csv" && user.role === ROLE_ADMIN ? <InventoryCsvPage /> : null}
+
+        {activeView === "token-management" && user.role === ROLE_ADMIN ? (
+          <TokenManagementPage viewerRole={user.role} />
+        ) : null}
 
         {activeView === "job-list" ? <JobListPage user={user} /> : null}
 

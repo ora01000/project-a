@@ -6,6 +6,7 @@ import {
   JOB_NOTIFICATION_RESULT,
   JOB_NOTIFICATION_REVIEW,
 } from "../../types/job";
+import { formatResponseTimestamp } from "../../utils/messageIndex";
 import { ConfirmDialog } from "../ConfirmDialog";
 
 interface JobNotificationCardProps {
@@ -64,6 +65,17 @@ const FAILURE_CONFIRM: Record<
   },
 };
 
+function formatAlarmSentAt(value: string | null | undefined): string | null {
+  if (!value?.trim()) {
+    return null;
+  }
+  const parsed = new Date(value.includes("T") ? value : value.replace(" ", "T"));
+  if (Number.isNaN(parsed.getTime())) {
+    return value;
+  }
+  return formatResponseTimestamp(parsed);
+}
+
 export function JobNotificationCard({
   notification,
   onReview,
@@ -80,6 +92,12 @@ export function JobNotificationCard({
   const isReviewRequest = notification.notification_type === JOB_NOTIFICATION_REVIEW;
   const isExecutionResult = notification.notification_type === JOB_NOTIFICATION_RESULT;
   const isExecutionFailure = notification.notification_type === JOB_NOTIFICATION_FAILURE;
+
+  const alarmSentAt = isReviewRequest
+    ? formatAlarmSentAt(notification.request_date)
+    : isExecutionResult
+      ? formatAlarmSentAt(notification.actual_completion_time)
+      : null;
 
   const handleConfirm = () => {
     if (!pendingAction) {
@@ -133,6 +151,9 @@ export function JobNotificationCard({
         >
           {notification.title}
         </div>
+        {alarmSentAt ? (
+          <p className="mb-2 text-xs text-slate-400">발송 시각: {alarmSentAt}</p>
+        ) : null}
         <p className="whitespace-pre-wrap text-sm text-slate-200">{notification.message}</p>
 
         {isReviewRequest ? (

@@ -1,8 +1,8 @@
 import logging
-from datetime import datetime, timezone
 from pathlib import Path
 
 from backend.app.db.roles import ROLE_ADMIN, ROLE_PENDING, ROLE_USER
+from backend.app.timezone import format_display_datetime
 from backend.app.db.signup_notifications import (
     create_signup_notification,
     delete_signup_notification,
@@ -59,7 +59,7 @@ def register_pending_user(
     password: str,
     depart: str,
 ) -> User:
-    signup_date = datetime.now(timezone.utc).astimezone().strftime("%Y-%m-%d %H:%M:%S")
+    signup_date = format_display_datetime()
     user = create_user(
         database_path,
         userid=userid,

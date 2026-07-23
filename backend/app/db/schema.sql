@@ -49,7 +49,10 @@ CREATE TABLE IF NOT EXISTS jobs (
     job_plan TEXT,
     original_job_plan TEXT,
     execution_result TEXT,
-    actual_completion_time TEXT
+    actual_completion_time TEXT,
+    approval_date TEXT,
+    pending_date TEXT,
+    reject_date TEXT
 );
 
 CREATE TABLE IF NOT EXISTS job_notifications (

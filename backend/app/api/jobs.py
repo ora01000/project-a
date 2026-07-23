@@ -1,17 +1,21 @@
 import json
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from backend.app.agents.system_agents import NotifyChannel
 from backend.app.db.job_datetime import now_job_datetime
+from backend.app.timezone import display_datetime_after
 from backend.app.db.jobs import (
     JOB_STATE_COMPLETED,
     JOB_STATE_PENDING,
     JOB_STATE_PLAN_COMPLETED,
     JOB_STATE_UNDER_REVIEW,
     Job,
+    delete_job_by_idx,
+    get_job_by_idx,
+    get_job_notification_times,
     job_state_label,
     list_jobs,
     list_jobs_by_state,
@@ -21,7 +25,11 @@ from backend.app.db.jobs import (
     save_job_plan_edit,
 )
 from backend.app.db.roles import ROLE_ADMIN
-from backend.app.db.notifications import delete_job_notification, list_notifications_for_user
+from backend.app.db.notifications import (
+    delete_job_notification,
+    delete_job_notifications_by_job,
+    list_notifications_for_user,
+)
 from backend.app.db.users import build_userid_username_map, resolve_username
 from backend.app.services.job_execution import (
     JobExecutionConflictError,
@@ -72,6 +80,9 @@ class JobResponse(BaseModel):
     original_job_plan: dict | None = None
     execution_result: dict | None = None
     actual_completion_time: str | None = None
+    approval_date: str | None = None
+    pending_date: str | None = None
+    reject_date: str | None = None
     requester_name: str | None = None
     approver_name: str | None = None
     sr_num: str | None = None
@@ -123,6 +134,9 @@ class JobResponse(BaseModel):
             original_job_plan=original_job_plan,
             execution_result=execution_result,
             actual_completion_time=job.actual_completion_time,
+            approval_date=job.approval_date,
+            pending_date=job.pending_date,
+            reject_date=job.reject_date,
             requester_name=requester_name,
             approver_name=approver_name,
             sr_num=job.sr_num,
@@ -149,6 +163,8 @@ class JobNotificationResponse(BaseModel):
     title: str
     message: str
     created_at: str
+    request_date: str | None = None
+    actual_completion_time: str | None = None
 
 
 class RejectJobRequest(BaseModel):
@@ -229,7 +245,7 @@ async def send_job_test_sample(payload: SendJobTestSampleRequest, request: Reque
 
     database_path = request.app.state.database_path
     request_date = now_job_datetime()
-    completion_request_date = (datetime.now() + timedelta(days=3)).strftime("%Y-%m-%d %H:%M:%S")
+    completion_request_date = display_datetime_after(timedelta(days=3))
     job = await submit_job_request(
         database_path,
         request_date=request_date,
@@ -320,6 +336,10 @@ async def get_completed_jobs(request: Request) -> list[JobResponse]:
 async def get_job_notifications(target_user: str, request: Request) -> list[JobNotificationResponse]:
     database_path = request.app.state.database_path
     notifications = list_notifications_for_user(database_path, target_user)
+    job_times = get_job_notification_times(
+        database_path,
+        [notification.job_idx for notification in notifications],
+    )
     return [
         JobNotificationResponse(
             idx=notification.idx,
@@ -328,6 +348,8 @@ async def get_job_notifications(target_user: str, request: Request) -> list[JobN
             title=notification.title,
             message=notification.message,
             created_at=notification.created_at,
+            request_date=job_times.get(notification.job_idx, {}).get("request_date"),
+            actual_completion_time=job_times.get(notification.job_idx, {}).get("actual_completion_time"),
         )
         for notification in notifications
     ]
@@ -344,8 +366,6 @@ async def dismiss_job_notification(notification_idx: int, request: Request) -> d
 
 @router.get("/jobs/{idx}", response_model=JobResponse)
 async def get_job(idx: int, request: Request) -> JobResponse:
-    from backend.app.db.jobs import get_job_by_idx
-
     database_path = request.app.state.database_path
     job = get_job_by_idx(database_path, idx)
     if job is None:
@@ -353,10 +373,24 @@ async def get_job(idx: int, request: Request) -> JobResponse:
     return _job_response(request, job)
 
 
+@router.delete("/jobs/{idx}/completed")
+async def delete_completed_job(idx: int, request: Request) -> dict[str, bool]:
+    database_path = request.app.state.database_path
+    job = get_job_by_idx(database_path, idx)
+    if job is None:
+        raise HTTPException(status_code=404, detail="작업을 찾을 수 없습니다.")
+    if job.state != JOB_STATE_COMPLETED:
+        raise HTTPException(status_code=400, detail="완료 상태의 작업만 삭제할 수 있습니다.")
+
+    delete_job_notifications_by_job(database_path, idx)
+    deleted = delete_job_by_idx(database_path, idx)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="작업을 찾을 수 없습니다.")
+    return {"ok": True}
+
+
 @router.put("/jobs/{idx}/plan", response_model=JobResponse)
 async def update_job_plan_endpoint(idx: int, payload: JobPlanUpdateRequest, request: Request) -> JobResponse:
-    from backend.app.db.jobs import get_job_by_idx
-
     database_path = request.app.state.database_path
     job = get_job_by_idx(database_path, idx)
     if job is None:
