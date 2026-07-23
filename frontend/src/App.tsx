@@ -8,6 +8,7 @@ import { DashboardPage } from "./components/DashboardPage";
 import { LoginPage } from "./components/LoginPage";
 import { MenuBar } from "./components/MenuBar";
 import { StatusBar } from "./components/StatusBar";
+import { TeamsInboundDebugWatcher } from "./components/TeamsInboundDebugWatcher";
 import { JobCreatePage } from "./components/jobs/JobCreatePage";
 import { JobListPage } from "./components/jobs/JobListPage";
 import { NoticeBoardPage } from "./components/notices/NoticeBoardPage";
@@ -230,6 +231,7 @@ export default function App() {
 
         {activeView === "notice-board" ? <NoticeBoardPage user={user} /> : null}
       </div>
+      <TeamsInboundDebugWatcher />
     </TopologyProvider>
   );
 }

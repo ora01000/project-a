@@ -30,8 +30,29 @@ class InventoryQueryInput(BaseModel):
     )
 
 
-async def _run_inventory_query(query: str, *, caller_agent_id: str | None = None) -> str:
+async def _run_inventory_query(
+    query: str,
+    *,
+    caller_agent_id: str | None = None,
+    caller_agent_name: str | None = None,
+) -> str:
     from backend.app.services.inventory import get_inventory_service
+    from backend.app.services.inventory_approval import (
+        requires_inventory_approval,
+        wait_for_inventory_approval,
+    )
+
+    if requires_inventory_approval(caller_agent_id):
+        approved = await wait_for_inventory_approval(
+            caller_agent_id=caller_agent_id or "unknown",
+            caller_agent_name=caller_agent_name or caller_agent_id or "unknown",
+            query=query,
+        )
+        if not approved:
+            return (
+                "사용자가 인벤토리 조회를 거부했습니다. "
+                "인벤토리 정보 없이 기존 지식과 지금까지 확인한 내용만으로 답변하세요."
+            )
 
     service = get_inventory_service()
     result = await service.query(query)
@@ -54,9 +75,17 @@ async def _run_inventory_query(query: str, *, caller_agent_id: str | None = None
     return result.content
 
 
-def create_inventory_tool(*, caller_agent_id: str | None = None) -> StructuredTool:
+def create_inventory_tool(
+    *,
+    caller_agent_id: str | None = None,
+    caller_agent_name: str | None = None,
+) -> StructuredTool:
     async def _query_inventory(query: str) -> str:
-        return await _run_inventory_query(query, caller_agent_id=caller_agent_id)
+        return await _run_inventory_query(
+            query,
+            caller_agent_id=caller_agent_id,
+            caller_agent_name=caller_agent_name,
+        )
 
     return StructuredTool.from_function(
         coroutine=_query_inventory,

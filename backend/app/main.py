@@ -33,6 +33,7 @@ from backend.app.api.release import router as release_router
 from backend.app.api.signup import router as signup_router
 from backend.app.api.token_usage import router as token_usage_router
 from backend.app.api.users import router as users_router
+from backend.app.api.teams_inbound_debug import router as teams_inbound_debug_router
 from backend.app.api.whatap_webhook import router as whatap_webhook_router
 from backend.app.config import load_job_requester_settings, load_k8s_collector_settings, load_settings
 from backend.app.db import init_database
@@ -344,6 +345,7 @@ def create_app() -> FastAPI:
     app.include_router(release_router, prefix="/api")
     app.include_router(inventory_router, prefix="/api")
     app.include_router(whatap_webhook_router, prefix="/api")
+    app.include_router(teams_inbound_debug_router, prefix="/api")
     return app
 
 

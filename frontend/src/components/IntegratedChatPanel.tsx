@@ -9,6 +9,10 @@ import { formatResponseTimestamp } from "../utils/messageIndex";
 import { flushSseBuffer, parseSseChunk } from "../utils/parseSse";
 import { AssistantMessageContent } from "./AssistantMessageContent";
 import { CollapsibleUserMessage } from "./CollapsibleUserMessage";
+import {
+  InventoryApprovalCard,
+  type InventoryApprovalRequest,
+} from "./InventoryApprovalCard";
 import { JobNotificationCard } from "./jobs/JobNotificationCard";
 import { SignupNotificationCard } from "./users/SignupNotificationCard";
 import { ToolUsageList } from "./ToolUsageList";
@@ -118,6 +122,8 @@ export function IntegratedChatPanel({
   const [isLoading, setIsLoading] = useState(false);
   const [inputHistory, setInputHistory] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
+  const [inventoryApprovals, setInventoryApprovals] = useState<InventoryApprovalRequest[]>([]);
+  const [processingApprovalId, setProcessingApprovalId] = useState<string | null>(null);
   const conversationScrollRef = useRef<HTMLDivElement>(null);
   const layoutRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -331,8 +337,43 @@ export function IntegratedChatPanel({
   };
 
   const handleStop = () => {
+    void rejectPendingInventoryApprovals();
     abortControllerRef.current?.abort();
   };
+
+  const rejectPendingInventoryApprovals = useCallback(async () => {
+    const pending = inventoryApprovals;
+    if (pending.length === 0) {
+      return;
+    }
+    await Promise.all(
+      pending.map((request) =>
+        fetch(`/api/chat/inventory-approvals/${request.approvalId}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ approved: false }),
+        }).catch(() => undefined),
+      ),
+    );
+    setInventoryApprovals([]);
+  }, [inventoryApprovals]);
+
+  const resolveInventoryApproval = useCallback(async (approvalId: string, approved: boolean) => {
+    setProcessingApprovalId(approvalId);
+    try {
+      const response = await fetch(`/api/chat/inventory-approvals/${approvalId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ approved }),
+      });
+      if (!response.ok) {
+        throw new Error("인벤토리 승인 처리에 실패했습니다.");
+      }
+      setInventoryApprovals((prev) => prev.filter((request) => request.approvalId !== approvalId));
+    } finally {
+      setProcessingApprovalId(null);
+    }
+  }, []);
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -396,6 +437,25 @@ export function IntegratedChatPanel({
             continue;
           }
 
+          if (event.event === "inventory_approval") {
+            const payload = JSON.parse(event.data) as {
+              approval_id: string;
+              caller_agent_id: string;
+              caller_agent_name: string;
+              query: string;
+            };
+            setInventoryApprovals((prev) => [
+              ...prev,
+              {
+                approvalId: payload.approval_id,
+                callerAgentId: payload.caller_agent_id,
+                callerAgentName: payload.caller_agent_name,
+                query: payload.query,
+              },
+            ]);
+            continue;
+          }
+
           if (event.event === "tools") {
             const payload = JSON.parse(event.data) as { tools: ToolUsage[] };
             toolsUsed = payload.tools ?? [];
@@ -445,6 +505,7 @@ export function IntegratedChatPanel({
       const message = err instanceof Error ? err.message : "Unknown error";
       updateLastResponse(`오류: ${message}`, []);
     } finally {
+      setInventoryApprovals([]);
       abortControllerRef.current = null;
       setIsLoading(false);
       onChatComplete?.();
@@ -478,61 +539,79 @@ export function IntegratedChatPanel({
       <div className="flex min-h-0 flex-1 flex-col">
         <div className="flex min-h-0 flex-1 flex-col gap-1 px-3 pt-3">
           <div className="text-xs font-medium tracking-wide text-slate-300">대화창</div>
-          <div
-            ref={conversationScrollRef}
-            className="min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain rounded-md border border-slate-800 bg-slate-950/50 p-2 text-sm"
-          >
-            {jobNotifications.length === 0 && signupNotifications.length === 0 && responses.length === 0 ? (
-              <p className="text-slate-500">대화 내용이 여기에 표시됩니다.</p>
-            ) : null}
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-md border border-slate-800 bg-slate-950/50 text-sm">
+            <div
+              ref={conversationScrollRef}
+              className="min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain p-2"
+            >
+              {jobNotifications.length === 0 &&
+              signupNotifications.length === 0 &&
+              responses.length === 0 ? (
+                <p className="text-slate-500">대화 내용이 여기에 표시됩니다.</p>
+              ) : null}
 
-            {signupNotifications.map((notification) => (
-              <SignupNotificationCard
-                key={`signup-${notification.idx}`}
-                notification={notification}
-                isProcessing={isSignupActionProcessing}
-                onApprove={(userIdx) => onSignupApprove?.(userIdx)}
-                onReject={(userIdx, reason) => onSignupReject?.(userIdx, reason)}
-                onHold={(notificationIdx) => onSignupHold?.(notificationIdx)}
-              />
-            ))}
-
-            {jobNotifications.map((notification) => (
-              <JobNotificationCard
-                key={notification.idx}
-                notification={notification}
-                isProcessing={isJobActionProcessing}
-                onReview={(jobIdx) => onJobReview?.(jobIdx)}
-                onApprove={(jobIdx) => onJobApprove?.(jobIdx)}
-                onPending={(jobIdx) => onJobPending?.(jobIdx)}
-                onReject={(jobIdx) => onJobReject?.(jobIdx)}
-                onDismiss={(notificationIdx) => onJobDismiss?.(notificationIdx)}
-                onRetry={(jobIdx, notificationIdx) => onJobRetry?.(jobIdx, notificationIdx)}
-              />
-            ))}
-
-            {responses.map((response) => (
-              <div key={response.id} className="space-y-2">
-                <CollapsibleUserMessage
-                  content={response.userContent}
-                  createdAt={response.createdAt}
+              {signupNotifications.map((notification) => (
+                <SignupNotificationCard
+                  key={`signup-${notification.idx}`}
+                  notification={notification}
+                  isProcessing={isSignupActionProcessing}
+                  onApprove={(userIdx) => onSignupApprove?.(userIdx)}
+                  onReject={(userIdx, reason) => onSignupReject?.(userIdx, reason)}
+                  onHold={(notificationIdx) => onSignupHold?.(notificationIdx)}
                 />
-                <div className="rounded-md border border-emerald-800/40 bg-emerald-950/35 px-2 py-2 text-slate-100 break-words">
-                  <div className="mb-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] leading-tight text-emerald-300/80">
-                    <span className="rounded-full border border-emerald-700/50 bg-emerald-950/60 px-2 py-0.5 text-emerald-200">
-                      {response.agentName}
-                    </span>
-                    <span>{formatResponseTimestamp(new Date(response.createdAt))}</span>
+              ))}
+
+              {jobNotifications.map((notification) => (
+                <JobNotificationCard
+                  key={notification.idx}
+                  notification={notification}
+                  isProcessing={isJobActionProcessing}
+                  onReview={(jobIdx) => onJobReview?.(jobIdx)}
+                  onApprove={(jobIdx) => onJobApprove?.(jobIdx)}
+                  onPending={(jobIdx) => onJobPending?.(jobIdx)}
+                  onReject={(jobIdx) => onJobReject?.(jobIdx)}
+                  onDismiss={(notificationIdx) => onJobDismiss?.(notificationIdx)}
+                  onRetry={(jobIdx, notificationIdx) => onJobRetry?.(jobIdx, notificationIdx)}
+                />
+              ))}
+
+              {responses.map((response) => (
+                <div key={response.id} className="space-y-2">
+                  <CollapsibleUserMessage
+                    content={response.userContent}
+                    createdAt={response.createdAt}
+                  />
+                  <div className="rounded-md border border-emerald-800/40 bg-emerald-950/35 px-2 py-2 text-slate-100 break-words">
+                    <div className="mb-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] leading-tight text-emerald-300/80">
+                      <span className="rounded-full border border-emerald-700/50 bg-emerald-950/60 px-2 py-0.5 text-emerald-200">
+                        {response.agentName}
+                      </span>
+                      <span>{formatResponseTimestamp(new Date(response.createdAt))}</span>
+                    </div>
+                    <ToolUsageList tools={response.toolsUsed} />
+                    {response.assistantContent ? (
+                      <AssistantMessageContent content={response.assistantContent} />
+                    ) : (
+                      <span className="text-slate-500">응답 생성 중...</span>
+                    )}
                   </div>
-                  <ToolUsageList tools={response.toolsUsed} />
-                  {response.assistantContent ? (
-                    <AssistantMessageContent content={response.assistantContent} />
-                  ) : (
-                    <span className="text-slate-500">응답 생성 중...</span>
-                  )}
                 </div>
+              ))}
+            </div>
+
+            {inventoryApprovals.length > 0 ? (
+              <div className="shrink-0 space-y-2 border-t border-amber-800/40 bg-amber-950/20 p-2">
+                {inventoryApprovals.map((request) => (
+                  <InventoryApprovalCard
+                    key={request.approvalId}
+                    request={request}
+                    isProcessing={processingApprovalId === request.approvalId}
+                    onApprove={(approvalId) => void resolveInventoryApproval(approvalId, true)}
+                    onReject={(approvalId) => void resolveInventoryApproval(approvalId, false)}
+                  />
+                ))}
               </div>
-            ))}
+            ) : null}
           </div>
         </div>
 

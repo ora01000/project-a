@@ -186,7 +186,12 @@ async def build_agent(
     ]
 
     if definition.agent_id != INVENTORY_AGENT_ID:
-        tools.append(create_inventory_tool(caller_agent_id=definition.agent_id))
+        tools.append(
+            create_inventory_tool(
+                caller_agent_id=definition.agent_id,
+                caller_agent_name=definition.name,
+            )
+        )
 
     prompt = definition.system_prompt
     if definition.agent_id != INVENTORY_AGENT_ID:
@@ -234,7 +239,12 @@ async def build_planned_step_agent(
     planned_name = (tool_name or "").strip()
     if planned_name and planned_name != "agent_invoke":
         if planned_name == QUERY_INVENTORY_TOOL_NAME:
-            selected_tools = [create_inventory_tool(caller_agent_id=definition.agent_id)]
+            selected_tools = [
+                create_inventory_tool(
+                    caller_agent_id=definition.agent_id,
+                    caller_agent_name=definition.name,
+                )
+            ]
         else:
             available = [
                 wrap_tool_with_argument_sanitizer(tool)
