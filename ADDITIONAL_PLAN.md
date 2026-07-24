@@ -1252,12 +1252,40 @@ cursor 에사 사용할 plan 초안을 작성합니다.
 ## 표시시각 타임존 정의
 - 로컬에서는 발생하지 않으나 실제 서버에서는 타임존이 맞지 않아 타임존을 Asia/Seoul 로 고정한다. 
 
-{"job_title":{"etag":"1784789589562","messageType":"message","createdDateTime":"2026-07-23T06:53:09.562Z","lastModifiedDateTime":"2026-07-23T06:53:09.562Z","subject":"[테스트] 팀즈 메시지 전송","importance":"normal","locale":"en-us","webUrl":"https://teams.microsoft.com/l/message/19%3ABYenL-cQTC1SX76v4E8aW26hD-spAN_rdfYbNGpw09k1%40thread.tacv2/1784789589562?groupId=a73b9b17-f8d5-435c-87cb-35077ce2296d&tenantId=01622868-7846-4ff6-8e31-fdc8937a8c01&createdTime=1784789589562&parentMessageId=1784789589562","id":"1784789589562","from":{"user":{"@odata.type":"#microsoft.graph.teamworkUserIdentity","id":"d75bcd72-d9d0-4a62-b19c-ced400dad5b4","displayName":"윤인수 IT플랫폼운영팀","userIdentityType":"aadUser","tenantId":"01622868-7846-4ff6-8e31-fdc8937a8c01"}},"body":{"contentType":"html","content":"<p>내용&nbsp;</p>"},"channelIdentity":{"teamId":"a73b9b17-f8d5-435c-87cb-35077ce2296d","channelId":"19:BYenL-cQTC1SX76v4E8aW26hD-spAN_rdfYbNGpw09k1@thread.tacv2"},"attachments":[],"mentions":[],"reactions":[]},"requester":"d75bcd72-d9d0-4a62-b19c-ced400dad5b4"}
+## commit, 도커 빌드 후 푸시
+- 현재까지 수정사항을 dev 브랜치에 commit/push 한다.
+- 프론트/백엔드 도커 빌드 수행후 260723-1 태깅, 푸시
+
+## 인벤토리 에이전트 사용 전 문의
+- 일반 에이전트에서 인벤토리 에이전트를 호출하기 전에 통합채팅창 알럿을 통해 인벤토리 에이전트를 호출할지 물어본다. 
+- 사용자가 승인을 하면 진행, 거부할 경우는 인벤토리 호출 없이 지금까지의 결과로만 응답한다.
+- 단 시스템 에이전트는 해당 없다.
+- 인벤토리 호출 확인 알럿 창이 다른 알럿과 동일하게 채팅창의 상단에 표시되어 확인이 어렵다. 인벤토리 호출 확인 알럿의 경우 채팅창의 가장 아래에 붙여서 출력가능한가?
+- 인벤토리 호출 확인 알럿의 승인/거부 버튼을 클릭시 한번 더 확인을 하는데 확인 절차는 삭제한다.
 
 
+프론트/백엔드 모두 도커 빌드, 동일 태그로 푸시
 
-    
+문의) backend /api/jobs 로 팀즈 채널에서 전송시 json 포맷
 
+## 테스트 코드 추가
+- 백엔드에 teams 채널에서 power automate 를 통해 전송하는 메시지를 그대로 받아 출력하는 디버깅용 엔드포인트와 코드를 작성한다.
+- POST 로 전송하며 전송받은 메시지를 그대로 출력한다.
+- 메시지 출력은 Popup 으로 보여준다
+
+## Power Automate 전송 포맷을 참고하여 수신 처리
+- 전송 json : power_automate_format.json
+- key mapping
+  - job_title.createdDateTime -> request_date
+  - job_title.subject -> job_title
+  - webUrl
+  - from.user.displayName
+  - body.contentType
+  - body.content
+  - channelIdentity.teamId
+  - channelIdentity.channelId
+  - attachments
+  - mentions
 
 
 
