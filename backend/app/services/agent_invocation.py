@@ -8,6 +8,7 @@ from backend.app.agents.base import (
 )
 from backend.app.agents.inventory_tool import INVENTORY_AGENT_ID, QUERY_INVENTORY_TOOL_NAME
 from backend.app.agents.inventory_agent import INVENTORY_AGENT_MARKER
+from backend.app.agents.remote_agent import REMOTE_AGENT_MARKER
 from backend.app.agents.system_agents import (
     HELPDESK_AGENT_ID,
     SYSTEM_AGENT_MARKER,
@@ -25,11 +26,16 @@ async def invoke_agent_by_id(
     message: str,
     *,
     caller_agent_id: str | None = None,
+    agent_runtime: Any | None = None,
 ) -> AgentInvokeResult:
     if agent_id == HELPDESK_AGENT_ID:
         from backend.app.services.helpdesk import handle_helpdesk_query
 
-        return await handle_helpdesk_query(agent_manager, message)
+        return await handle_helpdesk_query(
+            agent_manager,
+            message,
+            agent_runtime=agent_runtime,
+        )
 
     if agent_id == INVENTORY_AGENT_ID:
         inventory_service = getattr(agent_manager, "inventory_service", None)
@@ -52,6 +58,11 @@ async def invoke_agent_by_id(
         raise AgentInvocationError(f"Agent '{agent_id}' not found")
 
     agent = agent_manager.get_agent(agent_id)
+    if agent is REMOTE_AGENT_MARKER:
+        raise AgentInvocationError(
+            f"Agent '{agent_id}' is configured for remote runtime execution"
+        )
+
     if agent is INVENTORY_AGENT_MARKER:
         inventory_service = getattr(agent_manager, "inventory_service", None)
         if inventory_service is None:
@@ -94,6 +105,7 @@ async def invoke_agent_for_planned_step(
     tool_name: str | None = None,
     tool_params: dict[str, Any] | None = None,
     caller_agent_id: str | None = None,
+    agent_runtime: Any | None = None,
 ) -> AgentInvokeResult:
     """Invoke a regular agent constrained to the single tool from the job plan.
 
@@ -117,12 +129,17 @@ async def invoke_agent_for_planned_step(
             INVENTORY_AGENT_ID,
             message,
             caller_agent_id=caller_agent_id,
+            agent_runtime=agent_runtime,
         )
 
     if agent_id not in agent_manager.agents:
         raise AgentInvocationError(f"Agent '{agent_id}' not found")
 
     agent = agent_manager.get_agent(agent_id)
+    if agent is REMOTE_AGENT_MARKER:
+        raise AgentInvocationError(
+            f"Agent '{agent_id}' is configured for remote runtime execution"
+        )
     if agent is SYSTEM_AGENT_MARKER or is_dashboard_system_agent_id(agent_id):
         raise AgentInvocationError(
             f"System agent '{agent_id}' cannot be invoked as a planned job step"

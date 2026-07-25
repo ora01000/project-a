@@ -12,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from backend.app.agents.base import AgentDefinition, _aggregate_mcp_status, build_agent
 from backend.app.agents.inventory_agent import INVENTORY_AGENT_MARKER
 from backend.app.agents.inventory_tool import INVENTORY_AGENT_ID
+from backend.app.agents.remote_agent import REMOTE_AGENT_MARKER
 from backend.app.agents.registry import load_agent_definitions
 from backend.app.agents.system_agents import (
     SYSTEM_AGENT_MARKER,
@@ -33,9 +34,15 @@ from backend.app.api.release import router as release_router
 from backend.app.api.signup import router as signup_router
 from backend.app.api.token_usage import router as token_usage_router
 from backend.app.api.users import router as users_router
+from backend.app.api.runtime_internal import router as runtime_internal_router
 from backend.app.api.teams_inbound_debug import router as teams_inbound_debug_router
 from backend.app.api.whatap_webhook import router as whatap_webhook_router
-from backend.app.config import load_job_requester_settings, load_k8s_collector_settings, load_settings
+from backend.app.config import (
+    load_job_requester_settings,
+    load_k8s_collector_settings,
+    load_settings,
+    resolve_control_plane_base_url,
+)
 from backend.app.services.agent_runtime_client import create_agent_runtime_client
 from backend.app.db import init_database
 from backend.app.logging.prompt_debug import bind_token_tracker
@@ -65,6 +72,9 @@ class AgentManager:
         self.llm_status: str = "unknown"
         self.token_tracker: TokenTracker | None = None
         self.max_context_tokens: int = 32768
+        self.execution_mode: str = "local"
+        self.agent_runtime: Any | None = None
+        self._runtime_health_cache: dict[str, Any] = {}
         self._health_check_lock = asyncio.Lock()
 
     def _register_system_agents(self) -> None:
@@ -75,13 +85,16 @@ class AgentManager:
             self.agent_active_counts.setdefault(definition.agent_id, 0)
             self.agents[definition.agent_id] = SYSTEM_AGENT_MARKER
 
-    async def initialize(self, database_path: Path) -> None:
+    async def initialize(self, database_path: Path, *, execution_mode: str = "local") -> None:
+        self.execution_mode = (execution_mode or "local").strip().lower()
         llm_settings, _, mcp_servers, _ = load_settings()
         self.max_context_tokens = llm_settings.max_context_tokens
         self.token_tracker = TokenTracker(max_context_tokens=self.max_context_tokens)
         bind_token_tracker(self.token_tracker)
-        self.mcp_manager = MCPClientManager(mcp_servers)
-        await self.mcp_manager.initialize()
+
+        if self.execution_mode != "http":
+            self.mcp_manager = MCPClientManager(mcp_servers)
+            await self.mcp_manager.initialize()
 
         self.agent_definitions = load_agent_definitions(database_path)
         self.agent_definitions_by_id = {
@@ -94,6 +107,9 @@ class AgentManager:
             if definition.agent_id == INVENTORY_AGENT_ID:
                 self.agents[definition.agent_id] = INVENTORY_AGENT_MARKER
                 continue
+            if self.execution_mode == "http":
+                self.agents[definition.agent_id] = REMOTE_AGENT_MARKER
+                continue
             try:
                 self.agents[definition.agent_id] = await build_agent(definition, self.mcp_manager)
             except Exception as exc:
@@ -104,15 +120,23 @@ class AgentManager:
 
         self._register_system_agents()
         self.llm_status = await self._check_llm(llm_settings.base_url)
-        self._refresh_agent_health_status()
+        await self.refresh_health()
 
     async def refresh_health(self) -> None:
         async with self._health_check_lock:
             llm_settings, _, _, _ = load_settings()
             self.llm_status = await self._check_llm(llm_settings.base_url)
-            if self.mcp_manager is not None:
+            if self.execution_mode == "http" and self.agent_runtime is not None:
+                try:
+                    self._runtime_health_cache = await self.agent_runtime.get_runtime_summary()
+                except Exception as exc:
+                    logger.exception("Failed to refresh remote runtime health: %s", exc)
+            elif self.mcp_manager is not None:
                 await self.mcp_manager.refresh_health()
             self._refresh_agent_health_status()
+
+    def uses_remote_runtime(self) -> bool:
+        return self.execution_mode == "http"
 
     def _refresh_agent_health_status(self) -> None:
         statuses: dict[str, str] = {}
@@ -126,6 +150,13 @@ class AgentManager:
                 continue
             if agent_id not in self.agents:
                 statuses[agent_id] = "unavailable"
+                continue
+            if self.execution_mode == "http":
+                remote_status = self._runtime_health_cache.get("agent_status", {})
+                if isinstance(remote_status, dict):
+                    statuses[agent_id] = str(remote_status.get(agent_id, "unknown"))
+                else:
+                    statuses[agent_id] = "unknown"
                 continue
             if self.mcp_manager is None:
                 statuses[agent_id] = "unknown"
@@ -146,6 +177,37 @@ class AgentManager:
         return inventory_service.status
 
     async def reload_agents(self, database_path: Path) -> None:
+        if self.execution_mode == "http":
+            self.agent_definitions = load_agent_definitions(database_path)
+            self.agent_definitions_by_id = {
+                definition.agent_id: definition for definition in self.agent_definitions
+            }
+
+            next_agent_ids = {
+                definition.agent_id
+                for definition in [*self.agent_definitions, *list_dashboard_system_agent_definitions()]
+            }
+            for agent_id in list(self.agents.keys()):
+                if agent_id not in next_agent_ids:
+                    del self.agents[agent_id]
+            for agent_id in list(self.agent_operation_status.keys()):
+                if agent_id not in next_agent_ids:
+                    del self.agent_operation_status[agent_id]
+                    self.agent_operation_errors.pop(agent_id, None)
+                    self.agent_active_counts.pop(agent_id, None)
+
+            for definition in self.agent_definitions:
+                self.agent_operation_status.setdefault(definition.agent_id, "idle")
+                self.agent_active_counts.setdefault(definition.agent_id, 0)
+                if definition.agent_id == INVENTORY_AGENT_ID:
+                    self.agents[definition.agent_id] = INVENTORY_AGENT_MARKER
+                else:
+                    self.agents[definition.agent_id] = REMOTE_AGENT_MARKER
+
+            self._register_system_agents()
+            await self.refresh_health()
+            return
+
         if self.mcp_manager is None:
             raise RuntimeError("AgentManager is not initialized")
 
@@ -273,15 +335,23 @@ async def lifespan(app: FastAPI):
     app.state.database_path = init_database(database_path)
     inventory_service = initialize_inventory_service(database_path=app.state.database_path)
     app.state.inventory_service = inventory_service
-    await agent_manager.initialize(app.state.database_path)
+    await agent_manager.initialize(
+        app.state.database_path,
+        execution_mode=server_settings.agent_runtime_mode,
+    )
     agent_manager.inventory_service = inventory_service
-    agent_manager._refresh_agent_health_status()
     app.state.agent_manager = agent_manager
+    app.state.agent_runtime_mode = server_settings.agent_runtime_mode
+    app.state.control_plane_base_url = resolve_control_plane_base_url(server_settings)
+    app.state.runtime_api_key = server_settings.agent_runtime_api_key
     app.state.agent_runtime = create_agent_runtime_client(
         server_settings.agent_runtime_mode,
         agent_manager=agent_manager,
         http_base_url=server_settings.agent_runtime_http_base_url or None,
+        http_api_key=server_settings.agent_runtime_api_key,
+        http_timeout_seconds=server_settings.agent_runtime_http_timeout_seconds,
     )
+    agent_manager.agent_runtime = app.state.agent_runtime
 
     health_task = asyncio.create_task(
         _health_check_loop(
@@ -352,6 +422,7 @@ def create_app() -> FastAPI:
     app.include_router(inventory_router, prefix="/api")
     app.include_router(whatap_webhook_router, prefix="/api")
     app.include_router(teams_inbound_debug_router, prefix="/api")
+    app.include_router(runtime_internal_router, prefix="/api")
     return app
 
 

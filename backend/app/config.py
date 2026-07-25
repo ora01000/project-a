@@ -28,6 +28,9 @@ class ServerSettings(BaseModel):
     health_check_interval_seconds: int = 30
     agent_runtime_mode: str = "local"
     agent_runtime_http_base_url: str = ""
+    agent_runtime_http_timeout_seconds: float = 300.0
+    agent_runtime_api_key: str = ""
+    control_plane_base_url: str = ""
 
 
 class MCPServerConfig(BaseModel):
@@ -123,6 +126,14 @@ class AppSettings(BaseSettings):
     health_check_interval_seconds: int = Field(default=30, alias="HEALTH_CHECK_INTERVAL_SECONDS")
     agent_runtime_mode: str = Field(default="local", alias="AGENT_RUNTIME_MODE")
     agent_runtime_http_base_url: str = Field(default="", alias="AGENT_RUNTIME_HTTP_BASE_URL")
+    agent_runtime_http_timeout_seconds: float = Field(
+        default=300.0,
+        alias="AGENT_RUNTIME_HTTP_TIMEOUT_SECONDS",
+    )
+    agent_runtime_api_key: str = Field(default="", alias="AGENT_RUNTIME_API_KEY")
+    control_plane_base_url: str = Field(default="", alias="CONTROL_PLANE_BASE_URL")
+    agent_runtime_host: str = Field(default="0.0.0.0", alias="AGENT_RUNTIME_HOST")
+    agent_runtime_port: int = Field(default=8090, alias="AGENT_RUNTIME_PORT")
 
     email_enabled: bool = Field(default=False, alias="EMAIL_ENABLED")
     email_smtp_host: str = Field(default="", alias="EMAIL_SMTP_HOST")
@@ -427,6 +438,12 @@ class AuthProviderSettings(BaseModel):
     oauth_proxy: str = ""
 
 
+class AgentRuntimeSettings(BaseModel):
+    host: str = "0.0.0.0"
+    port: int = 8090
+    api_key: str = ""
+
+
 def load_auth_provider_settings() -> AuthProviderSettings:
     env_settings = AppSettings()
     yaml_settings = _load_yaml(CONFIG_DIR / "settings.yaml")
@@ -481,6 +498,18 @@ def load_settings() -> tuple[LLMSettings, ServerSettings, dict[str, MCPServerCon
             env_settings.agent_runtime_http_base_url
             or server_yaml.get("agent_runtime_http_base_url", "")
         ),
+        agent_runtime_http_timeout_seconds=float(
+            env_settings.agent_runtime_http_timeout_seconds
+            or server_yaml.get("agent_runtime_http_timeout_seconds", 300.0)
+        ),
+        agent_runtime_api_key=(
+            env_settings.agent_runtime_api_key
+            or server_yaml.get("agent_runtime_api_key", "")
+        ),
+        control_plane_base_url=(
+            env_settings.control_plane_base_url
+            or server_yaml.get("control_plane_base_url", "")
+        ),
     )
 
     mcp_servers: dict[str, MCPServerConfig] = {}
@@ -492,3 +521,24 @@ def load_settings() -> tuple[LLMSettings, ServerSettings, dict[str, MCPServerCon
     database_path = env_settings.database_path or server_yaml.get("database_path", "data/app.db")
 
     return llm, server, mcp_servers, database_path
+
+
+def load_agent_runtime_settings() -> AgentRuntimeSettings:
+    env_settings = AppSettings()
+    yaml_settings = _load_yaml(CONFIG_DIR / "settings.yaml")
+    runtime_yaml = yaml_settings.get("agent_runtime", {})
+
+    return AgentRuntimeSettings(
+        host=env_settings.agent_runtime_host or runtime_yaml.get("host", "0.0.0.0"),
+        port=env_settings.agent_runtime_port or runtime_yaml.get("port", 8090),
+        api_key=env_settings.agent_runtime_api_key or runtime_yaml.get("api_key", ""),
+    )
+
+
+def resolve_control_plane_base_url(server: ServerSettings) -> str:
+    explicit = (server.control_plane_base_url or "").strip()
+    if explicit:
+        return explicit.rstrip("/")
+    host = (server.backend_api_host or "localhost").strip()
+    port = server.backend_api_port
+    return f"http://{host}:{port}".rstrip("/")

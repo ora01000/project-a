@@ -3,6 +3,7 @@ import sqlite3
 from fastapi import APIRouter, Body, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from backend.app.agents.registry import load_agent_definitions
 from backend.app.config import load_settings
 from backend.app.db.agents import (
     StoredAgent,
@@ -62,8 +63,16 @@ class McpServerOptionResponse(BaseModel):
 
 
 async def _reload_runtime_agents(request: Request) -> None:
+    database_path = request.app.state.database_path
     manager = request.app.state.agent_manager
-    await manager.reload_agents(request.app.state.database_path)
+    await manager.reload_agents(database_path)
+
+    agent_runtime = getattr(request.app.state, "agent_runtime", None)
+    if agent_runtime is None:
+        return
+
+    definitions = load_agent_definitions(database_path)
+    await agent_runtime.reload_definitions(definitions)
 
 
 @router.get("/agent-records", response_model=list[AgentRecordResponse])

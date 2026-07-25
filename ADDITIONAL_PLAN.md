@@ -1354,6 +1354,25 @@ class AgentRuntimeClient(Protocol):
 - **`LocalAgentRuntimeClient`**: 내부에서 `invoke_agent_by_id` / `invoke_agent_for_planned_step` 호출
 - **`HttpAgentRuntimeClient` (Phase 2)**: `POST /runtime/agents/{id}/invoke`, `POST /runtime/agents/{id}/invoke-planned-step` — 동일 JSON 스키마
 
+#### Phase 2 범위 (dev-noagent) — 완료
+1. 독립 **Agent Runtime** FastAPI 서비스 (`backend/app/agent_runtime/`, 포트 8090)
+2. `HttpAgentRuntimeClient` + `CompositeAgentRuntimeClient` (`AGENT_RUNTIME_MODE=http`)
+3. 런타임 HTTP API: invoke / invoke-planned-step / reload / health / tools
+4. 인벤토리 HITL: 런타임 → Control Plane `POST /api/internal/runtime/inventory-approvals/request`
+5. `docker-compose.yml`에 `agent-runtime` 서비스 추가
+
+**실행 예시**
+```bash
+# 터미널 1: Agent Runtime
+uv run project-a-agent-runtime
+
+# 터미널 2: Control Plane (http 모드)
+AGENT_RUNTIME_MODE=http \
+AGENT_RUNTIME_HTTP_BASE_URL=http://localhost:8090 \
+CONTROL_PLANE_BASE_URL=http://localhost:8080 \
+uv run project-a-api
+```
+
 #### Phase 2 이후 (참고)
 - Agent Runtime을 별도 프로세스/컨테이너로 분리, MCP·LLM 설정을 런타임 쪽으로 이전
 - `reload_definitions`: 백엔드 CRUD 후 런타임에 정의 push 또는 런타임이 백엔드 메타 API poll
@@ -1365,12 +1384,22 @@ class AgentRuntimeClient(Protocol):
 - SSE 의사 스트리밍은 Control Plane 유지 (런타임은 전체 응답 반환)
 - `tool_params`는 현재 message에 인코딩되어 전달됨 — 원격 계약에도 동일 규칙 문서화 필요
 
+#### Phase 3 범위 (dev-noagent) — 완료
+1. `AGENT_RUNTIME_MODE=http` 시 Control Plane **MCP/LangGraph 미초기화** (`REMOTE_AGENT_MARKER`)
+2. 에이전트 목록·헬스·도구 API → 런타임 `get_runtime_summary` / `list_agent_tools` 프록시
+3. 주기 헬스 루프가 원격 런타임 헬스 캐시 갱신
+4. Job Planning tool consult도 런타임 도구 목록 사용
+
 #### 작업 체크리스트
 - [x] `agent_runtime_client.py` Protocol·Local 구현
 - [x] `main.py` lifespan에서 `app.state.agent_runtime` 등록
 - [x] `chat.py`, `job_execution.py` 호출부 교체
 - [x] `docs/BACKEND_AGENT_INTERFACE.md`에 Runtime Client 절 추가
-- [ ] (Phase 2) HTTP 런타임 스펙·OpenAPI 초안
+- [x] (Phase 2) HTTP 런타임 서비스 + `HttpAgentRuntimeClient`
+- [x] (Phase 2) `CompositeAgentRuntimeClient` (시스템/헬프데스크/인벤토리 로컬)
+- [x] (Phase 2) 인벤토리 HITL 원격 콜백 (`/api/internal/runtime/inventory-approvals/request`)
+- [x] (Phase 2) `docker-compose` agent-runtime 서비스
+- [x] (Phase 3) Control Plane MCP 이중 연결 제거·헬스 프록시 최적화
 
 
 

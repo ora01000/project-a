@@ -205,7 +205,12 @@ async def _select_agent(
     return decision
 
 
-async def handle_helpdesk_query(agent_manager: Any, message: str) -> AgentInvokeResult:
+async def handle_helpdesk_query(
+    agent_manager: Any,
+    message: str,
+    *,
+    agent_runtime: Any | None = None,
+) -> AgentInvokeResult:
     """Route the user message to one regular/inventory agent, or answer general inquiries directly."""
     from backend.app.services.agent_invocation import AgentInvocationError, invoke_agent_by_id
 
@@ -263,13 +268,23 @@ async def handle_helpdesk_query(agent_manager: Any, message: str) -> AgentInvoke
             caller_agent_id=HELPDESK_AGENT.agent_id,
             caller_agent_name=HELPDESK_AGENT.name,
         ):
-            # Forward the original user message unchanged — no rewrite/retry loop.
-            result = await invoke_agent_by_id(
-                agent_manager,
-                target_id,
-                message,
-                caller_agent_id=HELPDESK_AGENT.agent_id,
-            )
+            if agent_runtime is not None:
+                from backend.app.services.agent_runtime_client import AgentInvokeRequest
+
+                result = await agent_runtime.invoke(
+                    AgentInvokeRequest(
+                        agent_id=target_id,
+                        message=message,
+                        caller_agent_id=HELPDESK_AGENT.agent_id,
+                    ),
+                )
+            else:
+                result = await invoke_agent_by_id(
+                    agent_manager,
+                    target_id,
+                    message,
+                    caller_agent_id=HELPDESK_AGENT.agent_id,
+                )
     except AgentInvocationError as exc:
         if hasattr(agent_manager, "mark_agent_error"):
             agent_manager.mark_agent_error(target_id, str(exc), input_message=message)

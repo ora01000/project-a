@@ -294,6 +294,41 @@ Control Plane(FastAPI)은 에이전트 **실행**을 `AgentRuntimeClient`에 위
 
 `AgentManager`는 Phase 1에서 LangGraph 인스턴스 보관, `mark_agent_working/idle`, MCP 헬스, 토큰 추적을 계속 담당합니다.
 
+### 5.6 Agent Runtime HTTP 서비스 (Phase 2)
+
+**런타임 앱**: `backend/app/agent_runtime/main.py` (`project-a-agent-runtime`, 기본 포트 `8090`)
+
+| Method | Path | 설명 |
+|--------|------|------|
+| `GET` | `/runtime/health` | 런타임·MCP 헬스 |
+| `GET` | `/runtime/agents/{id}/health` | 에이전트별 헬스 |
+| `POST` | `/runtime/agents/{id}/invoke` | 채팅형 실행 |
+| `POST` | `/runtime/agents/{id}/invoke-planned-step` | 작업 단계 실행 |
+| `POST` | `/runtime/agents/reload` | 정의 push |
+| `GET` | `/runtime/agents/{id}/tools` | MCP 도구 목록 |
+
+**Control Plane 내부 API** (런타임 → HITL):
+
+| Method | Path | 설명 |
+|--------|------|------|
+| `POST` | `/api/internal/runtime/inventory-approvals/request` | 인벤토리 승인 동기 대기 |
+
+**모드**: `AGENT_RUNTIME_MODE=http` 시 `CompositeAgentRuntimeClient`가 `sys-*`, `inventory`, `sys-helpdesk`는 로컬, 일반 DB 에이전트는 HTTP 런타임으로 라우팅합니다.
+
+**환경 변수**: `AGENT_RUNTIME_HTTP_BASE_URL`, `CONTROL_PLANE_BASE_URL`, `AGENT_RUNTIME_API_KEY` (선택)
+
+### 5.7 Control Plane 최적화 (Phase 3 — `AGENT_RUNTIME_MODE=http`)
+
+| 항목 | local | http |
+|------|-------|------|
+| Control Plane MCP 연결 | O | **X** |
+| Control Plane LangGraph 빌드 | O | **X** (`REMOTE_AGENT_MARKER`) |
+| `/api/agents` 헬스 | 로컬 MCP | 런타임 `GET /runtime/health` 프록시 |
+| `/api/agents/{id}/tools` | 로컬 MCP | 런타임 `GET /runtime/agents/{id}/tools` |
+| Job Planning tool consult | 로컬 MCP | 런타임 도구 목록 |
+
+시스템 에이전트·인벤토리·헬프데스크는 Control Plane에 로컬 유지.
+
 ---
 
 ## 6. REST API 계약

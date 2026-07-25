@@ -7,7 +7,6 @@ from typing import Any
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from backend.app.agents.base import AgentDefinition
-from backend.app.agents.inventory_tool import INVENTORY_AGENT_ID, QUERY_INVENTORY_TOOL_NAME
 from backend.app.agents.registry import load_agent_definitions
 from backend.app.agents.system_agents import JOB_PLANNING_AGENT, NotifyChannel
 from backend.app.db.jobs import (
@@ -144,28 +143,23 @@ def _agent_by_id(agents: list[AgentDefinition], agent_id: str) -> AgentDefinitio
 
 
 async def _list_tools_for_agent(agent_manager: Any | None, definition: AgentDefinition) -> list[dict[str, str]]:
-    tools: list[dict[str, str]] = []
-    if definition.agent_id == INVENTORY_AGENT_ID:
-        tools.append(
-            {
-                "name": QUERY_INVENTORY_TOOL_NAME,
-                "description": "Query the inventory database",
-            }
-        )
+    agent_runtime = getattr(agent_manager, "agent_runtime", None) if agent_manager is not None else None
+    if (
+        agent_runtime is not None
+        and getattr(agent_manager, "uses_remote_runtime", lambda: False)()
+    ):
+        from backend.app.services.agent_runtime_client import is_control_plane_local_agent
 
-    mcp_manager = getattr(agent_manager, "mcp_manager", None) if agent_manager is not None else None
-    if mcp_manager is not None and definition.mcp_server_keys:
-        try:
-            for tool in await mcp_manager.get_tools_for_servers(definition.mcp_server_keys):
-                tools.append(
-                    {
-                        "name": tool.name,
-                        "description": getattr(tool, "description", "") or "",
-                    }
-                )
-        except Exception as exc:
-            logger.warning("Failed to list tools for %s: %s", definition.agent_id, exc)
-    return tools
+        if not is_control_plane_local_agent(definition.agent_id):
+            try:
+                return await agent_runtime.list_agent_tools(definition.agent_id)
+            except Exception as exc:
+                logger.warning("Failed to list runtime tools for %s: %s", definition.agent_id, exc)
+                return []
+
+    from backend.app.services.agent_tool_catalog import list_tools_for_definition
+
+    return await list_tools_for_definition(agent_manager, definition)
 
 
 async def _consult_agent_for_tools(

@@ -23,6 +23,7 @@ dependencies = [
 
 [project.scripts]
 project-a-api = "backend.app.main:run"
+project-a-agent-runtime = "backend.app.agent_runtime.main:run"
 
 [build-system]
 requires = ["hatchling"]

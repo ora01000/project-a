@@ -3,6 +3,7 @@ import json
 import logging
 from datetime import date
 from typing import Any, AsyncIterator
+from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
@@ -21,6 +22,7 @@ from backend.app.services.inventory_approval import (
     inventory_approval_session,
     reject_all_pending,
     resolve_inventory_approval,
+    runtime_inventory_approval_session,
 )
 
 router = APIRouter(tags=["chat"])
@@ -81,6 +83,9 @@ async def _invoke_with_inventory_approval(
     agent_id: str,
     message: str,
     result_holder: list[AgentInvokeResult],
+    *,
+    trace_id: str,
+    control_plane_base_url: str | None,
 ) -> AsyncIterator[dict[str, str]]:
     approval_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
 
@@ -89,9 +94,15 @@ async def _invoke_with_inventory_approval(
 
     async def run_invoke() -> AgentInvokeResult:
         async with inventory_approval_session(on_approval_required):
-            return await agent_runtime.invoke(
-                AgentInvokeRequest(agent_id=agent_id, message=message),
-            )
+            async with runtime_inventory_approval_session(trace_id, on_approval_required):
+                return await agent_runtime.invoke(
+                    AgentInvokeRequest(
+                        agent_id=agent_id,
+                        message=message,
+                        trace_id=trace_id,
+                        control_plane_base_url=control_plane_base_url,
+                    ),
+                )
 
     invoke_task = asyncio.create_task(run_invoke())
 
@@ -146,6 +157,8 @@ async def chat_with_agent(agent_id: str, payload: ChatRequest, request: Request)
             raise HTTPException(status_code=403, detail="할당되지 않은 에이전트입니다.")
 
     manager.mark_agent_working(agent_id, "채팅 응답")
+    trace_id = uuid4().hex
+    control_plane_base_url = getattr(request.app.state, "control_plane_base_url", None)
 
     async def event_generator() -> AsyncIterator[dict[str, str]]:
         result_holder: list[AgentInvokeResult] = []
@@ -155,6 +168,8 @@ async def chat_with_agent(agent_id: str, payload: ChatRequest, request: Request)
                 agent_id,
                 payload.message,
                 result_holder,
+                trace_id=trace_id,
+                control_plane_base_url=control_plane_base_url,
             ):
                 yield event
 
