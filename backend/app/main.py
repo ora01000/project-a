@@ -36,6 +36,7 @@ from backend.app.api.users import router as users_router
 from backend.app.api.teams_inbound_debug import router as teams_inbound_debug_router
 from backend.app.api.whatap_webhook import router as whatap_webhook_router
 from backend.app.config import load_job_requester_settings, load_k8s_collector_settings, load_settings
+from backend.app.services.agent_runtime_client import create_agent_runtime_client
 from backend.app.db import init_database
 from backend.app.logging.prompt_debug import bind_token_tracker
 from backend.app.logging.agent_logger import ensure_agent_logs_dir, log_agent_error
@@ -276,6 +277,11 @@ async def lifespan(app: FastAPI):
     agent_manager.inventory_service = inventory_service
     agent_manager._refresh_agent_health_status()
     app.state.agent_manager = agent_manager
+    app.state.agent_runtime = create_agent_runtime_client(
+        server_settings.agent_runtime_mode,
+        agent_manager=agent_manager,
+        http_base_url=server_settings.agent_runtime_http_base_url or None,
+    )
 
     health_task = asyncio.create_task(
         _health_check_loop(

@@ -273,6 +273,27 @@ result = await agent.ainvoke({"messages": [HumanMessage(content=message)]})
 
 작업 단계 실행 시 `JOB_STEP_EXECUTION_POLICY` 프롬프트가 추가되어, 계획 외 도구 호출을 구조적으로 제한합니다.
 
+### 5.5 AgentRuntimeClient (Phase 1 — Control Plane ↔ Runtime 경계)
+
+**파일**: `backend/app/services/agent_runtime_client.py`
+
+Control Plane(FastAPI)은 에이전트 **실행**을 `AgentRuntimeClient`에 위임합니다. Phase 1에서는 `LocalAgentRuntimeClient`가 기존 `agent_invocation`을 그대로 호출하며, 동작은 변경되지 않습니다.
+
+| 메서드 | 용도 | Phase 1 구현 |
+|--------|------|--------------|
+| `invoke(AgentInvokeRequest)` | 채팅·헬프데스크·인벤토리 | `invoke_agent_by_id` 위임 |
+| `invoke_planned_step(AgentPlannedStepRequest)` | 작업 단계 실행 | `invoke_agent_for_planned_step` 위임 |
+| `reload_definitions(...)` | 정의 동기화 | 미연결 — `AgentManager.reload_agents` 사용 |
+| `get_runtime_health(agent_id)` | 런타임 헬스 | `AgentManager.get_agent_health_status` 위임 |
+
+**등록**: `main.py` lifespan → `app.state.agent_runtime` (`AGENT_RUNTIME_MODE=local|http`, 기본 `local`)
+
+**호출부**:
+- `POST /api/agents/{agent_id}/chat` → `agent_runtime.invoke`
+- `POST /api/jobs/{idx}/actions/approve|retry` → `agent_runtime.invoke_planned_step` (백그라운드 실행)
+
+`AgentManager`는 Phase 1에서 LangGraph 인스턴스 보관, `mark_agent_working/idle`, MCP 헬스, 토큰 추적을 계속 담당합니다.
+
 ---
 
 ## 6. REST API 계약

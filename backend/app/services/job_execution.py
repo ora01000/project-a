@@ -4,10 +4,8 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from backend.app.services.agent_invocation import (
-    AgentInvocationError,
-    invoke_agent_for_planned_step,
-)
+from backend.app.services.agent_invocation import AgentInvocationError
+from backend.app.services.agent_runtime_client import AgentPlannedStepRequest, AgentRuntimeClient
 from backend.app.agents.system_agents import JOB_EXECUTION_AGENT, NotifyChannel
 from backend.app.db.job_datetime import now_job_datetime
 from backend.app.db.jobs import (
@@ -281,7 +279,12 @@ async def accept_job_execution(
         raise
 
 
-async def run_approved_job(database_path: Path, job_idx: int, agent_manager: Any) -> Job | None:
+async def run_approved_job(
+    database_path: Path,
+    job_idx: int,
+    agent_manager: Any,
+    agent_runtime: AgentRuntimeClient,
+) -> Job | None:
     """Run agent steps for an already-accepted (approved) job and notify recipients."""
     try:
         job = get_job_by_idx(database_path, job_idx)
@@ -365,15 +368,16 @@ async def run_approved_job(database_path: Path, job_idx: int, agent_manager: Any
                     caller_agent_name=JOB_EXECUTION_AGENT.name,
                     step_index=step_index,
                 ):
-                    result = await invoke_agent_for_planned_step(
-                        agent_manager,
-                        agent_id,
-                        message,
-                        tool_name=str(step.get("tool_name") or "") or None,
-                        tool_params=step.get("tool_params")
-                        if isinstance(step.get("tool_params"), dict)
-                        else None,
-                        caller_agent_id=JOB_EXECUTION_AGENT.agent_id,
+                    result = await agent_runtime.invoke_planned_step(
+                        AgentPlannedStepRequest(
+                            agent_id=agent_id,
+                            message=message,
+                            tool_name=str(step.get("tool_name") or "") or None,
+                            tool_params=step.get("tool_params")
+                            if isinstance(step.get("tool_params"), dict)
+                            else None,
+                            caller_agent_id=JOB_EXECUTION_AGENT.agent_id,
+                        ),
                     )
                 step_content = result.content if str(result.content or "").strip() else ""
                 step_results.append(
@@ -524,9 +528,14 @@ async def run_approved_job(database_path: Path, job_idx: int, agent_manager: Any
             _running_job_idxs.discard(job_idx)
 
 
-async def _run_approved_job_safe(database_path: Path, job_idx: int, agent_manager: Any) -> None:
+async def _run_approved_job_safe(
+    database_path: Path,
+    job_idx: int,
+    agent_manager: Any,
+    agent_runtime: AgentRuntimeClient,
+) -> None:
     try:
-        await run_approved_job(database_path, job_idx, agent_manager)
+        await run_approved_job(database_path, job_idx, agent_manager, agent_runtime)
     except Exception:
         logger.exception("%s background execution crashed for job idx=%s", JOB_EXECUTION_AGENT.name, job_idx)
         async with _running_lock:
@@ -537,6 +546,7 @@ async def accept_and_schedule_job_execution(
     database_path: Path,
     job_idx: int,
     agent_manager: Any,
+    agent_runtime: AgentRuntimeClient,
     *,
     is_retry: bool = False,
 ) -> Job | None:
@@ -546,7 +556,7 @@ async def accept_and_schedule_job_execution(
         return None
 
     asyncio.create_task(
-        _run_approved_job_safe(database_path, job_idx, agent_manager),
+        _run_approved_job_safe(database_path, job_idx, agent_manager, agent_runtime),
         name=f"job-execution-{job_idx}",
     )
     logger.info(

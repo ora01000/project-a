@@ -1288,7 +1288,89 @@ cursor 에사 사용할 plan 초안을 작성합니다.
   - mentions
 
 
+# 메이저 버전 : 0, 마이너 버전 : 4, 릴리즈 버전 : 260725 에 대한 변경 사항 기록
+## 에이전트 기능의 분리
+- 현재 구조에서 에이전트 와 Backend 를 분리하는 방안을 검토한다.
+  - 향후 에이전트는 다른 시스템을 연계하고 에이전트와는 단순한 질의/응담만 진행한다.
+  - 그 외 모든 기능은 별도의 백엔드 프로그램에서 수행한다.
+  - refactoring 검토
 
+### 검토 결과 (260725)
+
+#### 현재 구조 요약
+- **Control Plane (백엔드)**: FastAPI, SQLite(jobs/users/agents 메타), Job Planning/Execution, 알림, 권한, SSE 채팅 API, `AgentManager` 상태 추적
+- **Agent Runtime (인프로세스)**: LangGraph ReAct, MCP 클라이언트, `query_inventory` 도구, 인벤토리 HITL 승인 게이트
+- **단일 진입점**: `agent_invocation.invoke_agent_by_id` / `invoke_agent_for_planned_step` — 채팅·작업 실행·헬프데스크 위임이 모두 `AgentManager`에 직접 의존
+
+#### 분리 경계 (권장)
+
+| 영역 | Control Plane (백엔드) | Agent Runtime (분리 대상) |
+|------|------------------------|---------------------------|
+| API·UI | `/api/chat`, `/api/jobs`, 사용자·권한 | — |
+| 오케스트레이션 | Job Planning/Execution, 헬프데스크 라우팅 LLM | — |
+| 에이전트 실행 | 호출 위임만 (`AgentRuntimeClient`) | LangGraph, MCP, 인벤토리 쿼리, 도구 실행 |
+| 메타데이터 | `agents` 테이블 CRUD, 정의 동기화 | 정의 수신 후 로컬 빌드/리로드 |
+| 상태·관측 | `mark_agent_working/idle`, 타일 헬스, 토큰 집계 | 실행 중 도구 목록·토큰 반환 |
+
+**시스템 에이전트**(`sys-job-planning`, `sys-helpdesk` 등)는 Phase 1에서 Control Plane에 유지한다. 분리 1단계는 **DB 일반 에이전트의 ReAct 실행**만 추상화한다.
+
+#### Phase 1 범위 (dev-noagent)
+1. `AgentRuntimeClient` Protocol + `LocalAgentRuntimeClient` 구현 (기존 `agent_invocation` 위임)
+2. `chat.py`, `job_execution.py`가 `agent_manager` 대신 `AgentRuntimeClient`를 주입받도록 변경
+3. `AgentManager`에서 LangGraph 인스턴스 보관·MCP 초기화는 당분간 유지 (동작 동일, 호출 경로만 분리)
+4. 설정 키 `AGENT_RUNTIME_MODE=local|http` 예약 (기본 `local`)
+
+**Phase 1 비목표**: HTTP 런타임 구현, MCP/LLM 물리 분리, 인벤토리 HITL의 원격 콜백, Docker/배포 분리
+
+#### `AgentRuntimeClient` 인터페이스 초안
+
+파일: `backend/app/services/agent_runtime_client.py`
+
+```python
+@dataclass(frozen=True)
+class AgentInvokeRequest:
+    agent_id: str
+    message: str
+    caller_agent_id: str | None = None
+    trace_id: str | None = None          # 요청 상관관계 ID (로그·SSE)
+
+@dataclass(frozen=True)
+class AgentPlannedStepRequest:
+    agent_id: str
+    message: str
+    tool_name: str | None = None
+    tool_params: dict[str, Any] | None = None
+    caller_agent_id: str | None = None
+    trace_id: str | None = None
+
+class AgentRuntimeClient(Protocol):
+    async def invoke(self, request: AgentInvokeRequest) -> AgentInvokeResult: ...
+    async def invoke_planned_step(self, request: AgentPlannedStepRequest) -> AgentInvokeResult: ...
+    async def reload_definitions(self, definitions: list[AgentDefinition]) -> None: ...
+    async def get_runtime_health(self, agent_id: str) -> str: ...
+```
+
+- **반환 타입**: 기존 `AgentInvokeResult` (`content`, `tools_used`, `input_tokens`, `output_tokens`) 재사용 — API·프론트 계약 변경 없음
+- **`LocalAgentRuntimeClient`**: 내부에서 `invoke_agent_by_id` / `invoke_agent_for_planned_step` 호출
+- **`HttpAgentRuntimeClient` (Phase 2)**: `POST /runtime/agents/{id}/invoke`, `POST /runtime/agents/{id}/invoke-planned-step` — 동일 JSON 스키마
+
+#### Phase 2 이후 (참고)
+- Agent Runtime을 별도 프로세스/컨테이너로 분리, MCP·LLM 설정을 런타임 쪽으로 이전
+- `reload_definitions`: 백엔드 CRUD 후 런타임에 정의 push 또는 런타임이 백엔드 메타 API poll
+- 인벤토리 HITL: 런타임 → 백엔드 `POST /api/chat/inventory-approvals` 콜백 또는 동기 대기 API
+- 참고 문서: `docs/BACKEND_AGENT_INTERFACE.md` §5, §7
+
+#### 리스크·주의
+- 헬프데스크·인벤토리 에이전트는 `invoke_agent_by_id` 내부 분기가 많음 → Phase 1에서는 Local 위임으로 동작 보존, Phase 2에서 런타임 전용 핸들러로 이전 검토
+- SSE 의사 스트리밍은 Control Plane 유지 (런타임은 전체 응답 반환)
+- `tool_params`는 현재 message에 인코딩되어 전달됨 — 원격 계약에도 동일 규칙 문서화 필요
+
+#### 작업 체크리스트
+- [x] `agent_runtime_client.py` Protocol·Local 구현
+- [x] `main.py` lifespan에서 `app.state.agent_runtime` 등록
+- [x] `chat.py`, `job_execution.py` 호출부 교체
+- [x] `docs/BACKEND_AGENT_INTERFACE.md`에 Runtime Client 절 추가
+- [ ] (Phase 2) HTTP 런타임 스펙·OpenAPI 초안
 
 
 

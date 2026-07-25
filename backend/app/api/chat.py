@@ -16,7 +16,7 @@ from backend.app.agents.system_agents import is_chat_enabled_system_agent_id
 from backend.app.db.users import get_user_by_userid, parse_agent_ids
 from backend.app.logging.agent_logger import log_agent_interaction
 from backend.app.logging.user_comm_logger import list_user_communications, log_user_communication
-from backend.app.services.agent_invocation import invoke_agent_by_id
+from backend.app.services.agent_runtime_client import AgentInvokeRequest, AgentRuntimeClient
 from backend.app.services.inventory_approval import (
     inventory_approval_session,
     reject_all_pending,
@@ -77,7 +77,7 @@ async def _stream_response(result: AgentInvokeResult) -> AsyncIterator[dict[str,
 
 
 async def _invoke_with_inventory_approval(
-    manager: Any,
+    agent_runtime: AgentRuntimeClient,
     agent_id: str,
     message: str,
     result_holder: list[AgentInvokeResult],
@@ -89,7 +89,9 @@ async def _invoke_with_inventory_approval(
 
     async def run_invoke() -> AgentInvokeResult:
         async with inventory_approval_session(on_approval_required):
-            return await invoke_agent_by_id(manager, agent_id, message)
+            return await agent_runtime.invoke(
+                AgentInvokeRequest(agent_id=agent_id, message=message),
+            )
 
     invoke_task = asyncio.create_task(run_invoke())
 
@@ -130,6 +132,7 @@ async def resolve_inventory_approval_endpoint(
 @router.post("/agents/{agent_id}/chat")
 async def chat_with_agent(agent_id: str, payload: ChatRequest, request: Request):
     manager = request.app.state.agent_manager
+    agent_runtime = request.app.state.agent_runtime
 
     if agent_id not in manager.agents:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
@@ -148,7 +151,7 @@ async def chat_with_agent(agent_id: str, payload: ChatRequest, request: Request)
         result_holder: list[AgentInvokeResult] = []
         try:
             async for event in _invoke_with_inventory_approval(
-                manager,
+                agent_runtime,
                 agent_id,
                 payload.message,
                 result_holder,

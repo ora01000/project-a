@@ -441,8 +441,15 @@ async def review_job(idx: int, request: Request) -> JobResponse:
 async def approve_job(idx: int, request: Request) -> JobResponse:
     database_path = request.app.state.database_path
     manager = request.app.state.agent_manager
+    agent_runtime = request.app.state.agent_runtime
     try:
-        job = await accept_and_schedule_job_execution(database_path, idx, manager, is_retry=False)
+        job = await accept_and_schedule_job_execution(
+            database_path,
+            idx,
+            manager,
+            agent_runtime,
+            is_retry=False,
+        )
     except JobExecutionNotAllowedError as exc:
         raise HTTPException(status_code=400, detail=exc.detail) from exc
     except JobExecutionConflictError as exc:
@@ -456,8 +463,15 @@ async def approve_job(idx: int, request: Request) -> JobResponse:
 async def retry_job(idx: int, request: Request) -> JobResponse:
     database_path = request.app.state.database_path
     manager = request.app.state.agent_manager
+    agent_runtime = request.app.state.agent_runtime
     try:
-        job = await accept_and_schedule_job_execution(database_path, idx, manager, is_retry=True)
+        job = await accept_and_schedule_job_execution(
+            database_path,
+            idx,
+            manager,
+            agent_runtime,
+            is_retry=True,
+        )
     except JobExecutionNotAllowedError as exc:
         raise HTTPException(status_code=400, detail=exc.detail) from exc
     except JobExecutionConflictError as exc:

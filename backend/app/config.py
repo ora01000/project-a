@@ -26,6 +26,8 @@ class ServerSettings(BaseModel):
     backend_api_host: str = "localhost"
     backend_api_port: int = 8080
     health_check_interval_seconds: int = 30
+    agent_runtime_mode: str = "local"
+    agent_runtime_http_base_url: str = ""
 
 
 class MCPServerConfig(BaseModel):
@@ -119,6 +121,8 @@ class AppSettings(BaseSettings):
     backend_api_port: int | None = Field(default=None, alias="BACKEND_API_PORT")
     database_path: str = Field(default="data/app.db", alias="DATABASE_PATH")
     health_check_interval_seconds: int = Field(default=30, alias="HEALTH_CHECK_INTERVAL_SECONDS")
+    agent_runtime_mode: str = Field(default="local", alias="AGENT_RUNTIME_MODE")
+    agent_runtime_http_base_url: str = Field(default="", alias="AGENT_RUNTIME_HTTP_BASE_URL")
 
     email_enabled: bool = Field(default=False, alias="EMAIL_ENABLED")
     email_smtp_host: str = Field(default="", alias="EMAIL_SMTP_HOST")
@@ -468,6 +472,14 @@ def load_settings() -> tuple[LLMSettings, ServerSettings, dict[str, MCPServerCon
         health_check_interval_seconds=(
             env_settings.health_check_interval_seconds
             or server_yaml.get("health_check_interval_seconds", 30)
+        ),
+        agent_runtime_mode=(
+            env_settings.agent_runtime_mode
+            or server_yaml.get("agent_runtime_mode", "local")
+        ),
+        agent_runtime_http_base_url=(
+            env_settings.agent_runtime_http_base_url
+            or server_yaml.get("agent_runtime_http_base_url", "")
         ),
     )
 
