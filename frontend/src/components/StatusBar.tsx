@@ -19,6 +19,28 @@ function mcpLabel(name: string): string {
   return MCP_LABELS[name] ?? `MCP ${name}`;
 }
 
+const RUNTIME_MODE_LABELS: Record<string, string> = {
+  mock: "Runtime (mock)",
+  http: "Runtime (sandbox)",
+  local: "Runtime (mock)",
+};
+
+function runtimeModeLabel(mode: string | undefined): string {
+  if (!mode) {
+    return "Runtime";
+  }
+  return RUNTIME_MODE_LABELS[mode] ?? `Runtime (${mode})`;
+}
+
+function runtimeModeClass(mode: string | undefined): string {
+  const base =
+    "cursor-default rounded-md border px-2.5 py-1 text-xs font-medium transition";
+  if (mode === "http") {
+    return `${base} border-sky-700/70 bg-sky-950/70 text-sky-200`;
+  }
+  return `${base} border-amber-700/70 bg-amber-950/70 text-amber-200`;
+}
+
 function statusButtonClass(value: string | null): string {
   const base =
     "cursor-default rounded-md border px-2.5 py-1 text-xs font-medium transition";
@@ -90,6 +112,15 @@ export function StatusBar({ health }: StatusBarProps) {
           role="listitem"
         >
           LLM
+        </button>
+        <button
+          type="button"
+          tabIndex={-1}
+          className={runtimeModeClass(health.runtime_mode)}
+          title={`${runtimeModeLabel(health.runtime_mode)}: ${health.runtime_mode ?? "unknown"}`}
+          role="listitem"
+        >
+          {runtimeModeLabel(health.runtime_mode)}
         </button>
         {orderedMcpEntries(health.mcp).map(([name, status]) => (
           <button

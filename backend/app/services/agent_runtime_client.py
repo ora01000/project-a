@@ -1,4 +1,4 @@
-"""Agent runtime abstraction — Control Plane ↔ Agent Runtime boundary."""
+"""Agent runtime abstraction — Control Plane ↔ external sandbox boundary."""
 
 from __future__ import annotations
 
@@ -16,11 +16,23 @@ from backend.app.agent_runtime.schemas import (
     definition_to_payload,
     payload_to_result,
 )
-from backend.app.agents.base import AgentDefinition, AgentInvokeResult
-from backend.app.agents.inventory_tool import INVENTORY_AGENT_ID
-from backend.app.agents.system_agents import HELPDESK_AGENT_ID, is_dashboard_system_agent_id
+from backend.app.agents.base import AgentDefinition, AgentInvokeResult, ToolUsage
 
 logger = logging.getLogger(__name__)
+
+SANDBOX_RUNTIME_MODES = frozenset({"mock", "http", "local"})
+
+
+def normalize_runtime_mode(mode: str | None) -> str:
+    """Normalize runtime mode. ``local`` is a legacy alias for ``mock``."""
+    normalized = (mode or "mock").strip().lower()
+    if normalized == "local":
+        return "mock"
+    return normalized
+
+
+def is_sandbox_runtime_mode(mode: str | None) -> bool:
+    return normalize_runtime_mode(mode) in SANDBOX_RUNTIME_MODES
 
 
 @dataclass(frozen=True)
@@ -48,10 +60,10 @@ class AgentPlannedStepRequest:
 
 
 class AgentRuntimeClient(Protocol):
-    """Contract between Control Plane and Agent Runtime."""
+    """Contract between Control Plane and external Agent Runtime sandbox."""
 
     async def invoke(self, request: AgentInvokeRequest) -> AgentInvokeResult:
-        """Chat / helpdesk-delegated / inventory query."""
+        """Chat / helpdesk / inventory / system agent execution."""
         ...
 
     async def invoke_planned_step(self, request: AgentPlannedStepRequest) -> AgentInvokeResult:
@@ -59,11 +71,11 @@ class AgentRuntimeClient(Protocol):
         ...
 
     async def reload_definitions(self, definitions: list[AgentDefinition]) -> None:
-        """Apply agent definition changes (local rebuild or remote push)."""
+        """Apply agent definition changes on the sandbox runtime."""
         ...
 
     async def get_runtime_health(self, agent_id: str) -> str:
-        """Per-agent runtime health: connected | partial | unavailable | unknown."""
+        """Per-agent runtime health: connected | partial | unavailable | mock | unknown."""
         ...
 
     async def get_runtime_summary(self) -> dict[str, Any]:
@@ -75,16 +87,8 @@ class AgentRuntimeClient(Protocol):
         ...
 
 
-def is_control_plane_local_agent(agent_id: str) -> bool:
-    if agent_id in {HELPDESK_AGENT_ID, INVENTORY_AGENT_ID}:
-        return True
-    if is_dashboard_system_agent_id(agent_id):
-        return True
-    return False
-
-
 class LocalAgentRuntimeClient:
-    """Phase 1 — delegates to in-process ``agent_invocation``."""
+    """In-process runtime used by the standalone agent-runtime service only."""
 
     def __init__(self, agent_manager: Any) -> None:
         self._agent_manager = agent_manager
@@ -133,8 +137,63 @@ class LocalAgentRuntimeClient:
         return await list_tools_for_definition(self._agent_manager, definition)
 
 
+class MockAgentRuntimeClient:
+    """Dev-only stub runtime — no LangGraph/MCP/sandbox required on the control plane."""
+
+    def __init__(self, agent_manager: Any) -> None:
+        self._agent_manager = agent_manager
+
+    def _known_agent_ids(self) -> list[str]:
+        return list(self._agent_manager.agents.keys())
+
+    async def invoke(self, request: AgentInvokeRequest) -> AgentInvokeResult:
+        content = (
+            f"[mock runtime] agent={request.agent_id} received your message "
+            f"({len(request.message)} chars).\n\n"
+            "Set AGENT_RUNTIME_MODE=http and AGENT_RUNTIME_HTTP_BASE_URL to connect "
+            "to an external sandbox runtime for real execution."
+        )
+        return AgentInvokeResult(content=content, tools_used=[], input_tokens=0, output_tokens=0)
+
+    async def invoke_planned_step(self, request: AgentPlannedStepRequest) -> AgentInvokeResult:
+        tool_name = request.tool_name or "agent_invoke"
+        content = (
+            f"[mock runtime] planned step on {request.agent_id} "
+            f"(tool={tool_name}): {request.message[:500]}"
+        )
+        tools_used: list[ToolUsage] = []
+        if tool_name != "agent_invoke":
+            tools_used.append(ToolUsage(name=tool_name, mcp_server="mock"))
+        return AgentInvokeResult(content=content, tools_used=tools_used)
+
+    async def reload_definitions(self, definitions: list[AgentDefinition]) -> None:
+        logger.info("Mock runtime: accepted %d agent definition(s) (no-op)", len(definitions))
+
+    async def get_runtime_health(self, agent_id: str) -> str:
+        return "mock" if agent_id in self._agent_manager.agents else "unknown"
+
+    async def get_runtime_summary(self) -> dict[str, Any]:
+        agent_status = {agent_id: "mock" for agent_id in self._known_agent_ids()}
+        return {
+            "mcp": {
+                "kubernetes": "mock",
+                "kubectl_ai": "mock",
+                "kubevirt": "mock",
+                "vcenter": "mock",
+                "ansible": "disabled",
+            },
+            "agent_status": agent_status,
+        }
+
+    async def list_agent_tools(self, agent_id: str) -> list[dict[str, str]]:
+        return [
+            {"name": "mock_tool", "description": f"Mock MCP tool for {agent_id}"},
+            {"name": "agent_invoke", "description": "Respond without MCP tools"},
+        ]
+
+
 class HttpAgentRuntimeClient:
-    """Phase 2 — remote agent runtime over HTTP."""
+    """Remote agent runtime over HTTP (external sandbox)."""
 
     def __init__(
         self,
@@ -231,56 +290,6 @@ class HttpAgentRuntimeClient:
         return tools
 
 
-class CompositeAgentRuntimeClient:
-    """Routes system/helpdesk/inventory locally and regular agents to HTTP runtime."""
-
-    def __init__(self, local: LocalAgentRuntimeClient, remote: HttpAgentRuntimeClient) -> None:
-        self._local = local
-        self._remote = remote
-
-    def _pick(self, agent_id: str) -> AgentRuntimeClient:
-        if is_control_plane_local_agent(agent_id):
-            return self._local
-        return self._remote
-
-    async def invoke(self, request: AgentInvokeRequest) -> AgentInvokeResult:
-        return await self._pick(request.agent_id).invoke(request)
-
-    async def invoke_planned_step(self, request: AgentPlannedStepRequest) -> AgentInvokeResult:
-        return await self._pick(request.agent_id).invoke_planned_step(request)
-
-    async def reload_definitions(self, definitions: list[AgentDefinition]) -> None:
-        await self._remote.reload_definitions(definitions)
-
-    async def get_runtime_health(self, agent_id: str) -> str:
-        if is_control_plane_local_agent(agent_id):
-            return await self._local.get_runtime_health(agent_id)
-        return await self._remote.get_runtime_health(agent_id)
-
-    async def get_runtime_summary(self) -> dict[str, Any]:
-        local_summary = await self._local.get_runtime_summary()
-        try:
-            remote_summary = await self._remote.get_runtime_summary()
-        except Exception:
-            logger.exception("Failed to fetch remote runtime health summary")
-            remote_summary = {"mcp": {}, "agent_status": {}}
-
-        agent_status = dict(remote_summary.get("agent_status", {}))
-        for agent_id, status in local_summary.get("agent_status", {}).items():
-            if is_control_plane_local_agent(agent_id):
-                agent_status[agent_id] = status
-
-        return {
-            "mcp": remote_summary.get("mcp", {}),
-            "agent_status": agent_status,
-        }
-
-    async def list_agent_tools(self, agent_id: str) -> list[dict[str, str]]:
-        if is_control_plane_local_agent(agent_id):
-            return await self._local.list_agent_tools(agent_id)
-        return await self._remote.list_agent_tools(agent_id)
-
-
 def create_agent_runtime_client(
     mode: str,
     *,
@@ -289,22 +298,18 @@ def create_agent_runtime_client(
     http_api_key: str = "",
     http_timeout_seconds: float = 300.0,
 ) -> AgentRuntimeClient:
-    """Factory — ``AGENT_RUNTIME_MODE=local|http``."""
-    normalized = (mode or "local").strip().lower()
-    if normalized == "local":
+    """Factory — ``AGENT_RUNTIME_MODE=mock|http`` (``local`` aliases ``mock``)."""
+    normalized = normalize_runtime_mode(mode)
+    if normalized == "mock":
         if agent_manager is None:
-            raise ValueError("agent_manager is required for local runtime mode")
-        return LocalAgentRuntimeClient(agent_manager)
+            raise ValueError("agent_manager is required for mock runtime mode")
+        return MockAgentRuntimeClient(agent_manager)
     if normalized == "http":
-        if agent_manager is None:
-            raise ValueError("agent_manager is required for http runtime mode")
         if not http_base_url:
             raise ValueError("http_base_url is required for http runtime mode")
-        local = LocalAgentRuntimeClient(agent_manager)
-        remote = HttpAgentRuntimeClient(
+        return HttpAgentRuntimeClient(
             http_base_url,
             timeout_seconds=http_timeout_seconds,
             api_key=http_api_key,
         )
-        return CompositeAgentRuntimeClient(local, remote)
-    raise ValueError(f"Unsupported AGENT_RUNTIME_MODE: {mode!r}")
+    raise ValueError(f"Unsupported AGENT_RUNTIME_MODE: {mode!r} (use mock or http)")

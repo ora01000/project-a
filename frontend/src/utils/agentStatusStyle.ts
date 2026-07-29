@@ -1,4 +1,4 @@
-const HEALTHY_CONNECTION_STATUSES = new Set(["connected", "ready"]);
+const HEALTHY_CONNECTION_STATUSES = new Set(["connected", "ready", "mock"]);
 
 export function isHealthyConnectionStatus(status: string): boolean {
   return HEALTHY_CONNECTION_STATUSES.has(status);

@@ -20,6 +20,8 @@ export interface HealthInfo {
   llm: string;
   mcp: Record<string, string>;
   agents: string[];
+  agent_status?: Record<string, string>;
+  runtime_mode?: "mock" | "http" | "local";
 }
 
 export interface ChatMessage {

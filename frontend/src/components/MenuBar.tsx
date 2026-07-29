@@ -11,6 +11,7 @@ import { InfraCollectModal } from "./admin/InfraCollectModal";
 import { ProfileEditModal } from "./ProfileEditModal";
 import { ReleaseNotesModal } from "./ReleaseNotesModal";
 import { TableDebugModal } from "./TableDebugModal";
+import { ThemeSettingsModal } from "./ThemeSettingsModal";
 import { TestJobSendModal } from "./jobs/TestJobSendModal";
 
 interface MenuBarProps {
@@ -24,8 +25,8 @@ interface MenuBarProps {
 function menuButtonClass(isActive: boolean): string {
   return `rounded-md px-3 py-1.5 transition ${
     isActive
-      ? "bg-slate-800 text-white"
-      : "text-slate-200 hover:bg-slate-800 hover:text-white"
+      ? "bg-slate-800 text-slate-100"
+      : "text-slate-200 hover:bg-slate-800 hover:text-slate-100"
   }`;
 }
 
@@ -35,6 +36,7 @@ export function MenuBar({ activeView, user, onNavigate, onLogout, onUserUpdated 
   const [showAbout, setShowAbout] = useState(false);
   const [showReleaseNotes, setShowReleaseNotes] = useState(false);
   const [showTestJobSend, setShowTestJobSend] = useState(false);
+  const [showThemeSettings, setShowThemeSettings] = useState(false);
   const [showTableDebug, setShowTableDebug] = useState(false);
   const [showInfraCollect, setShowInfraCollect] = useState(false);
   const [showProfileEdit, setShowProfileEdit] = useState(false);
@@ -266,7 +268,8 @@ export function MenuBar({ activeView, user, onNavigate, onLogout, onUserUpdated 
                   showReleaseNotes ||
                   showTestJobSend ||
                   showTableDebug ||
-                  showInfraCollect,
+                  showInfraCollect ||
+                  showThemeSettings,
               )}
             >
               환경설정 ▾
@@ -329,6 +332,17 @@ export function MenuBar({ activeView, user, onNavigate, onLogout, onUserUpdated 
                     ) : null}
                   </div>
                 ) : null}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowSettingsMenu(false);
+                    setShowAdminWorkMenu(false);
+                    setShowThemeSettings(true);
+                  }}
+                  className="block w-full px-3 py-2 text-left text-sm text-slate-200 hover:bg-slate-800"
+                >
+                  화면 테마
+                </button>
                 <button
                   type="button"
                   onClick={() => {
@@ -400,6 +414,7 @@ export function MenuBar({ activeView, user, onNavigate, onLogout, onUserUpdated 
         />
       ) : null}
 
+      {showThemeSettings ? <ThemeSettingsModal onClose={() => setShowThemeSettings(false)} /> : null}
       {showAbout ? <AboutModal onClose={() => setShowAbout(false)} /> : null}
       {showReleaseNotes ? <ReleaseNotesModal onClose={() => setShowReleaseNotes(false)} /> : null}
       {showTestJobSend && isAdmin ? (

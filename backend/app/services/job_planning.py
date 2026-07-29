@@ -144,22 +144,14 @@ def _agent_by_id(agents: list[AgentDefinition], agent_id: str) -> AgentDefinitio
 
 async def _list_tools_for_agent(agent_manager: Any | None, definition: AgentDefinition) -> list[dict[str, str]]:
     agent_runtime = getattr(agent_manager, "agent_runtime", None) if agent_manager is not None else None
-    if (
-        agent_runtime is not None
-        and getattr(agent_manager, "uses_remote_runtime", lambda: False)()
-    ):
-        from backend.app.services.agent_runtime_client import is_control_plane_local_agent
+    if agent_runtime is not None and getattr(agent_manager, "uses_remote_runtime", lambda: False)():
+        try:
+            return await agent_runtime.list_agent_tools(definition.agent_id)
+        except Exception as exc:
+            logger.warning("Failed to list runtime tools for %s: %s", definition.agent_id, exc)
+            return []
 
-        if not is_control_plane_local_agent(definition.agent_id):
-            try:
-                return await agent_runtime.list_agent_tools(definition.agent_id)
-            except Exception as exc:
-                logger.warning("Failed to list runtime tools for %s: %s", definition.agent_id, exc)
-                return []
-
-    from backend.app.services.agent_tool_catalog import list_tools_for_definition
-
-    return await list_tools_for_definition(agent_manager, definition)
+    return []
 
 
 async def _consult_agent_for_tools(

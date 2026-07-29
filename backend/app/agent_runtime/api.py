@@ -15,7 +15,6 @@ from backend.app.agent_runtime.schemas import (
     result_to_payload,
 )
 from backend.app.agents.inventory_tool import INVENTORY_AGENT_ID
-from backend.app.agents.system_agents import HELPDESK_AGENT_ID, is_dashboard_system_agent_id
 from backend.app.services.agent_invocation import AgentInvocationError, invoke_agent_for_planned_step
 from backend.app.services.inventory_approval import remote_inventory_approval_context
 
@@ -26,14 +25,6 @@ router = APIRouter(prefix="/runtime", tags=["agent-runtime"])
 
 def _runtime_manager(request: Request) -> Any:
     return request.app.state.runtime_manager
-
-
-def _assert_runtime_executable(agent_id: str) -> None:
-    if agent_id == HELPDESK_AGENT_ID or is_dashboard_system_agent_id(agent_id):
-        raise HTTPException(
-            status_code=400,
-            detail=f"Agent '{agent_id}' must be executed on the control plane",
-        )
 
 
 @router.get("/health")
@@ -58,7 +49,6 @@ async def agent_runtime_health(agent_id: str, request: Request) -> RuntimeHealth
 async def invoke_agent(agent_id: str, payload: RuntimeInvokeBody, request: Request) -> dict:
     from backend.app.services.agent_invocation import invoke_agent_by_id
 
-    _assert_runtime_executable(agent_id)
     manager = _runtime_manager(request)
 
     if agent_id not in manager.agents:
@@ -75,6 +65,7 @@ async def invoke_agent(agent_id: str, payload: RuntimeInvokeBody, request: Reque
                 agent_id,
                 payload.message,
                 caller_agent_id=payload.caller_agent_id,
+                agent_runtime=getattr(request.app.state, "agent_runtime", None),
             )
     except AgentInvocationError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -84,7 +75,6 @@ async def invoke_agent(agent_id: str, payload: RuntimeInvokeBody, request: Reque
 
 @router.post("/agents/{agent_id}/invoke-planned-step")
 async def invoke_planned_step(agent_id: str, payload: RuntimePlannedStepBody, request: Request) -> dict:
-    _assert_runtime_executable(agent_id)
     manager = _runtime_manager(request)
 
     if agent_id not in manager.agents:
@@ -103,6 +93,7 @@ async def invoke_planned_step(agent_id: str, payload: RuntimePlannedStepBody, re
                 tool_name=payload.tool_name,
                 tool_params=payload.tool_params,
                 caller_agent_id=payload.caller_agent_id,
+                agent_runtime=getattr(request.app.state, "agent_runtime", None),
             )
     except AgentInvocationError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

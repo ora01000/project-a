@@ -9,6 +9,18 @@ INVENTORY_AGENT_ID = "sys-inventory"
 WHATAP_EVENT_AGENT_ID = "sys-whatap-events"
 HELPDESK_AGENT_ID = "sys-helpdesk"
 
+# Control Plane orchestration — not executed on sandbox runtime; health is always "ready".
+CONTROL_PLANE_ORCHESTRATION_AGENT_IDS = frozenset({
+    JOB_PLANNING_AGENT_ID,
+    JOB_EXECUTION_AGENT_ID,
+    WHATAP_EVENT_AGENT_ID,
+})
+
+# Sandbox runtime executes these system agents (helpdesk routing + delegation).
+SANDBOX_SYSTEM_AGENT_IDS = frozenset({
+    HELPDESK_AGENT_ID,
+})
+
 SYSTEM_AGENT_MARKER = object()
 
 
@@ -94,6 +106,14 @@ def is_dashboard_system_agent_id(agent_id: str) -> bool:
 
 def is_chat_enabled_system_agent_id(agent_id: str) -> bool:
     return any(agent.agent_id == agent_id and agent.chat_enabled for agent in SYSTEM_AGENTS)
+
+
+def is_control_plane_orchestration_agent(agent_id: str) -> bool:
+    return agent_id in CONTROL_PLANE_ORCHESTRATION_AGENT_IDS
+
+
+def is_sandbox_system_agent(agent_id: str) -> bool:
+    return agent_id in SANDBOX_SYSTEM_AGENT_IDS
 
 
 def get_system_agent_info(agent_id: str) -> SystemAgentInfo | None:
