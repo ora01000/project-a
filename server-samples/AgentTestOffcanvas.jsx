@@ -29,13 +29,16 @@ import {
 import CIcon from '@coreui/icons-react'
 import { cilDescription, cilSettings, cilText, cilTrash} from '@coreui/icons'
 
-// °øðimport { useModal } from '../../../components/AppModal'
+// 공통
+import { useModal } from '../../../components/AppModal'
 import { useCommonContext } from '../../../contexts/CommonProvider'
 import { invokeAgent, getInvocationLatest, getInvocationInfo} from '../../../api/agentApi'
 import { infoLog, warnLog, errorLog } from '../../../utils'
-// Ç' ¸ðimport AgentTestSettingsModal from '../modals/AgentTestSettingsModal';
+// 별도 모달
+import AgentTestSettingsModal from '../modals/AgentTestSettingsModal';
 
-// »óconst MAX_ATTEMPTS = 60         // 2ºÐ2s * 60)
+// 상수
+const MAX_ATTEMPTS = 60         // 2분(2s * 60)
 const POLLING_INTERVAL = 3000
 const ROLLING_INTERVAL = 5000
 
@@ -90,20 +93,22 @@ const AgentTestOffcanvas = ({ visible, onClose, serviceId, agentId, agentName })
   const bottomRef = useRef(null)
   const { showModal } = useModal()
   const settingsModalRef = useRef(null)
-  // »çÀ dº¸ °¡n¿1â const { userState } = useCommonContext()
+  // 사용자 정보 가져오기
+  const { userState } = useCommonContext()
   const { user } = userState
 
-  // ¸޽Ãöconst [messages, setMessages] = useState([
-    { sender: 'agent', text: '¾ȳç¼¼¿ä¹«¾ùµ¿͵帱±î?' }
+  // 메시지
+  const [messages, setMessages] = useState([
+    { sender: 'agent', text: '안녕하세요, 무엇을 도와드릴까요?' }
   ])
 
-  // pending placeholder Àµ¦½º (¸»ǳ¼± ¾øºÇ³Ê¹®±¸¸¸)
+  // pending placeholder 텍스트 (말풍선 없는 스피너 문구만)
   const pendingIdxRef = useRef(null)
   const abortRef = useRef(false)
 
   const [input, setInput] = useState('')
-  const [loading, setLoading] = useState(false)     // invoke ¿ä Á
-  const [isPolling, setIsPolling] = useState(false) // °á Æ¸µ Á
+  const [loading, setLoading] = useState(false)     // invoke 요청 중
+  const [isPolling, setIsPolling] = useState(false) // 응답 폴링 중
   const [selectedTrace, setSelectedTrace] = useState(null)
   const [traceVisible, setTraceVisible] = useState(false)
   const [responseFormat, setResponseFormat] = useState('text')
@@ -112,16 +117,16 @@ const AgentTestOffcanvas = ({ visible, onClose, serviceId, agentId, agentName })
     prompt_session_attributes: {},
     enable_trace: true,
   });
-  // ·Ѹµ ¹®±¸
+  // 롤링 문구
   const rollingTexts = [
-    'ó¸®ÁÀ´ϴÙ',
-    '°üº¸¸¦ °Ëä°íֽ4ϴÙ,
-    '´õ: À´ä 'Ç ´õ·¡ »ýÂÁ',
-    'v±ݸ¸ ±â·ÁÁ¼¼¿ä
+    '처리중입니다',
+    '관련 정보를 검색하고 있습니다.',
+    '조금 더: 응답을 조금 더 생각',
+    '잠시만 기다려주세요',
   ]
   const [rollingTick, setRollingTick] = useState(0)
 
-  // ===== ¼¼¼ÇID °ü===
+  // ===== 세션ID 관리 =====
   const getSessionId = () => {
     let sid = sessionStorage.getItem('session-id')
     if (!sid) sid = setNewSessionId()
@@ -134,16 +139,17 @@ const AgentTestOffcanvas = ({ visible, onClose, serviceId, agentId, agentName })
   }
   const sessionId = getSessionId()
 
-  // ===== pending ±³ü/d¸® ÇÆ =====
+  // ===== pending 교체/처리 헬퍼 =====
   const replacePending = (payload) => {
     setMessages(prev => {
       const next = [...prev]
       const i = pendingIdxRef.current
       if (i == null || !next[i]) {
-        // Àµ¦½º /½Ç´ë fail-safe
+        // 텍스트 /실패 fail-safe
         return [...next, payload]
       }
-      next[i] = payload            // ¡Úpending f°Å »õü¿£ pending ¾ø     return next
+      next[i] = payload            // pending 교체, 새로운 pending 없음
+      return next
     })
     pendingIdxRef.current = null
     setMessages(prev => prev.filter(m => !m?.pending))
@@ -154,7 +160,7 @@ const AgentTestOffcanvas = ({ visible, onClose, serviceId, agentId, agentName })
     pendingIdxRef.current = null
   }
 
-  // ===== °á Æ¸µ =====
+  // ===== 응답 폴링 =====
   const startPollingForResult = async ({ agentId, sessionId }) => {
     setIsPolling(true)
     abortRef.current = false
@@ -163,40 +169,41 @@ const AgentTestOffcanvas = ({ visible, onClose, serviceId, agentId, agentName })
       while (attempts < MAX_ATTEMPTS) {
         attempts += 1
         if (abortRef.current) {
-          infoLog('Æ¸µ Á´ܵÊ)
-          replacePending({ sender: 'agent', text: 'À´äë¸¦ Ã¼Ò߽4ϴÙ' })
+          infoLog('폴링 중단됨')
+          replacePending({ sender: 'agent', text: '응답을 취소했습니다' })
           return
         }
         const response = await getInvocationLatest(agentId, sessionId)
         const result = response.data
-        // infoLog('Æ¸µ vȸ °á:', result)
+        // infoLog('폴링 조회 결과:', result)
 
         if (!result || !result?.agent_invocation_status) {
           await new Promise((r) => setTimeout(r, POLLING_INTERVAL))
           continue
         }
 
-        // running/pendingÀ¸éè ´ë
+        // running/pending이면 대기
         if (result?.agent_invocation_status === 'running' || result?.agent_invocation_status === 'pending') {
           await new Promise((r) => setTimeout(r, POLLING_INTERVAL))
           continue
         }
 
-        // ¿ϷáÇÐµîÖ¾ »ó¡æóvȸ
+        // 완료됐을때 상세조회
         const detail = await getInvocationInfo(result?.agent_id, result?.agent_invocation_id)
         const info = detail.data
-        infoLog('Æ¸µ À´ä, info)
-        const finalText = info?.result?.text ?? 'ó¸® Á ¿7ù߻ýϴÙ'
+        infoLog('폴링 응답', info)
+        const finalText = info?.result?.text ?? '처리 중 오류가 발생했습니다'
         const finalTrace = info?.result?.trace
 
         replacePending({ sender: 'agent', text: finalText, trace: finalTrace })
         return
       }
 
-      // ŸÀ¾ƿô°ú   replacePending({ sender: 'agent', text: 'À´äð£À Ã°ú½4ϴÙ À½ÃÈ¿¡ ´ٽÃ½õµÇ Á¼¼¿ä })
+      // 타임아웃
+      replacePending({ sender: 'agent', text: '응답시간이 초과했습니다. 잠시 후에 다시 시도해 주세요' })
     } catch (e) {
-      errorLog('°á Æ¸µ ½ÇÐ', e)
-      replacePending({ sender: 'agent', text: 'ó¸® Á ¿7ù߻ýϴÙ À½ÃÈ¿¡ ´ٽÃ½õµÇ Á¼¼¿ä })
+      errorLog('응답 폴링 실패', e)
+      replacePending({ sender: 'agent', text: '처리 중 오류가 발생했습니다. 잠시 후에 다시 시도해 주세요' })
     } finally {
       setIsPolling(false)
     }
@@ -207,7 +214,7 @@ const AgentTestOffcanvas = ({ visible, onClose, serviceId, agentId, agentName })
     setIsPolling(false)
   }
 
-  // ===== À¼Û=====
+  // ===== 전송 =====
   const handleSend = async () => {
     if (!input.trim() || loading || isPolling) return
 
@@ -220,10 +227,11 @@ const AgentTestOffcanvas = ({ visible, onClose, serviceId, agentId, agentName })
       enable_trace: settings.enable_trace,
     }
 
-    // 1) »çÀ ¸޽Ãö  setMessages(prev => [...prev, { sender: 'user', text: input }])
+    // 1) 사용자 메시지
+    setMessages(prev => [...prev, { sender: 'user', text: input }])
     setInput('')
 
-    // 2) ¿¡ÀÀƮ "´ë placeholder" (¸»ǳ¼± ¾ø·»´����­ ½ºÇ³Ê¹®±¸)
+    // 2) 에이전트 "대기 placeholder" (말풍선 없이 스피너 문구)
     if (pendingIdxRef.current == null) {
       setMessages(prev => {
         const next = [...prev, { sender: 'agent', pending: true }]
@@ -235,36 +243,38 @@ const AgentTestOffcanvas = ({ visible, onClose, serviceId, agentId, agentName })
     setLoading(true)
 
     try {
-      // infoLog('Agent ȣÃ ÆÀ·εå, payload)
+      // infoLog('Agent 호출 페이로드', payload)
       const response = await invokeAgent(agentId, payload)
       const result = response.data
-      infoLog('Á½ÃÀ´ä, result)
-      // Á½ÃÀ´äælaceholder ±³ü
+      infoLog('즉시응답', result)
+      // 즉시응답으로 placeholder 교체
       replacePending({ sender: 'agent', text: result.text, trace: result.trace })
     } catch (error) {
-      errorLog('À´äÇÐ', error)
+      errorLog('응답실패', error)
       const status = error?.status || error?.response?.status
       if (status === 504) {
-        // ŸÀ¾ƿô Æ¸µ ½ÃÛ(placeholder /Á)
+        // 타임아웃 폴링 시작(placeholder 유지)
         startPollingForResult({ agentId, sessionId })
       } else {
         const errorData = error?.response?.data
         const serverMessage = typeof errorData === 'string'? errorData : errorData?.message || errorData?.detail
-        const errText = `¿7ù߻ýϴÙ- ${serverMessage || error?.message || 'Agent ½ÇàÇÐ ´ٽÃ½õµÇ¼¼¿ä}`
+        const errText = `오류가 발생했습니다 - ${serverMessage || error?.message || 'Agent 실행실패, 다시 시도해주세요'}`
         replacePending({ sender: 'agent', text: errText })
       }
     } finally {
       setLoading(false)
     }
   }
-  // »ý¿ë¸±â const handleTraceClick = (traceRawList) => {
+
+  // 상세보기
+  const handleTraceClick = (traceRawList) => {
     setSelectedTrace(traceRawList)
     setTraceVisible(true)
   }
 
-  // ¼¼¼ÇÃ±â
+  // 세션초기화
   const handleRefresh = () => {
-    setMessages([{ sender: 'agent', text: '¾ȳç¼¼¿ä¹«¾ùµ¿͵帱±î?' }])
+    setMessages([{ sender: 'agent', text: '안녕하세요, 무엇을 도와드릴까요?' }])
     setInput('')
     setNewSessionId()
     cleanupAllPending()
@@ -282,15 +292,16 @@ const AgentTestOffcanvas = ({ visible, onClose, serviceId, agentId, agentName })
           onSettingsChange={(newSettings) => setSettings(newSettings)}
         />
       ),
-      'Å½ºƮ ¼³d',
+      '테스트 설정',
       'lg',
       () => {
         try {
           const parsed = settingsModalRef.current?.getParsedSettings()
           if (!parsed) return false
           setSettings(prev => ({ ...prev, ...parsed }))
-          return true // true/undefined¸éð´Ýû     } catch {
-          return false // °ËõÆ ½Ã¸ð/Á
+          return true // true/undefined면 저장
+        } catch {
+          return false // 검증 실패 시 모달 닫기 방지
         }
       },
     );
@@ -344,17 +355,17 @@ const AgentTestOffcanvas = ({ visible, onClose, serviceId, agentId, agentName })
       {/* Main Chat Panel */}
       <COffcanvas placement="end" visible={visible} onHide={onClose} style={{ width: '40%' }}>
         <COffcanvasHeader className="d-flex align-items-center">
-          <COffcanvasTitle>Agent Å½ºƮ</COffcanvasTitle>
+          <COffcanvasTitle>Agent 테스트</COffcanvasTitle>
           <CButton className="ms-auto text-reset btn-close" onClick={onClose} aria-label="Close" />
         </COffcanvasHeader>
         <COffcanvasBody>
           <CCard style={{ margin: '10 auto', height: '80vh', display: 'flex', flexDirection: 'column' }}>
             <CCardHeader className="d-flex p-2 m-0">
               <CCol className="d-flex justify-content-start p-0 m-0" md={9}>
-                <h6 style={{ margin: 0, display: 'block' }}>?? {agentName} ¿ÍÇ´ë</h6>
+                <h6 style={{ margin: 0, display: 'block' }}>💬 {agentName} 와의 대화</h6>
               </CCol>
               <CCol className="d-flex align-items-center justify-content-end p-0 m-0" md={3}>
-                <CTooltip content={responseFormat === 'markdown' ? 'Å½ºƮ·Îº¸±â: 'Markdown8·Îº¸±â placement="bottom">
+                <CTooltip content={responseFormat === 'markdown' ? '텍스트로 보기' : 'Markdown으로 보기'} placement="bottom">
                   <CIcon
                     icon={responseFormat === 'markdown' ? cilDescription : cilText}
                     size="lg"
@@ -363,10 +374,10 @@ const AgentTestOffcanvas = ({ visible, onClose, serviceId, agentId, agentName })
                     onClick={handleResponseFormatToggle}
                   />
                 </CTooltip>
-                <CTooltip content="¼¼¼ÇÃ±â" placement="bottom">
+                <CTooltip content="세션초기화" placement="bottom">
                   <CIcon icon={cilTrash} size="lg" className="me-3" style={{ display: 'block', cursor: 'pointer' }} onClick={handleRefresh} />
                 </CTooltip>
-                <CTooltip content="¼³d" placement="bottom">
+                <CTooltip content="설정" placement="bottom">
                   <CIcon icon={cilSettings} size="lg" className="me-3" style={{ display: 'block', cursor: 'pointer' }} onClick={handleSettings} />
                 </CTooltip>
               </CCol>
@@ -378,7 +389,7 @@ const AgentTestOffcanvas = ({ visible, onClose, serviceId, agentId, agentName })
                   const isUser = msg.sender === 'user'
                   const useMarkdown = !isUser && responseFormat === 'markdown'
 
-                  // ¿¡ÀÀƮ ´ë placeholder: ¸»ǳ¼± ¾øºÇ³Ê+ ·Ѹµ ¹®±¸
+                  // 에이전트 대기 placeholder: 말풍선 없이 + 롤링 문구
                   if (!isUser && msg.pending === true && (loading || isPolling)) {
                     return (
                       <div key={idx} className="d-flex justify-content-start my-1 px-2">
@@ -390,7 +401,8 @@ const AgentTestOffcanvas = ({ visible, onClose, serviceId, agentId, agentName })
                     )
                   }
 
-                  // À¹Ý¹ö                  return (
+                  // 일반 버블
+                  return (
                     <CListGroupItem
                       key={idx}
                       className={`d-flex ${isUser ? 'justify-content-end' : (useMarkdown ? 'justify-content-center' : 'justify-content-start')}`}
@@ -418,7 +430,8 @@ const AgentTestOffcanvas = ({ visible, onClose, serviceId, agentId, agentName })
                                   onClick={(e) => { e.preventDefault(); handleTraceClick(msg.trace) }}
                                   style={{ fontSize: '0.85rem', display: 'inline-block', marginTop: '0.25rem' }}
                                 >
-                                  ?? »ý¿ë¸±â                               </a>
+                                  📋 상세보기
+                                </a>
                               </div>
                             )}
                           </div>
@@ -436,7 +449,8 @@ const AgentTestOffcanvas = ({ visible, onClose, serviceId, agentId, agentName })
                                 onClick={(e) => { e.preventDefault(); handleTraceClick(msg.trace) }}
                                 style={{ fontSize: '0.85rem', display: 'inline-block', marginTop: '0.25rem' }}
                               >
-                                ?? »ý¿ë¸±â                             </a>
+                                📋 상세보기
+                              </a>
                             </div>
                           )}
                         </div>
@@ -461,7 +475,7 @@ const AgentTestOffcanvas = ({ visible, onClose, serviceId, agentId, agentName })
                       handleSend()
                     }
                   }}
-                  placeholder="¸޽ÃöÀ·Âϼ¼¿ä."
+                  placeholder="메시지를 입력하세요."
                   disabled={loading || isPolling}
                   rows={1}
                   style={{ resize: 'none', overflow: 'hidden', flex: 1, maxHeight: '200px' }}
@@ -473,7 +487,7 @@ const AgentTestOffcanvas = ({ visible, onClose, serviceId, agentId, agentName })
                   className="ms-2"
                   style={{ height: 'calc(2.5rem + 1px)', alignSelf: 'flex-end' }}
                 >
-                  {isPolling ? 'ÁÁ' : (loading ? <CSpinner size="sm" /> : 'À¼Û)}
+                  {isPolling ? '중지' : (loading ? <CSpinner size="sm" /> : '전송')}
                 </CButton>
               </div>
             </CCardBody>
@@ -484,7 +498,7 @@ const AgentTestOffcanvas = ({ visible, onClose, serviceId, agentId, agentName })
       {/* Trace View Offcanvas */}
       <COffcanvas placement="end" visible={traceVisible} onHide={() => setTraceVisible(false)} style={{ width: '30%', zIndex: 1100 }}>
         <COffcanvasHeader className="d-flex align-items-center">
-          <COffcanvasTitle>?? ¿¡ÀÀƮÀ »ýOffcanvasTitle>
+          <COffcanvasTitle>📋 에이전트 상세</COffcanvasTitle>
           <CCloseButton className="ms-auto text-reset" onClick={() => setTraceVisible(false)} />
         </COffcanvasHeader>
         <COffcanvasBody>
@@ -500,4 +514,3 @@ const AgentTestOffcanvas = ({ visible, onClose, serviceId, agentId, agentName })
 }
 
 export default AgentTestOffcanvas
-
