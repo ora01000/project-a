@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import type { AgentRecord } from "../../types/agent-admin";
+import type { AgentRuntimeRecord } from "../../types/agentruntime";
+import { assignableAgentId } from "../../types/agentruntime";
 import type { UserRecord } from "../../types/user";
 import { ROLE_ADMIN, roleLabel } from "../../types/user";
 
@@ -56,7 +57,7 @@ function parseDraggedAgentIds(dataTransfer: DataTransfer): string[] {
 }
 
 export function AgentAssignmentPage({ onClose }: AgentAssignmentPageProps) {
-  const [agents, setAgents] = useState<AgentRecord[]>([]);
+  const [agents, setAgents] = useState<AgentRuntimeRecord[]>([]);
   const [drafts, setDrafts] = useState<AssignmentDraft[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -69,12 +70,16 @@ export function AgentAssignmentPage({ onClose }: AgentAssignmentPageProps) {
   const agentNameById = useMemo(() => {
     const map = new Map<string, string>();
     for (const agent of agents) {
-      map.set(agent.agent_id, agent.name);
+      const assignableId = agent.local_agent_id || agent.agent_id;
+      map.set(assignableId, agent.agent_name);
     }
     return map;
   }, [agents]);
 
-  const allAgentIds = useMemo(() => agents.map((agent) => agent.agent_id), [agents]);
+  const allAgentIds = useMemo(
+    () => agents.map((agent) => agent.local_agent_id || agent.agent_id),
+    [agents],
+  );
   const hasSelection = selectedAgentIds.size > 0;
 
   const loadData = useCallback(async () => {
@@ -82,7 +87,7 @@ export function AgentAssignmentPage({ onClose }: AgentAssignmentPageProps) {
     setError(null);
     try {
       const [agentsResponse, usersResponse] = await Promise.all([
-        fetch("/api/agent-records"),
+        fetch("/api/agentruntime"),
         fetch(`/api/users?viewer_role=${ROLE_ADMIN}`),
       ]);
       if (!agentsResponse.ok) {
@@ -92,7 +97,7 @@ export function AgentAssignmentPage({ onClose }: AgentAssignmentPageProps) {
         throw new Error(await parseError(usersResponse, "사용자 목록을 불러오지 못했습니다."));
       }
 
-      const agentsData = (await agentsResponse.json()) as AgentRecord[];
+      const agentsData = (await agentsResponse.json()) as AgentRuntimeRecord[];
       const usersData = (await usersResponse.json()) as UserRecord[];
       setAgents(agentsData);
       setSelectedAgentIds(new Set());
@@ -271,11 +276,12 @@ export function AgentAssignmentPage({ onClose }: AgentAssignmentPageProps) {
                   <p className="text-sm text-slate-500">등록된 에이전트가 없습니다.</p>
                 ) : (
                   agents.map((agent) => {
-                    const isSelected = selectedAgentIds.has(agent.agent_id);
-                    const isDragging = draggingAgentIds.includes(agent.agent_id);
+                    const agentKey = assignableAgentId(agent);
+                    const isSelected = selectedAgentIds.has(agentKey);
+                    const isDragging = draggingAgentIds.includes(agentKey);
                     return (
                       <button
-                        key={agent.agent_id}
+                        key={agentKey}
                         type="button"
                         draggable
                         aria-pressed={isSelected}
@@ -284,20 +290,20 @@ export function AgentAssignmentPage({ onClose }: AgentAssignmentPageProps) {
                             suppressClickRef.current = false;
                             return;
                           }
-                          toggleAgentSelection(agent.agent_id);
+                          toggleAgentSelection(agentKey);
                         }}
                         onDragStart={(event) => {
                           suppressClickRef.current = true;
-                          const payloadIds = selectedAgentIds.has(agent.agent_id)
+                          const payloadIds = selectedAgentIds.has(agentKey)
                             ? allAgentIds.filter((id) => selectedAgentIds.has(id))
-                            : [agent.agent_id];
+                            : [agentKey];
                           event.dataTransfer.setData(DRAG_MIME, JSON.stringify(payloadIds));
                           event.dataTransfer.setData(DRAG_MIME_LEGACY, payloadIds[0] ?? "");
                           event.dataTransfer.setData("text/plain", payloadIds.join(","));
                           event.dataTransfer.effectAllowed = "copy";
                           setDraggingAgentIds(payloadIds);
-                          if (!selectedAgentIds.has(agent.agent_id)) {
-                            setSelectedAgentIds(new Set([agent.agent_id]));
+                          if (!selectedAgentIds.has(agentKey)) {
+                            setSelectedAgentIds(new Set([agentKey]));
                           }
                         }}
                         onDragEnd={() => {
@@ -307,16 +313,16 @@ export function AgentAssignmentPage({ onClose }: AgentAssignmentPageProps) {
                             suppressClickRef.current = false;
                           }, 0);
                         }}
-                        title={`${agent.agent_id} — ${agent.role}`}
+                        title={`${agentKey} — ${agent.description}`}
                         className={`rounded-md border px-2.5 py-1.5 text-left text-xs font-medium transition ${
                           isDragging || isSelected
                             ? "border-sky-500 bg-sky-950/60 text-sky-100 ring-1 ring-sky-500/60"
                             : "border-slate-600 bg-slate-800 text-slate-100 hover:border-sky-700 hover:bg-slate-700"
                         }`}
                       >
-                        <span className="block truncate">{agent.name}</span>
+                        <span className="block truncate">{agent.agent_name}</span>
                         <span className="mt-0.5 block truncate font-mono text-[10px] text-slate-400">
-                          {agent.agent_id}
+                          {agentKey}
                         </span>
                       </button>
                     );

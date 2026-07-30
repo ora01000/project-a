@@ -5,14 +5,15 @@ import type { AppView } from "../types/navigation";
 import { ROLE_ADMIN } from "../types/user";
 import { formatUserLabel } from "../utils/authSession";
 import { formatCurrentTime } from "../utils/datetime";
+import { AGENT_MANAGEMENT_DISABLED_MESSAGE, TOKEN_MANAGEMENT_DISABLED_MESSAGE } from "../utils/runtimeCapabilities";
 import { AboutModal } from "./AboutModal";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { InfraCollectModal } from "./admin/InfraCollectModal";
+import { PostmanDebugModal } from "./admin/PostmanDebugModal";
 import { ProfileEditModal } from "./ProfileEditModal";
 import { ReleaseNotesModal } from "./ReleaseNotesModal";
 import { TableDebugModal } from "./TableDebugModal";
 import { ThemeSettingsModal } from "./ThemeSettingsModal";
-import { TestJobSendModal } from "./jobs/TestJobSendModal";
 
 interface MenuBarProps {
   activeView: AppView;
@@ -35,19 +36,17 @@ export function MenuBar({ activeView, user, onNavigate, onLogout, onUserUpdated 
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
   const [showReleaseNotes, setShowReleaseNotes] = useState(false);
-  const [showTestJobSend, setShowTestJobSend] = useState(false);
   const [showThemeSettings, setShowThemeSettings] = useState(false);
   const [showTableDebug, setShowTableDebug] = useState(false);
+  const [showPostmanDebug, setShowPostmanDebug] = useState(false);
   const [showInfraCollect, setShowInfraCollect] = useState(false);
   const [showProfileEdit, setShowProfileEdit] = useState(false);
   const [showSaveSuccess, setShowSaveSuccess] = useState(false);
   const [showAgentMenu, setShowAgentMenu] = useState(false);
-  const [showJobMenu, setShowJobMenu] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showSettingsMenu, setShowSettingsMenu] = useState(false);
   const [showAdminWorkMenu, setShowAdminWorkMenu] = useState(false);
   const agentMenuRef = useRef<HTMLDivElement>(null);
-  const jobMenuRef = useRef<HTMLDivElement>(null);
   const userMenuRef = useRef<HTMLDivElement>(null);
   const settingsMenuRef = useRef<HTMLDivElement>(null);
   const userLabel = formatUserLabel(user);
@@ -65,9 +64,6 @@ export function MenuBar({ activeView, user, onNavigate, onLogout, onUserUpdated 
       if (!agentMenuRef.current?.contains(event.target as Node)) {
         setShowAgentMenu(false);
       }
-      if (!jobMenuRef.current?.contains(event.target as Node)) {
-        setShowJobMenu(false);
-      }
       if (!userMenuRef.current?.contains(event.target as Node)) {
         setShowUserMenu(false);
       }
@@ -81,13 +77,9 @@ export function MenuBar({ activeView, user, onNavigate, onLogout, onUserUpdated 
   }, []);
 
   const isAgentMenuActive =
-    isAdmin &&
-    (activeView === "agent-list" ||
-      activeView === "inventory-csv" ||
-      activeView === "agent-assignment" ||
-      activeView === "token-management");
+    isAdmin && (activeView === "agent-assignment" || activeView === "agent-connections");
 
-  const isJobManagementActive = activeView === "job-list" || activeView === "job-create";
+
   const isUserManagementActive = activeView === "user-list";
 
   return (
@@ -116,31 +108,25 @@ export function MenuBar({ activeView, user, onNavigate, onLogout, onUserUpdated 
                 <div className="absolute left-0 top-full z-20 mt-1 min-w-[160px] rounded-md border border-slate-700 bg-slate-900 py-1 shadow-lg">
                   <button
                     type="button"
-                    onClick={() => {
-                      onNavigate("agent-list");
-                      setShowAgentMenu(false);
-                    }}
-                    className={`block w-full px-3 py-2 text-left text-sm ${
-                      activeView === "agent-list"
-                        ? "bg-slate-800 text-sky-200"
-                        : "text-slate-200 hover:bg-slate-800"
-                    }`}
+                    disabled
+                    title={AGENT_MANAGEMENT_DISABLED_MESSAGE}
+                    className="block w-full cursor-not-allowed px-3 py-2 text-left text-sm text-slate-500"
                   >
                     에이전트 관리
                   </button>
                   <button
                     type="button"
                     onClick={() => {
-                      onNavigate("inventory-csv");
+                      onNavigate("agent-connections");
                       setShowAgentMenu(false);
                     }}
                     className={`block w-full px-3 py-2 text-left text-sm ${
-                      activeView === "inventory-csv"
+                      activeView === "agent-connections"
                         ? "bg-slate-800 text-sky-200"
                         : "text-slate-200 hover:bg-slate-800"
                     }`}
                   >
-                    인벤토리 CSV
+                    에이전트 연결
                   </button>
                   <button
                     type="button"
@@ -158,15 +144,9 @@ export function MenuBar({ activeView, user, onNavigate, onLogout, onUserUpdated 
                   </button>
                   <button
                     type="button"
-                    onClick={() => {
-                      onNavigate("token-management");
-                      setShowAgentMenu(false);
-                    }}
-                    className={`block w-full px-3 py-2 text-left text-sm ${
-                      activeView === "token-management"
-                        ? "bg-slate-800 text-sky-200"
-                        : "text-slate-200 hover:bg-slate-800"
-                    }`}
+                    disabled
+                    title={TOKEN_MANAGEMENT_DISABLED_MESSAGE}
+                    className="block w-full cursor-not-allowed px-3 py-2 text-left text-sm text-slate-500"
                   >
                     토큰관리
                   </button>
@@ -176,50 +156,6 @@ export function MenuBar({ activeView, user, onNavigate, onLogout, onUserUpdated 
           ) : null}
 
           {isAdmin ? <span className="text-slate-600">|</span> : null}
-
-          <div ref={jobMenuRef} className="relative">
-            <button
-              type="button"
-              onClick={() => setShowJobMenu((current) => !current)}
-              className={menuButtonClass(isJobManagementActive)}
-            >
-              작업관리 ▾
-            </button>
-            {showJobMenu ? (
-              <div className="absolute left-0 top-full z-20 mt-1 min-w-[160px] rounded-md border border-slate-700 bg-slate-900 py-1 shadow-lg">
-                <button
-                  type="button"
-                  onClick={() => {
-                    onNavigate("job-list");
-                    setShowJobMenu(false);
-                  }}
-                  className={`block w-full px-3 py-2 text-left text-sm ${
-                    activeView === "job-list"
-                      ? "bg-slate-800 text-sky-200"
-                      : "text-slate-200 hover:bg-slate-800"
-                  }`}
-                >
-                  작업 목록
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    onNavigate("job-create");
-                    setShowJobMenu(false);
-                  }}
-                  className={`block w-full px-3 py-2 text-left text-sm ${
-                    activeView === "job-create"
-                      ? "bg-slate-800 text-sky-200"
-                      : "text-slate-200 hover:bg-slate-800"
-                  }`}
-                >
-                  작업 생성
-                </button>
-              </div>
-            ) : null}
-          </div>
-
-          <span className="text-slate-600">|</span>
 
           <div ref={userMenuRef} className="relative">
             <button
@@ -266,8 +202,8 @@ export function MenuBar({ activeView, user, onNavigate, onLogout, onUserUpdated 
               className={menuButtonClass(
                 showAbout ||
                   showReleaseNotes ||
-                  showTestJobSend ||
                   showTableDebug ||
+                  showPostmanDebug ||
                   showInfraCollect ||
                   showThemeSettings,
               )}
@@ -283,8 +219,8 @@ export function MenuBar({ activeView, user, onNavigate, onLogout, onUserUpdated 
                       onClick={() => setShowAdminWorkMenu((current) => !current)}
                       className={`flex w-full items-center justify-between px-3 py-2 text-left text-sm ${
                         showAdminWorkMenu ||
-                        showTestJobSend ||
                         showTableDebug ||
+                        showPostmanDebug ||
                         showInfraCollect
                           ? "bg-slate-800 text-sky-200"
                           : "text-slate-200 hover:bg-slate-800"
@@ -311,11 +247,11 @@ export function MenuBar({ activeView, user, onNavigate, onLogout, onUserUpdated 
                           onClick={() => {
                             setShowSettingsMenu(false);
                             setShowAdminWorkMenu(false);
-                            setShowTestJobSend(true);
+                            setShowPostmanDebug(true);
                           }}
                           className="block w-full px-3 py-2 text-left text-sm text-slate-200 hover:bg-slate-800"
                         >
-                          테스트 작업 발송
+                          postman
                         </button>
                         <button
                           type="button"
@@ -417,8 +353,8 @@ export function MenuBar({ activeView, user, onNavigate, onLogout, onUserUpdated 
       {showThemeSettings ? <ThemeSettingsModal onClose={() => setShowThemeSettings(false)} /> : null}
       {showAbout ? <AboutModal onClose={() => setShowAbout(false)} /> : null}
       {showReleaseNotes ? <ReleaseNotesModal onClose={() => setShowReleaseNotes(false)} /> : null}
-      {showTestJobSend && isAdmin ? (
-        <TestJobSendModal onClose={() => setShowTestJobSend(false)} />
+      {showPostmanDebug && isAdmin ? (
+        <PostmanDebugModal viewerRole={user.role} onClose={() => setShowPostmanDebug(false)} />
       ) : null}
       {showTableDebug && isAdmin ? (
         <TableDebugModal onClose={() => setShowTableDebug(false)} />

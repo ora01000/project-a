@@ -1,29 +1,37 @@
 #!/bin/bash
 # 에이전트 런타임 API 직접 검증 스크립트
 # 사용법:
-#   ./scripts/oauth_test.sh local    # mockup (127.0.0.1:9000)
-#   ./scripts/oauth_test.sh server   # 실서버 (기본값)
+#   ./server-samples/oauth_test.sh local    # mockup (127.0.0.1:8080)
+#   ./server-samples/oauth_test.sh server   # 실서버 (기본값)
 
 set -euo pipefail
 
 MODE="${1:-server}"
 
 if [ "$MODE" = "local" ]; then
-  TOKEN_URL="http://127.0.0.1:9000/portal/auths/v1/token"
-  AGENT_URL="http://127.0.0.1:9000/aihub/agents/v1"
+  TOKEN_URL="http://127.0.0.1:8080/portal/auths/v1/token"
+  AGENT_URL="http://127.0.0.1:8080/aihub/agents/v1"
   CLIENT_ID="mock-client-id"
   CLIENT_SECRET="mock-client-secret"
-  AGENT_ID="00000000-0000-4000-8000-000000000001"
+  SERVICE_ID="prvops"
+  AGENT_CHAT_SUFFIX=""
+  DB_PATH="${DB_PATH:-$(cd "$(dirname "$0")/.." && pwd)/data/app.db}"
+  AGENT_ID="$(sqlite3 "$DB_PATH" "SELECT agent_id FROM agentruntime ORDER BY idx LIMIT 1;")"
+  if [ -z "$AGENT_ID" ]; then
+    echo "agentruntime 테이블에 에이전트가 없습니다: $DB_PATH"
+    exit 1
+  fi
 else
   TOKEN_URL="https://test.nudp.lguplus.co.kr/portal/auths/v1/token"
   AGENT_URL="https://test.nudp.lguplus.co.kr/aihub/agents/v1"
   CLIENT_ID="cfab04d9-68ed-44e6-878b-4f9928b97f8c"
   CLIENT_SECRET="c9uPxk4Ow2zgvzPfCP2jJznf472wdw3e2Wg-7gijHd4"
   AGENT_ID="c9b7ddbf-3cc8-4257-b54c-675c3229b430"
+  SERVICE_ID="test"
+  AGENT_CHAT_SUFFIX="/invoke"
 fi
 
 SESSION_ID="8a456292-d3db-429c-ad71-af6dd26be800"
-SERVICE_ID="test"
 SESSION_ATTRIBUTES='{"user_id":"test"}'
 PROMPT_SESSION_ATTRIBUTES='{"user_id":"test"}'
 ENABLE_TRACE="false"
@@ -50,7 +58,7 @@ fi
 echo "▶ Access Token: $ACCESS_TOKEN"
 echo -e "\n▶ 요청: Agent API 호출"
 
-curl -s -X POST "$AGENT_URL/$AGENT_ID/invoke" \
+curl -s -X POST "$AGENT_URL/$AGENT_ID$AGENT_CHAT_SUFFIX" \
   -H "Authorization: Bearer $ACCESS_TOKEN" \
   -H "Content-Type: application/json" \
   -d "$(jq -n \

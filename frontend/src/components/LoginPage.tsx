@@ -16,30 +16,16 @@ interface AuthProviderInfo {
   registration_enabled: boolean;
 }
 
-interface ApproverJobSummary {
-  idx: number;
-  sr_num?: string | null;
-  job_title: string;
-  request_date: string;
-  requester: string;
-  request_depart: string;
-  state: number;
-  state_label: string;
-  completion_request_date: string;
-}
-
 interface LoginResponse extends AuthUser {
   profile_required?: boolean;
   welcome_back?: boolean;
   previous_last_login?: string | null;
-  approver_jobs?: ApproverJobSummary[];
   welcome_notices?: WelcomeNoticeItem[];
 }
 
 interface WelcomeBackState {
   user: AuthUser;
   previousLastLogin: string | null;
-  jobs: ApproverJobSummary[];
   notices: WelcomeNoticeItem[];
 }
 
@@ -128,7 +114,6 @@ export function LoginPage({ onLoginSuccess }: LoginPageProps) {
         setWelcomeBack({
           user,
           previousLastLogin: payload.previous_last_login ?? null,
-          jobs: payload.approver_jobs ?? [],
           notices: payload.welcome_notices ?? [],
         });
         return;
@@ -234,7 +219,6 @@ export function LoginPage({ onLoginSuccess }: LoginPageProps) {
           band={welcomeBack.user.band}
           previousLastLogin={welcomeBack.previousLastLogin}
           notices={welcomeBack.notices}
-          jobs={welcomeBack.jobs}
           onClose={() => {
             const user = welcomeBack.user;
             setWelcomeBack(null);

@@ -16,7 +16,6 @@ from backend.app.db import init_database
 from backend.app.logging.agent_logger import ensure_agent_logs_dir
 from backend.app.logging.prompt_debug import bind_token_tracker
 from backend.app.services.agent_runtime_client import LocalAgentRuntimeClient
-from backend.app.services.inventory import initialize_inventory_service
 from backend.app.usage.token_tracker import TokenTracker
 
 logger = logging.getLogger(__name__)
@@ -33,10 +32,6 @@ async def lifespan(app: FastAPI):
     runtime_settings = load_agent_runtime_settings()
 
     app.state.database_path = init_database(database_path)
-    inventory_service = initialize_inventory_service(database_path=app.state.database_path)
-    app.state.inventory_service = inventory_service
-
-    runtime_manager.inventory_service = inventory_service
     token_tracker = TokenTracker(max_context_tokens=llm_settings.max_context_tokens)
     bind_token_tracker(token_tracker)
 

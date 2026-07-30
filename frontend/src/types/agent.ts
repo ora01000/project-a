@@ -9,19 +9,27 @@ export interface AgentInfo {
   operation_error?: string | null;
   /** Brief label of current work while operation_status is working. */
   operation_detail?: string | null;
-  input_tokens: number;
-  output_tokens: number;
   is_system?: boolean;
   chat_enabled?: boolean;
 }
 
 export interface HealthInfo {
   status: string;
-  llm: string;
+  runtime_status: string;
   mcp: Record<string, string>;
   agents: string[];
   agent_status?: Record<string, string>;
   runtime_mode?: "mock" | "http" | "local";
+  runtime_capabilities?: RuntimeCapabilities;
+}
+
+export interface RuntimeCapabilities {
+  invoke: boolean;
+  planned_step: boolean;
+  health_summary: boolean;
+  agent_tools: boolean;
+  reload_definitions: boolean;
+  job_submission: boolean;
 }
 
 export interface ChatMessage {

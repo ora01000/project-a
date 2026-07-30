@@ -1,29 +1,19 @@
-import asyncio
 import json
 import logging
 from datetime import date
-from typing import Any, AsyncIterator
+from typing import AsyncIterator
 from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
-from backend.app.agents.base import (
-    AgentInvokeResult,
-    ToolUsage,
-)
-from backend.app.agents.system_agents import is_chat_enabled_system_agent_id
+from backend.app.agents.base import AgentInvokeResult, ToolUsage
 from backend.app.db.users import get_user_by_userid, parse_agent_ids
+from backend.app.disabled_features import is_removed_agent_id, raise_disabled_feature
 from backend.app.logging.agent_logger import log_agent_interaction
 from backend.app.logging.user_comm_logger import list_user_communications, log_user_communication
-from backend.app.services.agent_runtime_client import AgentInvokeRequest, AgentRuntimeClient
-from backend.app.services.inventory_approval import (
-    inventory_approval_session,
-    reject_all_pending,
-    resolve_inventory_approval,
-    runtime_inventory_approval_session,
-)
+from backend.app.services.agent_runtime_client import AgentInvokeRequest
 
 router = APIRouter(tags=["chat"])
 
@@ -33,10 +23,6 @@ logger = logging.getLogger(__name__)
 class ChatRequest(BaseModel):
     message: str = Field(min_length=1)
     userid: str | None = Field(default=None, max_length=50)
-
-
-class InventoryApprovalRequest(BaseModel):
-    approved: bool
 
 
 class UserCommLogEntry(BaseModel):
@@ -78,77 +64,32 @@ async def _stream_response(result: AgentInvokeResult) -> AsyncIterator[dict[str,
     }
 
 
-async def _invoke_with_inventory_approval(
-    agent_runtime: AgentRuntimeClient,
+async def _invoke_agent(
+    request: Request,
     agent_id: str,
     message: str,
-    result_holder: list[AgentInvokeResult],
-    *,
-    trace_id: str,
-    control_plane_base_url: str | None,
-) -> AsyncIterator[dict[str, str]]:
-    approval_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
-
-    async def on_approval_required(payload: dict[str, Any]) -> None:
-        await approval_queue.put(payload)
-
-    async def run_invoke() -> AgentInvokeResult:
-        async with inventory_approval_session(on_approval_required):
-            async with runtime_inventory_approval_session(trace_id, on_approval_required):
-                return await agent_runtime.invoke(
-                    AgentInvokeRequest(
-                        agent_id=agent_id,
-                        message=message,
-                        trace_id=trace_id,
-                        control_plane_base_url=control_plane_base_url,
-                    ),
-                )
-
-    invoke_task = asyncio.create_task(run_invoke())
-
-    try:
-        while not invoke_task.done() or not approval_queue.empty():
-            try:
-                payload = await asyncio.wait_for(approval_queue.get(), timeout=0.2)
-            except asyncio.TimeoutError:
-                continue
-
-            yield {
-                "event": "inventory_approval",
-                "data": json.dumps(payload, ensure_ascii=False),
-            }
-
-        result = await invoke_task
-        result_holder.append(result)
-    except Exception:
-        reject_all_pending()
-        if not invoke_task.done():
-            invoke_task.cancel()
-        raise
-
-    async for event in _stream_response(result):
-        yield event
-
-
-@router.post("/chat/inventory-approvals/{approval_id}")
-async def resolve_inventory_approval_endpoint(
-    approval_id: str,
-    payload: InventoryApprovalRequest,
-) -> dict[str, bool]:
-    if not resolve_inventory_approval(approval_id, approved=payload.approved):
-        raise HTTPException(status_code=404, detail="승인 요청을 찾을 수 없습니다.")
-    return {"ok": True}
+) -> AgentInvokeResult:
+    return await request.app.state.agent_runtime.invoke(
+        AgentInvokeRequest(
+            agent_id=agent_id,
+            message=message,
+            trace_id=uuid4().hex,
+            control_plane_base_url=getattr(request.app.state, "control_plane_base_url", None),
+        ),
+    )
 
 
 @router.post("/agents/{agent_id}/chat")
 async def chat_with_agent(agent_id: str, payload: ChatRequest, request: Request):
+    if is_removed_agent_id(agent_id):
+        raise_disabled_feature()
+
     manager = request.app.state.agent_manager
-    agent_runtime = request.app.state.agent_runtime
 
     if agent_id not in manager.agents:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
 
-    if payload.userid and not is_chat_enabled_system_agent_id(agent_id):
+    if payload.userid:
         user = get_user_by_userid(request.app.state.database_path, payload.userid)
         if user is None:
             raise HTTPException(status_code=404, detail="사용자를 찾을 수 없습니다.")
@@ -157,23 +98,13 @@ async def chat_with_agent(agent_id: str, payload: ChatRequest, request: Request)
             raise HTTPException(status_code=403, detail="할당되지 않은 에이전트입니다.")
 
     manager.mark_agent_working(agent_id, "채팅 응답")
-    trace_id = uuid4().hex
-    control_plane_base_url = getattr(request.app.state, "control_plane_base_url", None)
 
     async def event_generator() -> AsyncIterator[dict[str, str]]:
-        result_holder: list[AgentInvokeResult] = []
         try:
-            async for event in _invoke_with_inventory_approval(
-                agent_runtime,
-                agent_id,
-                payload.message,
-                result_holder,
-                trace_id=trace_id,
-                control_plane_base_url=control_plane_base_url,
-            ):
+            result = await _invoke_agent(request, agent_id, payload.message)
+            async for event in _stream_response(result):
                 yield event
 
-            result = result_holder[0]
             log_agent_interaction(
                 agent_id=agent_id,
                 input_message=payload.message,
@@ -195,7 +126,6 @@ async def chat_with_agent(agent_id: str, payload: ChatRequest, request: Request)
                 except ValueError as exc:
                     logger.warning("Skipped user comm log for %s: %s", payload.userid, exc)
         except Exception as exc:
-            reject_all_pending()
             manager.mark_agent_error(agent_id, str(exc), input_message=payload.message)
             raise
         finally:

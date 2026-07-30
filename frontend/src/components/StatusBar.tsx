@@ -50,7 +50,7 @@ function statusButtonClass(value: string | null): string {
   if (isHealthyConnectionStatus(value) || value === "ok") {
     return `${base} border-emerald-700/70 bg-emerald-950/70 text-emerald-200`;
   }
-  if (value === "partial" || value === "disabled") {
+  if (value === "partial" || value === "disabled" || value === "degraded") {
     return `${base} border-amber-700/70 bg-amber-950/70 text-amber-200`;
   }
   return `${base} border-rose-700/70 bg-rose-950/70 text-rose-200`;
@@ -79,8 +79,8 @@ export function StatusBar({ health }: StatusBarProps) {
           <button type="button" tabIndex={-1} className={statusButtonClass(null)}>
             API
           </button>
-          <button type="button" tabIndex={-1} className={statusButtonClass(null)}>
-            LLM
+          <button type="button" tabIndex={-1} className={runtimeModeClass(undefined)}>
+            Runtime
           </button>
           {MCP_DISPLAY_ORDER.map((name) => (
             <button key={name} type="button" tabIndex={-1} className={statusButtonClass(null)}>
@@ -107,17 +107,8 @@ export function StatusBar({ health }: StatusBarProps) {
         <button
           type="button"
           tabIndex={-1}
-          className={statusButtonClass(health.llm)}
-          title={`LLM: ${health.llm}`}
-          role="listitem"
-        >
-          LLM
-        </button>
-        <button
-          type="button"
-          tabIndex={-1}
-          className={runtimeModeClass(health.runtime_mode)}
-          title={`${runtimeModeLabel(health.runtime_mode)}: ${health.runtime_mode ?? "unknown"}`}
+          className={statusButtonClass(health.runtime_status)}
+          title={`${runtimeModeLabel(health.runtime_mode)}: ${health.runtime_status}`}
           role="listitem"
         >
           {runtimeModeLabel(health.runtime_mode)}

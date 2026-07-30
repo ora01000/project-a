@@ -145,21 +145,22 @@ function computePositions(metrics: LayoutMetrics): Record<string, NodePosition> 
   return positions;
 }
 
-const SYSTEM_AGENT_ORDER = [
-  "inventory",
-  "sys-inventory",
-  "sys-whatap-events",
-  "sys-job-planning",
-  "sys-job-execution",
-];
+const SYSTEM_AGENT_ORDER = ["sys-whatap-events"];
 
 function isTopologySystemAgent(agent: AgentInfo): boolean {
-  return Boolean(agent.is_system) || agent.id === "inventory" || agent.name === "인벤토리";
+  return Boolean(agent.is_system);
 }
 
 function systemAgentSortIndex(agentId: string): number {
   const index = SYSTEM_AGENT_ORDER.indexOf(agentId);
   return index === -1 ? SYSTEM_AGENT_ORDER.length : index;
+}
+
+function runtimeNodeLabel(mode: string | undefined): string {
+  if (mode === "http") {
+    return "Runtime (sandbox)";
+  }
+  return "Runtime (mock)";
 }
 
 function buildNodes(agents: AgentInfo[], health: HealthInfo | null): TopologyNode[] {
@@ -179,8 +180,8 @@ function buildNodes(agents: AgentInfo[], health: HealthInfo | null): TopologyNod
     {
       id: LLM_NODE_ID,
       kind: "llm",
-      label: "Local LLM",
-      status: health?.llm ?? "unknown",
+      label: runtimeNodeLabel(health?.runtime_mode),
+      status: health?.runtime_status ?? "unknown",
     },
   ];
 
@@ -266,7 +267,7 @@ export function TopologyMap({ agents, health, embedded = false }: TopologyMapPro
       {!embedded ? (
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-xs font-normal text-slate-200">Topology Map</h2>
-          <p className="text-[10px] text-slate-500">에이전트 · LLM · MCP 호출 관계</p>
+          <p className="text-[10px] text-slate-500">에이전트 · Runtime · MCP 호출 관계</p>
         </div>
       ) : null}
 

@@ -6,7 +6,6 @@ cd "${ROOT_DIR}"
 
 BACKEND_IMAGE="${BACKEND_IMAGE:-ora01000/project-a-backend:260710}"
 FRONTEND_IMAGE="${FRONTEND_IMAGE:-ora01000/project-a-frontend:260710}"
-AGENT_RUNTIME_IMAGE="${AGENT_RUNTIME_IMAGE:-ora01000/project-a-agent-runtime:260710}"
 PLATFORMS="${PLATFORMS:-linux/amd64,linux/arm64}"
 BUILDER_NAME="${BUILDER_NAME:-project-a-multiarch}"
 PUSH="${PUSH:-true}"
@@ -50,9 +49,7 @@ build_image() {
 ensure_builder
 build_image docker/backend/Dockerfile "${BACKEND_IMAGE}"
 build_image docker/frontend/Dockerfile "${FRONTEND_IMAGE}"
-build_image docker/agent-runtime/Dockerfile "${AGENT_RUNTIME_IMAGE}"
 
 echo "==> Done"
 echo "    ${BACKEND_IMAGE} (${PLATFORMS})"
 echo "    ${FRONTEND_IMAGE} (${PLATFORMS})"
-echo "    ${AGENT_RUNTIME_IMAGE} (${PLATFORMS})"

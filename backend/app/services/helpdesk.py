@@ -178,7 +178,7 @@ async def _select_agent(
                 break
 
     if agent_id not in allowed:
-        preferred = next((agent for agent in catalog if "inventory" in agent.agent_id), catalog[0])
+        preferred = catalog[0]
         agent_id = preferred.agent_id
         agent_name = preferred.name
         rationale = rationale or "fallback default agent"

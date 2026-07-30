@@ -4,18 +4,6 @@ import type { ReactNode } from "react";
 
 import { bandLabel } from "../types/user";
 
-interface ApproverJobSummary {
-  idx: number;
-  sr_num?: string | null;
-  job_title: string;
-  request_date: string;
-  requester: string;
-  request_depart: string;
-  state: number;
-  state_label: string;
-  completion_request_date: string;
-}
-
 export interface WelcomeNoticeItem {
   idx: number;
   writer: string;
@@ -31,7 +19,6 @@ interface WelcomeBackModalProps {
   band?: number | null;
   previousLastLogin: string | null;
   notices: WelcomeNoticeItem[];
-  jobs: ApproverJobSummary[];
   onClose: () => void;
 }
 
@@ -77,7 +64,6 @@ export function WelcomeBackModal({
   band,
   previousLastLogin,
   notices,
-  jobs,
   onClose,
 }: WelcomeBackModalProps) {
   const titleBand = bandLabel(band);
@@ -103,110 +89,43 @@ export function WelcomeBackModal({
         </div>
         <p className="mt-2 text-sm text-slate-300">다시 오신 것을 환영합니다.</p>
 
-        <div className="mt-4 flex min-h-0 flex-1 flex-col gap-4 overflow-hidden">
-          <div className="flex max-h-[40%] min-h-0 shrink-0 flex-col overflow-hidden rounded-md border border-slate-700">
-            <div className="shrink-0 border-b border-slate-700 bg-slate-800/80 px-3 py-2 text-xs font-medium text-slate-300">
-              공지사항 ({notices.length})
-            </div>
-            {notices.length === 0 ? (
-              <p className="p-4 text-sm text-slate-400">표시할 공지사항이 없습니다.</p>
-            ) : (
-              <div className="min-h-0 flex-1 space-y-3 overflow-auto p-3">
-                {notices.map((notice) => (
-                  <article
-                    key={notice.idx}
-                    className="rounded-md border border-slate-800 bg-slate-950/50 p-3 text-sm text-slate-200"
-                  >
-                    <div className="flex flex-col gap-2">
-                      <h3 className="block w-full rounded-md bg-slate-800 px-2.5 py-1.5 text-[17px] font-semibold text-slate-50">
-                        {notice.title}
-                      </h3>
-                      <span className="text-xs text-slate-400">
-                        작성자: {notice.writer_name || notice.writer}
-                      </span>
-                    </div>
-                    <p className="mt-1 font-mono text-xs text-slate-400">
-                      {notice.from_date} ~ {notice.until_date}
-                    </p>
-                    <div className="markdown-body mt-2 text-sm leading-relaxed">
-                      {notice.notice.trim() ? (
-                        <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
-                          {notice.notice}
-                        </ReactMarkdown>
-                      ) : (
-                        <p className="text-slate-500">내용 없음</p>
-                      )}
-                    </div>
-                  </article>
-                ))}
-              </div>
-            )}
+        <div className="mt-4 flex min-h-0 flex-1 flex-col overflow-hidden rounded-md border border-slate-700">
+          <div className="shrink-0 border-b border-slate-700 bg-slate-800/80 px-3 py-2 text-xs font-medium text-slate-300">
+            공지사항 ({notices.length})
           </div>
-
-          <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-md border border-slate-700">
-            <div className="shrink-0 border-b border-slate-700 bg-slate-800/80 px-3 py-2 text-xs font-medium text-slate-300">
-              승인자로 지정된 작업 ({jobs.length})
+          {notices.length === 0 ? (
+            <p className="p-4 text-sm text-slate-400">표시할 공지사항이 없습니다.</p>
+          ) : (
+            <div className="min-h-0 flex-1 space-y-3 overflow-auto p-3">
+              {notices.map((notice) => (
+                <article
+                  key={notice.idx}
+                  className="rounded-md border border-slate-800 bg-slate-950/50 p-3 text-sm text-slate-200"
+                >
+                  <div className="flex flex-col gap-2">
+                    <h3 className="block w-full rounded-md bg-slate-800 px-2.5 py-1.5 text-[17px] font-semibold text-slate-50">
+                      {notice.title}
+                    </h3>
+                    <span className="text-xs text-slate-400">
+                      작성자: {notice.writer_name || notice.writer}
+                    </span>
+                  </div>
+                  <p className="mt-1 font-mono text-xs text-slate-400">
+                    {notice.from_date} ~ {notice.until_date}
+                  </p>
+                  <div className="markdown-body mt-2 text-sm leading-relaxed">
+                    {notice.notice.trim() ? (
+                      <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+                        {notice.notice}
+                      </ReactMarkdown>
+                    ) : (
+                      <p className="text-slate-500">내용 없음</p>
+                    )}
+                  </div>
+                </article>
+              ))}
             </div>
-            {jobs.length === 0 ? (
-              <p className="p-4 text-sm text-slate-400">승인자로 지정된 작업이 없습니다.</p>
-            ) : (
-              <div className="min-h-0 flex-1 overflow-auto">
-                <table className="min-w-full border-collapse text-left text-xs text-slate-200">
-                  <thead className="sticky top-0 bg-slate-800">
-                    <tr>
-                      <th className="whitespace-nowrap border-b border-slate-700 px-3 py-2 font-medium text-slate-300">
-                        SR 번호
-                      </th>
-                      <th className="whitespace-nowrap border-b border-slate-700 px-3 py-2 font-medium text-slate-300">
-                        작업 제목
-                      </th>
-                      <th className="whitespace-nowrap border-b border-slate-700 px-3 py-2 font-medium text-slate-300">
-                        기안 일시
-                      </th>
-                      <th className="whitespace-nowrap border-b border-slate-700 px-3 py-2 font-medium text-slate-300">
-                        기안자
-                      </th>
-                      <th className="whitespace-nowrap border-b border-slate-700 px-3 py-2 font-medium text-slate-300">
-                        진행 상태
-                      </th>
-                      <th className="whitespace-nowrap border-b border-slate-700 px-3 py-2 font-medium text-slate-300">
-                        작업완료요청일
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {jobs.map((job) => (
-                      <tr key={job.idx} className="odd:bg-slate-900/40 even:bg-slate-900/80">
-                        <td className="whitespace-nowrap border-b border-slate-800 px-3 py-2 font-mono text-sky-200">
-                          {job.sr_num ?? "-"}
-                        </td>
-                        <td
-                          className="max-w-[220px] truncate border-b border-slate-800 px-3 py-2"
-                          title={job.job_title}
-                        >
-                          {job.job_title}
-                        </td>
-                        <td className="whitespace-nowrap border-b border-slate-800 px-3 py-2 font-mono">
-                          {job.request_date}
-                        </td>
-                        <td className="whitespace-nowrap border-b border-slate-800 px-3 py-2">
-                          {job.request_depart}/{job.requester}
-                        </td>
-                        <td className="whitespace-nowrap border-b border-slate-800 px-3 py-2">
-                          <span className="rounded border border-slate-600 bg-slate-950/50 px-1.5 py-0.5 text-[11px] text-sky-200">
-                            {job.state}: {job.state_label}
-                          </span>
-                        </td>
-                        <td className="whitespace-nowrap border-b border-slate-800 px-3 py-2 font-mono">
-                          {job.completion_request_date}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
+          )}
         </div>
 
         <div className="mt-5 flex shrink-0 justify-end">

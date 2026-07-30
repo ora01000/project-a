@@ -11,59 +11,16 @@ CREATE TABLE IF NOT EXISTS users (
     last_login TEXT
 );
 
-CREATE TABLE IF NOT EXISTS agents (
+CREATE TABLE IF NOT EXISTS agentruntime (
     idx INTEGER PRIMARY KEY AUTOINCREMENT,
-    agent_id VARCHAR(50) NOT NULL UNIQUE,
-    name VARCHAR(50) NOT NULL,
-    role VARCHAR(200) NOT NULL,
-    system_prompt TEXT NOT NULL,
-    mcp_server_keys VARCHAR(200) NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS inventory (
-    idx INTEGER PRIMARY KEY AUTOINCREMENT,
-    inventory_name VARCHAR(100) NOT NULL,
-    inventory_file VARCHAR(300) NOT NULL,
-    file_ext VARCHAR(15) NOT NULL,
-    chunk_type INTEGER NOT NULL,
-    chunk_size INTEGER NOT NULL DEFAULT 0,
-    chunk_overlap INTEGER NOT NULL DEFAULT 50,
-    n_results INTEGER NOT NULL DEFAULT 100,
-    db_type VARCHAR(10),
-    modified INTEGER NOT NULL DEFAULT 0
-);
-
-CREATE TABLE IF NOT EXISTS jobs (
-    idx INTEGER PRIMARY KEY AUTOINCREMENT,
-    sr_num VARCHAR(20),
-    request_date TEXT NOT NULL,
-    job_title VARCHAR(200) NOT NULL,
-    request_depart VARCHAR(50) NOT NULL,
-    requester VARCHAR(50) NOT NULL,
-    requester_email VARCHAR(50) NOT NULL,
-    completion_request_date TEXT NOT NULL,
-    job_description TEXT NOT NULL,
-    approver VARCHAR(50) NOT NULL,
-    state INTEGER NOT NULL DEFAULT 0,
-    notify_channel VARCHAR(30) NOT NULL DEFAULT 'integrated_chat',
-    job_plan TEXT,
-    original_job_plan TEXT,
-    execution_result TEXT,
-    actual_completion_time TEXT,
-    approval_date TEXT,
-    pending_date TEXT,
-    reject_date TEXT
-);
-
-CREATE TABLE IF NOT EXISTS job_notifications (
-    idx INTEGER PRIMARY KEY AUTOINCREMENT,
-    job_idx INTEGER NOT NULL,
-    target_user VARCHAR(50) NOT NULL,
-    notification_type VARCHAR(50) NOT NULL,
-    title VARCHAR(200) NOT NULL,
-    message TEXT NOT NULL,
-    created_at TEXT NOT NULL,
-    FOREIGN KEY (job_idx) REFERENCES jobs(idx)
+    type INTEGER NOT NULL,
+    agent_name VARCHAR(50) NOT NULL,
+    agent_id VARCHAR(50) NOT NULL,
+    local_agent_id VARCHAR(50) NOT NULL DEFAULT '',
+    description VARCHAR(255) NOT NULL,
+    registered_date TEXT NOT NULL,
+    service_id VARCHAR(20) NOT NULL,
+    UNIQUE(type, agent_id)
 );
 
 CREATE TABLE IF NOT EXISTS signup_notifications (
@@ -162,4 +119,3 @@ CREATE TABLE IF NOT EXISTS notice_board (
     notice TEXT NOT NULL,
     welcome_popup INTEGER NOT NULL DEFAULT 0
 );
-

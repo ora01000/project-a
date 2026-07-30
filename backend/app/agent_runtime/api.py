@@ -14,9 +14,8 @@ from backend.app.agent_runtime.schemas import (
     RuntimePlannedStepBody,
     result_to_payload,
 )
-from backend.app.agents.inventory_tool import INVENTORY_AGENT_ID
+from backend.app.disabled_features import is_removed_agent_id, raise_disabled_feature
 from backend.app.services.agent_invocation import AgentInvocationError, invoke_agent_for_planned_step
-from backend.app.services.inventory_approval import remote_inventory_approval_context
 
 logger = logging.getLogger(__name__)
 
@@ -49,24 +48,22 @@ async def agent_runtime_health(agent_id: str, request: Request) -> RuntimeHealth
 async def invoke_agent(agent_id: str, payload: RuntimeInvokeBody, request: Request) -> dict:
     from backend.app.services.agent_invocation import invoke_agent_by_id
 
+    if is_removed_agent_id(agent_id):
+        raise_disabled_feature()
+
     manager = _runtime_manager(request)
 
     if agent_id not in manager.agents:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
 
-    approval_ctx = None
-    if payload.control_plane_base_url and payload.trace_id:
-        approval_ctx = (payload.control_plane_base_url.rstrip("/"), payload.trace_id)
-
     try:
-        async with remote_inventory_approval_context(approval_ctx):
-            result = await invoke_agent_by_id(
-                manager,
-                agent_id,
-                payload.message,
-                caller_agent_id=payload.caller_agent_id,
-                agent_runtime=getattr(request.app.state, "agent_runtime", None),
-            )
+        result = await invoke_agent_by_id(
+            manager,
+            agent_id,
+            payload.message,
+            caller_agent_id=payload.caller_agent_id,
+            agent_runtime=getattr(request.app.state, "agent_runtime", None),
+        )
     except AgentInvocationError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -75,30 +72,7 @@ async def invoke_agent(agent_id: str, payload: RuntimeInvokeBody, request: Reque
 
 @router.post("/agents/{agent_id}/invoke-planned-step")
 async def invoke_planned_step(agent_id: str, payload: RuntimePlannedStepBody, request: Request) -> dict:
-    manager = _runtime_manager(request)
-
-    if agent_id not in manager.agents:
-        raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
-
-    approval_ctx = None
-    if payload.control_plane_base_url and payload.trace_id:
-        approval_ctx = (payload.control_plane_base_url.rstrip("/"), payload.trace_id)
-
-    try:
-        async with remote_inventory_approval_context(approval_ctx):
-            result = await invoke_agent_for_planned_step(
-                manager,
-                agent_id,
-                payload.message,
-                tool_name=payload.tool_name,
-                tool_params=payload.tool_params,
-                caller_agent_id=payload.caller_agent_id,
-                agent_runtime=getattr(request.app.state, "agent_runtime", None),
-            )
-    except AgentInvocationError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    return result_to_payload(result).model_dump()
+    raise_disabled_feature()
 
 
 @router.post("/agents/reload")
@@ -110,8 +84,6 @@ async def reload_agents(payload: ReloadAgentsBody, request: Request) -> dict[str
 
 @router.get("/agents/{agent_id}/tools")
 async def list_agent_tools(agent_id: str, request: Request) -> list[dict[str, str]]:
-    from backend.app.agents.inventory_tool import QUERY_INVENTORY_TOOL_NAME
-
     manager = _runtime_manager(request)
     try:
         definition = manager.get_definition(agent_id)
@@ -119,14 +91,6 @@ async def list_agent_tools(agent_id: str, request: Request) -> list[dict[str, st
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found") from exc
 
     tools: list[dict[str, str]] = []
-    if agent_id == INVENTORY_AGENT_ID:
-        tools.append(
-            {
-                "name": QUERY_INVENTORY_TOOL_NAME,
-                "description": "Query the inventory database",
-            }
-        )
-
     if manager.mcp_manager and definition.mcp_server_keys:
         for tool in await manager.mcp_manager.get_tools_for_servers(definition.mcp_server_keys):
             tools.append(

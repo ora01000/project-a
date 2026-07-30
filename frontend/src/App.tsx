@@ -1,17 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { TopologyProvider } from "./context/TopologyContext";
-import { AgentListPage } from "./components/agents/AgentListPage";
-import { TokenManagementPage } from "./components/agents/TokenManagementPage";
-import { InventoryCsvPage } from "./components/agents/InventoryCsvPage";
 import { DashboardPage } from "./components/DashboardPage";
 import { LoginPage } from "./components/LoginPage";
 import { MenuBar } from "./components/MenuBar";
 import { StatusBar } from "./components/StatusBar";
 import { TeamsInboundDebugWatcher } from "./components/TeamsInboundDebugWatcher";
-import { JobCreatePage } from "./components/jobs/JobCreatePage";
-import { JobListPage } from "./components/jobs/JobListPage";
 import { NoticeBoardPage } from "./components/notices/NoticeBoardPage";
+import { AgentConnectionListPage } from "./components/agentruntime/AgentConnectionListPage";
 import { AgentAssignmentPage } from "./components/users/AgentAssignmentPage";
 import { UserListPage } from "./components/users/UserListPage";
 import type { AgentInfo, HealthInfo } from "./types/agent";
@@ -140,6 +136,28 @@ export default function App() {
   }, [userIdx, userRole]);
 
   useEffect(() => {
+    if (!user) {
+      return;
+    }
+
+    const loadHealth = async () => {
+      try {
+        const response = await fetch("/api/health");
+        if (!response.ok) {
+          return;
+        }
+        setHealth((await response.json()) as HealthInfo);
+      } catch {
+        // Keep the last known health snapshot when polling fails.
+      }
+    };
+
+    void loadHealth();
+    const interval = window.setInterval(loadHealth, 15_000);
+    return () => window.clearInterval(interval);
+  }, [user]);
+
+  useEffect(() => {
     if (!user || activeView !== "dashboard") {
       return;
     }
@@ -159,13 +177,12 @@ export default function App() {
     if (!user) {
       return;
     }
-    const adminOnlyViews: AppView[] = [
-      "agent-list",
-      "inventory-csv",
-      "agent-assignment",
-      "token-management",
-    ];
-    if (user.role !== ROLE_ADMIN && adminOnlyViews.includes(activeView)) {
+    const adminOnlyViews: AppView[] = ["agent-assignment", "agent-connections"];
+    const disabledViews: AppView[] = ["token-management"];
+    if (
+      (user.role !== ROLE_ADMIN && adminOnlyViews.includes(activeView)) ||
+      disabledViews.includes(activeView)
+    ) {
       setActiveView("dashboard");
     }
   }, [activeView, user]);
@@ -180,7 +197,7 @@ export default function App() {
         <header className="mb-4 shrink-0">
           <h1 className="text-2xl font-bold text-slate-100">AX 인프라 운영 콘솔</h1>
           <p className="mt-1 text-sm text-slate-400">
-            에이전트 노드와 오른쪽 통합 채팅 창으로 멀티 에이전트를 관리합니다.
+            에이전트 노드와 오른쪽 대화형 터미널로 멀티 에이전트를 관리합니다.
           </p>
         </header>
 
@@ -209,24 +226,16 @@ export default function App() {
           </>
         ) : null}
 
-        {activeView === "agent-list" && user.role === ROLE_ADMIN ? <AgentListPage /> : null}
-
-        {activeView === "inventory-csv" && user.role === ROLE_ADMIN ? <InventoryCsvPage /> : null}
-
-        {activeView === "token-management" && user.role === ROLE_ADMIN ? (
-          <TokenManagementPage viewerRole={user.role} />
-        ) : null}
-
-        {activeView === "job-list" ? <JobListPage user={user} /> : null}
-
-        {activeView === "job-create" ? <JobCreatePage user={user} /> : null}
-
         {activeView === "user-list" ? (
           <UserListPage currentUserIdx={user.idx} currentUserRole={user.role} />
         ) : null}
 
         {activeView === "agent-assignment" && user.role === ROLE_ADMIN ? (
           <AgentAssignmentPage onClose={() => setActiveView("dashboard")} />
+        ) : null}
+
+        {activeView === "agent-connections" && user.role === ROLE_ADMIN ? (
+          <AgentConnectionListPage user={user} />
         ) : null}
 
         {activeView === "notice-board" ? <NoticeBoardPage user={user} /> : null}

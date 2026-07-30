@@ -3,7 +3,7 @@ from typing import Any
 
 import yaml
 from dotenv import dotenv_values
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -110,6 +110,7 @@ class AppSettings(BaseSettings):
         env_file=ENV_FILE,
         env_file_encoding="utf-8",
         extra="ignore",
+        populate_by_name=True,
     )
 
     llm_base_url: str = Field(default="http://localhost:8001/v1", alias="LLM_BASE_URL")
@@ -197,6 +198,40 @@ class AppSettings(BaseSettings):
     auth_provider_type: str = Field(default="db", alias="AUTH_PROVIDER_TYPE")
     oauth_proxy: str = Field(default="", alias="OAUTH_PROXY")
 
+    @field_validator("backend_port", mode="before")
+    @classmethod
+    def _normalize_backend_port(cls, value: object) -> int:
+        explicit = _merged_env().get("BACKEND_LISTEN_PORT", "").strip()
+        if explicit:
+            return parse_listen_port(explicit, default=8080)
+        return parse_listen_port(value, default=8080)
+
+    @field_validator("frontend_port", mode="before")
+    @classmethod
+    def _normalize_frontend_port(cls, value: object) -> int:
+        explicit = _merged_env().get("FRONTEND_LISTEN_PORT", "").strip()
+        if explicit:
+            return parse_listen_port(explicit, default=9001)
+        return parse_listen_port(value, default=9001)
+
+    @field_validator("agent_runtime_port", mode="before")
+    @classmethod
+    def _normalize_agent_runtime_port(cls, value: object) -> int:
+        explicit = _merged_env().get("AGENT_RUNTIME_LISTEN_PORT", "").strip()
+        if explicit:
+            return parse_listen_port(explicit, default=8090)
+        return parse_listen_port(value, default=8090)
+
+    @field_validator("backend_api_port", mode="before")
+    @classmethod
+    def _normalize_backend_api_port(cls, value: object) -> int | None:
+        if value is None or value == "":
+            return None
+        explicit = _merged_env().get("BACKEND_API_LISTEN_PORT", "").strip()
+        if explicit:
+            return parse_listen_port(explicit, default=8080)
+        return parse_listen_port(value, default=8080)
+
 
 def _merged_env() -> dict[str, str]:
     import os
@@ -208,6 +243,67 @@ def _merged_env() -> dict[str, str]:
                 values[key] = value
     values.update(os.environ)
     return values
+
+
+def _env_setting(name: str, *, default: str = "") -> str:
+    return _merged_env().get(name, default).strip()
+
+
+def parse_listen_port(raw: object | None, *, default: int) -> int:
+    """Parse a listen port from int, plain string, or Kubernetes service-link URL (tcp://host:port)."""
+    if raw is None:
+        return default
+    if isinstance(raw, int):
+        return raw
+    text = str(raw).strip()
+    if not text:
+        return default
+    if text.startswith("tcp://"):
+        host_port = text[6:]
+        if ":" in host_port:
+            port_text = host_port.rsplit(":", 1)[-1]
+            try:
+                return int(port_text)
+            except ValueError:
+                return default
+        return default
+    try:
+        return int(text)
+    except (TypeError, ValueError):
+        return default
+
+
+def resolve_backend_listen_port(
+    *,
+    env_settings: AppSettings | None = None,
+    server_yaml: dict[str, Any] | None = None,
+) -> int:
+    explicit = _env_setting("BACKEND_LISTEN_PORT")
+    if explicit:
+        return parse_listen_port(explicit, default=8080)
+    merged = _merged_env().get("BACKEND_PORT", "")
+    if merged:
+        return parse_listen_port(merged, default=8080)
+    if env_settings is not None:
+        return parse_listen_port(env_settings.backend_port, default=8080)
+    yaml = server_yaml or {}
+    return parse_listen_port(yaml.get("backend_port"), default=8080)
+
+
+def resolve_agent_runtime_mode(
+    *,
+    env_settings: AppSettings | None = None,
+    server_yaml: dict[str, Any] | None = None,
+) -> str:
+    """Resolve runtime mode from AGENT_RUNTIME_MODE (env/.env) with yaml fallback."""
+    explicit = _env_setting("AGENT_RUNTIME_MODE")
+    if explicit:
+        return explicit
+    settings = env_settings or AppSettings()
+    if settings.agent_runtime_mode:
+        return settings.agent_runtime_mode
+    yaml = server_yaml or {}
+    return str(yaml.get("agent_runtime_mode") or "mock")
 
 
 def _mcp_server_key_from_env_suffix(suffix: str) -> str:
@@ -476,7 +572,10 @@ def load_settings() -> tuple[LLMSettings, ServerSettings, dict[str, MCPServerCon
     )
     server = ServerSettings(
         backend_host=env_settings.backend_host or server_yaml.get("backend_host", "0.0.0.0"),
-        backend_port=env_settings.backend_port or server_yaml.get("backend_port", 8080),
+        backend_port=resolve_backend_listen_port(
+            env_settings=env_settings,
+            server_yaml=server_yaml,
+        ),
         frontend_host=env_settings.frontend_host or server_yaml.get("frontend_host", "0.0.0.0"),
         frontend_port=env_settings.frontend_port or server_yaml.get("frontend_port", 9001),
         backend_api_host=env_settings.backend_api_host or server_yaml.get("backend_api_host", "localhost"),
@@ -490,9 +589,9 @@ def load_settings() -> tuple[LLMSettings, ServerSettings, dict[str, MCPServerCon
             env_settings.health_check_interval_seconds
             or server_yaml.get("health_check_interval_seconds", 30)
         ),
-        agent_runtime_mode=(
-            env_settings.agent_runtime_mode
-            or server_yaml.get("agent_runtime_mode", "mock")
+        agent_runtime_mode=resolve_agent_runtime_mode(
+            env_settings=env_settings,
+            server_yaml=server_yaml,
         ),
         agent_runtime_http_base_url=(
             env_settings.agent_runtime_http_base_url

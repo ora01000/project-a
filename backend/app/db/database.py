@@ -2,15 +2,10 @@ import logging
 import sqlite3
 from pathlib import Path
 
-from backend.app.agents.registry import AGENT_DEFINITIONS
 from backend.app.config import PROJECT_ROOT
 from backend.app.db.seed import INITIAL_USERS
 
 logger = logging.getLogger(__name__)
-
-
-def _encode_mcp_server_keys(keys: list[str]) -> str:
-    return ",".join(keys)
 
 SCHEMA_PATH = Path(__file__).with_name("schema.sql")
 DEFAULT_DATABASE_PATH = PROJECT_ROOT / "data" / "app.db"
@@ -54,97 +49,6 @@ def _apply_migrations(connection: sqlite3.Connection) -> None:
         connection.execute("ALTER TABLE users ADD COLUMN band INTEGER NOT NULL DEFAULT 1")
         connection.execute("UPDATE users SET band = 1 WHERE band IS NULL OR band = 0")
 
-    job_columns = {
-        row["name"] for row in connection.execute("PRAGMA table_info(jobs)").fetchall()
-    }
-    if "job_plan" not in job_columns:
-        connection.execute("ALTER TABLE jobs ADD COLUMN job_plan TEXT")
-    if "original_job_plan" not in job_columns:
-        connection.execute("ALTER TABLE jobs ADD COLUMN original_job_plan TEXT")
-        # Backfill existing plans as the original baseline for restore.
-        connection.execute(
-            """
-            UPDATE jobs
-            SET original_job_plan = job_plan
-            WHERE original_job_plan IS NULL AND job_plan IS NOT NULL
-            """
-        )
-    if "execution_result" not in job_columns:
-        connection.execute("ALTER TABLE jobs ADD COLUMN execution_result TEXT")
-    if "notify_channel" not in job_columns:
-        connection.execute(
-            "ALTER TABLE jobs ADD COLUMN notify_channel VARCHAR(30) NOT NULL DEFAULT 'integrated_chat'"
-        )
-    if "actual_completion_time" not in job_columns:
-        connection.execute("ALTER TABLE jobs ADD COLUMN actual_completion_time TEXT")
-    if "sr_num" not in job_columns:
-        # Format length is 16 (e.g. SR20260717_00001); use 20 for headroom.
-        connection.execute("ALTER TABLE jobs ADD COLUMN sr_num VARCHAR(20)")
-    if "approval_date" not in job_columns:
-        connection.execute("ALTER TABLE jobs ADD COLUMN approval_date TEXT")
-    if "pending_date" not in job_columns:
-        connection.execute("ALTER TABLE jobs ADD COLUMN pending_date TEXT")
-    if "reject_date" not in job_columns:
-        connection.execute("ALTER TABLE jobs ADD COLUMN reject_date TEXT")
-
-    # Prefer userid in jobs.requester / jobs.approver (legacy rows used username).
-    connection.execute(
-        "UPDATE jobs SET requester = 'isyun' WHERE requester = '윤인수'"
-    )
-    connection.execute(
-        "UPDATE jobs SET requester = 'loadan' WHERE requester = '안세훈'"
-    )
-    connection.execute(
-        "UPDATE jobs SET approver = 'isyun' WHERE approver = '윤인수'"
-    )
-    connection.execute(
-        "UPDATE jobs SET approver = 'loadan' WHERE approver = '안세훈'"
-    )
-
-    # Backfill date-only request/completion fields with 00:00:00.
-    connection.execute(
-        """
-        UPDATE jobs
-        SET request_date = request_date || ' 00:00:00'
-        WHERE request_date IS NOT NULL
-          AND length(trim(request_date)) = 10
-          AND request_date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'
-        """
-    )
-    connection.execute(
-        """
-        UPDATE jobs
-        SET completion_request_date = completion_request_date || ' 00:00:00'
-        WHERE completion_request_date IS NOT NULL
-          AND length(trim(completion_request_date)) = 10
-          AND completion_request_date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'
-        """
-    )
-
-    # Backfill SR numbers from request_date + idx (e.g. SR20260717_00001).
-    from backend.app.db.job_datetime import build_sr_num
-
-    for row in connection.execute(
-        """
-        SELECT idx, request_date
-        FROM jobs
-        WHERE sr_num IS NULL OR trim(sr_num) = ''
-        """
-    ).fetchall():
-        try:
-            sr_num = build_sr_num(str(row["request_date"]), int(row["idx"]))
-        except ValueError:
-            logger.warning(
-                "Skipped sr_num backfill for jobs.idx=%s request_date=%r",
-                row["idx"],
-                row["request_date"],
-            )
-            continue
-        connection.execute(
-            "UPDATE jobs SET sr_num = ? WHERE idx = ?",
-            (sr_num, int(row["idx"])),
-        )
-
     tables = {
         str(row[0])
         for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
@@ -178,43 +82,219 @@ def _apply_migrations(connection: sqlite3.Connection) -> None:
             )
             """
         )
-    if "inventory" not in tables:
+    if "agentruntime" not in tables:
         connection.execute(
             """
-            CREATE TABLE inventory (
+            CREATE TABLE agentruntime (
                 idx INTEGER PRIMARY KEY AUTOINCREMENT,
-                inventory_name VARCHAR(100) NOT NULL,
-                inventory_file VARCHAR(300) NOT NULL,
-                file_ext VARCHAR(15) NOT NULL,
-                chunk_type INTEGER NOT NULL,
-                chunk_size INTEGER NOT NULL DEFAULT 0,
-                chunk_overlap INTEGER NOT NULL DEFAULT 50,
-                n_results INTEGER NOT NULL DEFAULT 100,
-                db_type VARCHAR(10),
-                modified INTEGER NOT NULL DEFAULT 0
+                type INTEGER NOT NULL,
+                agent_name VARCHAR(50) NOT NULL,
+                agent_id VARCHAR(50) NOT NULL,
+                local_agent_id VARCHAR(50) NOT NULL DEFAULT '',
+                description VARCHAR(255) NOT NULL,
+                registered_date TEXT NOT NULL,
+                service_id VARCHAR(20) NOT NULL,
+                UNIQUE(type, agent_id)
             )
             """
         )
-    else:
-        inventory_columns = {
-            row["name"] for row in connection.execute("PRAGMA table_info(inventory)").fetchall()
-        }
-        if "chunk_size" not in inventory_columns:
-            connection.execute(
-                "ALTER TABLE inventory ADD COLUMN chunk_size INTEGER NOT NULL DEFAULT 0"
-            )
-        if "chunk_overlap" not in inventory_columns:
-            connection.execute(
-                "ALTER TABLE inventory ADD COLUMN chunk_overlap INTEGER NOT NULL DEFAULT 50"
-            )
-        if "n_results" not in inventory_columns:
-            connection.execute(
-                "ALTER TABLE inventory ADD COLUMN n_results INTEGER NOT NULL DEFAULT 100"
-            )
-        if "db_type" not in inventory_columns:
-            connection.execute("ALTER TABLE inventory ADD COLUMN db_type VARCHAR(10)")
+
+    _migrate_agentruntime_registered_datetime(connection)
+    _migrate_agentruntime_local_agent_id(connection)
+    _migrate_agentruntime_type_unique(connection)
+    _migrate_agentruntime_drop_url_columns(connection)
+    _drop_legacy_product_tables(connection)
 
     _ensure_k8s_inventory_tables(connection)
+
+
+def _migrate_agentruntime_registered_datetime(connection: sqlite3.Connection) -> None:
+    tables = {
+        str(row[0])
+        for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+    }
+    if "agentruntime" not in tables:
+        return
+
+    from backend.app.db.agentruntime import normalize_registered_datetime
+
+    rows = connection.execute("SELECT idx, registered_date FROM agentruntime").fetchall()
+    updated = 0
+    for row in rows:
+        current = str(row["registered_date"])
+        normalized = normalize_registered_datetime(current)
+        if normalized != current:
+            connection.execute(
+                "UPDATE agentruntime SET registered_date = ? WHERE idx = ?",
+                (normalized, int(row["idx"])),
+            )
+            updated += 1
+    if updated:
+        logger.info("Migrated %s agentruntime registered_date value(s) to datetime", updated)
+
+
+def _migrate_agentruntime_local_agent_id(connection: sqlite3.Connection) -> None:
+    tables = {
+        str(row[0])
+        for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+    }
+    if "agentruntime" not in tables:
+        return
+
+    columns = {
+        row["name"] for row in connection.execute("PRAGMA table_info(agentruntime)").fetchall()
+    }
+    if "local_agent_id" not in columns:
+        connection.execute(
+            "ALTER TABLE agentruntime ADD COLUMN local_agent_id VARCHAR(50) NOT NULL DEFAULT ''"
+        )
+
+    from backend.app.agents.registry import AGENT_DEFINITIONS
+    from backend.app.db.agentruntime import build_axit_agent_id
+
+    rows = connection.execute(
+        "SELECT idx, agent_id, local_agent_id FROM agentruntime"
+    ).fetchall()
+    updated = 0
+    for row in rows:
+        current = str(row["local_agent_id"] or "").strip()
+        if current:
+            continue
+        axit_agent_id = str(row["agent_id"])
+        for definition in AGENT_DEFINITIONS:
+            if build_axit_agent_id(definition.agent_id) == axit_agent_id:
+                connection.execute(
+                    "UPDATE agentruntime SET local_agent_id = ? WHERE idx = ?",
+                    (definition.agent_id, int(row["idx"])),
+                )
+                updated += 1
+                break
+    if updated:
+        logger.info("Backfilled %s agentruntime local_agent_id value(s)", updated)
+
+
+def _migrate_agentruntime_type_unique(connection: sqlite3.Connection) -> None:
+    tables = {
+        str(row[0])
+        for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+    }
+    if "agentruntime" not in tables:
+        return
+
+    index_rows = connection.execute(
+        "SELECT name, sql FROM sqlite_master WHERE type='index' AND tbl_name='agentruntime'"
+    ).fetchall()
+    has_type_agent_unique = any(
+        row["sql"]
+        and "type" in str(row["sql"]).lower()
+        and "agent_id" in str(row["sql"]).lower()
+        for row in index_rows
+    )
+    if has_type_agent_unique:
+        return
+
+    table_sql_row = connection.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='agentruntime'"
+    ).fetchone()
+    table_sql = str(table_sql_row["sql"] or "") if table_sql_row else ""
+    table_sql_lower = table_sql.lower()
+    if (
+        "unique" in table_sql_lower
+        and "type" in table_sql_lower
+        and "agent_id" in table_sql_lower
+    ):
+        connection.execute("DROP TABLE IF EXISTS agentruntime_legacy")
+        return
+    if "UNIQUE" not in table_sql.upper() or "agent_id" not in table_sql:
+        return
+
+    connection.execute("DROP TABLE IF EXISTS agentruntime_legacy")
+    logger.info("Migrating agentruntime table: UNIQUE(agent_id) -> UNIQUE(type, agent_id)")
+    connection.execute("ALTER TABLE agentruntime RENAME TO agentruntime_legacy")
+    connection.execute(
+        """
+        CREATE TABLE agentruntime (
+            idx INTEGER PRIMARY KEY AUTOINCREMENT,
+            type INTEGER NOT NULL,
+            token_url VARCHAR(200) NOT NULL,
+            agent_url VARCHAR(200) NOT NULL,
+            agent_name VARCHAR(50) NOT NULL,
+            agent_id VARCHAR(50) NOT NULL,
+            local_agent_id VARCHAR(50) NOT NULL DEFAULT '',
+            description VARCHAR(255) NOT NULL,
+            registered_date TEXT NOT NULL,
+            service_id VARCHAR(20) NOT NULL,
+            UNIQUE(type, agent_id)
+        )
+        """
+    )
+    connection.execute(
+        """
+        INSERT INTO agentruntime (
+            idx, type, token_url, agent_url, agent_name, agent_id, local_agent_id,
+            description, registered_date, service_id
+        )
+        SELECT
+            idx, type, token_url, agent_url, agent_name, agent_id, local_agent_id,
+            description, registered_date, service_id
+        FROM agentruntime_legacy
+        """
+    )
+    connection.execute("DROP TABLE agentruntime_legacy")
+    logger.info("agentruntime unique constraint migration complete")
+
+
+def _migrate_agentruntime_drop_url_columns(connection: sqlite3.Connection) -> None:
+    tables = {
+        str(row[0])
+        for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+    }
+    if "agentruntime" not in tables:
+        return
+
+    columns = {
+        row["name"] for row in connection.execute("PRAGMA table_info(agentruntime)").fetchall()
+    }
+    if "token_url" not in columns and "agent_url" not in columns:
+        return
+
+    logger.info("Migrating agentruntime table: drop token_url and agent_url columns")
+    connection.execute("DROP TABLE IF EXISTS agentruntime_legacy")
+    connection.execute("ALTER TABLE agentruntime RENAME TO agentruntime_legacy")
+    connection.execute(
+        """
+        CREATE TABLE agentruntime (
+            idx INTEGER PRIMARY KEY AUTOINCREMENT,
+            type INTEGER NOT NULL,
+            agent_name VARCHAR(50) NOT NULL,
+            agent_id VARCHAR(50) NOT NULL,
+            local_agent_id VARCHAR(50) NOT NULL DEFAULT '',
+            description VARCHAR(255) NOT NULL,
+            registered_date TEXT NOT NULL,
+            service_id VARCHAR(20) NOT NULL,
+            UNIQUE(type, agent_id)
+        )
+        """
+    )
+    connection.execute(
+        """
+        INSERT INTO agentruntime (
+            idx, type, agent_name, agent_id, local_agent_id,
+            description, registered_date, service_id
+        )
+        SELECT
+            idx, type, agent_name, agent_id, local_agent_id,
+            description, registered_date, service_id
+        FROM agentruntime_legacy
+        """
+    )
+    connection.execute("DROP TABLE agentruntime_legacy")
+    logger.info("agentruntime URL column migration complete")
+
+
+def _drop_legacy_product_tables(connection: sqlite3.Connection) -> None:
+    for table_name in ("job_notifications", "jobs", "inventory", "agents"):
+        connection.execute(f"DROP TABLE IF EXISTS {table_name}")
 
 
 def _ensure_k8s_inventory_tables(connection: sqlite3.Connection) -> None:
@@ -380,66 +460,60 @@ def seed_initial_users(connection: sqlite3.Connection) -> int:
     return len(INITIAL_USERS)
 
 
-def seed_initial_agents(connection: sqlite3.Connection) -> int:
-    row = connection.execute("SELECT COUNT(*) AS count FROM agents").fetchone()
+def seed_initial_agentruntime(connection: sqlite3.Connection) -> int:
+    from backend.app.agents.registry import AGENT_DEFINITIONS
+    from backend.app.db.agentruntime import AGENTRUNTIME_TYPE_MOCKUP, insert_agentruntime_records, mockup_row_from_definition
+
+    row = connection.execute(
+        "SELECT COUNT(*) AS count FROM agentruntime WHERE type = ?",
+        (AGENTRUNTIME_TYPE_MOCKUP,),
+    ).fetchone()
     existing_count = int(row["count"]) if row else 0
     if existing_count > 0:
-        logger.info("Skip agent seeding: agents table already has %s record(s)", existing_count)
+        logger.info(
+            "Skip agentruntime mock seeding: type=0 already has %s record(s)",
+            existing_count,
+        )
         return 0
 
-    seed_rows = [
-        {
-            "agent_id": definition.agent_id,
-            "name": definition.name,
-            "role": definition.role,
-            "system_prompt": definition.system_prompt,
-            "mcp_server_keys": _encode_mcp_server_keys(definition.mcp_server_keys),
-        }
-        for definition in AGENT_DEFINITIONS
-    ]
-    connection.executemany(
-        """
-        INSERT INTO agents (agent_id, name, role, system_prompt, mcp_server_keys)
-        VALUES (:agent_id, :name, :role, :system_prompt, :mcp_server_keys)
-        """,
-        seed_rows,
-    )
+    seed_rows = [mockup_row_from_definition(definition) for definition in AGENT_DEFINITIONS]
+    if not seed_rows:
+        logger.info("Skip agentruntime seeding: AGENT_DEFINITIONS is empty")
+        return 0
+
+    inserted = insert_agentruntime_records(connection, seed_rows)
     connection.commit()
-    logger.info("Seeded %s initial agent record(s)", len(seed_rows))
-    return len(seed_rows)
+    logger.info("Seeded %s agentruntime mock record(s)", inserted)
+    return inserted
 
 
-def sync_missing_agents(connection: sqlite3.Connection) -> int:
-    existing_ids = {
-        str(row["agent_id"])
-        for row in connection.execute("SELECT agent_id FROM agents").fetchall()
+def sync_missing_agentruntime(connection: sqlite3.Connection) -> int:
+    from backend.app.agents.registry import AGENT_DEFINITIONS
+    from backend.app.db.agentruntime import AGENTRUNTIME_TYPE_MOCKUP, insert_agentruntime_records, mockup_row_from_definition
+
+    existing_local_ids = {
+        str(row["local_agent_id"]).strip()
+        for row in connection.execute(
+            """
+            SELECT local_agent_id
+            FROM agentruntime
+            WHERE type = ? AND local_agent_id IS NOT NULL
+            """,
+            (AGENTRUNTIME_TYPE_MOCKUP,),
+        ).fetchall()
+        if str(row["local_agent_id"]).strip()
     }
     missing_definitions = [
-        definition for definition in AGENT_DEFINITIONS if definition.agent_id not in existing_ids
+        definition for definition in AGENT_DEFINITIONS if definition.agent_id not in existing_local_ids
     ]
     if not missing_definitions:
         return 0
 
-    seed_rows = [
-        {
-            "agent_id": definition.agent_id,
-            "name": definition.name,
-            "role": definition.role,
-            "system_prompt": definition.system_prompt,
-            "mcp_server_keys": _encode_mcp_server_keys(definition.mcp_server_keys),
-        }
-        for definition in missing_definitions
-    ]
-    connection.executemany(
-        """
-        INSERT INTO agents (agent_id, name, role, system_prompt, mcp_server_keys)
-        VALUES (:agent_id, :name, :role, :system_prompt, :mcp_server_keys)
-        """,
-        seed_rows,
-    )
+    seed_rows = [mockup_row_from_definition(definition) for definition in missing_definitions]
+    inserted = insert_agentruntime_records(connection, seed_rows)
     connection.commit()
-    logger.info("Synced %s missing agent record(s)", len(seed_rows))
-    return len(seed_rows)
+    logger.info("Synced %s missing agentruntime record(s)", inserted)
+    return inserted
 
 
 def init_database(database_path: str | Path | None = None) -> Path:
@@ -451,8 +525,8 @@ def init_database(database_path: str | Path | None = None) -> Path:
         _apply_migrations(connection)
         connection.commit()
         seed_initial_users(connection)
-        seed_initial_agents(connection)
-        sync_missing_agents(connection)
+        seed_initial_agentruntime(connection)
+        sync_missing_agentruntime(connection)
 
     logger.info("SQLite database initialized at %s", path)
     return path

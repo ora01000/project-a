@@ -9,14 +9,8 @@ import { formatResponseTimestamp } from "../utils/messageIndex";
 import { flushSseBuffer, parseSseChunk } from "../utils/parseSse";
 import { AssistantMessageContent } from "./AssistantMessageContent";
 import { CollapsibleUserMessage } from "./CollapsibleUserMessage";
-import {
-  InventoryApprovalCard,
-  type InventoryApprovalRequest,
-} from "./InventoryApprovalCard";
-import { JobNotificationCard } from "./jobs/JobNotificationCard";
 import { SignupNotificationCard } from "./users/SignupNotificationCard";
 import { ToolUsageList } from "./ToolUsageList";
-import type { JobNotification } from "../types/job";
 import type { SignupNotification } from "../types/signup";
 
 interface IntegratedChatPanelProps {
@@ -25,18 +19,10 @@ interface IntegratedChatPanelProps {
   isFullscreen: boolean;
   onToggleFullscreen: () => void;
   onChatComplete?: () => void;
-  jobNotifications?: JobNotification[];
   signupNotifications?: SignupNotification[];
-  onJobReview?: (jobIdx: number) => void;
-  onJobApprove?: (jobIdx: number) => void;
-  onJobPending?: (jobIdx: number) => void;
-  onJobReject?: (jobIdx: number) => void;
-  onJobDismiss?: (notificationIdx: number) => void;
-  onJobRetry?: (jobIdx: number, notificationIdx: number) => void;
   onSignupApprove?: (userIdx: number) => void;
   onSignupReject?: (userIdx: number, reason: string) => void;
   onSignupHold?: (notificationIdx: number) => void;
-  isJobActionProcessing?: boolean;
   isSignupActionProcessing?: boolean;
 }
 
@@ -101,29 +87,19 @@ export function IntegratedChatPanel({
   isFullscreen,
   onToggleFullscreen,
   onChatComplete,
-  jobNotifications = [],
   signupNotifications = [],
-  onJobReview,
-  onJobApprove,
-  onJobPending,
-  onJobReject,
-  onJobDismiss,
-  onJobRetry,
   onSignupApprove,
   onSignupReject,
   onSignupHold,
-  isJobActionProcessing = false,
   isSignupActionProcessing = false,
 }: IntegratedChatPanelProps) {
   const { emitFlow } = useTopology();
-  const [selectedAgentId, setSelectedAgentId] = useState("sys-helpdesk");
+  const [selectedAgentId, setSelectedAgentId] = useState("");
   const [input, setInput] = useState("");
   const [responses, setResponses] = useState<IntegratedChatResponse[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [inputHistory, setInputHistory] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
-  const [inventoryApprovals, setInventoryApprovals] = useState<InventoryApprovalRequest[]>([]);
-  const [processingApprovalId, setProcessingApprovalId] = useState<string | null>(null);
   const conversationScrollRef = useRef<HTMLDivElement>(null);
   const layoutRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -206,21 +182,9 @@ export function IntegratedChatPanel({
       if (agent.chat_enabled !== true) {
         return false;
       }
-      // System chat agents (e.g. helpdesk) stay available to everyone.
-      if (agent.is_system) {
-        return true;
-      }
       return assignedIds.has(agent.id);
     });
-    return [...enabled].sort((left, right) => {
-      if (left.id === "sys-helpdesk") {
-        return -1;
-      }
-      if (right.id === "sys-helpdesk") {
-        return 1;
-      }
-      return left.name.localeCompare(right.name, "ko");
-    });
+    return [...enabled].sort((left, right) => left.name.localeCompare(right.name, "ko"));
   }, [agents, user.agent_ids]);
 
   const selectedAgent = useMemo(
@@ -272,8 +236,7 @@ export function IntegratedChatPanel({
       if (current && chatAgents.some((agent) => agent.id === current)) {
         return current;
       }
-      const helpdesk = chatAgents.find((agent) => agent.id === "sys-helpdesk");
-      return helpdesk?.id ?? chatAgents[0]?.id ?? "";
+      return chatAgents[0]?.id ?? "";
     });
   }, [chatAgents]);
 
@@ -337,43 +300,8 @@ export function IntegratedChatPanel({
   };
 
   const handleStop = () => {
-    void rejectPendingInventoryApprovals();
     abortControllerRef.current?.abort();
   };
-
-  const rejectPendingInventoryApprovals = useCallback(async () => {
-    const pending = inventoryApprovals;
-    if (pending.length === 0) {
-      return;
-    }
-    await Promise.all(
-      pending.map((request) =>
-        fetch(`/api/chat/inventory-approvals/${request.approvalId}`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ approved: false }),
-        }).catch(() => undefined),
-      ),
-    );
-    setInventoryApprovals([]);
-  }, [inventoryApprovals]);
-
-  const resolveInventoryApproval = useCallback(async (approvalId: string, approved: boolean) => {
-    setProcessingApprovalId(approvalId);
-    try {
-      const response = await fetch(`/api/chat/inventory-approvals/${approvalId}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ approved }),
-      });
-      if (!response.ok) {
-        throw new Error("인벤토리 승인 처리에 실패했습니다.");
-      }
-      setInventoryApprovals((prev) => prev.filter((request) => request.approvalId !== approvalId));
-    } finally {
-      setProcessingApprovalId(null);
-    }
-  }, []);
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -437,25 +365,6 @@ export function IntegratedChatPanel({
             continue;
           }
 
-          if (event.event === "inventory_approval") {
-            const payload = JSON.parse(event.data) as {
-              approval_id: string;
-              caller_agent_id: string;
-              caller_agent_name: string;
-              query: string;
-            };
-            setInventoryApprovals((prev) => [
-              ...prev,
-              {
-                approvalId: payload.approval_id,
-                callerAgentId: payload.caller_agent_id,
-                callerAgentName: payload.caller_agent_name,
-                query: payload.query,
-              },
-            ]);
-            continue;
-          }
-
           if (event.event === "tools") {
             const payload = JSON.parse(event.data) as { tools: ToolUsage[] };
             toolsUsed = payload.tools ?? [];
@@ -505,7 +414,6 @@ export function IntegratedChatPanel({
       const message = err instanceof Error ? err.message : "Unknown error";
       updateLastResponse(`오류: ${message}`, []);
     } finally {
-      setInventoryApprovals([]);
       abortControllerRef.current = null;
       setIsLoading(false);
       onChatComplete?.();
@@ -523,7 +431,7 @@ export function IntegratedChatPanel({
     >
       <header className="flex h-[100px] shrink-0 items-center justify-between border-b border-slate-700 px-4">
         <div className="min-w-0">
-          <h2 className="text-lg font-semibold text-slate-100">통합 채팅</h2>
+          <h2 className="text-lg font-semibold text-slate-100">대화형 터미널</h2>
           <p className="mt-1 text-sm text-slate-400">에이전트를 선택해 메시지를 전송하세요.</p>
         </div>
         <button
@@ -544,9 +452,7 @@ export function IntegratedChatPanel({
               ref={conversationScrollRef}
               className="min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain p-2"
             >
-              {jobNotifications.length === 0 &&
-              signupNotifications.length === 0 &&
-              responses.length === 0 ? (
+              {signupNotifications.length === 0 && responses.length === 0 ? (
                 <p className="text-slate-500">대화 내용이 여기에 표시됩니다.</p>
               ) : null}
 
@@ -558,20 +464,6 @@ export function IntegratedChatPanel({
                   onApprove={(userIdx) => onSignupApprove?.(userIdx)}
                   onReject={(userIdx, reason) => onSignupReject?.(userIdx, reason)}
                   onHold={(notificationIdx) => onSignupHold?.(notificationIdx)}
-                />
-              ))}
-
-              {jobNotifications.map((notification) => (
-                <JobNotificationCard
-                  key={notification.idx}
-                  notification={notification}
-                  isProcessing={isJobActionProcessing}
-                  onReview={(jobIdx) => onJobReview?.(jobIdx)}
-                  onApprove={(jobIdx) => onJobApprove?.(jobIdx)}
-                  onPending={(jobIdx) => onJobPending?.(jobIdx)}
-                  onReject={(jobIdx) => onJobReject?.(jobIdx)}
-                  onDismiss={(notificationIdx) => onJobDismiss?.(notificationIdx)}
-                  onRetry={(jobIdx, notificationIdx) => onJobRetry?.(jobIdx, notificationIdx)}
                 />
               ))}
 
@@ -598,20 +490,6 @@ export function IntegratedChatPanel({
                 </div>
               ))}
             </div>
-
-            {inventoryApprovals.length > 0 ? (
-              <div className="shrink-0 space-y-2 border-t border-amber-800/40 bg-amber-950/20 p-2">
-                {inventoryApprovals.map((request) => (
-                  <InventoryApprovalCard
-                    key={request.approvalId}
-                    request={request}
-                    isProcessing={processingApprovalId === request.approvalId}
-                    onApprove={(approvalId) => void resolveInventoryApproval(approvalId, true)}
-                    onReject={(approvalId) => void resolveInventoryApproval(approvalId, false)}
-                  />
-                ))}
-              </div>
-            ) : null}
           </div>
         </div>
 

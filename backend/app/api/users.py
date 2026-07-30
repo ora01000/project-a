@@ -3,7 +3,7 @@ import sqlite3
 from fastapi import APIRouter, Body, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from backend.app.db.agents import list_stored_agents
+from backend.app.db.assignable_agents import known_assignable_agent_ids
 from backend.app.db.roles import ROLE_ADMIN
 from backend.app.db.users import (
     User,
@@ -87,9 +87,11 @@ class SaveUserAgentAssignmentsResponse(BaseModel):
     users: list[UserResponse]
 
 
-def _validate_agent_ids(database_path: str, agent_ids: list[str]) -> list[str]:
+def _validate_agent_ids(request: Request, agent_ids: list[str]) -> list[str]:
+    database_path = request.app.state.database_path
+    runtime_mode = getattr(request.app.state, "agent_runtime_mode", "mock")
     normalized = parse_agent_ids(",".join(agent_ids))
-    known = {agent.agent_id for agent in list_stored_agents(database_path)}
+    known = known_assignable_agent_ids(database_path, runtime_mode=runtime_mode)
     unknown = [agent_id for agent_id in normalized if agent_id not in known]
     if unknown:
         raise HTTPException(
@@ -149,7 +151,7 @@ async def save_user_agent_assignments(
         existing = get_user_by_idx(database_path, item.idx)
         if existing is None:
             raise HTTPException(status_code=404, detail=f"사용자를 찾을 수 없습니다: idx={item.idx}")
-        agent_ids = _validate_agent_ids(database_path, item.agent_ids)
+        agent_ids = _validate_agent_ids(request, item.agent_ids)
         updated = update_user_agents(database_path, item.idx, agent_ids)
         if updated is None:
             raise HTTPException(status_code=404, detail=f"사용자를 찾을 수 없습니다: idx={item.idx}")

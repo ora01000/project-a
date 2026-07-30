@@ -8,8 +8,8 @@ server {
     root /usr/share/nginx/html;
     index index.html;
 
-    access_log /var/log/nginx/frontend-access.log;
-    error_log /var/log/nginx/error.log warn;
+    access_log /dev/stdout;
+    error_log /dev/stderr warn;
 
     location /api/ {
         proxy_pass http://${BACKEND_API_HOST}:${BACKEND_API_PORT}/api/;

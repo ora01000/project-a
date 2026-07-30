@@ -1,11 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { AgentInfo, HealthInfo } from "../types/agent";
-import type { JobDetailTab } from "../types/job";
 import { ROLE_ADMIN } from "../types/user";
 import { AgentLogsPanel } from "./AgentLogsPanel";
 import { PromptDebugPanel } from "./PromptDebugPanel";
-import { JobWorkPanel } from "./jobs/JobWorkPanel";
 import { TopologyMap } from "./TopologyMap";
 
 interface DetailInfoPanelProps {
@@ -16,14 +14,11 @@ interface DetailInfoPanelProps {
   onActiveTabChange?: (tab: DetailTab) => void;
 }
 
-type DetailTab = "topology" | "logs" | "debug" | JobDetailTab;
+type DetailTab = "topology" | "logs" | "debug";
 
 const BASE_TABS: { id: DetailTab; label: string }[] = [
   { id: "topology", label: "Topology 맵" },
   { id: "logs", label: "로그" },
-  { id: "review", label: "검토 작업" },
-  { id: "pending", label: "보류 작업" },
-  { id: "completed", label: "완료 작업" },
 ];
 
 const DEFAULT_HEIGHT = 500;
@@ -156,10 +151,8 @@ export function DetailInfoPanel({
         ) : activeTab === "logs" ? (
           <AgentLogsPanel />
         ) : activeTab === "debug" && isAdmin ? (
-          <PromptDebugPanel agents={agents} viewerRole={viewerRole} />
-        ) : (
-          <JobWorkPanel key={activeTab} tab={activeTab as JobDetailTab} />
-        )}
+          <PromptDebugPanel agents={agents} />
+        ) : null}
       </div>
     </section>
   );
