@@ -20,6 +20,8 @@ CREATE TABLE IF NOT EXISTS agentruntime (
     description VARCHAR(255) NOT NULL,
     registered_date TEXT NOT NULL,
     service_id VARCHAR(20) NOT NULL,
+    talkable INTEGER NOT NULL DEFAULT 1,
+    is_orchestrator INTEGER NOT NULL DEFAULT 0,
     UNIQUE(type, agent_id)
 );
 

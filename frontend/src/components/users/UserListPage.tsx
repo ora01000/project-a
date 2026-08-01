@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { ConfirmDialog } from "../ConfirmDialog";
 import { UserFormModal } from "./UserFormModal";
@@ -18,16 +18,11 @@ async function parseError(response: Response, fallback: string): Promise<string>
 export function UserListPage({ currentUserIdx, currentUserRole }: UserListPageProps) {
   const canManageUsers = currentUserRole === ROLE_ADMIN;
   const [users, setUsers] = useState<UserRecord[]>([]);
-  const [selectedIdxSet, setSelectedIdxSet] = useState<Set<number>>(new Set());
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [formMode, setFormMode] = useState<"create" | "edit" | null>(null);
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-
-  const selectedUsers = useMemo(
-    () => users.filter((user) => selectedIdxSet.has(user.idx)),
-    [users, selectedIdxSet],
-  );
+  const [editingUser, setEditingUser] = useState<UserRecord | null>(null);
+  const [deletingUser, setDeletingUser] = useState<UserRecord | null>(null);
 
   const loadUsers = useCallback(async () => {
     setIsLoading(true);
@@ -39,10 +34,6 @@ export function UserListPage({ currentUserIdx, currentUserRole }: UserListPagePr
       }
       const data = (await response.json()) as UserRecord[];
       setUsers(data);
-      setSelectedIdxSet((current) => {
-        const valid = new Set(data.map((user) => user.idx));
-        return new Set([...current].filter((idx) => valid.has(idx)));
-      });
     } catch (err) {
       setError(err instanceof Error ? err.message : "사용자 목록을 불러오지 못했습니다.");
     } finally {
@@ -54,24 +45,9 @@ export function UserListPage({ currentUserIdx, currentUserRole }: UserListPagePr
     void loadUsers();
   }, [loadUsers]);
 
-  const toggleRow = (idx: number) => {
-    setSelectedIdxSet((current) => {
-      const next = new Set(current);
-      if (next.has(idx)) {
-        next.delete(idx);
-      } else {
-        next.add(idx);
-      }
-      return next;
-    });
-  };
-
-  const toggleAll = () => {
-    if (selectedIdxSet.size === users.length) {
-      setSelectedIdxSet(new Set());
-      return;
-    }
-    setSelectedIdxSet(new Set(users.map((user) => user.idx)));
+  const closeForm = () => {
+    setFormMode(null);
+    setEditingUser(null);
   };
 
   const handleCreate = async (values: UserFormValues) => {
@@ -93,12 +69,11 @@ export function UserListPage({ currentUserIdx, currentUserRole }: UserListPagePr
     if (!canManageUsers) {
       throw new Error("관리자만 사용자를 수정할 수 있습니다.");
     }
-    const target = selectedUsers[0];
-    if (!target) {
+    if (!editingUser) {
       throw new Error("수정할 사용자를 선택해 주세요.");
     }
 
-    const response = await fetch(`/api/users/${target.idx}`, {
+    const response = await fetch(`/api/users/${editingUser.idx}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -120,31 +95,30 @@ export function UserListPage({ currentUserIdx, currentUserRole }: UserListPagePr
   const handleDelete = async () => {
     if (!canManageUsers) {
       setError("관리자만 사용자를 삭제할 수 있습니다.");
-      setShowDeleteConfirm(false);
+      setDeletingUser(null);
       return;
     }
-    if (selectedIdxSet.size === 0) {
+    if (!deletingUser) {
       return;
     }
-    if (selectedIdxSet.has(currentUserIdx)) {
+    if (deletingUser.idx === currentUserIdx) {
       setError("현재 로그인한 사용자는 삭제할 수 없습니다.");
-      setShowDeleteConfirm(false);
+      setDeletingUser(null);
       return;
     }
 
     const response = await fetch("/api/users", {
       method: "DELETE",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ idx_list: [...selectedIdxSet], viewer_role: currentUserRole }),
+      body: JSON.stringify({ idx_list: [deletingUser.idx], viewer_role: currentUserRole }),
     });
     if (!response.ok) {
       setError(await parseError(response, "사용자 삭제에 실패했습니다."));
-      setShowDeleteConfirm(false);
+      setDeletingUser(null);
       return;
     }
 
-    setShowDeleteConfirm(false);
-    setSelectedIdxSet(new Set());
+    setDeletingUser(null);
     await loadUsers();
   };
 
@@ -160,41 +134,17 @@ export function UserListPage({ currentUserIdx, currentUserRole }: UserListPagePr
           </p>
         </div>
         {canManageUsers ? (
-          <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={() => setShowDeleteConfirm(true)}
-              disabled={selectedIdxSet.size === 0}
-              className="rounded-md border border-rose-800 px-3 py-1.5 text-sm text-rose-200 hover:bg-rose-950/40 disabled:cursor-not-allowed disabled:text-slate-500"
-            >
-              삭제
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                if (selectedUsers.length !== 1) {
-                  setError("수정할 사용자 1명을 선택해 주세요.");
-                  return;
-                }
-                setError(null);
-                setFormMode("edit");
-              }}
-              disabled={selectedUsers.length !== 1}
-              className="rounded-md border border-slate-600 px-3 py-1.5 text-sm text-slate-200 hover:bg-slate-800 disabled:cursor-not-allowed disabled:text-slate-500"
-            >
-              수정
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setError(null);
-                setFormMode("create");
-              }}
-              className="rounded-md bg-sky-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-sky-500"
-            >
-              추가
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={() => {
+              setError(null);
+              setEditingUser(null);
+              setFormMode("create");
+            }}
+            className="rounded-md bg-sky-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-sky-500"
+          >
+            추가
+          </button>
         ) : null}
       </header>
 
@@ -211,37 +161,18 @@ export function UserListPage({ currentUserIdx, currentUserRole }: UserListPagePr
           <table className="min-w-full border-collapse text-sm">
             <thead>
               <tr className="border-b border-slate-700 text-left text-slate-400">
-                {canManageUsers ? (
-                  <th className="px-3 py-2">
-                    <input
-                      type="checkbox"
-                      checked={users.length > 0 && selectedIdxSet.size === users.length}
-                      onChange={toggleAll}
-                      aria-label="전체 선택"
-                    />
-                  </th>
-                ) : null}
                 <th className="px-3 py-2">아이디</th>
                 <th className="px-3 py-2">이메일</th>
                 <th className="px-3 py-2">이름</th>
                 <th className="px-3 py-2">직책</th>
                 <th className="px-3 py-2">조직</th>
                 <th className="px-3 py-2">역할</th>
+                {canManageUsers ? <th className="px-3 py-2">작업</th> : null}
               </tr>
             </thead>
             <tbody>
               {users.map((user) => (
                 <tr key={user.idx} className="border-b border-slate-800 text-slate-200">
-                  {canManageUsers ? (
-                    <td className="px-3 py-2">
-                      <input
-                        type="checkbox"
-                        checked={selectedIdxSet.has(user.idx)}
-                        onChange={() => toggleRow(user.idx)}
-                        aria-label={`${user.userid} 선택`}
-                      />
-                    </td>
-                  ) : null}
                   <td className="px-3 py-2">{user.userid}</td>
                   <td className="px-3 py-2">{user.email}</td>
                   <td className="px-3 py-2">{user.username}</td>
@@ -250,6 +181,34 @@ export function UserListPage({ currentUserIdx, currentUserRole }: UserListPagePr
                   <td className="px-3 py-2">
                     {user.role}: {roleLabel(user.role)}
                   </td>
+                  {canManageUsers ? (
+                    <td className="px-3 py-2">
+                      <div className="flex flex-wrap gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setError(null);
+                            setEditingUser(user);
+                            setFormMode("edit");
+                          }}
+                          className="rounded-md border border-slate-600 px-2 py-1 text-xs text-slate-200 hover:bg-slate-800"
+                        >
+                          수정
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setError(null);
+                            setDeletingUser(user);
+                          }}
+                          disabled={user.idx === currentUserIdx}
+                          className="rounded-md border border-rose-800 px-2 py-1 text-xs text-rose-200 hover:bg-rose-950/40 disabled:cursor-not-allowed disabled:border-slate-700 disabled:text-slate-500"
+                        >
+                          삭제
+                        </button>
+                      </div>
+                    </td>
+                  ) : null}
                 </tr>
               ))}
             </tbody>
@@ -260,19 +219,19 @@ export function UserListPage({ currentUserIdx, currentUserRole }: UserListPagePr
       {canManageUsers && formMode ? (
         <UserFormModal
           mode={formMode}
-          user={formMode === "edit" ? selectedUsers[0] : undefined}
-          onClose={() => setFormMode(null)}
+          user={formMode === "edit" ? editingUser ?? undefined : undefined}
+          onClose={closeForm}
           onSave={formMode === "create" ? handleCreate : handleUpdate}
         />
       ) : null}
 
-      {canManageUsers && showDeleteConfirm ? (
+      {canManageUsers && deletingUser ? (
         <ConfirmDialog
           title="사용자 삭제"
-          message={`선택한 ${selectedIdxSet.size}명의 사용자를 삭제하시겠습니까?`}
+          message={`'${deletingUser.userid}' 사용자를 삭제하시겠습니까?`}
           confirmLabel="예"
           cancelLabel="아니오"
-          onCancel={() => setShowDeleteConfirm(false)}
+          onCancel={() => setDeletingUser(null)}
           onConfirm={() => void handleDelete()}
         />
       ) : null}

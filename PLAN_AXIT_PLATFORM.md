@@ -140,3 +140,64 @@ AGENT_RUNTIME_MODE = http 인 경우 agentruntime 의 type = 1 을 참조한다.
   - 대시보드/상세정보(중앙 패널) : 대화형 터미널(오른쪽 패널) 의 가로 비욜을 마우스 드래그로 조절할 수 있게 변경
 
 ## 중간 체크 - 260801
+
+## UI 정리
+- 사용자 조회 화면에서 테이블 컬럼의 체크박스는 삭제하고, 대신 삭제/수정 버튼은 각 row 의 마지막 컬럼에 배치한다. 체크박스 선택없이 삭제/수정하도록 변경한다
+- 공지사항 목록 조회에서 체크박스는 삭제하고 삭제 버튼을 각 row의 마지막 버튼 컬럼에 배치한다. 체크박스 선택없이 삭제되도록 변경한다.(수정 버튼과 동일)
+
+## 목업 에이전트 추가
+- agentruntime 에 다음 에이전트를 추가한다. 이 에이전트 정보는 init schema 에 추가하지 않는다
+  1. 에이전트 이름 : Whatap 이벤트 수신 
+    타입 : 목업
+    agent_id : 랜덤 생성
+    local agent id : whatap-event
+    설명 : Whatap 에서 이벤트를 수신하고 처리
+    service id : prvops
+
+  2. 에이전트 이름 : 작업 접수/계획
+    타입 : 목업
+    agent_id : 랜덤 생성
+    local agent id : job-scheduler
+    설명 : 채널을 통해 작업 요청을 수신/계획 수립
+    service id : prvops
+
+  3. 에이전트 이름 : 아키텍처 분석
+    타입 : 목업
+    agent_id : 랜덤 생성
+    local agent id : archi-analysis
+    설명 : 인프라의 설계 구성 분석/도식화
+    service id : prvops
+
+  4. 에이전트 이름 : 헬프데스크
+    타입 : 목업
+    agent_id : 랜덤 생성
+    local agent id : helpdesk
+    설명 : 문의응대
+    service id : prvops
+
+- 위 네 개의 에이전트는 목업 테스트시만 에이전트로 등록되며 다음 정보를 목업 정의 코드에 정적으로  적용한다.
+  1. whatap-event
+    - 도구 : 없음
+    - 다음 에이전트를 호출할 수 있다.
+      - dprv-k8s, dprv6-k8s, pcicd-k8s, dprmn-k8s, dtest-k8s, dpvs-k8s, dprsv-k8s, dprrt-k8s, dkvrt-k8s
+    - 시스템 프롬프트
+      - 당신은 Whatap APM 으로부터 이상징후 발생시 webhook를 통해 이벤트를 수신받을 수 있다. 수신받은 이벤트의 인프라를 찾아 적절한 에이전트에 분석을 요청한다.
+  2. job-scheduler
+    - 도구 : 없음
+    - 다음 에이전트를 호출할 수 있다.
+      - dprv-k8s, dprv6-k8s, pcicd-k8s, dprmn-k8s, dtest-k8s, dpvs-k8s, dprsv-k8s, dprrt-k8s, dkvrt-k8s
+    - 시스템 프롬프트
+      - 당신은 요청받은 사용자 요청을 분석하고 작업 계획을 수립합니다.
+  3. archi-analysis
+    - 도구 : 없음
+    - 다음 에이전트를 호출할 수 있다.
+      - dprv-k8s, dprv6-k8s, pcicd-k8s, dprmn-k8s, dtest-k8s, dpvs-k8s, dprsv-k8s, dprrt-k8s, dkvrt-k8s
+    - 시스템 프롬프트
+      - 당신은 인프라 아키텍처를 분석하고 도식화하는 에이전트입니다. 인프라의 구조도를 mermaid 차트로 출력합니다.
+  4. helpdesk
+    - 도구 : 없음
+    - 다음 에이전트를 호출할 수 있다.
+      - dprv-k8s, dprv6-k8s, pcicd-k8s, dprmn-k8s, dtest-k8s, dpvs-k8s, dprsv-k8s, dprrt-k8s, dkvrt-k8s
+    - 시스템 프롬프트
+      - 당신은 인프라 문의 응대 에이전트입니다. 사용자의 요청을 받으면 어떤 인프라인지를 확인하고 적절한 에이전트를 호출하여 정확한 답변을 전달합니다.
+

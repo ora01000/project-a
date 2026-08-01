@@ -5,6 +5,8 @@ from backend.app.agents.base import (
     build_planned_step_agent,
     invoke_agent,
 )
+from backend.app.agents.mock_platform_agents import is_mock_platform_orchestrator_agent
+from backend.app.agents.orchestrator_agent import ORCHESTRATOR_MARKER
 from backend.app.agents.remote_agent import REMOTE_AGENT_MARKER
 from backend.app.disabled_features import is_removed_agent_id
 
@@ -21,7 +23,7 @@ async def invoke_agent_by_id(
     caller_agent_id: str | None = None,
     agent_runtime: Any | None = None,
 ) -> AgentInvokeResult:
-    del caller_agent_id, agent_runtime
+    del caller_agent_id
 
     if is_removed_agent_id(agent_id):
         raise AgentInvocationError(f"Agent '{agent_id}' is disabled")
@@ -33,6 +35,15 @@ async def invoke_agent_by_id(
     if agent is REMOTE_AGENT_MARKER:
         raise AgentInvocationError(
             f"Agent '{agent_id}' is configured for remote runtime execution"
+        )
+    if agent is ORCHESTRATOR_MARKER or is_mock_platform_orchestrator_agent(agent_id):
+        from backend.app.services.mock_orchestration import handle_mock_orchestration_query
+
+        return await handle_mock_orchestration_query(
+            agent_manager,
+            agent_id,
+            message,
+            agent_runtime=agent_runtime,
         )
 
     try:

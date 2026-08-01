@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import type { AuthUser } from "../../types/auth";
 import type { NoticeFormValues, NoticeRecord } from "../../types/notice";
@@ -19,12 +19,11 @@ async function parseError(response: Response, fallback: string): Promise<string>
 export function NoticeBoardPage({ user }: NoticeBoardPageProps) {
   const isAdmin = user.role === ROLE_ADMIN;
   const [notices, setNotices] = useState<NoticeRecord[]>([]);
-  const [selectedIdxSet, setSelectedIdxSet] = useState<Set<number>>(new Set());
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [formMode, setFormMode] = useState<"create" | "edit" | null>(null);
   const [editingNotice, setEditingNotice] = useState<NoticeRecord | null>(null);
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deletingNotice, setDeletingNotice] = useState<NoticeRecord | null>(null);
   const [togglingIdx, setTogglingIdx] = useState<number | null>(null);
 
   const loadNotices = useCallback(async () => {
@@ -37,10 +36,6 @@ export function NoticeBoardPage({ user }: NoticeBoardPageProps) {
       }
       const data = (await response.json()) as NoticeRecord[];
       setNotices(data);
-      setSelectedIdxSet((current) => {
-        const valid = new Set(data.map((notice) => notice.idx));
-        return new Set([...current].filter((idx) => valid.has(idx)));
-      });
     } catch (err) {
       setError(err instanceof Error ? err.message : "공지사항을 불러오지 못했습니다.");
     } finally {
@@ -51,31 +46,6 @@ export function NoticeBoardPage({ user }: NoticeBoardPageProps) {
   useEffect(() => {
     void loadNotices();
   }, [loadNotices]);
-
-  const selectedNotices = useMemo(
-    () => notices.filter((notice) => selectedIdxSet.has(notice.idx)),
-    [notices, selectedIdxSet],
-  );
-
-  const toggleRow = (idx: number) => {
-    setSelectedIdxSet((current) => {
-      const next = new Set(current);
-      if (next.has(idx)) {
-        next.delete(idx);
-      } else {
-        next.add(idx);
-      }
-      return next;
-    });
-  };
-
-  const toggleAll = () => {
-    if (selectedIdxSet.size === notices.length) {
-      setSelectedIdxSet(new Set());
-      return;
-    }
-    setSelectedIdxSet(new Set(notices.map((notice) => notice.idx)));
-  };
 
   const handleCreate = async (values: NoticeFormValues) => {
     const response = await fetch("/api/notices", {
@@ -120,24 +90,23 @@ export function NoticeBoardPage({ user }: NoticeBoardPageProps) {
   };
 
   const handleDelete = async () => {
-    if (selectedIdxSet.size === 0) {
+    if (!deletingNotice) {
       return;
     }
     const response = await fetch("/api/notices", {
       method: "DELETE",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        idx_list: [...selectedIdxSet],
+        idx_list: [deletingNotice.idx],
         viewer_role: user.role,
       }),
     });
     if (!response.ok) {
       setError(await parseError(response, "공지사항 삭제에 실패했습니다."));
-      setShowDeleteConfirm(false);
+      setDeletingNotice(null);
       return;
     }
-    setShowDeleteConfirm(false);
-    setSelectedIdxSet(new Set());
+    setDeletingNotice(null);
     await loadNotices();
   };
 
@@ -177,31 +146,19 @@ export function NoticeBoardPage({ user }: NoticeBoardPageProps) {
           <h2 className="text-sm font-semibold text-slate-200">공지사항</h2>
           <p className="mt-0.5 text-xs text-slate-500">notice_board 테이블 공지 목록입니다.</p>
         </div>
-        <div className="flex gap-2">
-          {isAdmin ? (
-            <>
-              <button
-                type="button"
-                onClick={() => setShowDeleteConfirm(true)}
-                disabled={selectedIdxSet.size === 0}
-                className="rounded-md border border-rose-800 px-3 py-1.5 text-sm text-rose-200 hover:bg-rose-950/40 disabled:cursor-not-allowed disabled:text-slate-500"
-              >
-                삭제
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setError(null);
-                  setEditingNotice(null);
-                  setFormMode("create");
-                }}
-                className="rounded-md bg-sky-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-sky-500"
-              >
-                추가
-              </button>
-            </>
-          ) : null}
-        </div>
+        {isAdmin ? (
+          <button
+            type="button"
+            onClick={() => {
+              setError(null);
+              setEditingNotice(null);
+              setFormMode("create");
+            }}
+            className="rounded-md bg-sky-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-sky-500"
+          >
+            추가
+          </button>
+        ) : null}
       </header>
 
       {error ? (
@@ -219,16 +176,6 @@ export function NoticeBoardPage({ user }: NoticeBoardPageProps) {
           <table className="min-w-full border-collapse text-sm">
             <thead>
               <tr className="border-b border-slate-700 text-left text-slate-400">
-                {isAdmin ? (
-                  <th className="px-3 py-2">
-                    <input
-                      type="checkbox"
-                      checked={notices.length > 0 && selectedIdxSet.size === notices.length}
-                      onChange={toggleAll}
-                      aria-label="전체 선택"
-                    />
-                  </th>
-                ) : null}
                 <th className="px-3 py-2">글번호</th>
                 <th className="px-3 py-2">제목</th>
                 <th className="px-3 py-2">작성자</th>
@@ -236,7 +183,7 @@ export function NoticeBoardPage({ user }: NoticeBoardPageProps) {
                 <th className="px-3 py-2">공지시작</th>
                 <th className="px-3 py-2">공지기한</th>
                 <th className="px-3 py-2">웰컴백 팝업 표시여부</th>
-                {isAdmin ? <th className="px-3 py-2">수정</th> : null}
+                {isAdmin ? <th className="px-3 py-2">작업</th> : null}
               </tr>
             </thead>
             <tbody>
@@ -244,16 +191,6 @@ export function NoticeBoardPage({ user }: NoticeBoardPageProps) {
                 const scheduleStatus = noticeScheduleStatus(notice);
                 return (
                 <tr key={notice.idx} className="border-b border-slate-800 text-slate-200">
-                  {isAdmin ? (
-                    <td className="px-3 py-2">
-                      <input
-                        type="checkbox"
-                        checked={selectedIdxSet.has(notice.idx)}
-                        onChange={() => toggleRow(notice.idx)}
-                        aria-label={`${notice.title} 선택`}
-                      />
-                    </td>
-                  ) : null}
                   <td className="px-3 py-2">{notice.idx}</td>
                   <td className="px-3 py-2">{notice.title}</td>
                   <td className="px-3 py-2">{notice.writer_name?.trim() || notice.writer}</td>
@@ -294,6 +231,16 @@ export function NoticeBoardPage({ user }: NoticeBoardPageProps) {
                           className="rounded-md border border-slate-600 px-2 py-1 text-xs text-slate-200 hover:bg-slate-800"
                         >
                           수정
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setError(null);
+                            setDeletingNotice(notice);
+                          }}
+                          className="rounded-md border border-rose-800 px-2 py-1 text-xs text-rose-200 hover:bg-rose-950/40"
+                        >
+                          삭제
                         </button>
                         {scheduleStatus === "scheduled" ? (
                           <button
@@ -338,13 +285,13 @@ export function NoticeBoardPage({ user }: NoticeBoardPageProps) {
         />
       ) : null}
 
-      {showDeleteConfirm && isAdmin ? (
+      {deletingNotice && isAdmin ? (
         <ConfirmDialog
           title="공지사항 삭제"
-          message={`선택한 ${selectedNotices.length}건의 공지사항을 삭제하시겠습니까?`}
+          message={`'${deletingNotice.title}' 공지사항을 삭제하시겠습니까?`}
           confirmLabel="예"
           cancelLabel="아니오"
-          onCancel={() => setShowDeleteConfirm(false)}
+          onCancel={() => setDeletingNotice(null)}
           onConfirm={() => void handleDelete()}
         />
       ) : null}

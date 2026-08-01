@@ -173,6 +173,8 @@ export function AgentConnectionListPage({ user, onAgentRuntimeChanged }: AgentCo
                 <th className="px-3 py-2">설명</th>
                 <th className="px-3 py-2">등록일시</th>
                 <th className="px-3 py-2">Service ID</th>
+                <th className="px-3 py-2">대화 가능</th>
+                <th className="px-3 py-2">오케스트레이터</th>
                 <th className="px-3 py-2">작업</th>
               </tr>
             </thead>
@@ -188,6 +190,8 @@ export function AgentConnectionListPage({ user, onAgentRuntimeChanged }: AgentCo
                   </td>
                   <td className="px-3 py-2 whitespace-nowrap font-mono text-xs">{record.registered_date}</td>
                   <td className="px-3 py-2">{record.service_id}</td>
+                  <td className="px-3 py-2">{record.talkable ? "예" : "아니오"}</td>
+                  <td className="px-3 py-2">{record.is_orchestrator ? "예" : "아니오"}</td>
                   <td className="px-3 py-2">
                     <div className="flex flex-wrap gap-1.5">
                       <button

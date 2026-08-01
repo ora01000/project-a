@@ -33,6 +33,8 @@ class AgentRuntimeRecordResponse(BaseModel):
     description: str
     registered_date: str
     service_id: str
+    talkable: bool
+    is_orchestrator: bool
 
     @classmethod
     def from_record(cls, record: StoredAgentRuntime) -> "AgentRuntimeRecordResponse":
@@ -45,6 +47,8 @@ class AgentRuntimeRecordResponse(BaseModel):
             description=record.description,
             registered_date=record.registered_date,
             service_id=record.service_id,
+            talkable=record.talkable,
+            is_orchestrator=record.is_orchestrator,
         )
 
 

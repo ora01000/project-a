@@ -9,9 +9,11 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.app.agents.base import AgentDefinition, _aggregate_mcp_status, build_agent
+from backend.app.agents.mock_platform_agents import is_mock_platform_orchestrator_agent
+from backend.app.agents.orchestrator_agent import ORCHESTRATOR_MARKER
 from backend.app.agents.remote_agent import REMOTE_AGENT_MARKER
 from backend.app.mcp.client import MCPClientManager
-from backend.app.agents.registry import load_server_agent_definitions, load_static_agent_definitions
+from backend.app.agents.registry import load_mock_runtime_definitions, load_server_agent_definitions
 from backend.app.agents.system_agents import is_control_plane_orchestration_agent
 from backend.app.api.agent_logs import router as agent_logs_router
 from backend.app.api.agentruntime_records import router as agentruntime_records_router
@@ -94,6 +96,9 @@ class AgentManager:
 
         for definition in self.agent_definitions:
             try:
+                if is_mock_platform_orchestrator_agent(definition.agent_id):
+                    self.agents[definition.agent_id] = ORCHESTRATOR_MARKER
+                    continue
                 self.agents[definition.agent_id] = await build_agent(definition, self.mcp_manager)
             except Exception as exc:
                 logger.exception("Failed to build agent %s: %s", definition.agent_id, exc)
@@ -102,7 +107,7 @@ class AgentManager:
     def _load_runtime_definitions(self, database_path: Path) -> list[AgentDefinition]:
         if self.uses_remote_runtime():
             return filter_agent_definitions(load_server_agent_definitions(database_path))
-        return filter_agent_definitions(load_static_agent_definitions())
+        return filter_agent_definitions(load_mock_runtime_definitions(database_path))
 
     async def initialize(self, database_path: Path, *, execution_mode: str = "mock") -> None:
         self.execution_mode = normalize_runtime_mode(execution_mode)
@@ -146,6 +151,9 @@ class AgentManager:
                 statuses[agent_id] = "unavailable"
                 continue
             if is_control_plane_orchestration_agent(agent_id):
+                statuses[agent_id] = "ready"
+                continue
+            if is_mock_platform_orchestrator_agent(agent_id):
                 statuses[agent_id] = "ready"
                 continue
             if self.uses_remote_runtime():

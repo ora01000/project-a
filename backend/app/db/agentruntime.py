@@ -18,11 +18,28 @@ MOCKUP_CLIENT_ID = "mock-client-id"
 MOCKUP_CLIENT_SECRET = "mock-client-secret"
 DEFAULT_SERVICE_ID = "prvops"
 
+NON_TALKABLE_LOCAL_AGENT_IDS: frozenset[str] = frozenset({"whatap-event", "job-scheduler"})
+
+ORCHESTRATOR_LOCAL_AGENT_IDS: frozenset[str] = frozenset({
+    "helpdesk",
+    "whatap-event",
+    "job-scheduler",
+    "archi-analysis",
+})
+
 _AXIT_AGENT_ID_NAMESPACE = uuid.UUID("00000000-0000-4000-8000-000000000000")
+
+
+@dataclass(frozen=True)
+class MockAgentRuntimePreset:
+    agent_name: str
+    local_agent_id: str
+    description: str
+
 
 _AGENTRUNTIME_SELECT = """
     SELECT idx, type, agent_name, agent_id, local_agent_id,
-           description, registered_date, service_id
+           description, registered_date, service_id, talkable, is_orchestrator
     FROM agentruntime
 """
 
@@ -37,6 +54,27 @@ class StoredAgentRuntime:
     description: str
     registered_date: str
     service_id: str
+    talkable: bool
+    is_orchestrator: bool
+
+
+def default_talkable_for_local_agent_id(local_agent_id: str) -> bool:
+    return local_agent_id.strip() not in NON_TALKABLE_LOCAL_AGENT_IDS
+
+
+def default_is_orchestrator_for_local_agent_id(local_agent_id: str) -> bool:
+    return local_agent_id.strip() in ORCHESTRATOR_LOCAL_AGENT_IDS
+
+
+def build_talkable_by_catalog_agent_id(
+    database_path: str | Path,
+    *,
+    runtime_mode: str | None = None,
+) -> dict[str, bool]:
+    return {
+        catalog_agent_id(record): record.talkable
+        for record in list_agentruntime_records(database_path, runtime_mode=runtime_mode)
+    }
 
 
 def format_registered_datetime(dt: datetime | None = None) -> str:
@@ -94,6 +132,8 @@ def _row_to_stored_agentruntime(row) -> StoredAgentRuntime:
         description=str(row["description"]),
         registered_date=normalize_registered_datetime(str(row["registered_date"])),
         service_id=str(row["service_id"]),
+        talkable=bool(row["talkable"]),
+        is_orchestrator=bool(row["is_orchestrator"]),
     )
 
 
@@ -106,6 +146,27 @@ def resolve_active_agentruntime_type(runtime_mode: str | None = None) -> int:
     if mode == "http":
         return AGENTRUNTIME_TYPE_EXTERNAL
     return AGENTRUNTIME_TYPE_MOCKUP
+
+
+def mockup_row_from_preset(
+    preset: MockAgentRuntimePreset,
+    *,
+    registered_at: datetime | None = None,
+) -> dict[str, object]:
+    from backend.app.services.axit_config import resolve_axit_service_id
+
+    local_agent_id = preset.local_agent_id.strip()
+    return {
+        "type": AGENTRUNTIME_TYPE_MOCKUP,
+        "agent_name": preset.agent_name,
+        "agent_id": build_axit_agent_id(local_agent_id),
+        "local_agent_id": local_agent_id,
+        "description": preset.description,
+        "registered_date": format_registered_datetime(registered_at),
+        "service_id": resolve_axit_service_id(),
+        "talkable": default_talkable_for_local_agent_id(local_agent_id),
+        "is_orchestrator": default_is_orchestrator_for_local_agent_id(local_agent_id),
+    }
 
 
 def mockup_row_from_definition(
@@ -123,6 +184,8 @@ def mockup_row_from_definition(
         "description": definition.role,
         "registered_date": format_registered_datetime(registered_at),
         "service_id": resolve_axit_service_id(),
+        "talkable": default_talkable_for_local_agent_id(definition.agent_id),
+        "is_orchestrator": default_is_orchestrator_for_local_agent_id(definition.agent_id),
     }
 
 
@@ -226,11 +289,11 @@ def insert_agentruntime_records(
         """
         INSERT INTO agentruntime (
             type, agent_name, agent_id, local_agent_id, description,
-            registered_date, service_id
+            registered_date, service_id, talkable, is_orchestrator
         )
         VALUES (
             :type, :agent_name, :agent_id, :local_agent_id, :description,
-            :registered_date, :service_id
+            :registered_date, :service_id, :talkable, :is_orchestrator
         )
         """,
         rows,
@@ -248,18 +311,30 @@ def create_agentruntime_record(
     description: str,
     service_id: str,
     registered_date: str | None = None,
+    talkable: bool | None = None,
+    is_orchestrator: bool | None = None,
 ) -> StoredAgentRuntime:
     registered = normalize_registered_datetime(
         registered_date or format_registered_datetime(),
+    )
+    resolved_talkable = (
+        default_talkable_for_local_agent_id(local_agent_id)
+        if talkable is None
+        else talkable
+    )
+    resolved_is_orchestrator = (
+        default_is_orchestrator_for_local_agent_id(local_agent_id)
+        if is_orchestrator is None
+        else is_orchestrator
     )
     with get_connection(database_path) as connection:
         cursor = connection.execute(
             """
             INSERT INTO agentruntime (
                 type, agent_name, agent_id, local_agent_id, description,
-                registered_date, service_id
+                registered_date, service_id, talkable, is_orchestrator
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 runtime_type,
@@ -269,6 +344,8 @@ def create_agentruntime_record(
                 description.strip(),
                 registered,
                 service_id.strip(),
+                1 if resolved_talkable else 0,
+                1 if resolved_is_orchestrator else 0,
             ),
         )
         connection.commit()

@@ -7,6 +7,8 @@ export interface AgentRuntimeRecord {
   description: string;
   registered_date: string;
   service_id: string;
+  talkable: boolean;
+  is_orchestrator: boolean;
 }
 
 export interface AgentRuntimeFormValues {

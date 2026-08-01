@@ -3,6 +3,10 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException, Request
 
 from backend.app.agents.base import AgentDefinition
+from backend.app.db.agentruntime import (
+    build_talkable_by_catalog_agent_id,
+    default_talkable_for_local_agent_id,
+)
 from backend.app.services.agent_runtime_client import (
     MOCK_RUNTIME_UNAVAILABLE_DETAIL,
     get_runtime_capabilities,
@@ -74,6 +78,26 @@ def _resolve_agent_connection_status(
     return "unknown"
 
 
+def _talkable_lookup(request: Request) -> dict[str, bool]:
+    if not hasattr(request.state, "talkable_by_agent_id"):
+        database_path = getattr(request.app.state, "database_path", None)
+        if database_path is None:
+            request.state.talkable_by_agent_id = {}
+        else:
+            request.state.talkable_by_agent_id = build_talkable_by_catalog_agent_id(
+                database_path,
+                runtime_mode=_runtime_mode(request),
+            )
+    return request.state.talkable_by_agent_id
+
+
+def _chat_enabled_for_agent(request: Request, definition: AgentDefinition) -> bool:
+    talkable_lookup = _talkable_lookup(request)
+    if definition.agent_id in talkable_lookup:
+        return talkable_lookup[definition.agent_id]
+    return default_talkable_for_local_agent_id(definition.agent_id)
+
+
 def _agent_payload(
     request: Request,
     definition: AgentDefinition,
@@ -105,7 +129,7 @@ def _agent_payload(
         "operation_error": manager.get_operation_error(definition.agent_id),
         "operation_detail": manager.get_operation_detail(definition.agent_id),
         "is_system": False,
-        "chat_enabled": True,
+        "chat_enabled": _chat_enabled_for_agent(request, definition),
     }
 
 

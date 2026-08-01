@@ -94,6 +94,8 @@ def _apply_migrations(connection: sqlite3.Connection) -> None:
                 description VARCHAR(255) NOT NULL,
                 registered_date TEXT NOT NULL,
                 service_id VARCHAR(20) NOT NULL,
+                talkable INTEGER NOT NULL DEFAULT 1,
+                is_orchestrator INTEGER NOT NULL DEFAULT 0,
                 UNIQUE(type, agent_id)
             )
             """
@@ -103,6 +105,8 @@ def _apply_migrations(connection: sqlite3.Connection) -> None:
     _migrate_agentruntime_local_agent_id(connection)
     _migrate_agentruntime_type_unique(connection)
     _migrate_agentruntime_drop_url_columns(connection)
+    _migrate_agentruntime_talkable(connection)
+    _migrate_agentruntime_is_orchestrator(connection)
     _drop_legacy_product_tables(connection)
 
     _ensure_k8s_inventory_tables(connection)
@@ -290,6 +294,88 @@ def _migrate_agentruntime_drop_url_columns(connection: sqlite3.Connection) -> No
     )
     connection.execute("DROP TABLE agentruntime_legacy")
     logger.info("agentruntime URL column migration complete")
+
+
+def _migrate_agentruntime_talkable(connection: sqlite3.Connection) -> None:
+    tables = {
+        str(row[0])
+        for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+    }
+    if "agentruntime" not in tables:
+        return
+
+    columns = {
+        row["name"] for row in connection.execute("PRAGMA table_info(agentruntime)").fetchall()
+    }
+    if "talkable" not in columns:
+        connection.execute(
+            "ALTER TABLE agentruntime ADD COLUMN talkable INTEGER NOT NULL DEFAULT 1"
+        )
+        logger.info("Added agentruntime.talkable column")
+
+    from backend.app.db.agentruntime import NON_TALKABLE_LOCAL_AGENT_IDS
+
+    placeholders = ", ".join("?" for _ in NON_TALKABLE_LOCAL_AGENT_IDS)
+    connection.execute(
+        f"""
+        UPDATE agentruntime
+        SET talkable = 0
+        WHERE local_agent_id IN ({placeholders})
+        """,
+        tuple(NON_TALKABLE_LOCAL_AGENT_IDS),
+    )
+    connection.execute(
+        f"""
+        UPDATE agentruntime
+        SET talkable = 1
+        WHERE local_agent_id NOT IN ({placeholders})
+           OR local_agent_id IS NULL
+           OR TRIM(local_agent_id) = ''
+        """,
+        tuple(NON_TALKABLE_LOCAL_AGENT_IDS),
+    )
+    logger.info("Synced agentruntime talkable flags")
+
+
+def _migrate_agentruntime_is_orchestrator(connection: sqlite3.Connection) -> None:
+    tables = {
+        str(row[0])
+        for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+    }
+    if "agentruntime" not in tables:
+        return
+
+    columns = {
+        row["name"] for row in connection.execute("PRAGMA table_info(agentruntime)").fetchall()
+    }
+    if "is_orchestrator" not in columns:
+        connection.execute(
+            "ALTER TABLE agentruntime ADD COLUMN is_orchestrator INTEGER NOT NULL DEFAULT 0"
+        )
+        logger.info("Added agentruntime.is_orchestrator column")
+
+    from backend.app.db.agentruntime import ORCHESTRATOR_LOCAL_AGENT_IDS
+
+    placeholders = ", ".join("?" for _ in ORCHESTRATOR_LOCAL_AGENT_IDS)
+    connection.execute(
+        f"""
+        UPDATE agentruntime
+        SET is_orchestrator = 1
+        WHERE local_agent_id IN ({placeholders})
+        """,
+        tuple(ORCHESTRATOR_LOCAL_AGENT_IDS),
+    )
+    connection.execute(
+        f"""
+        UPDATE agentruntime
+        SET is_orchestrator = 0
+        WHERE local_agent_id NOT IN ({placeholders})
+           OR local_agent_id IS NULL
+           OR TRIM(local_agent_id) = ''
+        """,
+        tuple(ORCHESTRATOR_LOCAL_AGENT_IDS),
+    )
+    logger.info("Synced agentruntime is_orchestrator flags")
 
 
 def _drop_legacy_product_tables(connection: sqlite3.Connection) -> None:
@@ -516,6 +602,41 @@ def sync_missing_agentruntime(connection: sqlite3.Connection) -> int:
     return inserted
 
 
+def sync_extra_mock_agentruntime(connection: sqlite3.Connection) -> int:
+    from backend.app.agents.mock_platform_agents import MOCK_AGENTRUNTIME_EXTRA_PRESETS
+    from backend.app.db.agentruntime import (
+        AGENTRUNTIME_TYPE_MOCKUP,
+        insert_agentruntime_records,
+        mockup_row_from_preset,
+    )
+
+    existing_local_ids = {
+        str(row["local_agent_id"]).strip()
+        for row in connection.execute(
+            """
+            SELECT local_agent_id
+            FROM agentruntime
+            WHERE type = ? AND local_agent_id IS NOT NULL
+            """,
+            (AGENTRUNTIME_TYPE_MOCKUP,),
+        ).fetchall()
+        if str(row["local_agent_id"]).strip()
+    }
+    missing_presets = [
+        preset
+        for preset in MOCK_AGENTRUNTIME_EXTRA_PRESETS
+        if preset.local_agent_id not in existing_local_ids
+    ]
+    if not missing_presets:
+        return 0
+
+    seed_rows = [mockup_row_from_preset(preset) for preset in missing_presets]
+    inserted = insert_agentruntime_records(connection, seed_rows)
+    connection.commit()
+    logger.info("Synced %s extra mock agentruntime record(s)", inserted)
+    return inserted
+
+
 def init_database(database_path: str | Path | None = None) -> Path:
     path = resolve_database_path(database_path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -527,6 +648,7 @@ def init_database(database_path: str | Path | None = None) -> Path:
         seed_initial_users(connection)
         seed_initial_agentruntime(connection)
         sync_missing_agentruntime(connection)
+        sync_extra_mock_agentruntime(connection)
 
     logger.info("SQLite database initialized at %s", path)
     return path
