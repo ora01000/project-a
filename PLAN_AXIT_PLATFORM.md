@@ -201,3 +201,13 @@ AGENT_RUNTIME_MODE = http 인 경우 agentruntime 의 type = 1 을 참조한다.
     - 시스템 프롬프트
       - 당신은 인프라 문의 응대 에이전트입니다. 사용자의 요청을 받으면 어떤 인프라인지를 확인하고 적절한 에이전트를 호출하여 정확한 답변을 전달합니다.
 
+- agentruntime 에서 사용자 직접 문의 가능을 구분한다.
+  - agentruntime 에 다음 컬럼을 추가한다.
+    - talkable boolean : default true
+  - 테이블에서 다음을 제외하고 모두 talkable 을  true 로 설정한다.
+    - whatap-event, job-scheduler
+  - talkable 이 true 인 경우에만 대화식 터미널의 에이전트 선택창에 표시한다(즉 UI를 통해 사용자가 메시지를 보낼 수 있다)
+
+- agentruntime 테이블에 컬럼 추가
+  - is_orchestrator boolean : default false
+  - helpdesk, whatap-event, job-scheduler, achi-analysis 는 true 이다.
