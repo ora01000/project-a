@@ -8,6 +8,7 @@ import { AgentConnectionFormModal } from "./AgentConnectionFormModal";
 
 interface AgentConnectionListPageProps {
   user: AuthUser;
+  onAgentRuntimeChanged?: () => void | Promise<void>;
 }
 
 async function parseError(response: Response, fallback: string): Promise<string> {
@@ -15,7 +16,7 @@ async function parseError(response: Response, fallback: string): Promise<string>
   return payload?.detail ?? fallback;
 }
 
-export function AgentConnectionListPage({ user }: AgentConnectionListPageProps) {
+export function AgentConnectionListPage({ user, onAgentRuntimeChanged }: AgentConnectionListPageProps) {
   const [records, setRecords] = useState<AgentRuntimeRecord[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -67,6 +68,12 @@ export function AgentConnectionListPage({ user }: AgentConnectionListPageProps) 
     viewer_role: user.role,
   });
 
+  const notifyDashboard = useCallback(async () => {
+    if (onAgentRuntimeChanged) {
+      await onAgentRuntimeChanged();
+    }
+  }, [onAgentRuntimeChanged]);
+
   const handleCreate = async (values: AgentRuntimeFormValues) => {
     const response = await fetch("/api/agentruntime", {
       method: "POST",
@@ -77,6 +84,7 @@ export function AgentConnectionListPage({ user }: AgentConnectionListPageProps) 
       throw new Error(await parseError(response, "에이전트 연결 추가에 실패했습니다."));
     }
     await loadRecords();
+    await notifyDashboard();
   };
 
   const handleUpdate = async (values: AgentRuntimeFormValues) => {
@@ -92,6 +100,7 @@ export function AgentConnectionListPage({ user }: AgentConnectionListPageProps) 
       throw new Error(await parseError(response, "에이전트 연결 수정에 실패했습니다."));
     }
     await loadRecords();
+    await notifyDashboard();
   };
 
   const closeForm = () => {
@@ -123,6 +132,7 @@ export function AgentConnectionListPage({ user }: AgentConnectionListPageProps) 
     }
     setDeletingRecord(null);
     await loadRecords();
+    await notifyDashboard();
   };
 
   return (

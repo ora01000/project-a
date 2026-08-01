@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+from pathlib import Path
 
 from fastapi import APIRouter, Body, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -73,6 +74,18 @@ def _active_runtime_mode(request: Request) -> str:
     return getattr(request.app.state, "agent_runtime_mode", "mock")
 
 
+async def _sync_agent_catalog(request: Request) -> None:
+    manager = getattr(request.app.state, "agent_manager", None)
+    database_path = getattr(request.app.state, "database_path", None)
+    if manager is None or database_path is None:
+        return
+    runtime_mode = _active_runtime_mode(request)
+    if runtime_mode == "http":
+        manager.sync_remote_catalog(Path(database_path))
+        return
+    await manager.reload_agents(Path(database_path))
+
+
 @router.get("/agentruntime", response_model=list[AgentRuntimeRecordResponse])
 async def list_agentruntime(request: Request) -> list[AgentRuntimeRecordResponse]:
     database_path = request.app.state.database_path
@@ -107,6 +120,7 @@ async def create_agentruntime(
             status_code=409,
             detail="동일한 type·agent_id 조합이 이미 존재합니다.",
         ) from exc
+    await _sync_agent_catalog(request)
     return AgentRuntimeRecordResponse.from_record(record)
 
 
@@ -144,6 +158,7 @@ async def update_agentruntime(
         ) from exc
     if record is None:
         raise HTTPException(status_code=404, detail="에이전트 연결 정보를 찾을 수 없습니다.")
+    await _sync_agent_catalog(request)
     return AgentRuntimeRecordResponse.from_record(record)
 
 
@@ -169,4 +184,5 @@ async def delete_agentruntime(
 
     if not delete_agentruntime_record(database_path, idx):
         raise HTTPException(status_code=404, detail="에이전트 연결 정보를 찾을 수 없습니다.")
+    await _sync_agent_catalog(request)
     return {"deleted": True}

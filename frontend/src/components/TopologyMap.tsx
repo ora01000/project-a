@@ -5,6 +5,7 @@ import type { TopologyEdge, TopologyNode } from "../types/topology";
 import { LLM_NODE_ID, agentNodeId, mcpNodeId } from "../types/topology";
 import { useTopology } from "../context/TopologyContext";
 import { connectionStatusFill, connectionStatusStroke } from "../utils/agentStatusStyle";
+import { runtimeTopologyNodeLabel } from "../utils/runtimeModeLabel";
 
 interface TopologyMapProps {
   agents: AgentInfo[];
@@ -156,13 +157,6 @@ function systemAgentSortIndex(agentId: string): number {
   return index === -1 ? SYSTEM_AGENT_ORDER.length : index;
 }
 
-function runtimeNodeLabel(mode: string | undefined): string {
-  if (mode === "http") {
-    return "Runtime (sandbox)";
-  }
-  return "Runtime (mock)";
-}
-
 function buildNodes(agents: AgentInfo[], health: HealthInfo | null): TopologyNode[] {
   const mcpIds = new Set<string>();
   for (const agent of agents) {
@@ -180,7 +174,7 @@ function buildNodes(agents: AgentInfo[], health: HealthInfo | null): TopologyNod
     {
       id: LLM_NODE_ID,
       kind: "llm",
-      label: runtimeNodeLabel(health?.runtime_mode),
+      label: runtimeTopologyNodeLabel(health?.runtime_mode),
       status: health?.runtime_status ?? "unknown",
     },
   ];

@@ -189,6 +189,33 @@ class AgentManager:
     def get_inventory_health_status(self) -> str:
         return "disabled"
 
+    def sync_remote_catalog(self, database_path: Path) -> None:
+        """Refresh http-mode agent catalog and health badges from DB without MCP rebuild."""
+        if not self.uses_remote_runtime():
+            return
+
+        self.agent_definitions = self._load_runtime_definitions(database_path)
+        self.agent_definitions_by_id = {
+            definition.agent_id: definition for definition in self.agent_definitions
+        }
+
+        next_agent_ids = {definition.agent_id for definition in self.agent_definitions}
+        for agent_id in list(self.agents.keys()):
+            if agent_id not in next_agent_ids:
+                del self.agents[agent_id]
+        for agent_id in list(self.agent_operation_status.keys()):
+            if agent_id not in next_agent_ids:
+                del self.agent_operation_status[agent_id]
+                self.agent_operation_errors.pop(agent_id, None)
+                self.agent_active_counts.pop(agent_id, None)
+        self._agent_invoke_failures = {
+            agent_id for agent_id in self._agent_invoke_failures if agent_id in next_agent_ids
+        }
+
+        self._register_db_agents()
+        self._register_system_agents()
+        self._refresh_agent_health_status()
+
     async def reload_agents(self, database_path: Path) -> None:
         self.agent_definitions = self._load_runtime_definitions(database_path)
         self.agent_definitions_by_id = {

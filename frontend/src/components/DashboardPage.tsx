@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { AgentInfo, HealthInfo } from "../types/agent";
 import type { AuthUser } from "../types/auth";
@@ -8,6 +8,11 @@ import { AgentGrid } from "./AgentGrid";
 import { AgentNodeListPanel } from "./AgentNodeListPanel";
 import { DetailInfoPanel, type DetailTab } from "./DetailInfoPanel";
 import { IntegratedChatPanel } from "./IntegratedChatPanel";
+
+const DEFAULT_CHAT_PANEL_WIDTH = 650;
+const MIN_CHAT_PANEL_WIDTH = 360;
+const MIN_CENTER_PANEL_WIDTH = 320;
+const PANEL_RESIZE_HANDLE_WIDTH = 8;
 
 interface DashboardPageProps {
   agents: AgentInfo[];
@@ -43,6 +48,68 @@ export function DashboardPage({
   onToggleIntegratedChatFullscreen,
   onChatComplete,
 }: DashboardPageProps) {
+  const splitLayoutRef = useRef<HTMLDivElement>(null);
+  const [chatPanelWidth, setChatPanelWidth] = useState(DEFAULT_CHAT_PANEL_WIDTH);
+  const isResizingRef = useRef(false);
+  const resizeStartXRef = useRef(0);
+  const resizeStartWidthRef = useRef(DEFAULT_CHAT_PANEL_WIDTH);
+
+  const clampChatPanelWidth = useCallback((nextWidth: number) => {
+    const containerWidth = splitLayoutRef.current?.clientWidth ?? window.innerWidth;
+    const maxWidth = Math.max(
+      MIN_CHAT_PANEL_WIDTH,
+      containerWidth - MIN_CENTER_PANEL_WIDTH - PANEL_RESIZE_HANDLE_WIDTH - 16,
+    );
+    return Math.min(maxWidth, Math.max(MIN_CHAT_PANEL_WIDTH, nextWidth));
+  }, []);
+
+  const handlePanelResizeStart = useCallback(
+    (event: React.MouseEvent) => {
+      event.preventDefault();
+      isResizingRef.current = true;
+      resizeStartXRef.current = event.clientX;
+      resizeStartWidthRef.current = chatPanelWidth;
+      document.body.style.cursor = "col-resize";
+      document.body.style.userSelect = "none";
+    },
+    [chatPanelWidth],
+  );
+
+  useEffect(() => {
+    const handleMouseMove = (event: MouseEvent) => {
+      if (!isResizingRef.current) {
+        return;
+      }
+      const deltaX = resizeStartXRef.current - event.clientX;
+      setChatPanelWidth(clampChatPanelWidth(resizeStartWidthRef.current + deltaX));
+    };
+
+    const handleMouseUp = () => {
+      if (!isResizingRef.current) {
+        return;
+      }
+      isResizingRef.current = false;
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+    return () => {
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+    };
+  }, [clampChatPanelWidth]);
+
+  useEffect(() => {
+    const handleWindowResize = () => {
+      setChatPanelWidth((current) => clampChatPanelWidth(current));
+    };
+
+    window.addEventListener("resize", handleWindowResize);
+    return () => window.removeEventListener("resize", handleWindowResize);
+  }, [clampChatPanelWidth]);
+
   const [detailTab, setDetailTab] = useState<DetailTab>("topology");
   const [signupNotifications, setSignupNotifications] = useState<SignupNotification[]>([]);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -151,27 +218,39 @@ export function DashboardPage({
         </div>
       ) : null}
 
-      <div className="flex min-h-0 flex-1 items-stretch gap-4">
+      <div ref={splitLayoutRef} className="flex min-h-0 flex-1 items-stretch gap-4">
         {!integratedChatFullscreen ? (
-          <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-4 self-stretch">
-            <AgentNodeListPanel>
-              {assignedAgents.length > 0 ? <AgentGrid agents={assignedAgents} /> : null}
-            </AgentNodeListPanel>
+          <>
+            <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-4 self-stretch">
+              <AgentNodeListPanel>
+                {assignedAgents.length > 0 ? <AgentGrid agents={assignedAgents} /> : null}
+              </AgentNodeListPanel>
 
-            <DetailInfoPanel
-              agents={assignedAgents}
-              health={health}
-              viewerRole={user.role}
-              activeTab={detailTab}
-              onActiveTabChange={setDetailTab}
-            />
-          </div>
+              <DetailInfoPanel
+                agents={assignedAgents}
+                health={health}
+                viewerRole={user.role}
+                activeTab={detailTab}
+                onActiveTabChange={setDetailTab}
+              />
+            </div>
+
+            <button
+              type="button"
+              aria-label="패널 가로 비율 조절"
+              onMouseDown={handlePanelResizeStart}
+              className="group flex w-2 shrink-0 cursor-col-resize items-center justify-center self-stretch rounded-md border border-transparent hover:border-slate-600 hover:bg-slate-800/60"
+            >
+              <span className="h-12 w-1 rounded-full bg-slate-600 group-hover:bg-slate-400" />
+            </button>
+          </>
         ) : null}
 
         <IntegratedChatPanel
           agents={agents}
           user={user}
           isFullscreen={integratedChatFullscreen}
+          panelWidth={chatPanelWidth}
           onToggleFullscreen={onToggleIntegratedChatFullscreen}
           onChatComplete={onChatComplete}
           signupNotifications={signupNotifications}

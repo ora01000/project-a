@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from fastapi import APIRouter, HTTPException, Request
 
 from backend.app.agents.base import AgentDefinition
@@ -12,6 +14,16 @@ router = APIRouter(tags=["agents"])
 
 def _runtime_mode(request: Request) -> str:
     return normalize_runtime_mode(getattr(request.app.state, "agent_runtime_mode", "mock"))
+
+
+def _sync_http_catalog_if_needed(request: Request) -> None:
+    if _runtime_mode(request) != "http":
+        return
+    manager = request.app.state.agent_manager
+    database_path = getattr(request.app.state, "database_path", None)
+    if database_path is None:
+        return
+    manager.sync_remote_catalog(Path(database_path))
 
 
 def _mock_runtime_summary(request: Request) -> dict:
@@ -41,6 +53,27 @@ def _mcp_status_for_definition(
     return {key: mcp_connection_status.get(key, "unknown") for key in definition.mcp_server_keys}
 
 
+def _resolve_agent_connection_status(
+    request: Request,
+    definition: AgentDefinition,
+    *,
+    runtime_summary: dict | None = None,
+) -> str:
+    manager = request.app.state.agent_manager
+    manager_status = manager.get_agent_health_status()
+    if definition.agent_id in manager_status:
+        return str(manager_status[definition.agent_id])
+
+    summary = runtime_summary or {}
+    remote_status = summary.get("agent_status", {})
+    if isinstance(remote_status, dict) and definition.agent_id in remote_status:
+        return str(remote_status[definition.agent_id])
+
+    if _runtime_mode(request) == "http":
+        return "connected"
+    return "unknown"
+
+
 def _agent_payload(
     request: Request,
     definition: AgentDefinition,
@@ -50,9 +83,12 @@ def _agent_payload(
     manager = request.app.state.agent_manager
 
     summary = runtime_summary or {}
-    agent_status = summary.get("agent_status", {})
     mcp_root = summary.get("mcp", {})
-    status = str(agent_status.get(definition.agent_id, "unknown"))
+    status = _resolve_agent_connection_status(
+        request,
+        definition,
+        runtime_summary=runtime_summary,
+    )
     mcp_status = _mcp_status_for_definition(
         definition,
         mcp_connection_status=mcp_root if isinstance(mcp_root, dict) else {},
@@ -75,6 +111,7 @@ def _agent_payload(
 
 @router.get("/agents")
 async def list_agents(request: Request) -> list[dict]:
+    _sync_http_catalog_if_needed(request)
     manager = request.app.state.agent_manager
     runtime_summary = await _runtime_summary(request)
 
@@ -103,6 +140,7 @@ async def list_agent_tools(agent_id: str, request: Request) -> list[dict]:
 
 @router.get("/health")
 async def health(request: Request) -> dict:
+    _sync_http_catalog_if_needed(request)
     manager = request.app.state.agent_manager
     runtime_summary = await _runtime_summary(request)
     mcp_status = runtime_summary.get("mcp", {})

@@ -20,7 +20,7 @@ AXIT_MOCK_CLIENT_ID = "mock-client-id"
 AXIT_MOCK_CLIENT_SECRET = "mock-client-secret"
 
 AXIT_HTTP_CLIENT_ID = "4afb927e-74fe-400f-81d6-c01c369757ae"
-AXIT_HTTP_CLIENT_SECRET = "23pXFILdy5LhYbHbJvBZcDe5P84EXVmZPjxzI-hEwX8"
+AXIT_HTTP_CLIENT_SECRET = "23pXFlLdy5LhYbHbJvBZcDe5P84EXVmZPjxzI-hEwX8"
 
 AXIT_DEFAULT_SERVICE_ID = "prvops"
 AXIT_ACCESS_TOKEN_TTL_SECONDS = 3600
@@ -78,3 +78,9 @@ def resolve_axit_service_id() -> str:
         or _env_setting("AXIT_SERVICE_ID")
         or AXIT_DEFAULT_SERVICE_ID
     )
+
+
+def resolve_axit_credential_source() -> str:
+    if _env_setting("CLIENT_ID") or _env_setting("AXIT_CLIENT_ID"):
+        return "env"
+    return "default"

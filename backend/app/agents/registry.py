@@ -5,7 +5,7 @@ from backend.app.agents.base import AgentDefinition
 from backend.app.agents.k8s_agent import K8S_CLUSTER_AGENTS
 from backend.app.agents.kubevirt_agent import KUBEVIRT_AGENT
 from backend.app.agents.vcenter_agent import VCENTER_AGENT
-from backend.app.db.agentruntime import list_agentruntime_records
+from backend.app.db.agentruntime import catalog_agent_id, list_agentruntime_records
 
 AGENT_DEFINITIONS: list[AgentDefinition] = [
     *K8S_CLUSTER_AGENTS,
@@ -28,10 +28,9 @@ def load_server_agent_definitions(database_path: str | Path) -> list[AgentDefini
     """Agent catalog from agentruntime for server/external delegation."""
     definitions: list[AgentDefinition] = []
     for record in list_agentruntime_records(database_path, runtime_mode="http"):
-        local_agent_id = record.local_agent_id.strip() or record.agent_id
         definitions.append(
             AgentDefinition(
-                agent_id=local_agent_id,
+                agent_id=catalog_agent_id(record),
                 name=record.agent_name,
                 role=record.description,
                 mcp_server_keys=[],

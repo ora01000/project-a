@@ -292,16 +292,13 @@ class ExternalAxitRuntimeClient:
         self._axit_client = AxitPlatformClient()
 
     def _connected_agent_status(self) -> dict[str, str]:
-        from backend.app.db.agentruntime import list_agentruntime_records
+        from backend.app.db.agentruntime import catalog_agent_id, list_agentruntime_records
 
         records = list_agentruntime_records(self._database_path, runtime_mode="http")
         statuses: dict[str, str] = {}
         for record in records:
-            local_agent_id = record.local_agent_id.strip()
-            if local_agent_id:
-                statuses[local_agent_id] = self._agent_manager.get_axit_agent_connection_status(
-                    local_agent_id,
-                )
+            agent_id = catalog_agent_id(record)
+            statuses[agent_id] = self._agent_manager.get_axit_agent_connection_status(agent_id)
         return statuses
 
     async def invoke(self, request: AgentInvokeRequest) -> AgentInvokeResult:

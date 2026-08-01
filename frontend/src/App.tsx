@@ -4,7 +4,6 @@ import { TopologyProvider } from "./context/TopologyContext";
 import { DashboardPage } from "./components/DashboardPage";
 import { LoginPage } from "./components/LoginPage";
 import { MenuBar } from "./components/MenuBar";
-import { StatusBar } from "./components/StatusBar";
 import { TeamsInboundDebugWatcher } from "./components/TeamsInboundDebugWatcher";
 import { NoticeBoardPage } from "./components/notices/NoticeBoardPage";
 import { AgentConnectionListPage } from "./components/agentruntime/AgentConnectionListPage";
@@ -136,28 +135,6 @@ export default function App() {
   }, [userIdx, userRole]);
 
   useEffect(() => {
-    if (!user) {
-      return;
-    }
-
-    const loadHealth = async () => {
-      try {
-        const response = await fetch("/api/health");
-        if (!response.ok) {
-          return;
-        }
-        setHealth((await response.json()) as HealthInfo);
-      } catch {
-        // Keep the last known health snapshot when polling fails.
-      }
-    };
-
-    void loadHealth();
-    const interval = window.setInterval(loadHealth, 15_000);
-    return () => window.clearInterval(interval);
-  }, [user]);
-
-  useEffect(() => {
     if (!user || activeView !== "dashboard") {
       return;
     }
@@ -210,20 +187,15 @@ export default function App() {
         />
 
         {activeView === "dashboard" ? (
-          <>
-            <div className="mb-4">
-              <StatusBar health={health} />
-            </div>
-            <DashboardPage
-              agents={agents}
-              health={health}
-              error={error}
-              user={user}
-              integratedChatFullscreen={integratedChatFullscreen}
-              onToggleIntegratedChatFullscreen={toggleIntegratedChatFullscreen}
-              onChatComplete={loadDashboardData}
-            />
-          </>
+          <DashboardPage
+            agents={agents}
+            health={health}
+            error={error}
+            user={user}
+            integratedChatFullscreen={integratedChatFullscreen}
+            onToggleIntegratedChatFullscreen={toggleIntegratedChatFullscreen}
+            onChatComplete={loadDashboardData}
+          />
         ) : null}
 
         {activeView === "user-list" ? (
@@ -235,7 +207,7 @@ export default function App() {
         ) : null}
 
         {activeView === "agent-connections" && user.role === ROLE_ADMIN ? (
-          <AgentConnectionListPage user={user} />
+          <AgentConnectionListPage user={user} onAgentRuntimeChanged={loadDashboardData} />
         ) : null}
 
         {activeView === "notice-board" ? <NoticeBoardPage user={user} /> : null}

@@ -60,6 +60,14 @@ def build_axit_agent_id(local_agent_id: str) -> str:
     return str(uuid.uuid5(_AXIT_AGENT_ID_NAMESPACE, local_agent_id.strip()))
 
 
+def catalog_agent_id(record: StoredAgentRuntime) -> str:
+    """Dashboard/assignment agent key: local_agent_id if set, otherwise AXIT agent_id."""
+    local_agent_id = record.local_agent_id.strip()
+    if local_agent_id:
+        return local_agent_id
+    return record.agent_id.strip()
+
+
 def runtime_mode_for_type(runtime_type: int) -> str:
     return "http" if runtime_type == AGENTRUNTIME_TYPE_EXTERNAL else "mock"
 

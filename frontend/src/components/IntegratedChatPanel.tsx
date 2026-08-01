@@ -17,6 +17,7 @@ interface IntegratedChatPanelProps {
   agents: AgentInfo[];
   user: AuthUser;
   isFullscreen: boolean;
+  panelWidth?: number;
   onToggleFullscreen: () => void;
   onChatComplete?: () => void;
   signupNotifications?: SignupNotification[];
@@ -85,6 +86,7 @@ export function IntegratedChatPanel({
   agents,
   user,
   isFullscreen,
+  panelWidth = 650,
   onToggleFullscreen,
   onChatComplete,
   signupNotifications = [],
@@ -425,8 +427,9 @@ export function IntegratedChatPanel({
   return (
     <aside
       ref={layoutRef}
+      style={isFullscreen ? undefined : { width: panelWidth }}
       className={`flex self-stretch flex-col overflow-hidden rounded-xl border border-slate-700 bg-slate-900/90 shadow-lg ${
-        isFullscreen ? "min-h-0 w-full" : "min-h-0 w-[650px] shrink-0"
+        isFullscreen ? "min-h-0 w-full" : "min-h-0 shrink-0"
       }`}
     >
       <header className="flex h-[100px] shrink-0 items-center justify-between border-b border-slate-700 px-4">

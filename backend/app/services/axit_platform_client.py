@@ -25,10 +25,15 @@ from backend.app.services.axit_config import (
     AXIT_ACCESS_TOKEN_TTL_SECONDS,
     resolve_axit_client_id,
     resolve_axit_client_secret,
+    resolve_axit_credential_source,
     resolve_axit_token_url,
 )
 
 logger = logging.getLogger(__name__)
+
+
+class AxitTokenError(RuntimeError):
+    """Raised when AXIT platform token issuance fails."""
 
 
 @dataclass(frozen=True)
@@ -90,7 +95,26 @@ class AxitPlatformClient:
         cached = self._token_cache.get(token_url)
         now = time.time()
         if cached is not None and cached.expires_at > now:
+            logger.info(
+                "AXIT token cache hit: method=POST url=%s runtime_mode=%s expires_in_sec=%.0f",
+                token_url,
+                runtime_mode,
+                cached.expires_at - now,
+            )
             return cached.access_token
+
+        client_id = self._resolve_client_id(runtime_mode)
+        credential_source = resolve_axit_credential_source()
+        request_body = {"grant_type": "client_credentials"}
+        logger.info(
+            "AXIT token request start: method=POST url=%s runtime_mode=%s client_id=%s "
+            "credential_source=%s grant_type=%s content_type=application/x-www-form-urlencoded",
+            token_url,
+            runtime_mode,
+            client_id,
+            credential_source,
+            request_body["grant_type"],
+        )
 
         async with httpx.AsyncClient(timeout=self._timeout_seconds) as client:
             response = await client.post(
@@ -99,9 +123,28 @@ class AxitPlatformClient:
                     "Authorization": self._basic_auth_header(runtime_mode),
                     "Content-Type": "application/x-www-form-urlencoded",
                 },
-                data={"grant_type": "client_credentials"},
+                data=request_body,
             )
-            response.raise_for_status()
+            logger.info(
+                "AXIT token response received: method=POST url=%s status=%s reason=%s",
+                token_url,
+                response.status_code,
+                response.reason_phrase,
+            )
+            if response.status_code >= 400:
+                body_preview = response.text.strip()[:500]
+                logger.error(
+                    "AXIT token request failed: method=POST url=%s status=%s client_id=%s "
+                    "credential_source=%s body=%s",
+                    token_url,
+                    response.status_code,
+                    client_id,
+                    credential_source,
+                    body_preview,
+                )
+                raise AxitTokenError(
+                    f"Token issuance failed ({response.status_code}) for {token_url}: {body_preview or response.reason_phrase}"
+                ) from None
             payload = response.json()
 
         if not isinstance(payload, dict):
@@ -109,6 +152,11 @@ class AxitPlatformClient:
 
         access_token = str(payload.get("access_token", "")).strip()
         if not access_token or access_token.lower() == "null":
+            logger.error(
+                "AXIT token response missing access_token: method=POST url=%s payload_keys=%s",
+                token_url,
+                sorted(payload.keys()),
+            )
             raise RuntimeError(f"Token issuance failed: access_token missing from {token_url}")
 
         expires_in_raw = payload.get("expires_in", AXIT_ACCESS_TOKEN_TTL_SECONDS)
@@ -121,6 +169,12 @@ class AxitPlatformClient:
         self._token_cache[token_url] = _CachedAccessToken(
             access_token=access_token,
             expires_at=expires_at,
+        )
+        logger.info(
+            "AXIT token request success: method=POST url=%s expires_in=%s token_type=%s",
+            token_url,
+            expires_in,
+            payload.get("token_type", "Bearer"),
         )
         return access_token
 

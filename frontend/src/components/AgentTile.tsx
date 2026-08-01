@@ -55,9 +55,6 @@ export function AgentTile({ agent }: AgentTileProps) {
             </div>
           </div>
         </div>
-        <p className="mt-1 truncate text-[11px] text-slate-500" title={agent.mcp_servers.join(", ")}>
-          MCP: {agent.mcp_servers.join(", ") || "-"}
-        </p>
       </div>
 
       {agent.operation_status === "working" && agent.operation_detail ? (

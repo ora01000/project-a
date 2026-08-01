@@ -127,7 +127,11 @@ async def chat_with_agent(agent_id: str, payload: ChatRequest, request: Request)
                     logger.warning("Skipped user comm log for %s: %s", payload.userid, exc)
         except Exception as exc:
             manager.mark_agent_error(agent_id, str(exc), input_message=payload.message)
-            raise
+            yield {
+                "event": "error",
+                "data": json.dumps({"message": str(exc)}),
+            }
+            return
         finally:
             manager.mark_agent_idle(agent_id)
 
