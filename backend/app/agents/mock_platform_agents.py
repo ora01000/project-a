@@ -5,6 +5,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from backend.app.agents.base import AgentDefinition
+from backend.app.agents.infra_diagram_prompt import (
+    INFRA_D2_ANALYSIS_GUIDELINES,
+    INFRA_D2_MANIFEST_SHAPE_MAPPING,
+    INFRA_D2_NODE_LABEL_RULE,
+)
 from backend.app.db.agentruntime import ORCHESTRATOR_LOCAL_AGENT_IDS, MockAgentRuntimePreset
 
 CALLABLE_INFRA_AGENT_IDS: tuple[str, ...] = (
@@ -72,7 +77,14 @@ MOCK_PLATFORM_AGENT_SPECS: tuple[MockPlatformAgentSpec, ...] = (
             "1. Select an appropriate agent capable of extracting information about the requested "
             "infrastructure and delegate to that agent.\n"
             "2. Do not answer directly; the delegated infra agent will query resources and "
-            "produce the final response including a D2 diagram when applicable."
+            "produce the final response including a D2 diagram when applicable.\n"
+            "3. When a D2 diagram is produced, the infra agent must use these manifest-specific "
+            "node shapes:\n"
+            f"{INFRA_D2_MANIFEST_SHAPE_MAPPING}\n"
+            f"4. {INFRA_D2_NODE_LABEL_RULE}\n"
+            "5. When delegating diagram work, ensure the infra agent follows these analysis "
+            "guidelines:\n"
+            f"{INFRA_D2_ANALYSIS_GUIDELINES}"
         ),
     ),
     MockPlatformAgentSpec(

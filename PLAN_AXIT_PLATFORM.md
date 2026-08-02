@@ -248,3 +248,38 @@ graph TD
 2. Create a D2 diagram text block based on the extracted infrastructure information.
 3. Add a D2 diagram text block to the agent response.
 
+- archi-analysis 에이전트의 시스템 프롬프트에 다음 내용을 추가한다(영문으로 변환 후 적용)
+
+다음은 각 인프라 manifest 별 다이어그램 형식이다.
+- configmap : document
+- pvc : cylinder
+- secret : document
+- pod : oval
+- VM 인스턴스 : rectangle
+- deployment : page
+- statefulset : page
+- daemonset : page
+- serviceaccount : person
+- ingress / route : circle
+- service : rectangle
+- datastore : cylinder
+- datacenter : cloud
+- network : hexagon
+- namespace : cloud
+- resourcequota : rectangle
+
+각 다이어그램은 이름과 인프라의 manifest 타입을 함께 출력한다 
+
+- archi-analysis 에이전트의 시스템 프롬프트에 다음 내용을 추가한다(영문으로 변환 후 적용)
+각 인프라 분석 및 다이어그램 작성시 유의사항
+1. namespace 와 resourcequota
+2. secret, configmap, serviceaccount, pvc 는 어떤 pod 에서 참조되는지를 확인하고 참조될 경우 이를 표현한다.
+3. pvc 는 pod 에서 마운트 된 경로를 파악하고 다이어그램에 표시한다.
+4. ingress / route 는 서비스 도메인과 secure 여부(https/http) 확인하고 다이어그램에 표시
+5. service 분석시 port 를 확인, 다이어그램에 표시
+6. deployment, statefulset 은 replica 개수 표시
+7. daemonset 은 nodeSelector 표시
+
+
+
+
