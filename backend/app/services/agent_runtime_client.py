@@ -92,6 +92,7 @@ class AgentInvokeRequest:
     agent_id: str
     message: str
     caller_agent_id: str | None = None
+    session_id: str | None = None
     trace_id: str | None = None
     control_plane_base_url: str | None = None
 
@@ -226,6 +227,7 @@ class MockAgentRuntimeClient:
                 AxitPlatformInvokeRequest(
                     axit_agent_id=axit_agent_id,
                     message=request.message,
+                    session_id=request.session_id,
                     enable_trace=True,
                 ),
                 runtime_record=runtime_record,
@@ -326,6 +328,7 @@ class ExternalAxitRuntimeClient:
                 AxitPlatformInvokeRequest(
                     axit_agent_id=runtime_record.agent_id,
                     message=request.message,
+                    session_id=request.session_id,
                     enable_trace=True,
                 ),
                 runtime_record=runtime_record,

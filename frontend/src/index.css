@@ -28,3 +28,32 @@ body {
     stroke-dashoffset: -18;
   }
 }
+
+.mermaid-diagram svg,
+.d2-diagram svg {
+  max-width: none;
+  width: auto;
+  height: auto;
+  display: block;
+}
+
+.mermaid-diagram foreignObject {
+  overflow: hidden;
+}
+
+.mermaid-diagram foreignObject div,
+.mermaid-diagram .nodeLabel,
+.mermaid-diagram .nodeLabel p,
+.mermaid-diagram .nodeLabel span,
+.mermaid-diagram .edgeLabel {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  white-space: normal;
+  line-height: 1.25;
+  font-size: 12px;
+}
+
+.mermaid-diagram .nodeLabel p {
+  margin: 0;
+  text-align: center;
+}

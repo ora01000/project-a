@@ -8,7 +8,9 @@ import { getNextMessageNumber } from "../utils/messageIndex";
 import { flushSseBuffer, parseSseChunk } from "../utils/parseSse";
 import { AssistantMessageContent } from "./AssistantMessageContent";
 import { MessageIndexLabel } from "./MessageIndexLabel";
+import { OpenAiBillingConfirmDialog } from "./OpenAiBillingConfirmDialog";
 import { ToolUsageList } from "./ToolUsageList";
+import { fetchLlmBillingStatus } from "../utils/llmBilling";
 
 interface ChatPanelProps {
   agentId: string;
@@ -23,6 +25,8 @@ export function ChatPanel({ agentId, disabled = false, expanded = false }: ChatP
   const [isLoading, setIsLoading] = useState(false);
   const [inputHistory, setInputHistory] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
+  const [billingConfirmPrompt, setBillingConfirmPrompt] = useState<string | null>(null);
+  const [billingConfirmModel, setBillingConfirmModel] = useState<string | null>(null);
   const userScrollRef = useRef<HTMLDivElement>(null);
   const assistantScrollRef = useRef<HTMLDivElement>(null);
   const layoutRef = useRef<HTMLDivElement>(null);
@@ -118,10 +122,8 @@ export function ChatPanel({ agentId, disabled = false, expanded = false }: ChatP
     }
   };
 
-  const handleSubmit = async (event: React.FormEvent) => {
-    event.preventDefault();
-    const trimmed = input.trim();
-    if (!trimmed || isLoading || disabled) {
+  const sendChatMessage = async (trimmed: string) => {
+    if (isLoading || disabled) {
       return;
     }
 
@@ -216,6 +218,42 @@ export function ChatPanel({ agentId, disabled = false, expanded = false }: ChatP
     }
   };
 
+  const handleSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    const trimmed = input.trim();
+    if (!trimmed || isLoading || disabled) {
+      return;
+    }
+
+    try {
+      const billingStatus = await fetchLlmBillingStatus();
+      if (billingStatus.requires_confirmation) {
+        setBillingConfirmModel(billingStatus.model);
+        setBillingConfirmPrompt(trimmed);
+        return;
+      }
+    } catch {
+      // 상태 조회 실패 시 로컬 LLM으로 간주하고 기존 흐름 유지
+    }
+
+    await sendChatMessage(trimmed);
+  };
+
+  const handleBillingConfirm = () => {
+    if (!billingConfirmPrompt) {
+      return;
+    }
+    const prompt = billingConfirmPrompt;
+    setBillingConfirmPrompt(null);
+    setBillingConfirmModel(null);
+    void sendChatMessage(prompt);
+  };
+
+  const handleBillingCancel = () => {
+    setBillingConfirmPrompt(null);
+    setBillingConfirmModel(null);
+  };
+
   const canShowPrevious = inputHistory.length > 0;
 
   return (
@@ -301,6 +339,14 @@ export function ChatPanel({ agentId, disabled = false, expanded = false }: ChatP
           {isLoading ? "..." : "전송"}
         </button>
       </form>
+      {billingConfirmPrompt ? (
+        <OpenAiBillingConfirmDialog
+          prompt={billingConfirmPrompt}
+          model={billingConfirmModel}
+          onConfirm={handleBillingConfirm}
+          onCancel={handleBillingCancel}
+        />
+      ) : null}
     </div>
   );
 }

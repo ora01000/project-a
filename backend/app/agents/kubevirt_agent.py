@@ -1,4 +1,5 @@
 from backend.app.agents.base import AgentDefinition
+from backend.app.agents.infra_diagram_prompt import INFRA_ARCHITECTURE_D2_INSTRUCTION
 
 KUBEVIRT_AGENT = AgentDefinition(
     agent_id="kubevirt",
@@ -11,6 +12,7 @@ KUBEVIRT_AGENT = AgentDefinition(
         "VirtualMachineInstance (VMI), DataVolume, and related CRDs. "
         "Focus on VM status, scheduling, and runtime information. "
         "Provide concise, structured answers in Korean when possible. "
-        "Do not perform destructive operations; read-only queries only."
+        "Do not perform destructive operations; read-only queries only.\n\n"
+        f"{INFRA_ARCHITECTURE_D2_INSTRUCTION}"
     ),
 )

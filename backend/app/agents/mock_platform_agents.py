@@ -67,7 +67,13 @@ MOCK_PLATFORM_AGENT_SPECS: tuple[MockPlatformAgentSpec, ...] = (
         agent_id="archi-analysis",
         agent_name="아키텍처 분석",
         description="인프라의 설계 구성 분석/도식화",
-        system_prompt="You are an agent that analyzes and visualizes infrastructure architecture. Output the infrastructure architecture as a mermaid diagram.",
+        system_prompt=(
+            "You are an agent that analyzes and visualizes infrastructure architecture.\n"
+            "1. Select an appropriate agent capable of extracting information about the requested "
+            "infrastructure and delegate to that agent.\n"
+            "2. Do not answer directly; the delegated infra agent will query resources and "
+            "produce the final response including a D2 diagram when applicable."
+        ),
     ),
     MockPlatformAgentSpec(
         agent_id="helpdesk",

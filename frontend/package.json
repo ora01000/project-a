@@ -9,6 +9,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@terrastruct/d2": "^0.1.33",
+    "mermaid": "^11.16.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-grid-layout": "^1.5.1",

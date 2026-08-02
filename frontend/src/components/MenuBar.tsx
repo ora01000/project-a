@@ -9,6 +9,7 @@ import { AGENT_MANAGEMENT_DISABLED_MESSAGE, TOKEN_MANAGEMENT_DISABLED_MESSAGE } 
 import { AboutModal } from "./AboutModal";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { InfraCollectModal } from "./admin/InfraCollectModal";
+import { MockLlmSelectModal } from "./admin/MockLlmSelectModal";
 import { PostmanDebugModal } from "./admin/PostmanDebugModal";
 import { ProfileEditModal } from "./ProfileEditModal";
 import { ReleaseNotesModal } from "./ReleaseNotesModal";
@@ -39,7 +40,9 @@ export function MenuBar({ activeView, user, onNavigate, onLogout, onUserUpdated 
   const [showThemeSettings, setShowThemeSettings] = useState(false);
   const [showTableDebug, setShowTableDebug] = useState(false);
   const [showPostmanDebug, setShowPostmanDebug] = useState(false);
+  const [showMockLlmSelect, setShowMockLlmSelect] = useState(false);
   const [showInfraCollect, setShowInfraCollect] = useState(false);
+  const [runtimeMode, setRuntimeMode] = useState<string>("mock");
   const [showProfileEdit, setShowProfileEdit] = useState(false);
   const [showSaveSuccess, setShowSaveSuccess] = useState(false);
   const [showAgentMenu, setShowAgentMenu] = useState(false);
@@ -51,12 +54,39 @@ export function MenuBar({ activeView, user, onNavigate, onLogout, onUserUpdated 
   const settingsMenuRef = useRef<HTMLDivElement>(null);
   const userLabel = formatUserLabel(user);
   const isAdmin = user.role === ROLE_ADMIN;
+  const isMockRuntime = runtimeMode === "mock" || runtimeMode === "local";
 
   useEffect(() => {
     const timer = window.setInterval(() => {
       setCurrentTime(formatCurrentTime(new Date()));
     }, 1000);
     return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadRuntimeMode = async () => {
+      try {
+        const response = await fetch("/api/health");
+        if (!response.ok) {
+          return;
+        }
+        const health = (await response.json()) as { runtime_mode?: string };
+        if (!cancelled) {
+          setRuntimeMode(health.runtime_mode ?? "mock");
+        }
+      } catch {
+        if (!cancelled) {
+          setRuntimeMode("mock");
+        }
+      }
+    };
+
+    void loadRuntimeMode();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -203,8 +233,9 @@ export function MenuBar({ activeView, user, onNavigate, onLogout, onUserUpdated 
                 showAbout ||
                   showReleaseNotes ||
                   showTableDebug ||
-                  showPostmanDebug ||
-                  showInfraCollect ||
+                        showPostmanDebug ||
+                        showMockLlmSelect ||
+                        showInfraCollect ||
                   showThemeSettings,
               )}
             >
@@ -221,6 +252,7 @@ export function MenuBar({ activeView, user, onNavigate, onLogout, onUserUpdated 
                         showAdminWorkMenu ||
                         showTableDebug ||
                         showPostmanDebug ||
+                        showMockLlmSelect ||
                         showInfraCollect
                           ? "bg-slate-800 text-sky-200"
                           : "text-slate-200 hover:bg-slate-800"
@@ -253,6 +285,19 @@ export function MenuBar({ activeView, user, onNavigate, onLogout, onUserUpdated 
                         >
                           postman
                         </button>
+                        {isMockRuntime ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setShowSettingsMenu(false);
+                              setShowAdminWorkMenu(false);
+                              setShowMockLlmSelect(true);
+                            }}
+                            className="block w-full px-3 py-2 text-left text-sm text-slate-200 hover:bg-slate-800"
+                          >
+                            (목업)LLM 변경
+                          </button>
+                        ) : null}
                         <button
                           type="button"
                           onClick={() => {
@@ -355,6 +400,9 @@ export function MenuBar({ activeView, user, onNavigate, onLogout, onUserUpdated 
       {showReleaseNotes ? <ReleaseNotesModal onClose={() => setShowReleaseNotes(false)} /> : null}
       {showPostmanDebug && isAdmin ? (
         <PostmanDebugModal viewerRole={user.role} onClose={() => setShowPostmanDebug(false)} />
+      ) : null}
+      {showMockLlmSelect && isAdmin && isMockRuntime ? (
+        <MockLlmSelectModal viewerRole={user.role} onClose={() => setShowMockLlmSelect(false)} />
       ) : null}
       {showTableDebug && isAdmin ? (
         <TableDebugModal onClose={() => setShowTableDebug(false)} />

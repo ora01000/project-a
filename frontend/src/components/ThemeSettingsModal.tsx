@@ -50,7 +50,10 @@ export function ThemeSettingsModal({ onClose }: ThemeSettingsModalProps) {
                 onChange={() => setSelected(option)}
                 className="accent-sky-500"
               />
-              <span className="text-sm font-medium">{THEME_LABELS[option]}</span>
+              <span className="text-sm font-medium">
+                {THEME_LABELS[option]}
+                {option === theme ? " (현재)" : ""}
+              </span>
             </label>
           ))}
         </div>

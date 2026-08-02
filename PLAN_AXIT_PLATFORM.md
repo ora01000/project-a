@@ -211,3 +211,40 @@ AGENT_RUNTIME_MODE = http 인 경우 agentruntime 의 type = 1 을 참조한다.
 - agentruntime 테이블에 컬럼 추가
   - is_orchestrator boolean : default false
   - helpdesk, whatap-event, job-scheduler, achi-analysis 는 true 이다.
+  
+
+- archi-analysis 에이전트의 system prompt 에 다음 내용을 보완한다
+
+1. Select an appropriate agent capable of extracting information about the requested infrastructure and extract the infrastructure information.
+2. Create a Mermaid diagram text block based on the extracted infrastructure information.
+3. Add a Mermaid diagram text block to the agent response.
+```mermaid
+graph TD
+  A[Ingress] --> B[Service]
+  B --> C[Pod]
+```
+
+- 대화형 터미널 > 대화창 영역에 세션 초기화 버튼을 추가한다. 세션 초기화 버튼 클릭시 에이전트를 호출할 때 SESSION UUID 를 새로 생성한다.
+
+## 목업용 LLM 선택
+환경설정 > 관리자 작업 > (목업)LLM 변경 메뉴 추가
+- 목업 환경에서 선택가능한 LLM 은 두 가지 이다.
+  - 기존 local llm : 경로 등 설정 정보는 동일함
+  - OpenAI
+    - https://api.openai.com/v1
+    - API key : sk-proj-8Pr3XXXXXXXXXXXXXXPqSrMA
+
+- mermaid diagram redering 기능 추가 이후, diagram 이 표시되면 주기적인 refresh 가 발생한다. 원인을 파악
+- openai API 를 호출할때는 과금이 발생하므로 응용에서 호출하기 전에 확인 창을 통해 확인 후 수행하도록 변경하고 확인시 질의 prompt 를 표시
+
+- mermaid diagram 출력 시 오른쪽 상단에 다음 버튼을 추가한다
+  1. 다운로드 버튼
+  2. 확대/축소 버튼 
+
+
+- archi-analysis 에이전트의 system prompt 에 다음 내용을 보완한다. 주요 변경사항은 mermaid diagram 대신, D2 diagram을 사용한다. 3번 prompt 아래 간단한 D2 다이어그램 샘플 텍스트를 추가한다
+
+1. Select an appropriate agent capable of extracting information about the requested infrastructure and extract the infrastructure information.
+2. Create a D2 diagram text block based on the extracted infrastructure information.
+3. Add a D2 diagram text block to the agent response.
+

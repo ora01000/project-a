@@ -1,4 +1,5 @@
 from backend.app.agents.base import AgentDefinition
+from backend.app.agents.infra_diagram_prompt import INFRA_ARCHITECTURE_D2_INSTRUCTION
 
 K8S_CLUSTER_SPECS: list[tuple[str, str]] = [
     ("dprv6-k8s", "구 PaaS 대개체 개발기(6층)"),
@@ -19,7 +20,8 @@ def _build_k8s_system_prompt(cluster_id: str, display_name: str) -> str:
         "Use kubernetes-mcp-server and kubectl-ai MCP tools to query cluster resources such as "
         "namespaces, pods, nodes, deployments, services, and events. "
         "Provide concise, structured answers in Korean when possible. "
-        "Do not perform destructive operations; read-only queries only."
+        "Do not perform destructive operations; read-only queries only.\n\n"
+        f"{INFRA_ARCHITECTURE_D2_INSTRUCTION}"
     )
 
 

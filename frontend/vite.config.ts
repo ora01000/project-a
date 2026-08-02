@@ -17,6 +17,9 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [react(), accessLogPlugin(path.join(projectRoot, "logs"))],
+    optimizeDeps: {
+      exclude: ["@terrastruct/d2"],
+    },
     server: {
       host: frontendHost,
       port: frontendPort,

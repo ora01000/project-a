@@ -22,7 +22,9 @@ from backend.app.api.auth import router as auth_router
 from backend.app.api.chat import router as chat_router
 from backend.app.api.debug import router as debug_router
 from backend.app.api.k8s_collector import router as k8s_collector_router
+from backend.app.api.llm import router as llm_router
 from backend.app.api.notices import router as notices_router
+from backend.app.api.mock_llm import router as mock_llm_router
 from backend.app.api.postman_debug import router as postman_debug_router
 from backend.app.api.prompt_debug import router as prompt_debug_router
 from backend.app.api.release import router as release_router
@@ -249,6 +251,24 @@ class AgentManager:
             await self._build_local_agents()
         await self.refresh_health()
 
+    async def rebuild_langgraph_agents(self) -> None:
+        """Rebuild LangGraph agents so runtime LLM provider changes take effect."""
+        if self.uses_remote_runtime() or self.mcp_manager is None:
+            return
+
+        for definition in self.agent_definitions:
+            agent_id = definition.agent_id
+            if is_mock_platform_orchestrator_agent(agent_id):
+                continue
+            current = self.agents.get(agent_id)
+            if current in (REMOTE_AGENT_MARKER, ORCHESTRATOR_MARKER):
+                continue
+            try:
+                self.agents[agent_id] = await build_agent(definition, self.mcp_manager)
+            except Exception as exc:
+                logger.exception("Failed to rebuild agent %s after LLM change: %s", agent_id, exc)
+                self.agents.pop(agent_id, None)
+
     def get_agent(self, agent_id: str) -> Any:
         if agent_id not in self.agents:
             raise KeyError(agent_id)
@@ -338,6 +358,10 @@ async def lifespan(app: FastAPI):
     runtime_mode = normalize_runtime_mode(server_settings.agent_runtime_mode)
     logger.info("AGENT_RUNTIME_MODE=%s", runtime_mode)
     app.state.database_path = init_database(database_path)
+    if runtime_mode == "mock":
+        from backend.app.services.mock_llm_runtime import load_persisted_runtime_state
+
+        load_persisted_runtime_state()
     await agent_manager.initialize(
         app.state.database_path,
         execution_mode=runtime_mode,
@@ -404,8 +428,10 @@ def create_app() -> FastAPI:
     app.include_router(k8s_collector_router, prefix="/api")
     app.include_router(notices_router, prefix="/api")
     app.include_router(chat_router, prefix="/api")
+    app.include_router(llm_router, prefix="/api")
     app.include_router(debug_router, prefix="/api")
     app.include_router(postman_debug_router, prefix="/api")
+    app.include_router(mock_llm_router, prefix="/api")
     app.include_router(release_router, prefix="/api")
     app.include_router(teams_inbound_debug_router, prefix="/api")
     app.include_router(axit_mock_router)

@@ -9,9 +9,11 @@ import { formatResponseTimestamp } from "../utils/messageIndex";
 import { flushSseBuffer, parseSseChunk } from "../utils/parseSse";
 import { AssistantMessageContent } from "./AssistantMessageContent";
 import { CollapsibleUserMessage } from "./CollapsibleUserMessage";
+import { OpenAiBillingConfirmDialog } from "./OpenAiBillingConfirmDialog";
 import { SignupNotificationCard } from "./users/SignupNotificationCard";
 import { ToolUsageList } from "./ToolUsageList";
 import type { SignupNotification } from "../types/signup";
+import { fetchLlmBillingStatus } from "../utils/llmBilling";
 
 interface IntegratedChatPanelProps {
   agents: AgentInfo[];
@@ -29,6 +31,10 @@ interface IntegratedChatPanelProps {
 
 function createResponseId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+}
+
+function createSessionId(): string {
+  return crypto.randomUUID();
 }
 
 function StopIcon() {
@@ -102,6 +108,9 @@ export function IntegratedChatPanel({
   const [isLoading, setIsLoading] = useState(false);
   const [inputHistory, setInputHistory] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
+  const [sessionId, setSessionId] = useState(createSessionId);
+  const [billingConfirmPrompt, setBillingConfirmPrompt] = useState<string | null>(null);
+  const [billingConfirmModel, setBillingConfirmModel] = useState<string | null>(null);
   const conversationScrollRef = useRef<HTMLDivElement>(null);
   const layoutRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -305,10 +314,16 @@ export function IntegratedChatPanel({
     abortControllerRef.current?.abort();
   };
 
-  const handleSubmit = async (event: React.FormEvent) => {
-    event.preventDefault();
-    const trimmed = input.trim();
-    if (!trimmed || isLoading || !selectedAgent) {
+  const handleResetSession = () => {
+    abortControllerRef.current?.abort();
+    setSessionId(createSessionId());
+    setResponses([]);
+    setInput("");
+    setHistoryIndex(-1);
+  };
+
+  const sendChatMessage = async (trimmed: string) => {
+    if (!selectedAgent || isLoading) {
       return;
     }
 
@@ -343,7 +358,11 @@ export function IntegratedChatPanel({
       const response = await fetch(`/api/agents/${selectedAgent.id}/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: trimmed, userid: user.userid }),
+        body: JSON.stringify({
+          message: trimmed,
+          userid: user.userid,
+          session_id: sessionId,
+        }),
         signal: abortController.signal,
       });
 
@@ -422,6 +441,42 @@ export function IntegratedChatPanel({
     }
   };
 
+  const handleSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    const trimmed = input.trim();
+    if (!trimmed || isLoading || !selectedAgent) {
+      return;
+    }
+
+    try {
+      const billingStatus = await fetchLlmBillingStatus();
+      if (billingStatus.requires_confirmation) {
+        setBillingConfirmModel(billingStatus.model);
+        setBillingConfirmPrompt(trimmed);
+        return;
+      }
+    } catch {
+      // 상태 조회 실패 시 로컬 LLM으로 간주하고 기존 흐름 유지
+    }
+
+    await sendChatMessage(trimmed);
+  };
+
+  const handleBillingConfirm = () => {
+    if (!billingConfirmPrompt) {
+      return;
+    }
+    const prompt = billingConfirmPrompt;
+    setBillingConfirmPrompt(null);
+    setBillingConfirmModel(null);
+    void sendChatMessage(prompt);
+  };
+
+  const handleBillingCancel = () => {
+    setBillingConfirmPrompt(null);
+    setBillingConfirmModel(null);
+  };
+
   const canShowPrevious = inputHistory.length > 0;
 
   return (
@@ -449,7 +504,18 @@ export function IntegratedChatPanel({
 
       <div className="flex min-h-0 flex-1 flex-col">
         <div className="flex min-h-0 flex-1 flex-col gap-1 px-3 pt-3">
-          <div className="text-xs font-medium tracking-wide text-slate-300">대화창</div>
+          <div className="flex items-center justify-between gap-2">
+            <div className="text-xs font-medium tracking-wide text-slate-300">대화창</div>
+            <button
+              type="button"
+              onClick={handleResetSession}
+              disabled={isLoading}
+              title="에이전트 호출 세션 UUID를 새로 생성합니다"
+              className="shrink-0 rounded-md border border-slate-600 px-2 py-1 text-xs text-slate-200 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              세션 초기화
+            </button>
+          </div>
           <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-md border border-slate-800 bg-slate-950/50 text-sm">
             <div
               ref={conversationScrollRef}
@@ -610,6 +676,14 @@ export function IntegratedChatPanel({
           </div>
         </form>
       </div>
+      {billingConfirmPrompt ? (
+        <OpenAiBillingConfirmDialog
+          prompt={billingConfirmPrompt}
+          model={billingConfirmModel}
+          onConfirm={handleBillingConfirm}
+          onCancel={handleBillingCancel}
+        />
+      ) : null}
     </aside>
   );
 }

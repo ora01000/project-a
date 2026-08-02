@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 class ChatRequest(BaseModel):
     message: str = Field(min_length=1)
     userid: str | None = Field(default=None, max_length=50)
+    session_id: str | None = Field(default=None, max_length=100)
 
 
 class UserCommLogEntry(BaseModel):
@@ -68,11 +69,14 @@ async def _invoke_agent(
     request: Request,
     agent_id: str,
     message: str,
+    *,
+    session_id: str | None = None,
 ) -> AgentInvokeResult:
     return await request.app.state.agent_runtime.invoke(
         AgentInvokeRequest(
             agent_id=agent_id,
             message=message,
+            session_id=session_id,
             trace_id=uuid4().hex,
             control_plane_base_url=getattr(request.app.state, "control_plane_base_url", None),
         ),
@@ -101,7 +105,12 @@ async def chat_with_agent(agent_id: str, payload: ChatRequest, request: Request)
 
     async def event_generator() -> AsyncIterator[dict[str, str]]:
         try:
-            result = await _invoke_agent(request, agent_id, payload.message)
+            result = await _invoke_agent(
+                request,
+                agent_id,
+                payload.message,
+                session_id=payload.session_id,
+            )
             async for event in _stream_response(result):
                 yield event
 
