@@ -89,6 +89,12 @@ class JobRequesterSettings(BaseModel):
     initial_delay_seconds: int = 60
 
 
+class JobProcessorSettings(BaseModel):
+    enabled: bool = True
+    poll_interval_seconds: int = 60
+    initial_delay_seconds: int = 0
+
+
 class K8sCollectorSettings(BaseModel):
     enabled: bool = True
     # Daily local schedule: first agent at HH:MM, then +stagger_minutes per agent order.
@@ -169,6 +175,16 @@ class AppSettings(BaseSettings):
     job_requester_initial_delay_seconds: int | None = Field(
         default=None,
         alias="JOB_REQUESTER_INITIAL_DELAY_SECONDS",
+    )
+
+    job_processor_enabled: bool | None = Field(default=None, alias="JOB_PROCESSOR_ENABLED")
+    job_processor_poll_interval_seconds: int | None = Field(
+        default=None,
+        alias="JOB_PROCESSOR_POLL_INTERVAL_SECONDS",
+    )
+    job_processor_initial_delay_seconds: int | None = Field(
+        default=None,
+        alias="JOB_PROCESSOR_INITIAL_DELAY_SECONDS",
     )
 
     k8s_collector_enabled: bool | None = Field(default=None, alias="K8S_COLLECTOR_ENABLED")
@@ -453,6 +469,42 @@ def load_job_requester_settings() -> JobRequesterSettings:
     return JobRequesterSettings(
         enabled=enabled,
         interval_minutes=max(1, interval_minutes),
+        initial_delay_seconds=max(0, initial_delay_seconds),
+    )
+
+
+def load_job_processor_settings() -> JobProcessorSettings:
+    yaml_settings = _load_yaml(CONFIG_DIR / "settings.yaml")
+    processor_yaml = yaml_settings.get("job_processor", {})
+    env_settings = AppSettings()
+
+    if env_settings.job_processor_poll_interval_seconds is not None:
+        interval_raw = env_settings.job_processor_poll_interval_seconds
+    else:
+        interval_raw = processor_yaml.get("poll_interval_seconds", 60)
+
+    if env_settings.job_processor_initial_delay_seconds is not None:
+        delay_raw = env_settings.job_processor_initial_delay_seconds
+    else:
+        delay_raw = processor_yaml.get("initial_delay_seconds", 0)
+
+    try:
+        poll_interval_seconds = int(interval_raw)
+    except (TypeError, ValueError):
+        poll_interval_seconds = 60
+    try:
+        initial_delay_seconds = int(delay_raw)
+    except (TypeError, ValueError):
+        initial_delay_seconds = 0
+
+    if env_settings.job_processor_enabled is not None:
+        enabled = env_settings.job_processor_enabled
+    else:
+        enabled = _as_bool(processor_yaml.get("enabled"), True)
+
+    return JobProcessorSettings(
+        enabled=enabled,
+        poll_interval_seconds=max(1, poll_interval_seconds),
         initial_delay_seconds=max(0, initial_delay_seconds),
     )
 

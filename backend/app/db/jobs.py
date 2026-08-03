@@ -8,6 +8,7 @@ from backend.app.db.job_datetime import build_sr_num, normalize_job_datetime, no
 
 JOB_STATUS_RECEIVED = 0
 JOB_STATUS_APPROVER_ASSIGNED = 1
+JOB_STATUS_DIRECT_APPROVED = 2
 JOB_STATUS_COMPLETED_SUCCESS = 10
 JOB_STATUS_COMPLETED_FAILURE = 11
 JOB_STATUS_REJECTED = 12
@@ -17,6 +18,7 @@ JOB_SELECT_COLUMNS = """
     srnum,
     status_code,
     approver_registered_date,
+    approver,
     job_title,
     requester_name,
     requester_email,
@@ -37,6 +39,7 @@ class JobRecord:
     srnum: str
     status_code: int
     approver_registered_date: str | None
+    approver: str | None
     job_title: str
     requester_name: str
     requester_email: str
@@ -66,6 +69,7 @@ class JobIntakePayload:
 
 def _row_to_job(row) -> JobRecord:
     approver_registered_date = row["approver_registered_date"]
+    approver = row["approver"]
     return JobRecord(
         idx=int(row["idx"]),
         srnum=str(row["srnum"]),
@@ -73,6 +77,7 @@ def _row_to_job(row) -> JobRecord:
         approver_registered_date=(
             str(approver_registered_date) if approver_registered_date is not None else None
         ),
+        approver=str(approver).strip() if approver is not None and str(approver).strip() else None,
         job_title=str(row["job_title"]),
         requester_name=str(row["requester_name"]),
         requester_email=str(row["requester_email"]),
@@ -102,6 +107,39 @@ def get_job_by_idx(database_path: str | Path, idx: int) -> JobRecord | None:
     return _row_to_job(row)
 
 
+def list_jobs(
+    database_path: str | Path,
+    *,
+    status_code: int | None = None,
+    min_status_code: int | None = None,
+    approver: str | None = None,
+) -> list[JobRecord]:
+    clauses: list[str] = []
+    params: list[object] = []
+    if status_code is not None:
+        clauses.append("status_code = ?")
+        params.append(status_code)
+    if min_status_code is not None:
+        clauses.append("status_code >= ?")
+        params.append(min_status_code)
+    if approver is not None and approver.strip():
+        clauses.append("approver = ?")
+        params.append(approver.strip())
+
+    where_sql = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    with get_connection(database_path) as connection:
+        rows = connection.execute(
+            f"""
+            SELECT {JOB_SELECT_COLUMNS}
+            FROM jobs
+            {where_sql}
+            ORDER BY idx DESC
+            """,
+            params,
+        ).fetchall()
+    return [_row_to_job(row) for row in rows]
+
+
 def create_job_from_intake(
     database_path: str | Path,
     payload: JobIntakePayload,
@@ -116,6 +154,7 @@ def create_job_from_intake(
                 srnum,
                 status_code,
                 approver_registered_date,
+                approver,
                 job_title,
                 requester_name,
                 requester_email,
@@ -128,11 +167,12 @@ def create_job_from_intake(
                 message_id,
                 received_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 "",
                 JOB_STATUS_RECEIVED,
+                None,
                 None,
                 payload.job_title.strip(),
                 payload.requester_name.strip(),
@@ -159,3 +199,204 @@ def create_job_from_intake(
     if created is None:
         raise RuntimeError("Failed to load created job record")
     return created
+
+
+def assign_job_approver(
+    database_path: str | Path,
+    idx: int,
+    *,
+    approver_userid: str,
+    status_code: int = JOB_STATUS_APPROVER_ASSIGNED,
+) -> JobRecord:
+    from backend.app.db.users import get_user_by_userid
+
+    userid = approver_userid.strip()
+    if not userid:
+        raise ValueError("approver is required")
+
+    if get_user_by_userid(database_path, userid) is None:
+        raise ValueError(f"unknown approver userid: {userid}")
+
+    existing = get_job_by_idx(database_path, idx)
+    if existing is None:
+        raise ValueError("job not found")
+    if existing.approver:
+        raise ValueError("approver is already assigned")
+
+    registered_at = now_job_datetime()
+    with get_connection(database_path) as connection:
+        cursor = connection.execute(
+            """
+            UPDATE jobs
+            SET approver = ?,
+                approver_registered_date = ?,
+                status_code = ?
+            WHERE idx = ? AND (approver IS NULL OR TRIM(approver) = '')
+            """,
+            (userid, registered_at, status_code, idx),
+        )
+        connection.commit()
+        if cursor.rowcount == 0:
+            raise ValueError("approver is already assigned")
+
+    updated = get_job_by_idx(database_path, idx)
+    if updated is None:
+        raise RuntimeError("Failed to load updated job record")
+    return updated
+
+
+def direct_approve_job(
+    database_path: str | Path,
+    idx: int,
+    *,
+    approver_userid: str,
+) -> JobRecord:
+    return assign_job_approver(
+        database_path,
+        idx,
+        approver_userid=approver_userid,
+        status_code=JOB_STATUS_DIRECT_APPROVED,
+    )
+
+
+def _require_assigned_reviewer(job: JobRecord, actor_userid: str) -> None:
+    actor = actor_userid.strip()
+    if not actor:
+        raise ValueError("actor_userid is required")
+    if job.status_code != JOB_STATUS_APPROVER_ASSIGNED:
+        raise ValueError("job is not awaiting review")
+    if (job.approver or "").strip() != actor:
+        raise ValueError("only assigned approver can perform this action")
+
+
+def approve_assigned_job(
+    database_path: str | Path,
+    idx: int,
+    *,
+    actor_userid: str,
+) -> JobRecord:
+    existing = get_job_by_idx(database_path, idx)
+    if existing is None:
+        raise ValueError("job not found")
+    _require_assigned_reviewer(existing, actor_userid)
+
+    with get_connection(database_path) as connection:
+        cursor = connection.execute(
+            """
+            UPDATE jobs
+            SET status_code = ?
+            WHERE idx = ? AND status_code = ? AND approver = ?
+            """,
+            (JOB_STATUS_DIRECT_APPROVED, idx, JOB_STATUS_APPROVER_ASSIGNED, actor_userid.strip()),
+        )
+        connection.commit()
+        if cursor.rowcount == 0:
+            raise ValueError("job review state has changed")
+
+    updated = get_job_by_idx(database_path, idx)
+    if updated is None:
+        raise RuntimeError("Failed to load updated job record")
+    return updated
+
+
+def reject_assigned_job(
+    database_path: str | Path,
+    idx: int,
+    *,
+    actor_userid: str,
+) -> JobRecord:
+    existing = get_job_by_idx(database_path, idx)
+    if existing is None:
+        raise ValueError("job not found")
+    _require_assigned_reviewer(existing, actor_userid)
+
+    with get_connection(database_path) as connection:
+        cursor = connection.execute(
+            """
+            UPDATE jobs
+            SET status_code = ?
+            WHERE idx = ? AND status_code = ? AND approver = ?
+            """,
+            (JOB_STATUS_REJECTED, idx, JOB_STATUS_APPROVER_ASSIGNED, actor_userid.strip()),
+        )
+        connection.commit()
+        if cursor.rowcount == 0:
+            raise ValueError("job review state has changed")
+
+    updated = get_job_by_idx(database_path, idx)
+    if updated is None:
+        raise RuntimeError("Failed to load updated job record")
+    return updated
+
+
+def update_job_status(
+    database_path: str | Path,
+    idx: int,
+    status_code: int,
+    *,
+    expected_status: int | None = None,
+) -> JobRecord:
+    with get_connection(database_path) as connection:
+        if expected_status is None:
+            cursor = connection.execute(
+                """
+                UPDATE jobs
+                SET status_code = ?
+                WHERE idx = ?
+                """,
+                (status_code, idx),
+            )
+        else:
+            cursor = connection.execute(
+                """
+                UPDATE jobs
+                SET status_code = ?
+                WHERE idx = ? AND status_code = ?
+                """,
+                (status_code, idx, expected_status),
+            )
+        connection.commit()
+        if cursor.rowcount == 0:
+            raise ValueError("job status update failed")
+
+    updated = get_job_by_idx(database_path, idx)
+    if updated is None:
+        raise RuntimeError("Failed to load updated job record")
+    return updated
+
+
+def rework_job(
+    database_path: str | Path,
+    idx: int,
+    *,
+    actor_userid: str,
+) -> JobRecord:
+    existing = get_job_by_idx(database_path, idx)
+    if existing is None:
+        raise ValueError("job not found")
+
+    actor = actor_userid.strip()
+    if not actor:
+        raise ValueError("actor_userid is required")
+    if (existing.approver or "").strip() != actor:
+        raise ValueError("only assigned approver can rework this job")
+    if existing.status_code < JOB_STATUS_COMPLETED_SUCCESS:
+        raise ValueError("job is not in a completed state")
+
+    with get_connection(database_path) as connection:
+        cursor = connection.execute(
+            """
+            UPDATE jobs
+            SET status_code = ?
+            WHERE idx = ? AND approver = ? AND status_code >= ?
+            """,
+            (JOB_STATUS_DIRECT_APPROVED, idx, actor, JOB_STATUS_COMPLETED_SUCCESS),
+        )
+        connection.commit()
+        if cursor.rowcount == 0:
+            raise ValueError("job rework state has changed")
+
+    updated = get_job_by_idx(database_path, idx)
+    if updated is None:
+        raise RuntimeError("Failed to load updated job record")
+    return updated

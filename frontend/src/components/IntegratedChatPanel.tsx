@@ -23,6 +23,7 @@ interface IntegratedChatPanelProps {
   panelWidth?: number;
   onToggleFullscreen: () => void;
   onChatComplete?: () => void;
+  onCopyToNote?: (content: string, noteName?: string) => Promise<void>;
   signupNotifications?: SignupNotification[];
   onSignupApprove?: (userIdx: number) => void;
   onSignupReject?: (userIdx: number, reason: string) => void;
@@ -92,6 +93,7 @@ export function IntegratedChatPanel({
   panelWidth = 650,
   onToggleFullscreen,
   onChatComplete,
+  onCopyToNote,
   signupNotifications = [],
   onSignupApprove,
   onSignupReject,
@@ -108,6 +110,7 @@ export function IntegratedChatPanel({
   const [sessionId, setSessionId] = useState(createSessionId);
   const [billingConfirmPrompt, setBillingConfirmPrompt] = useState<string | null>(null);
   const [billingConfirmModel, setBillingConfirmModel] = useState<string | null>(null);
+  const [copyingResponseId, setCopyingResponseId] = useState<string | null>(null);
   const conversationScrollRef = useRef<HTMLDivElement>(null);
   const layoutRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -476,6 +479,23 @@ export function IntegratedChatPanel({
 
   const canShowPrevious = inputHistory.length > 0;
 
+  const handleCopyResponseToNote = async (response: IntegratedChatResponse) => {
+    if (!onCopyToNote || !response.assistantContent.trim()) {
+      return;
+    }
+
+    setCopyingResponseId(response.id);
+    try {
+      const noteName = `${response.agentName} ${formatResponseTimestamp(new Date(response.createdAt))}`.slice(
+        0,
+        50,
+      );
+      await onCopyToNote(response.assistantContent, noteName);
+    } finally {
+      setCopyingResponseId(null);
+    }
+  };
+
   return (
     <aside
       ref={layoutRef}
@@ -540,11 +560,23 @@ export function IntegratedChatPanel({
                     createdAt={response.createdAt}
                   />
                   <div className="rounded-md border border-emerald-800/40 bg-emerald-950/35 px-2 py-2 text-slate-100 break-words">
-                    <div className="mb-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] leading-tight text-emerald-300/80">
-                      <span className="rounded-full border border-emerald-700/50 bg-emerald-950/60 px-2 py-0.5 text-emerald-200">
-                        {response.agentName}
-                      </span>
-                      <span>{formatResponseTimestamp(new Date(response.createdAt))}</span>
+                    <div className="mb-1 flex items-start justify-between gap-2">
+                      <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[10px] leading-tight text-emerald-300/80">
+                        <span className="rounded-full border border-emerald-700/50 bg-emerald-950/60 px-2 py-0.5 text-emerald-200">
+                          {response.agentName}
+                        </span>
+                        <span>{formatResponseTimestamp(new Date(response.createdAt))}</span>
+                      </div>
+                      {response.assistantContent && onCopyToNote ? (
+                        <button
+                          type="button"
+                          disabled={copyingResponseId === response.id}
+                          onClick={() => void handleCopyResponseToNote(response)}
+                          className="shrink-0 rounded-md border border-slate-600 bg-slate-900/80 px-2 py-0.5 text-[10px] font-medium text-slate-200 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                          {copyingResponseId === response.id ? "복사 중..." : "노트로 복사"}
+                        </button>
+                      ) : null}
                     </div>
                     <ToolUsageList tools={response.toolsUsed} />
                     {response.assistantContent ? (

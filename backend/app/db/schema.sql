@@ -127,6 +127,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     srnum VARCHAR(20) NOT NULL UNIQUE,
     status_code INTEGER NOT NULL DEFAULT 0,
     approver_registered_date TEXT,
+    approver VARCHAR(20),
     job_title VARCHAR(300) NOT NULL,
     requester_name VARCHAR(100) NOT NULL,
     requester_email VARCHAR(100) NOT NULL,
@@ -138,4 +139,19 @@ CREATE TABLE IF NOT EXISTS jobs (
     channel_id VARCHAR(120) NOT NULL,
     message_id VARCHAR(50) NOT NULL,
     received_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS jobs_result (
+    srnum VARCHAR(20) NOT NULL PRIMARY KEY,
+    result TEXT NOT NULL,
+    complete_date TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS mynotes (
+    idx INTEGER PRIMARY KEY AUTOINCREMENT,
+    userid VARCHAR(50) NOT NULL,
+    note_name VARCHAR(50) NOT NULL,
+    create_date TEXT NOT NULL,
+    origin_file VARCHAR(200) NOT NULL,
+    last_update TEXT NOT NULL
 );

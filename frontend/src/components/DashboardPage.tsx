@@ -8,10 +8,13 @@ import { AgentGrid } from "./AgentGrid";
 import { AgentNodeListPanel } from "./AgentNodeListPanel";
 import { DetailInfoPanel, type DetailTab } from "./DetailInfoPanel";
 import { IntegratedChatPanel } from "./IntegratedChatPanel";
+import { JobNotesPanel } from "./JobNotesPanel";
 
 const DEFAULT_CHAT_PANEL_WIDTH = 650;
 const MIN_CHAT_PANEL_WIDTH = 360;
-const MIN_CENTER_PANEL_WIDTH = 320;
+const AGENT_LIST_PANEL_WIDTH = 280;
+const MIN_JOB_NOTES_PANEL_WIDTH = 240;
+const MIN_CENTER_PANEL_WIDTH = AGENT_LIST_PANEL_WIDTH + MIN_JOB_NOTES_PANEL_WIDTH;
 const PANEL_RESIZE_HANDLE_WIDTH = 8;
 
 interface DashboardPageProps {
@@ -49,6 +52,9 @@ export function DashboardPage({
   onChatComplete,
 }: DashboardPageProps) {
   const splitLayoutRef = useRef<HTMLDivElement>(null);
+  const copyToNoteRef = useRef<(content: string, noteName?: string) => Promise<void>>(
+    async () => {},
+  );
   const [chatPanelWidth, setChatPanelWidth] = useState(DEFAULT_CHAT_PANEL_WIDTH);
   const isResizingRef = useRef(false);
   const resizeStartXRef = useRef(0);
@@ -204,6 +210,17 @@ export function DashboardPage({
     [loadSignupNotifications],
   );
 
+  const handleCopyToNoteReady = useCallback(
+    (handler: (content: string, noteName?: string) => Promise<void>) => {
+      copyToNoteRef.current = handler;
+    },
+    [],
+  );
+
+  const handleCopyToNote = useCallback((content: string, noteName?: string) => {
+    return copyToNoteRef.current(content, noteName);
+  }, []);
+
   return (
     <>
       {error ? (
@@ -222,9 +239,17 @@ export function DashboardPage({
         {!integratedChatFullscreen ? (
           <>
             <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-4 self-stretch">
-              <AgentNodeListPanel>
-                {assignedAgents.length > 0 ? <AgentGrid agents={assignedAgents} /> : null}
-              </AgentNodeListPanel>
+              <div className="flex min-h-0 flex-1 gap-4">
+                <AgentNodeListPanel className="w-[280px] shrink-0">
+                  {assignedAgents.length > 0 ? <AgentGrid agents={assignedAgents} /> : null}
+                </AgentNodeListPanel>
+
+                <JobNotesPanel
+                  className="min-w-0 flex-1"
+                  currentUser={user}
+                  onCopyToNoteReady={handleCopyToNoteReady}
+                />
+              </div>
 
               <DetailInfoPanel
                 agents={assignedAgents}
@@ -253,6 +278,7 @@ export function DashboardPage({
           panelWidth={chatPanelWidth}
           onToggleFullscreen={onToggleIntegratedChatFullscreen}
           onChatComplete={onChatComplete}
+          onCopyToNote={handleCopyToNote}
           signupNotifications={signupNotifications}
           isSignupActionProcessing={isSignupActionProcessing}
           onSignupApprove={(userIdx) => void runSignupAction("approve", userIdx)}

@@ -2,11 +2,12 @@ import type { ReactNode } from "react";
 
 interface AgentNodeListPanelProps {
   children: ReactNode;
+  className?: string;
 }
 
-export function AgentNodeListPanel({ children }: AgentNodeListPanelProps) {
+export function AgentNodeListPanel({ children, className = "" }: AgentNodeListPanelProps) {
   return (
-    <section className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+    <section className={`relative flex min-h-0 min-w-0 flex-col ${className}`.trim()}>
       <div
         aria-hidden
         className="pointer-events-none absolute inset-0 rounded-xl border border-slate-700 bg-slate-900/50 shadow-inner"

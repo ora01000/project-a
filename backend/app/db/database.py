@@ -110,6 +110,9 @@ def _apply_migrations(connection: sqlite3.Connection) -> None:
     _drop_legacy_product_tables(connection)
 
     _ensure_jobs_table(connection)
+    _migrate_jobs_approver_column(connection)
+    _ensure_jobs_result_table(connection)
+    _ensure_mynotes_table(connection)
     _ensure_k8s_inventory_tables(connection)
 
 
@@ -394,6 +397,7 @@ def _ensure_jobs_table(connection: sqlite3.Connection) -> None:
             srnum VARCHAR(20) NOT NULL UNIQUE,
             status_code INTEGER NOT NULL DEFAULT 0,
             approver_registered_date TEXT,
+            approver VARCHAR(20),
             job_title VARCHAR(300) NOT NULL,
             requester_name VARCHAR(100) NOT NULL,
             requester_email VARCHAR(100) NOT NULL,
@@ -409,6 +413,67 @@ def _ensure_jobs_table(connection: sqlite3.Connection) -> None:
         """
     )
     logger.info("Created jobs table")
+
+
+def _migrate_jobs_approver_column(connection: sqlite3.Connection) -> None:
+    tables = {
+        str(row[0])
+        for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+    }
+    if "jobs" not in tables:
+        return
+
+    columns = {
+        row["name"] for row in connection.execute("PRAGMA table_info(jobs)").fetchall()
+    }
+    if "approver" in columns:
+        return
+
+    connection.execute("ALTER TABLE jobs ADD COLUMN approver VARCHAR(20)")
+    logger.info("Added jobs.approver column")
+
+
+def _ensure_jobs_result_table(connection: sqlite3.Connection) -> None:
+    tables = {
+        str(row[0])
+        for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+    }
+    if "jobs_result" in tables:
+        return
+
+    connection.execute(
+        """
+        CREATE TABLE jobs_result (
+            srnum VARCHAR(20) NOT NULL PRIMARY KEY,
+            result TEXT NOT NULL,
+            complete_date TEXT NOT NULL
+        )
+        """
+    )
+    logger.info("Created jobs_result table")
+
+
+def _ensure_mynotes_table(connection: sqlite3.Connection) -> None:
+    tables = {
+        str(row[0])
+        for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+    }
+    if "mynotes" in tables:
+        return
+
+    connection.execute(
+        """
+        CREATE TABLE mynotes (
+            idx INTEGER PRIMARY KEY AUTOINCREMENT,
+            userid VARCHAR(50) NOT NULL,
+            note_name VARCHAR(50) NOT NULL,
+            create_date TEXT NOT NULL,
+            origin_file VARCHAR(200) NOT NULL,
+            last_update TEXT NOT NULL
+        )
+        """
+    )
+    logger.info("Created mynotes table")
 
 
 def _drop_legacy_product_tables(connection: sqlite3.Connection) -> None:

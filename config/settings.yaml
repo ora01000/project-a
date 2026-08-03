@@ -60,6 +60,12 @@ job_requester:
   interval_minutes: 60
   initial_delay_seconds: 60
 
+# 승인 완료(status_code=2) 작업을 helpdesk 에이전트에 위임
+job_processor:
+  enabled: true
+  poll_interval_seconds: 60
+  initial_delay_seconds: 0
+
 # Kubernetes/OpenShift 클러스터 수집 (openshift DynamicClient, 동기)
 # - 기동 시/스케줄 자동 수집은 중지 (수동 수집 UI 사용)
 # - schedule_enabled 를 true 로 켜면 매일 00:10 부터 등록 순서대로 5분 간격 재개

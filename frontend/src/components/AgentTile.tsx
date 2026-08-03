@@ -3,6 +3,7 @@ import { connectionStatusDotClass } from "../utils/agentStatusStyle";
 
 interface AgentTileProps {
   agent: AgentInfo;
+  stacked?: boolean;
 }
 
 export const AGENT_TILE_WIDTH_PX = 280;
@@ -18,16 +19,23 @@ function operationStatusColor(status: AgentInfo["operation_status"]): string {
   return "bg-rose-500";
 }
 
-export function AgentTile({ agent }: AgentTileProps) {
+export function AgentTile({ agent, stacked = false }: AgentTileProps) {
   return (
     <div
       className="flex shrink-0 flex-col overflow-hidden rounded-xl border border-slate-700 bg-slate-900/90 shadow-lg"
-      style={{
-        width: AGENT_TILE_WIDTH_PX,
-        height: AGENT_TILE_HEIGHT_PX,
-        minWidth: AGENT_TILE_WIDTH_PX,
-        minHeight: AGENT_TILE_HEIGHT_PX,
-      }}
+      style={
+        stacked
+          ? {
+              width: "100%",
+              minHeight: AGENT_TILE_HEIGHT_PX,
+            }
+          : {
+              width: AGENT_TILE_WIDTH_PX,
+              height: AGENT_TILE_HEIGHT_PX,
+              minWidth: AGENT_TILE_WIDTH_PX,
+              minHeight: AGENT_TILE_HEIGHT_PX,
+            }
+      }
     >
       <div className="shrink-0 border-b border-slate-700 px-3 py-2.5">
         <div className="flex items-start justify-between gap-2">

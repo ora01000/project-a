@@ -26,6 +26,7 @@ from backend.app.api.k8s_collector import router as k8s_collector_router
 from backend.app.api.llm import router as llm_router
 from backend.app.api.notices import router as notices_router
 from backend.app.api.mock_llm import router as mock_llm_router
+from backend.app.api.mynotes import router as mynotes_router
 from backend.app.api.postman_debug import router as postman_debug_router
 from backend.app.api.prompt_debug import router as prompt_debug_router
 from backend.app.api.release import router as release_router
@@ -35,6 +36,7 @@ from backend.app.api.users import router as users_router
 from backend.app.api.teams_inbound_debug import router as teams_inbound_debug_router
 from backend.app.api.axit_mock import router as axit_mock_router
 from backend.app.config import (
+    load_job_processor_settings,
     load_k8s_collector_settings,
     load_settings,
     resolve_control_plane_base_url,
@@ -50,6 +52,7 @@ from backend.app.logging.prompt_debug import bind_token_tracker
 from backend.app.logging.agent_logger import ensure_agent_logs_dir, log_agent_error
 from backend.app.logging.user_comm_logger import initialize_user_comm_logs
 from backend.app.services.k8s_collector_loop import run_k8s_collector_loop
+from backend.app.services.job_processor_loop import run_job_processor_loop
 from backend.app.usage.token_tracker import TokenTracker
 
 logger = logging.getLogger(__name__)
@@ -397,6 +400,19 @@ async def lifespan(app: FastAPI):
                 agent_manager=agent_manager,
             )
         )
+    job_processor_settings = load_job_processor_settings()
+    job_processor_task: asyncio.Task | None = None
+    if job_processor_settings.enabled:
+        job_processor_task = asyncio.create_task(
+            run_job_processor_loop(
+                Path(app.state.database_path),
+                app.state.agent_runtime,
+                runtime_mode=runtime_mode,
+                control_plane_base_url=app.state.control_plane_base_url,
+                settings=job_processor_settings,
+                agent_manager=agent_manager,
+            )
+        )
     try:
         yield
     finally:
@@ -407,6 +423,10 @@ async def lifespan(app: FastAPI):
             k8s_collector_task.cancel()
             with suppress(asyncio.CancelledError):
                 await k8s_collector_task
+        if job_processor_task is not None:
+            job_processor_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await job_processor_task
 
 
 def create_app() -> FastAPI:
@@ -427,6 +447,7 @@ def create_app() -> FastAPI:
     app.include_router(token_usage_router, prefix="/api")
     app.include_router(agents_router, prefix="/api")
     app.include_router(jobs_router, prefix="/api")
+    app.include_router(mynotes_router, prefix="/api")
     app.include_router(k8s_collector_router, prefix="/api")
     app.include_router(notices_router, prefix="/api")
     app.include_router(chat_router, prefix="/api")

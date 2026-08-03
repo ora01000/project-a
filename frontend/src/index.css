@@ -29,6 +29,24 @@ body {
   }
 }
 
+.job-content-html ol,
+.job-content-html ul {
+  margin: 0.5rem 0;
+  padding-left: 1.25rem;
+}
+
+.job-content-html p {
+  margin: 0.5rem 0;
+}
+
+.job-content-html p:first-child {
+  margin-top: 0;
+}
+
+.job-content-html p:last-child {
+  margin-bottom: 0;
+}
+
 .mermaid-diagram svg,
 .d2-diagram svg {
   max-width: none;
@@ -56,4 +74,21 @@ body {
 .mermaid-diagram .nodeLabel p {
   margin: 0;
   text-align: center;
+}
+
+.note-preview-panel .markdown-body {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.note-preview-panel .mermaid-diagram,
+.note-preview-panel .d2-diagram {
+  max-width: 100%;
+}
+
+.note-preview-panel .mermaid-diagram svg,
+.note-preview-panel .d2-diagram svg {
+  max-width: 100%;
+  width: auto;
+  height: auto;
 }
