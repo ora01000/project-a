@@ -111,10 +111,17 @@ def runtime_mode_for_type(runtime_type: int) -> str:
 
 
 def build_agent_chat_url(record: StoredAgentRuntime) -> str:
-    """AXIT agent chat endpoint: {AGENT_URL}/{agent_id}[/invoke for external]."""
-    from backend.app.services.axit_config import resolve_axit_agent_url
+    """AXIT agent invoke endpoint based on runtime type and orchestrator flag."""
+    from backend.app.services.axit_config import resolve_axit_agent_url, resolve_axit_orchestrator_url
 
     runtime_mode = runtime_mode_for_type(record.type)
+    if record.is_orchestrator:
+        base = (
+            f"{resolve_axit_orchestrator_url(runtime_mode=runtime_mode).rstrip('/')}"
+            f"/{record.agent_id}"
+        )
+        return f"{base}/invoke"
+
     base = f"{resolve_axit_agent_url(runtime_mode=runtime_mode).rstrip('/')}/{record.agent_id}"
     if record.type == AGENTRUNTIME_TYPE_EXTERNAL:
         return f"{base}/invoke"

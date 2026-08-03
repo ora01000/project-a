@@ -162,3 +162,18 @@ async def invoke_axit_agent_with_suffix(
     request: Request,
 ) -> AxitInvokeResponse:
     return await _invoke_axit_agent(agent_id, payload, request)
+
+
+@router.post("/aihub/orchestrators/v1/{agent_id}/invoke", response_model=AxitInvokeResponse)
+async def invoke_axit_orchestrator_agent(
+    agent_id: str,
+    payload: AxitInvokeRequest,
+    request: Request,
+) -> AxitInvokeResponse:
+    database_path = request.app.state.database_path
+    runtime_record = get_agentruntime_by_agent_id(database_path, agent_id, runtime_mode="mock")
+    if runtime_record is None:
+        raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
+    if not runtime_record.is_orchestrator:
+        raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' is not an orchestrator")
+    return await _invoke_axit_agent(agent_id, payload, request)

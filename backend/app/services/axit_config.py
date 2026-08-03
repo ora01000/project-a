@@ -12,9 +12,11 @@ from backend.app.services.agent_runtime_client import normalize_runtime_mode
 
 AXIT_TOKEN_PATH = "/portal/auths/v1/token"
 AXIT_AGENT_PATH = "/aihub/agents/v1"
+AXIT_ORCHESTRATOR_PATH = "/aihub/orchestrators/v1"
 
 AXIT_HTTP_TOKEN_URL = f"https://test.nudp.lguplus.co.kr{AXIT_TOKEN_PATH}"
 AXIT_HTTP_AGENT_URL = f"https://test.nudp.lguplus.co.kr{AXIT_AGENT_PATH}"
+AXIT_HTTP_ORCHESTRATOR_URL = f"https://test.nudp.lguplus.co.kr{AXIT_ORCHESTRATOR_PATH}"
 
 AXIT_MOCK_CLIENT_ID = "mock-client-id"
 AXIT_MOCK_CLIENT_SECRET = "mock-client-secret"
@@ -52,6 +54,20 @@ def resolve_axit_agent_url(*, runtime_mode: str | None = None) -> str:
     _, server_settings, _, _ = load_settings()
     base_url = resolve_control_plane_base_url(server_settings)
     return f"{base_url.rstrip('/')}{AXIT_AGENT_PATH}"
+
+
+def resolve_axit_orchestrator_url(*, runtime_mode: str | None = None) -> str:
+    explicit = (
+        _env_setting("ORCHESTRATOR_URL")
+        or _env_setting("AXIT_ORCHESTRATOR_URL")
+    )
+    if explicit:
+        return explicit.rstrip("/")
+    if _resolved_mode(runtime_mode) == "http":
+        return AXIT_HTTP_ORCHESTRATOR_URL
+    _, server_settings, _, _ = load_settings()
+    base_url = resolve_control_plane_base_url(server_settings)
+    return f"{base_url.rstrip('/')}{AXIT_ORCHESTRATOR_PATH}"
 
 
 def resolve_axit_client_id(*, runtime_mode: str | None = None) -> str:

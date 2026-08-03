@@ -106,8 +106,10 @@ AGENT_RUNTIME_MODE = http 인 경우 agentruntime 의 type = 1 을 참조한다.
 - 토큰 발급 요청/응답은 상세 로그를 남긴다.
 
 ### 에이전트 invoke
-- 외부 연동(type=1): `POST {AGENT_URL}/{agent_id}/invoke`
-- 목업(type=0): `POST {AGENT_URL}/{agent_id}`
+- 일반 에이전트(type=1): `POST {AGENT_URL}/{agent_id}/invoke`
+- 일반 에이전트 목업(type=0): `POST {AGENT_URL}/{agent_id}`
+- 협업 에이전트(`is_orchestrator=1`): `POST {ORCHESTRATOR_URL}/{agent_id}/invoke`
+  - 기본 경로: `/aihub/orchestrators/v1/{agent-id}/invoke`
 - `Authorization: Bearer {access_token}`
 - 요청 JSON:
   - `service_id`, `session_id`(UUID), `session_attributes`, `prompt_session_attributes`, `enable_trace`, `text`
@@ -280,6 +282,11 @@ graph TD
 6. deployment, statefulset 은 replica 개수 표시
 7. daemonset 은 nodeSelector 표시
 
+## 협업 에이전트 API 경로 변경
+agentruntime.is_orchestrator 값이 1인 경우 협업 에이전트이다.
+협업 에이전트는 다른 에이전트를 사용할 수 있다.
+협업 에이전트의 API 호출 경로는 다음과 같이 변경한다.
+- /aihub/orchestrators/v1/{agent-id}/invoke
 
 
 
