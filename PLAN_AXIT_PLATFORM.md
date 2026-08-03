@@ -288,5 +288,24 @@ agentruntime.is_orchestrator 값이 1인 경우 협업 에이전트이다.
 협업 에이전트의 API 호출 경로는 다음과 같이 변경한다.
 - /aihub/orchestrators/v1/{agent-id}/invoke
 
+## init data 제외
+백엔드 재시작시 agentruntime 테이블에 init 데이터는 추가하지 않는다.
+
+## 작업요청서 수신기 데몬을 추가
+작업요청서 수신기는 AI 에이전트가 아니며 백엔드의 기능으로 API 로 노출한다
+json 포맷으로 전송을 받는다
+포맷은 다음과 같다.
+
+{
+  "job_title": {작업요청서 제목},
+  "requester_name": {작업요청자 이름},
+  "requester_email" : {요청자 email},
+  "requester_depart": {요청자의 부서},
+  "job_content" : {html 형식의 작업 내용},
+  "request_date": {요청 일시},
+  
+
+}
+
 
 
