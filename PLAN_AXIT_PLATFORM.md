@@ -292,20 +292,20 @@ agentruntime.is_orchestrator 값이 1인 경우 협업 에이전트이다.
 백엔드 재시작시 agentruntime 테이블에 init 데이터는 추가하지 않는다.
 
 ## 작업요청서 수신기 데몬을 추가
-작업요청서 수신기는 AI 에이전트가 아니며 백엔드의 기능으로 API 로 노출한다
-json 포맷으로 전송을 받는다
-포맷은 다음과 같다.
+작업요청서 수신기는 AI 에이전트가 아니며 백엔드의 기능으로 API 로 노출한다.
+이 데몬은 mock/http 모드 모두 사용한다.
+json 포맷으로 전송을 받는다. job_format.json 참조
+요청받은 job 은 다음 테이블에 저장한다.
 
-{
-  "job_title": {작업요청서 제목},
-  "requester_name": {작업요청자 이름},
-  "requester_email" : {요청자 email},
-  "requester_depart": {요청자의 부서},
-  "job_content" : {html 형식의 작업 내용},
-  "request_date": {요청 일시},
-  
+- jobs
+ - srnum varchar, format : {"SR" + YYMMDD + "_" + #####} 자동 생성
+ - status_code int, 0:접수, 1:승인자배당완료, 10:처리완료(성공), 11:처리완료(실패), 12:작업반려
+   - 작업요청서 수신 데몬에 최초 접수, record 생성시 status_code 는 0 이다
+ - approver_registered_date : datetime
+ - 그 외 컬럼
+   - job_format.json 포맷에 맞춰 컬럼 생성
 
-}
+
 
 
 
