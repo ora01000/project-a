@@ -4,6 +4,7 @@ import type { AuthUser } from "../../types/auth";
 import type { JobRecord } from "../../types/job";
 import type { UserRecord } from "../../types/user";
 import { ConfirmDialog } from "../ConfirmDialog";
+import { JobBlockField, JobFieldLabel, JobInlineField } from "./JobFieldLabel";
 
 async function parseError(response: Response, fallback: string): Promise<string> {
   const payload = (await response.json().catch(() => null)) as { detail?: string } | null;
@@ -214,55 +215,36 @@ export function JobReviewTab({ active, currentUser }: JobReviewTabProps) {
           {selectedJob ? (
             <div className="flex min-h-0 flex-1 flex-col gap-3">
               <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain pr-1">
-                <div>
-                  <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">
-                    작업 제목
-                  </p>
-                  <p className="mt-1 text-sm font-semibold text-slate-100">{selectedJob.job_title}</p>
-                </div>
-                <div>
-                  <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">요청자</p>
-                  <p className="mt-1 text-sm text-slate-200">{selectedJob.requester_name}</p>
-                </div>
-                <div>
-                  <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">
-                    요청 일시
-                  </p>
-                  <p className="mt-1 text-sm text-slate-200">
-                    {formatJobDate(selectedJob.request_date)}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">
-                    작업 내용
-                  </p>
+                <JobInlineField label="작업 제목" bullet="📋" valueClassName="text-sm font-semibold text-slate-100">
+                  {selectedJob.job_title}
+                </JobInlineField>
+                <JobInlineField label="요청자" bullet="👤">
+                  {selectedJob.requester_name}
+                </JobInlineField>
+                <JobInlineField label="요청 일시" bullet="🕐">
+                  {formatJobDate(selectedJob.request_date)}
+                </JobInlineField>
+                <JobBlockField label="작업 내용" bullet="📝">
                   <div
-                    className="job-content-html mt-2 rounded-md border border-slate-700 bg-slate-950/60 p-3 text-sm text-slate-200"
+                    className="job-content-html rounded-md border border-slate-700 bg-slate-950/60 p-3 text-sm text-slate-200"
                     dangerouslySetInnerHTML={{ __html: selectedJob.job_content }}
                   />
-                </div>
+                </JobBlockField>
               </div>
 
               <div className="shrink-0 border-t border-slate-700/80 pt-3">
                 {hasApprover(selectedJob) ? (
-                  <div>
-                    <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">
-                      작업 승인자
-                    </p>
-                    <p className="mt-1 text-sm text-slate-200">
-                      {usernameByUserid.get(selectedJob.approver ?? "") ?? selectedJob.approver}
-                    </p>
-                  </div>
+                  <JobInlineField label="작업 승인자" bullet="✅">
+                    {usernameByUserid.get(selectedJob.approver ?? "") ?? selectedJob.approver}
+                  </JobInlineField>
                 ) : (
-                  <div className="flex flex-wrap items-end gap-2">
-                    <label className="min-w-[180px] flex-1">
-                      <span className="mb-1 block text-[11px] font-medium uppercase tracking-wide text-slate-500">
-                        작업 승인자
-                      </span>
+                  <div className="space-y-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <JobFieldLabel bullet="✅">작업 승인자</JobFieldLabel>
                       <select
                         value={selectedApproverUserid}
                         onChange={(event) => setSelectedApproverUserid(event.target.value)}
-                        className="w-full rounded-md border border-slate-600 bg-slate-950 px-2.5 py-1.5 text-sm text-slate-100"
+                        className="min-w-[180px] flex-1 rounded-md border border-slate-600 bg-slate-950 px-2.5 py-1.5 text-sm text-slate-100"
                       >
                         <option value="">사용자 선택</option>
                         {users.map((user) => (
@@ -271,23 +253,25 @@ export function JobReviewTab({ active, currentUser }: JobReviewTabProps) {
                           </option>
                         ))}
                       </select>
-                    </label>
-                    <button
-                      type="button"
-                      disabled={!selectedApproverUserid || isAssigning}
-                      onClick={() => setConfirmAssignOpen(true)}
-                      className="rounded-md border border-sky-700 bg-sky-950/60 px-3 py-1.5 text-sm font-medium text-sky-100 hover:bg-sky-900/70 disabled:cursor-not-allowed disabled:opacity-40"
-                    >
-                      적용
-                    </button>
-                    <button
-                      type="button"
-                      disabled={isAssigning}
-                      onClick={() => setConfirmDirectApproveOpen(true)}
-                      className="rounded-md border border-emerald-700 bg-emerald-950/60 px-3 py-1.5 text-sm font-medium text-emerald-100 hover:bg-emerald-900/70 disabled:cursor-not-allowed disabled:opacity-40"
-                    >
-                      직접승인
-                    </button>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        disabled={!selectedApproverUserid || isAssigning}
+                        onClick={() => setConfirmAssignOpen(true)}
+                        className="rounded-md border border-sky-700 bg-sky-950/60 px-3 py-1.5 text-sm font-medium text-sky-100 hover:bg-sky-900/70 disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        적용
+                      </button>
+                      <button
+                        type="button"
+                        disabled={isAssigning}
+                        onClick={() => setConfirmDirectApproveOpen(true)}
+                        className="rounded-md border border-emerald-700 bg-emerald-950/60 px-3 py-1.5 text-sm font-medium text-emerald-100 hover:bg-emerald-900/70 disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        직접승인
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>

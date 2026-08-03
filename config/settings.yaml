@@ -66,6 +66,12 @@ job_processor:
   poll_interval_seconds: 60
   initial_delay_seconds: 0
 
+# 나의 노트: Redis 편집 버퍼 → 주기적 파일 영구 저장
+mynotes:
+  enabled: true
+  flush_interval_seconds: 300
+  initial_delay_seconds: 0
+
 # Kubernetes/OpenShift 클러스터 수집 (openshift DynamicClient, 동기)
 # - 기동 시/스케줄 자동 수집은 중지 (수동 수집 UI 사용)
 # - schedule_enabled 를 true 로 켜면 매일 00:10 부터 등록 순서대로 5분 간격 재개
@@ -86,3 +92,12 @@ k8s_collector:
 auth:
   provider_type: "db"   # db | madang
   oauth_proxy: ""
+
+# Redis (세션·캐시, 배포 시 별도 프로세스 — 패키징하지 않음)
+redis:
+  url: "redis://localhost:6379/0"
+
+# Bearer 세션 (B-2): 슬라이딩 TTL + 절대 상한
+auth_session:
+  ttl_seconds: 3600
+  absolute_max_seconds: 28800

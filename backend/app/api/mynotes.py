@@ -14,8 +14,14 @@ from backend.app.db.mynotes import (
     get_mynote_by_idx,
     list_mynotes,
     read_mynote_content,
-    save_mynote_content,
+    touch_mynote_last_update,
     update_mynote_name,
+)
+from backend.app.services.mynote_content_store import (
+    delete_mynote_content_from_redis,
+    hydrate_mynote_content,
+    rename_mynote_content_in_redis,
+    set_mynote_content_in_redis,
 )
 
 logger = logging.getLogger(__name__)
@@ -74,6 +80,11 @@ class SaveMyNoteContentRequest(BaseModel):
     content: str = ""
 
 
+async def _load_mynote_content(record: MyNoteRecord) -> str:
+    file_content = read_mynote_content(record)
+    return await hydrate_mynote_content(record, file_content=file_content)
+
+
 @router.get("/mynotes", response_model=list[MyNoteResponse])
 async def list_my_notes(
     request: Request,
@@ -96,6 +107,7 @@ async def create_my_note(
             userid=body.userid,
             note_name=body.note_name,
         )
+        await set_mynote_content_in_redis(record.userid, record.note_name, "")
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
@@ -114,7 +126,7 @@ async def get_my_note(
     record = get_mynote_by_idx(database_path, idx)
     if record is None or record.userid != userid.strip():
         raise HTTPException(status_code=404, detail="Note not found")
-    content = read_mynote_content(record)
+    content = await _load_mynote_content(record)
     return MyNoteDetailResponse.from_record(record, content=content)
 
 
@@ -125,12 +137,18 @@ async def save_my_note_content(
     body: SaveMyNoteContentRequest,
 ) -> MyNoteResponse:
     database_path = request.app.state.database_path
+    existing = get_mynote_by_idx(database_path, idx)
+    if existing is None:
+        raise HTTPException(status_code=404, detail="Note not found")
+    if existing.userid != body.userid.strip():
+        raise HTTPException(status_code=403, detail="Note does not belong to this user")
+
     try:
-        record = save_mynote_content(
+        await set_mynote_content_in_redis(existing.userid, existing.note_name, body.content)
+        record = touch_mynote_last_update(
             database_path,
             idx,
             userid=body.userid,
-            content=body.content,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -147,12 +165,25 @@ async def rename_my_note(
     body: RenameMyNoteRequest,
 ) -> MyNoteResponse:
     database_path = request.app.state.database_path
+    existing = get_mynote_by_idx(database_path, idx)
+    if existing is None:
+        raise HTTPException(status_code=404, detail="Note not found")
+    if existing.userid != body.userid.strip():
+        raise HTTPException(status_code=403, detail="Note does not belong to this user")
+
+    old_note_name = existing.note_name
     try:
+        await hydrate_mynote_content(existing, file_content=read_mynote_content(existing))
         record = update_mynote_name(
             database_path,
             idx,
             userid=body.userid,
             note_name=body.note_name,
+        )
+        await rename_mynote_content_in_redis(
+            existing.userid,
+            old_note_name=old_note_name,
+            new_note_name=record.note_name,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -169,7 +200,14 @@ async def delete_my_note(
     userid: str = Query(min_length=1, max_length=50),
 ) -> None:
     database_path = request.app.state.database_path
+    existing = get_mynote_by_idx(database_path, idx)
+    if existing is None:
+        raise HTTPException(status_code=404, detail="Note not found")
+    if existing.userid != userid.strip():
+        raise HTTPException(status_code=403, detail="Note does not belong to this user")
+
     try:
+        await delete_mynote_content_from_redis(existing.userid, existing.note_name)
         delete_mynote(database_path, idx, userid=userid)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

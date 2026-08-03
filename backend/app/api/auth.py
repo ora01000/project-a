@@ -1,7 +1,9 @@
+from __future__ import annotations
+
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from backend.app.config import load_auth_provider_settings
+from backend.app.config import load_auth_provider_settings, load_auth_session_settings
 from backend.app.db.notice_board import list_welcome_notices
 from backend.app.db.users import (
     User,
@@ -12,7 +14,9 @@ from backend.app.db.users import (
     resolve_username,
     update_user,
 )
+from backend.app.middleware.session_auth import extract_bearer_token, get_request_auth_user
 from backend.app.services.auth_provider import AuthProviderError, login_with_provider
+from backend.app.services.auth_session import create_session, revoke_session
 
 router = APIRouter(tags=["auth"])
 
@@ -62,6 +66,9 @@ class UserResponse(BaseModel):
 
 
 class LoginResponse(UserResponse):
+    access_token: str
+    token_type: str = "Bearer"
+    expires_in: int
     profile_required: bool = False
     welcome_back: bool = False
     previous_last_login: str | None = None
@@ -73,6 +80,10 @@ class AuthProviderResponse(BaseModel):
     registration_enabled: bool
 
 
+class MeResponse(UserResponse):
+    expires_in: int
+
+
 class CompleteProfileRequest(BaseModel):
     idx: int
     email: str = Field(min_length=1, max_length=50)
@@ -82,12 +93,43 @@ class CompleteProfileRequest(BaseModel):
     band: int = Field(default=1, ge=1, le=3)
 
 
+class LogoutResponse(BaseModel):
+    ok: bool = True
+
+
 @router.get("/auth/provider", response_model=AuthProviderResponse)
 async def get_auth_provider() -> AuthProviderResponse:
     settings = load_auth_provider_settings()
     return AuthProviderResponse(
         provider_type=settings.provider_type,
         registration_enabled=settings.provider_type == "db",
+    )
+
+
+async def _issue_login_response(
+    request: Request,
+    user: User,
+    *,
+    profile_required: bool,
+    welcome_back: bool = False,
+    previous_last_login: str | None = None,
+    welcome_notices: list[WelcomeNoticeSummary] | None = None,
+) -> LoginResponse:
+    session_settings = load_auth_session_settings()
+    access_token, expires_in = await create_session(
+        user.idx,
+        user.userid,
+        ttl_seconds=session_settings.ttl_seconds,
+    )
+    base = UserResponse.from_user(user)
+    return LoginResponse(
+        **base.model_dump(),
+        access_token=access_token,
+        expires_in=expires_in,
+        profile_required=profile_required,
+        welcome_back=welcome_back,
+        previous_last_login=previous_last_login,
+        welcome_notices=welcome_notices or [],
     )
 
 
@@ -122,9 +164,9 @@ async def login(payload: LoginRequest, request: Request) -> LoginResponse:
             for notice in list_welcome_notices(database_path)
         ]
 
-    base = UserResponse.from_user(user)
-    return LoginResponse(
-        **base.model_dump(),
+    return await _issue_login_response(
+        request,
+        user,
         profile_required=result.profile_required,
         welcome_back=welcome_back,
         previous_last_login=previous_last_login,
@@ -132,8 +174,30 @@ async def login(payload: LoginRequest, request: Request) -> LoginResponse:
     )
 
 
+@router.get("/auth/me", response_model=MeResponse)
+async def get_current_user(request: Request) -> MeResponse:
+    user = get_request_auth_user(request)
+    session_settings = load_auth_session_settings()
+    return MeResponse(
+        **UserResponse.from_user(user).model_dump(),
+        expires_in=session_settings.ttl_seconds,
+    )
+
+
+@router.post("/auth/logout", response_model=LogoutResponse)
+async def logout(request: Request) -> LogoutResponse:
+    token = extract_bearer_token(request) or getattr(request.state, "auth_token", None)
+    if token:
+        await revoke_session(token)
+    return LogoutResponse()
+
+
 @router.put("/auth/profile", response_model=UserResponse)
 async def complete_profile(payload: CompleteProfileRequest, request: Request) -> UserResponse:
+    auth_user = get_request_auth_user(request)
+    if auth_user.idx != payload.idx:
+        raise HTTPException(status_code=403, detail="본인 프로필만 수정할 수 있습니다.")
+
     database_path = request.app.state.database_path
     existing = get_user_by_idx(database_path, payload.idx)
     if existing is None:

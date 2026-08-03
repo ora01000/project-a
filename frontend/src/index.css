@@ -81,9 +81,13 @@ body {
   word-break: break-word;
 }
 
-.note-preview-panel .mermaid-diagram,
-.note-preview-panel .d2-diagram {
+.note-preview-panel .d2-diagram,
+.note-preview-panel .mermaid-diagram {
   max-width: 100%;
+}
+
+.note-preview-panel .d2-diagram {
+  width: 100%;
 }
 
 .note-preview-panel .mermaid-diagram svg,

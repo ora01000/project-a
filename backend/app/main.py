@@ -36,11 +36,16 @@ from backend.app.api.users import router as users_router
 from backend.app.api.teams_inbound_debug import router as teams_inbound_debug_router
 from backend.app.api.axit_mock import router as axit_mock_router
 from backend.app.config import (
+    load_auth_session_settings,
     load_job_processor_settings,
     load_k8s_collector_settings,
+    load_mynotes_settings,
+    load_redis_settings,
     load_settings,
     resolve_control_plane_base_url,
 )
+from backend.app.middleware.session_auth import SessionAuthMiddleware
+from backend.app.services.redis_client import close_redis, init_redis
 from backend.app.services.agent_runtime_client import (
     create_agent_runtime_client,
     get_runtime_capabilities,
@@ -53,6 +58,7 @@ from backend.app.logging.agent_logger import ensure_agent_logs_dir, log_agent_er
 from backend.app.logging.user_comm_logger import initialize_user_comm_logs
 from backend.app.services.k8s_collector_loop import run_k8s_collector_loop
 from backend.app.services.job_processor_loop import run_job_processor_loop
+from backend.app.services.mynote_flush_loop import run_mynote_flush_loop
 from backend.app.usage.token_tracker import TokenTracker
 
 logger = logging.getLogger(__name__)
@@ -374,6 +380,9 @@ async def lifespan(app: FastAPI):
     app.state.agent_runtime_mode = runtime_mode
     app.state.control_plane_base_url = resolve_control_plane_base_url(server_settings)
     app.state.runtime_api_key = server_settings.agent_runtime_api_key
+    redis_settings = load_redis_settings()
+    await init_redis(redis_settings.url)
+    app.state.auth_session_settings = load_auth_session_settings()
     app.state.agent_runtime = create_agent_runtime_client(
         runtime_mode,
         agent_manager=agent_manager,
@@ -413,6 +422,15 @@ async def lifespan(app: FastAPI):
                 agent_manager=agent_manager,
             )
         )
+    mynotes_settings = load_mynotes_settings()
+    mynote_flush_task: asyncio.Task | None = None
+    if mynotes_settings.enabled:
+        mynote_flush_task = asyncio.create_task(
+            run_mynote_flush_loop(
+                Path(app.state.database_path),
+                mynotes_settings,
+            )
+        )
     try:
         yield
     finally:
@@ -427,6 +445,11 @@ async def lifespan(app: FastAPI):
             job_processor_task.cancel()
             with suppress(asyncio.CancelledError):
                 await job_processor_task
+        if mynote_flush_task is not None:
+            mynote_flush_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await mynote_flush_task
+        await close_redis()
 
 
 def create_app() -> FastAPI:
@@ -438,6 +461,7 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    app.add_middleware(SessionAuthMiddleware)
     app.include_router(auth_router, prefix="/api")
     app.include_router(signup_router, prefix="/api")
     app.include_router(users_router, prefix="/api")

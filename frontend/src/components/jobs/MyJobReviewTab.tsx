@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { AuthUser } from "../../types/auth";
 import type { JobRecord } from "../../types/job";
 import { ConfirmDialog } from "../ConfirmDialog";
+import { JobBlockField, JobInlineField } from "./JobFieldLabel";
 
 async function parseError(response: Response, fallback: string): Promise<string> {
   const payload = (await response.json().catch(() => null)) as { detail?: string } | null;
@@ -175,33 +176,21 @@ export function MyJobReviewTab({ active, currentUser }: MyJobReviewTabProps) {
           {selectedJob ? (
             <div className="flex min-h-0 flex-1 flex-col gap-3">
               <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain pr-1">
-                <div>
-                  <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">
-                    작업 제목
-                  </p>
-                  <p className="mt-1 text-sm font-semibold text-slate-100">{selectedJob.job_title}</p>
-                </div>
-                <div>
-                  <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">요청자</p>
-                  <p className="mt-1 text-sm text-slate-200">{selectedJob.requester_name}</p>
-                </div>
-                <div>
-                  <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">
-                    요청 일시
-                  </p>
-                  <p className="mt-1 text-sm text-slate-200">
-                    {formatJobDate(selectedJob.request_date)}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">
-                    작업 내용
-                  </p>
+                <JobInlineField label="작업 제목" bullet="📋" valueClassName="text-sm font-semibold text-slate-100">
+                  {selectedJob.job_title}
+                </JobInlineField>
+                <JobInlineField label="요청자" bullet="👤">
+                  {selectedJob.requester_name}
+                </JobInlineField>
+                <JobInlineField label="요청 일시" bullet="🕐">
+                  {formatJobDate(selectedJob.request_date)}
+                </JobInlineField>
+                <JobBlockField label="작업 내용" bullet="📝">
                   <div
-                    className="job-content-html mt-2 rounded-md border border-slate-700 bg-slate-950/60 p-3 text-sm text-slate-200"
+                    className="job-content-html rounded-md border border-slate-700 bg-slate-950/60 p-3 text-sm text-slate-200"
                     dangerouslySetInnerHTML={{ __html: selectedJob.job_content }}
                   />
-                </div>
+                </JobBlockField>
               </div>
 
               <div className="flex shrink-0 gap-2 border-t border-slate-700/80 pt-3">

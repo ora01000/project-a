@@ -95,6 +95,12 @@ class JobProcessorSettings(BaseModel):
     initial_delay_seconds: int = 0
 
 
+class MyNotesSettings(BaseModel):
+    enabled: bool = True
+    flush_interval_seconds: int = 300
+    initial_delay_seconds: int = 0
+
+
 class K8sCollectorSettings(BaseModel):
     enabled: bool = True
     # Daily local schedule: first agent at HH:MM, then +stagger_minutes per agent order.
@@ -187,6 +193,16 @@ class AppSettings(BaseSettings):
         alias="JOB_PROCESSOR_INITIAL_DELAY_SECONDS",
     )
 
+    mynotes_flush_enabled: bool | None = Field(default=None, alias="MY_NOTES_FLUSH_ENABLED")
+    mynotes_flush_interval_seconds: int | None = Field(
+        default=None,
+        alias="MY_NOTES_FLUSH_INTERVAL_SECONDS",
+    )
+    mynotes_flush_initial_delay_seconds: int | None = Field(
+        default=None,
+        alias="MY_NOTES_FLUSH_INITIAL_DELAY_SECONDS",
+    )
+
     k8s_collector_enabled: bool | None = Field(default=None, alias="K8S_COLLECTOR_ENABLED")
     k8s_collector_schedule_hour: int | None = Field(default=None, alias="K8S_COLLECTOR_SCHEDULE_HOUR")
     k8s_collector_schedule_minute: int | None = Field(
@@ -213,6 +229,13 @@ class AppSettings(BaseSettings):
 
     auth_provider_type: str = Field(default="db", alias="AUTH_PROVIDER_TYPE")
     oauth_proxy: str = Field(default="", alias="OAUTH_PROXY")
+
+    redis_url: str = Field(default="redis://localhost:6379/0", alias="REDIS_URL")
+    auth_session_ttl_seconds: int | None = Field(default=None, alias="AUTH_SESSION_TTL_SECONDS")
+    auth_session_absolute_max_seconds: int | None = Field(
+        default=None,
+        alias="AUTH_SESSION_ABSOLUTE_MAX_SECONDS",
+    )
 
     @field_validator("backend_port", mode="before")
     @classmethod
@@ -509,6 +532,42 @@ def load_job_processor_settings() -> JobProcessorSettings:
     )
 
 
+def load_mynotes_settings() -> MyNotesSettings:
+    yaml_settings = _load_yaml(CONFIG_DIR / "settings.yaml")
+    mynotes_yaml = yaml_settings.get("mynotes", {})
+    env_settings = AppSettings()
+
+    if env_settings.mynotes_flush_interval_seconds is not None:
+        interval_raw = env_settings.mynotes_flush_interval_seconds
+    else:
+        interval_raw = mynotes_yaml.get("flush_interval_seconds", 300)
+
+    if env_settings.mynotes_flush_initial_delay_seconds is not None:
+        delay_raw = env_settings.mynotes_flush_initial_delay_seconds
+    else:
+        delay_raw = mynotes_yaml.get("initial_delay_seconds", 0)
+
+    try:
+        flush_interval_seconds = int(interval_raw)
+    except (TypeError, ValueError):
+        flush_interval_seconds = 300
+    try:
+        initial_delay_seconds = int(delay_raw)
+    except (TypeError, ValueError):
+        initial_delay_seconds = 0
+
+    if env_settings.mynotes_flush_enabled is not None:
+        enabled = env_settings.mynotes_flush_enabled
+    else:
+        enabled = _as_bool(mynotes_yaml.get("enabled"), True)
+
+    return MyNotesSettings(
+        enabled=enabled,
+        flush_interval_seconds=max(30, flush_interval_seconds),
+        initial_delay_seconds=max(0, initial_delay_seconds),
+    )
+
+
 def load_k8s_collector_settings() -> K8sCollectorSettings:
     yaml_settings = _load_yaml(CONFIG_DIR / "settings.yaml")
     collector_yaml = yaml_settings.get("k8s_collector", {})
@@ -581,6 +640,15 @@ def load_k8s_collector_settings() -> K8sCollectorSettings:
     )
 
 
+class RedisSettings(BaseModel):
+    url: str = "redis://localhost:6379/0"
+
+
+class AuthSessionSettings(BaseModel):
+    ttl_seconds: int = 3600
+    absolute_max_seconds: int = 28800
+
+
 class AuthProviderSettings(BaseModel):
     provider_type: str = "db"
     oauth_proxy: str = ""
@@ -590,6 +658,46 @@ class AgentRuntimeSettings(BaseModel):
     host: str = "0.0.0.0"
     port: int = 8090
     api_key: str = ""
+
+
+def load_redis_settings() -> RedisSettings:
+    env_settings = AppSettings()
+    yaml_settings = _load_yaml(CONFIG_DIR / "settings.yaml")
+    redis_yaml = yaml_settings.get("redis", {})
+
+    url = (env_settings.redis_url or redis_yaml.get("url") or "redis://localhost:6379/0").strip()
+    return RedisSettings(url=url)
+
+
+def load_auth_session_settings() -> AuthSessionSettings:
+    env_settings = AppSettings()
+    yaml_settings = _load_yaml(CONFIG_DIR / "settings.yaml")
+    session_yaml = yaml_settings.get("auth_session", {})
+
+    ttl_raw = (
+        env_settings.auth_session_ttl_seconds
+        if env_settings.auth_session_ttl_seconds is not None
+        else session_yaml.get("ttl_seconds", 3600)
+    )
+    absolute_raw = (
+        env_settings.auth_session_absolute_max_seconds
+        if env_settings.auth_session_absolute_max_seconds is not None
+        else session_yaml.get("absolute_max_seconds", 28800)
+    )
+
+    try:
+        ttl_seconds = int(ttl_raw)
+    except (TypeError, ValueError):
+        ttl_seconds = 3600
+    try:
+        absolute_max_seconds = int(absolute_raw)
+    except (TypeError, ValueError):
+        absolute_max_seconds = 28800
+
+    return AuthSessionSettings(
+        ttl_seconds=max(60, ttl_seconds),
+        absolute_max_seconds=max(60, absolute_max_seconds),
+    )
 
 
 def load_auth_provider_settings() -> AuthProviderSettings:

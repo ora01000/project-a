@@ -17,6 +17,7 @@ dependencies = [
     "openshift>=0.13.2",
     "pydantic-settings>=2.14.2",
     "pyyaml>=6.0.3",
+    "redis>=8.1.0",
     "sse-starlette>=3.4.5",
     "uvicorn>=0.50.2",
 ]

@@ -72,6 +72,18 @@ def list_mynotes(database_path: str | Path, *, userid: str) -> list[MyNoteRecord
     return [_row_to_mynote(row) for row in rows]
 
 
+def list_all_mynotes(database_path: str | Path) -> list[MyNoteRecord]:
+    with get_connection(database_path) as connection:
+        rows = connection.execute(
+            """
+            SELECT idx, userid, note_name, create_date, origin_file, last_update
+            FROM mynotes
+            ORDER BY idx ASC
+            """
+        ).fetchall()
+    return [_row_to_mynote(row) for row in rows]
+
+
 def get_mynote_by_idx(database_path: str | Path, idx: int) -> MyNoteRecord | None:
     with get_connection(database_path) as connection:
         row = connection.execute(
@@ -162,6 +174,44 @@ def update_mynote_name(
     return updated
 
 
+def touch_mynote_last_update(
+    database_path: str | Path,
+    idx: int,
+    *,
+    userid: str,
+) -> MyNoteRecord:
+    existing = get_mynote_by_idx(database_path, idx)
+    if existing is None:
+        raise ValueError("note not found")
+    if existing.userid != _sanitize_user_id(userid):
+        raise ValueError("note does not belong to this user")
+
+    last_update = now_job_datetime()
+    with get_connection(database_path) as connection:
+        cursor = connection.execute(
+            """
+            UPDATE mynotes
+            SET last_update = ?
+            WHERE idx = ? AND userid = ?
+            """,
+            (last_update, idx, existing.userid),
+        )
+        connection.commit()
+        if cursor.rowcount == 0:
+            raise ValueError("note update failed")
+
+    updated = get_mynote_by_idx(database_path, idx)
+    if updated is None:
+        raise RuntimeError("Failed to load updated mynote record")
+    return updated
+
+
+def write_mynote_content_file(record: MyNoteRecord, content: str) -> None:
+    file_path = resolve_origin_file_path(record.origin_file)
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+    file_path.write_text(content, encoding="utf-8")
+
+
 def save_mynote_content(
     database_path: str | Path,
     idx: int,
@@ -175,9 +225,7 @@ def save_mynote_content(
     if existing.userid != _sanitize_user_id(userid):
         raise ValueError("note does not belong to this user")
 
-    file_path = resolve_origin_file_path(existing.origin_file)
-    file_path.parent.mkdir(parents=True, exist_ok=True)
-    file_path.write_text(content, encoding="utf-8")
+    write_mynote_content_file(existing, content)
 
     last_update = now_job_datetime()
     with get_connection(database_path) as connection:

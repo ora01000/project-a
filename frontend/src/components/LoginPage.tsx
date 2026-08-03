@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 import type { AuthUser } from "../types/auth";
+import { startAuthSession, userFromAuthResponse } from "../utils/authSession";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { PasswordInput } from "./PasswordInput";
 import { ProfileCompleteModal } from "./ProfileCompleteModal";
@@ -8,7 +9,7 @@ import { WelcomeBackModal, type WelcomeNoticeItem } from "./WelcomeBackModal";
 import { RegisterUserModal } from "./users/RegisterUserModal";
 
 interface LoginPageProps {
-  onLoginSuccess: (user: AuthUser) => void;
+  onLoginSuccess: (user: AuthUser, accessToken: string, expiresInSeconds: number) => void;
 }
 
 interface AuthProviderInfo {
@@ -17,6 +18,8 @@ interface AuthProviderInfo {
 }
 
 interface LoginResponse extends AuthUser {
+  access_token?: string;
+  expires_in?: number;
   profile_required?: boolean;
   welcome_back?: boolean;
   previous_last_login?: string | null;
@@ -25,8 +28,16 @@ interface LoginResponse extends AuthUser {
 
 interface WelcomeBackState {
   user: AuthUser;
+  accessToken: string;
+  expiresInSeconds: number;
   previousLastLogin: string | null;
   notices: WelcomeNoticeItem[];
+}
+
+interface PendingProfileState {
+  user: AuthUser;
+  accessToken: string;
+  expiresInSeconds: number;
 }
 
 export function LoginPage({ onLoginSuccess }: LoginPageProps) {
@@ -38,7 +49,7 @@ export function LoginPage({ onLoginSuccess }: LoginPageProps) {
   const [pendingMessage, setPendingMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [registrationEnabled, setRegistrationEnabled] = useState(true);
-  const [pendingProfileUser, setPendingProfileUser] = useState<AuthUser | null>(null);
+  const [pendingProfile, setPendingProfile] = useState<PendingProfileState | null>(null);
   const [welcomeBack, setWelcomeBack] = useState<WelcomeBackState | null>(null);
 
   useEffect(() => {
@@ -93,33 +104,32 @@ export function LoginPage({ onLoginSuccess }: LoginPageProps) {
       }
 
       const payload = (await response.json()) as LoginResponse;
-      const user: AuthUser = {
-        idx: payload.idx,
-        userid: payload.userid,
-        email: payload.email,
-        username: payload.username,
-        depart: payload.depart,
-        role: payload.role,
-        band: payload.band ?? 1,
-        agents: payload.agents ?? "",
-        agent_ids: payload.agent_ids ?? [],
-      };
+      const accessToken = payload.access_token;
+      const expiresInSeconds = payload.expires_in ?? 3600;
+      if (!accessToken) {
+        throw new Error("로그인 토큰을 받지 못했습니다.");
+      }
+
+      const user = userFromAuthResponse(payload as unknown as Record<string, unknown>);
 
       if (payload.profile_required) {
-        setPendingProfileUser(user);
+        startAuthSession(user, accessToken, expiresInSeconds);
+        setPendingProfile({ user, accessToken, expiresInSeconds });
         return;
       }
 
       if (payload.welcome_back) {
         setWelcomeBack({
           user,
+          accessToken,
+          expiresInSeconds,
           previousLastLogin: payload.previous_last_login ?? null,
           notices: payload.welcome_notices ?? [],
         });
         return;
       }
 
-      onLoginSuccess(user);
+      onLoginSuccess(user, accessToken, expiresInSeconds);
     } catch (err) {
       setError(err instanceof Error ? err.message : "로그인에 실패했습니다.");
     } finally {
@@ -203,12 +213,13 @@ export function LoginPage({ onLoginSuccess }: LoginPageProps) {
         />
       ) : null}
 
-      {pendingProfileUser ? (
+      {pendingProfile ? (
         <ProfileCompleteModal
-          user={pendingProfileUser}
+          user={pendingProfile.user}
           onSaved={(updated) => {
-            setPendingProfileUser(null);
-            onLoginSuccess(updated);
+            const { accessToken, expiresInSeconds } = pendingProfile;
+            setPendingProfile(null);
+            onLoginSuccess(updated, accessToken, expiresInSeconds);
           }}
         />
       ) : null}
@@ -220,9 +231,9 @@ export function LoginPage({ onLoginSuccess }: LoginPageProps) {
           previousLastLogin={welcomeBack.previousLastLogin}
           notices={welcomeBack.notices}
           onClose={() => {
-            const user = welcomeBack.user;
+            const { user, accessToken, expiresInSeconds } = welcomeBack;
             setWelcomeBack(null);
-            onLoginSuccess(user);
+            onLoginSuccess(user, accessToken, expiresInSeconds);
           }}
         />
       ) : null}

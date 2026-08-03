@@ -17,6 +17,10 @@ function clampZoom(value: number): number {
   return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, Math.round(value * 100) / 100));
 }
 
+function clampFitScale(value: number): number {
+  return Math.min(4, Math.max(0.05, value));
+}
+
 function getSvgCacheKey(definition: string): string {
   return `${D2_RENDER_CONFIG_VERSION}:${definition}`;
 }
@@ -64,6 +68,7 @@ function DownloadIcon() {
 
 function D2DiagramInner({ chart }: D2DiagramProps) {
   const renderIdRef = useRef(0);
+  const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
   const normalizedChart = chart.trim();
   const cacheKey = normalizedChart ? getSvgCacheKey(normalizedChart) : "";
@@ -72,11 +77,28 @@ function D2DiagramInner({ chart }: D2DiagramProps) {
   const [renderError, setRenderError] = useState<string | null>(null);
   const [zoom, setZoom] = useState(ZOOM_DEFAULT);
   const [diagramSize, setDiagramSize] = useState<{ width: number; height: number } | null>(null);
+  const [containerWidth, setContainerWidth] = useState(0);
 
   useEffect(() => {
     setZoom(ZOOM_DEFAULT);
     setDiagramSize(null);
   }, [normalizedChart]);
+
+  useLayoutEffect(() => {
+    const container = containerRef.current;
+    if (!container) {
+      return;
+    }
+
+    const updateWidth = () => {
+      setContainerWidth(container.clientWidth);
+    };
+
+    updateWidth();
+    const observer = new ResizeObserver(updateWidth);
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, [svg]);
 
   useLayoutEffect(() => {
     const svgElement = canvasRef.current?.querySelector("svg");
@@ -143,7 +165,15 @@ function D2DiagramInner({ chart }: D2DiagramProps) {
     downloadDiagramSvg(svg, "d2-diagram");
   };
 
-  const zoomPercent = Math.round(zoom * 100);
+  const horizontalPadding = 24;
+  const fitScale =
+    diagramSize && containerWidth > horizontalPadding
+      ? clampFitScale((containerWidth - horizontalPadding) / diagramSize.width)
+      : 1;
+  const effectiveScale = fitScale * zoom;
+  const scaledWidth = diagramSize ? diagramSize.width * effectiveScale : 0;
+  const scaledHeight = diagramSize ? diagramSize.height * effectiveScale : 0;
+  const zoomPercent = Math.round(effectiveScale * 100);
   const toolbarButtonClass =
     "flex h-7 w-7 items-center justify-center rounded text-sm text-slate-200 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40";
 
@@ -167,7 +197,10 @@ function D2DiagramInner({ chart }: D2DiagramProps) {
   }
 
   return (
-    <div className="d2-diagram relative overflow-hidden rounded border border-slate-700 bg-slate-950/60">
+    <div
+      ref={containerRef}
+      className="d2-diagram relative w-full overflow-hidden rounded border border-slate-700 bg-slate-950/60"
+    >
       <div className="absolute right-2 top-2 z-10 flex items-center gap-1 rounded-md border border-slate-700 bg-slate-900/95 p-1 shadow-lg">
         <button
           type="button"
@@ -192,7 +225,7 @@ function D2DiagramInner({ chart }: D2DiagramProps) {
           type="button"
           onClick={() => setZoom(ZOOM_DEFAULT)}
           aria-label="배율 초기화"
-          title="100%로 초기화"
+          title="가로 맞춤으로 초기화"
           className="min-w-[3.25rem] rounded px-1.5 py-1 text-center font-mono text-[11px] text-slate-300 hover:bg-slate-800"
         >
           {zoomPercent}%
@@ -209,14 +242,14 @@ function D2DiagramInner({ chart }: D2DiagramProps) {
         </button>
       </div>
 
-      <div className="max-h-[480px] overflow-auto p-3 pt-11">
+      <div className="overflow-hidden p-3 pt-11">
         <div
-          className="inline-block"
+          className="mx-auto"
           style={
             diagramSize
               ? {
-                  width: diagramSize.width * zoom,
-                  height: diagramSize.height * zoom,
+                  width: scaledWidth,
+                  height: scaledHeight,
                 }
               : undefined
           }
@@ -225,7 +258,7 @@ function D2DiagramInner({ chart }: D2DiagramProps) {
             ref={canvasRef}
             className="d2-diagram-canvas inline-block"
             style={{
-              transform: `scale(${zoom})`,
+              transform: `scale(${effectiveScale})`,
               transformOrigin: "top left",
               width: diagramSize?.width,
               height: diagramSize?.height,

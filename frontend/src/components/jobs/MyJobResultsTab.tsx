@@ -5,6 +5,7 @@ import type { JobRecord } from "../../types/job";
 import type { JobResult } from "../../types/jobResult";
 import { AssistantMessageContent } from "../AssistantMessageContent";
 import { ConfirmDialog } from "../ConfirmDialog";
+import { JobBlockField, JobInlineField } from "./JobFieldLabel";
 
 async function parseError(response: Response, fallback: string): Promise<string> {
   const payload = (await response.json().catch(() => null)) as { detail?: string } | null;
@@ -42,6 +43,16 @@ function statusLabel(statusCode: number): string {
     return "작업 반려";
   }
   return `상태 ${statusCode}`;
+}
+
+function statusValueButtonClass(statusCode: number): string {
+  if (statusCode === 11) {
+    return "border-rose-700/80 bg-rose-950/70 text-rose-200";
+  }
+  if (statusCode === 12) {
+    return "border-amber-700/80 bg-amber-950/70 text-amber-200";
+  }
+  return "border-emerald-700/80 bg-emerald-950/70 text-emerald-200";
 }
 
 interface MyJobResultsTabProps {
@@ -215,22 +226,20 @@ export function MyJobResultsTab({ active, currentUser, onCopyToNote }: MyJobResu
           ) : null}
           {selectedJob ? (
             <div className="flex min-h-0 flex-1 flex-col gap-3">
-              <div className="shrink-0 space-y-2">
-                <div className="flex flex-wrap items-center gap-2">
-                  <p className="text-sm font-semibold text-slate-100">{selectedJob.job_title}</p>
+              <div className="shrink-0 space-y-3">
+                <JobInlineField label="작업 제목" bullet="📋" valueClassName="text-sm font-semibold text-slate-100">
+                  {selectedJob.job_title}
+                </JobInlineField>
+                <JobInlineField label="상태" bullet="🏷️" valueClassName="">
                   <span
-                    className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${
-                      selectedJob.status_code === 11
-                        ? "bg-rose-950/70 text-rose-200"
-                        : selectedJob.status_code === 12
-                          ? "bg-amber-950/70 text-amber-200"
-                          : "bg-emerald-950/70 text-emerald-200"
-                    }`}
+                    className={`inline-flex rounded-md border px-2.5 py-1 text-[11px] font-semibold shadow-sm ${statusValueButtonClass(selectedJob.status_code)}`}
                   >
                     {statusLabel(selectedJob.status_code)}
                   </span>
-                </div>
-                <p className="text-xs text-slate-400">SR 번호: {selectedJob.srnum}</p>
+                </JobInlineField>
+                <JobInlineField label="SR 번호" bullet="🔖">
+                  {selectedJob.srnum}
+                </JobInlineField>
               </div>
 
               <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain pr-1">
@@ -242,19 +251,13 @@ export function MyJobResultsTab({ active, currentUser, onCopyToNote }: MyJobResu
                 ) : null}
                 {!isLoadingResult && jobResult ? (
                   <>
-                    <div>
-                      <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">
-                        완료 일시
-                      </p>
-                      <p className="mt-1 text-sm text-slate-200">
-                        {formatJobDate(jobResult.complete_date)}
-                      </p>
-                    </div>
-                    <div>
-                      <div className="flex items-center justify-between gap-2">
-                        <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">
-                          처리 결과
-                        </p>
+                    <JobInlineField label="완료 일시" bullet="🕐">
+                      {formatJobDate(jobResult.complete_date)}
+                    </JobInlineField>
+                    <JobBlockField
+                      label="처리 결과"
+                      bullet="📊"
+                      headerExtra={
                         <button
                           type="button"
                           disabled={isCopyingToNote}
@@ -263,11 +266,12 @@ export function MyJobResultsTab({ active, currentUser, onCopyToNote }: MyJobResu
                         >
                           {isCopyingToNote ? "복사 중..." : "노트로 복사"}
                         </button>
-                      </div>
-                      <div className="mt-2 rounded-md border border-slate-700 bg-slate-950/60 p-3">
+                      }
+                    >
+                      <div className="rounded-md border border-slate-700 bg-slate-950/60 p-3">
                         <AssistantMessageContent content={jobResult.result} />
                       </div>
-                    </div>
+                    </JobBlockField>
                   </>
                 ) : null}
               </div>

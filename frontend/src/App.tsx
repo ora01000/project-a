@@ -13,10 +13,19 @@ import type { AgentInfo, HealthInfo } from "./types/agent";
 import type { AuthUser } from "./types/auth";
 import type { AppView } from "./types/navigation";
 import { ROLE_ADMIN } from "./types/user";
-import { clearAuthUser, loadAuthUser, saveAuthUser, startAuthSession } from "./utils/authSession";
+import { logoutSession, setUnauthorizedHandler } from "./utils/api";
+import {
+  clearAuthUser,
+  getAccessToken,
+  loadAuthUser,
+  saveAuthUser,
+  startAuthSession,
+  userFromAuthResponse,
+} from "./utils/authSession";
 
 export default function App() {
-  const [user, setUser] = useState<AuthUser | null>(() => loadAuthUser());
+  const [user, setUser] = useState<AuthUser | null>(null);
+  const [authBootstrapping, setAuthBootstrapping] = useState(() => Boolean(getAccessToken()));
   const [activeView, setActiveView] = useState<AppView>("dashboard");
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [health, setHealth] = useState<HealthInfo | null>(null);
@@ -27,11 +36,14 @@ export default function App() {
     setIntegratedChatFullscreen((current) => !current);
   }, []);
 
-  const handleLoginSuccess = useCallback((loggedInUser: AuthUser) => {
-    startAuthSession(loggedInUser);
-    setUser(loggedInUser);
-    setActiveView("dashboard");
-  }, []);
+  const handleLoginSuccess = useCallback(
+    (loggedInUser: AuthUser, accessToken: string, expiresInSeconds: number) => {
+      startAuthSession(loggedInUser, accessToken, expiresInSeconds);
+      setUser(loggedInUser);
+      setActiveView("dashboard");
+    },
+    [],
+  );
 
   const handleUserUpdated = useCallback((updatedUser: AuthUser) => {
     saveAuthUser(updatedUser);
@@ -39,13 +51,70 @@ export default function App() {
   }, []);
 
   const handleLogout = useCallback(() => {
-    clearAuthUser();
+    void logoutSession();
     setUser(null);
     setActiveView("dashboard");
     setAgents([]);
     setHealth(null);
     setError(null);
     setIntegratedChatFullscreen(false);
+  }, []);
+
+  useEffect(() => {
+    setUnauthorizedHandler(() => {
+      clearAuthUser();
+      setUser(null);
+      setActiveView("dashboard");
+      setAgents([]);
+      setHealth(null);
+      setError(null);
+      setIntegratedChatFullscreen(false);
+    });
+    return () => setUnauthorizedHandler(null);
+  }, []);
+
+  useEffect(() => {
+    const token = getAccessToken();
+    if (!token) {
+      setAuthBootstrapping(false);
+      return;
+    }
+
+    let cancelled = false;
+    const restoreSession = async () => {
+      try {
+        const response = await fetch("/api/auth/me");
+        if (!response.ok) {
+          clearAuthUser();
+          if (!cancelled) {
+            setUser(null);
+          }
+          return;
+        }
+
+        const payload = (await response.json()) as Record<string, unknown>;
+        const restoredUser = userFromAuthResponse(payload);
+        const expiresIn = typeof payload.expires_in === "number" ? payload.expires_in : 3600;
+        if (!cancelled) {
+          startAuthSession(restoredUser, token, expiresIn);
+          setUser(restoredUser);
+        }
+      } catch {
+        const cachedUser = loadAuthUser();
+        if (!cancelled) {
+          setUser(cachedUser);
+        }
+      } finally {
+        if (!cancelled) {
+          setAuthBootstrapping(false);
+        }
+      }
+    };
+
+    void restoreSession();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -163,6 +232,14 @@ export default function App() {
       setActiveView("dashboard");
     }
   }, [activeView, user]);
+
+  if (authBootstrapping) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-950 text-slate-300">
+        세션 확인 중...
+      </div>
+    );
+  }
 
   if (!user) {
     return <LoginPage onLoginSuccess={handleLoginSuccess} />;
