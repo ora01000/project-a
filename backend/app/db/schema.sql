@@ -121,3 +121,21 @@ CREATE TABLE IF NOT EXISTS notice_board (
     notice TEXT NOT NULL,
     welcome_popup INTEGER NOT NULL DEFAULT 0
 );
+
+CREATE TABLE IF NOT EXISTS jobs (
+    idx INTEGER PRIMARY KEY AUTOINCREMENT,
+    srnum VARCHAR(20) NOT NULL UNIQUE,
+    status_code INTEGER NOT NULL DEFAULT 0,
+    approver_registered_date TEXT,
+    job_title VARCHAR(300) NOT NULL,
+    requester_name VARCHAR(100) NOT NULL,
+    requester_email VARCHAR(100) NOT NULL,
+    requester_depart VARCHAR(100) NOT NULL,
+    job_content TEXT NOT NULL,
+    request_date TEXT NOT NULL,
+    madang_id VARCHAR(50) NOT NULL,
+    team_id VARCHAR(50) NOT NULL,
+    channel_id VARCHAR(120) NOT NULL,
+    message_id VARCHAR(50) NOT NULL,
+    received_at TEXT NOT NULL
+);

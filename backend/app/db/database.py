@@ -109,6 +109,7 @@ def _apply_migrations(connection: sqlite3.Connection) -> None:
     _migrate_agentruntime_is_orchestrator(connection)
     _drop_legacy_product_tables(connection)
 
+    _ensure_jobs_table(connection)
     _ensure_k8s_inventory_tables(connection)
 
 
@@ -378,8 +379,40 @@ def _migrate_agentruntime_is_orchestrator(connection: sqlite3.Connection) -> Non
     logger.info("Synced agentruntime is_orchestrator flags")
 
 
+def _ensure_jobs_table(connection: sqlite3.Connection) -> None:
+    tables = {
+        str(row[0])
+        for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+    }
+    if "jobs" in tables:
+        return
+
+    connection.execute(
+        """
+        CREATE TABLE jobs (
+            idx INTEGER PRIMARY KEY AUTOINCREMENT,
+            srnum VARCHAR(20) NOT NULL UNIQUE,
+            status_code INTEGER NOT NULL DEFAULT 0,
+            approver_registered_date TEXT,
+            job_title VARCHAR(300) NOT NULL,
+            requester_name VARCHAR(100) NOT NULL,
+            requester_email VARCHAR(100) NOT NULL,
+            requester_depart VARCHAR(100) NOT NULL,
+            job_content TEXT NOT NULL,
+            request_date TEXT NOT NULL,
+            madang_id VARCHAR(50) NOT NULL,
+            team_id VARCHAR(50) NOT NULL,
+            channel_id VARCHAR(120) NOT NULL,
+            message_id VARCHAR(50) NOT NULL,
+            received_at TEXT NOT NULL
+        )
+        """
+    )
+    logger.info("Created jobs table")
+
+
 def _drop_legacy_product_tables(connection: sqlite3.Connection) -> None:
-    for table_name in ("job_notifications", "jobs", "inventory", "agents"):
+    for table_name in ("job_notifications", "inventory", "agents"):
         connection.execute(f"DROP TABLE IF EXISTS {table_name}")
 
 
