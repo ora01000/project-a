@@ -24,6 +24,11 @@ INFRA_D2_NODE_LABEL_RULE = (
     "(for example: `nginx-service (Service)` or `ollama-webui (Namespace)`)."
 )
 
+INFRA_D2_STYLE_RULE = (
+    "Use only valid D2 style keywords inside style blocks (for example stroke-dash: 5). "
+    "Do not use CSS-only keywords such as stroke-dashed, stroke-solid, or font-family."
+)
+
 INFRA_D2_ANALYSIS_GUIDELINES = (
     "When analyzing infrastructure and creating diagrams, follow these guidelines:\n"
     "1. Include Namespace and ResourceQuota in the analysis.\n"
@@ -44,6 +49,7 @@ INFRA_ARCHITECTURE_D2_INSTRUCTION = (
     "complete D2 diagram that uses real resource names and relationships from the query results.\n\n"
     f"{INFRA_D2_MANIFEST_SHAPE_MAPPING}\n\n"
     f"{INFRA_D2_NODE_LABEL_RULE}\n\n"
+    f"{INFRA_D2_STYLE_RULE}\n\n"
     f"{INFRA_D2_ANALYSIS_GUIDELINES}\n\n"
     "Apply shapes with D2 node blocks, for example:\n"
     "```d2\n"

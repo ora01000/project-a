@@ -1,8 +1,9 @@
 import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { downloadDiagramSvg } from "../utils/diagramExport";
+import { normalizeD2Definition } from "../utils/d2Normalize";
 
-const D2_RENDER_CONFIG_VERSION = "v2-scale1";
+const D2_RENDER_CONFIG_VERSION = "v3-normalize-styles";
 const renderedSvgCache = new Map<string, string>();
 
 const ZOOM_MIN = 0.5;
@@ -36,7 +37,7 @@ async function renderD2Chart(definition: string): Promise<string> {
   }
 
   const d2 = await getD2Client();
-  const result = await d2.compile(definition);
+  const result = await d2.compile(normalizeD2Definition(definition));
   const svg = await d2.render(result.diagram, {
     ...result.renderOptions,
     darkThemeID: 200,

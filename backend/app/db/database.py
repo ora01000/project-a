@@ -546,97 +546,6 @@ def seed_initial_users(connection: sqlite3.Connection) -> int:
     return len(INITIAL_USERS)
 
 
-def seed_initial_agentruntime(connection: sqlite3.Connection) -> int:
-    from backend.app.agents.registry import AGENT_DEFINITIONS
-    from backend.app.db.agentruntime import AGENTRUNTIME_TYPE_MOCKUP, insert_agentruntime_records, mockup_row_from_definition
-
-    row = connection.execute(
-        "SELECT COUNT(*) AS count FROM agentruntime WHERE type = ?",
-        (AGENTRUNTIME_TYPE_MOCKUP,),
-    ).fetchone()
-    existing_count = int(row["count"]) if row else 0
-    if existing_count > 0:
-        logger.info(
-            "Skip agentruntime mock seeding: type=0 already has %s record(s)",
-            existing_count,
-        )
-        return 0
-
-    seed_rows = [mockup_row_from_definition(definition) for definition in AGENT_DEFINITIONS]
-    if not seed_rows:
-        logger.info("Skip agentruntime seeding: AGENT_DEFINITIONS is empty")
-        return 0
-
-    inserted = insert_agentruntime_records(connection, seed_rows)
-    connection.commit()
-    logger.info("Seeded %s agentruntime mock record(s)", inserted)
-    return inserted
-
-
-def sync_missing_agentruntime(connection: sqlite3.Connection) -> int:
-    from backend.app.agents.registry import AGENT_DEFINITIONS
-    from backend.app.db.agentruntime import AGENTRUNTIME_TYPE_MOCKUP, insert_agentruntime_records, mockup_row_from_definition
-
-    existing_local_ids = {
-        str(row["local_agent_id"]).strip()
-        for row in connection.execute(
-            """
-            SELECT local_agent_id
-            FROM agentruntime
-            WHERE type = ? AND local_agent_id IS NOT NULL
-            """,
-            (AGENTRUNTIME_TYPE_MOCKUP,),
-        ).fetchall()
-        if str(row["local_agent_id"]).strip()
-    }
-    missing_definitions = [
-        definition for definition in AGENT_DEFINITIONS if definition.agent_id not in existing_local_ids
-    ]
-    if not missing_definitions:
-        return 0
-
-    seed_rows = [mockup_row_from_definition(definition) for definition in missing_definitions]
-    inserted = insert_agentruntime_records(connection, seed_rows)
-    connection.commit()
-    logger.info("Synced %s missing agentruntime record(s)", inserted)
-    return inserted
-
-
-def sync_extra_mock_agentruntime(connection: sqlite3.Connection) -> int:
-    from backend.app.agents.mock_platform_agents import MOCK_AGENTRUNTIME_EXTRA_PRESETS
-    from backend.app.db.agentruntime import (
-        AGENTRUNTIME_TYPE_MOCKUP,
-        insert_agentruntime_records,
-        mockup_row_from_preset,
-    )
-
-    existing_local_ids = {
-        str(row["local_agent_id"]).strip()
-        for row in connection.execute(
-            """
-            SELECT local_agent_id
-            FROM agentruntime
-            WHERE type = ? AND local_agent_id IS NOT NULL
-            """,
-            (AGENTRUNTIME_TYPE_MOCKUP,),
-        ).fetchall()
-        if str(row["local_agent_id"]).strip()
-    }
-    missing_presets = [
-        preset
-        for preset in MOCK_AGENTRUNTIME_EXTRA_PRESETS
-        if preset.local_agent_id not in existing_local_ids
-    ]
-    if not missing_presets:
-        return 0
-
-    seed_rows = [mockup_row_from_preset(preset) for preset in missing_presets]
-    inserted = insert_agentruntime_records(connection, seed_rows)
-    connection.commit()
-    logger.info("Synced %s extra mock agentruntime record(s)", inserted)
-    return inserted
-
-
 def init_database(database_path: str | Path | None = None) -> Path:
     path = resolve_database_path(database_path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -646,9 +555,6 @@ def init_database(database_path: str | Path | None = None) -> Path:
         _apply_migrations(connection)
         connection.commit()
         seed_initial_users(connection)
-        seed_initial_agentruntime(connection)
-        sync_missing_agentruntime(connection)
-        sync_extra_mock_agentruntime(connection)
 
     logger.info("SQLite database initialized at %s", path)
     return path

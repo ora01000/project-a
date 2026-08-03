@@ -7,6 +7,7 @@ import { useTopology } from "../context/TopologyContext";
 import { appendInputHistory, loadInputHistory } from "../utils/inputHistory";
 import { formatResponseTimestamp } from "../utils/messageIndex";
 import { flushSseBuffer, parseSseChunk } from "../utils/parseSse";
+import { createSessionId } from "../utils/sessionId";
 import { AssistantMessageContent } from "./AssistantMessageContent";
 import { CollapsibleUserMessage } from "./CollapsibleUserMessage";
 import { OpenAiBillingConfirmDialog } from "./OpenAiBillingConfirmDialog";
@@ -31,10 +32,6 @@ interface IntegratedChatPanelProps {
 
 function createResponseId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-}
-
-function createSessionId(): string {
-  return crypto.randomUUID();
 }
 
 function StopIcon() {
