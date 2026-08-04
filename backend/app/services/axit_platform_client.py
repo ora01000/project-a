@@ -31,6 +31,63 @@ from backend.app.services.axit_config import (
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_AXIT_HTTP_TIMEOUT_SECONDS = 3600.0
+DEFAULT_AXIT_TOKEN_TIMEOUT_SECONDS = 60.0
+
+
+def build_axit_http_timeout(timeout_seconds: float) -> httpx.Timeout:
+    """Long read timeout for AXIT agent invoke; keep connect/write bounded."""
+    read_timeout = max(1.0, float(timeout_seconds))
+    return httpx.Timeout(connect=30.0, read=read_timeout, write=60.0, pool=30.0)
+
+
+def build_axit_token_http_timeout(timeout_seconds: float = DEFAULT_AXIT_TOKEN_TIMEOUT_SECONDS) -> httpx.Timeout:
+    read_timeout = max(5.0, float(timeout_seconds))
+    return httpx.Timeout(connect=15.0, read=read_timeout, write=15.0, pool=15.0)
+
+
+class AxitInvokeError(RuntimeError):
+    """AXIT invoke failed before a successful completion payload was parsed."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        elapsed_seconds: float,
+        invoke_url: str = "",
+        status_code: int | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.elapsed_seconds = elapsed_seconds
+        self.invoke_url = invoke_url
+        self.status_code = status_code
+
+
+class AxitGatewayTimeoutError(AxitInvokeError):
+    """AXIT API gateway returned 504 while upstream agent work may still be running."""
+
+
+class AxitInvokeTimeoutError(AxitInvokeError):
+    """Backend httpx client timed out waiting for AXIT invoke response."""
+
+
+def format_axit_invoke_error(exc: Exception) -> str:
+    if isinstance(exc, AxitGatewayTimeoutError):
+        return (
+            "AXIT 플랫폼 게이트웨이가 응답 대기 중 504 Gateway Timeout을 반환했습니다. "
+            f"경과 {exc.elapsed_seconds:.0f}초. 에이전트는 백그라운드에서 계속 처리 중일 수 있습니다. "
+            "AXIT API Gateway/프록시의 integration timeout 증설 또는 비동기 invoke API가 필요합니다."
+        )
+    if isinstance(exc, AxitInvokeTimeoutError):
+        return (
+            "AXIT invoke 응답 대기 시간이 초과되었습니다 "
+            f"({exc.elapsed_seconds:.0f}초). AGENT_RUNTIME_HTTP_TIMEOUT_SECONDS 설정을 확인하세요."
+        )
+    if isinstance(exc, AxitInvokeError):
+        status = f" HTTP {exc.status_code}" if exc.status_code is not None else ""
+        return f"AXIT invoke 실패{status}: {exc} (경과 {exc.elapsed_seconds:.0f}초)"
+    return str(exc)
+
 
 class AxitTokenError(RuntimeError):
     """Raised when AXIT platform token issuance fails."""
@@ -68,11 +125,13 @@ class AxitPlatformClient:
         *,
         client_id: str | None = None,
         client_secret: str | None = None,
-        timeout_seconds: float = 300.0,
+        timeout_seconds: float = DEFAULT_AXIT_HTTP_TIMEOUT_SECONDS,
     ) -> None:
         self._client_id = client_id
         self._client_secret = client_secret
-        self._timeout_seconds = timeout_seconds
+        self._timeout_seconds = max(1.0, float(timeout_seconds))
+        self._invoke_http_timeout = build_axit_http_timeout(self._timeout_seconds)
+        self._token_http_timeout = build_axit_token_http_timeout()
         self._token_cache: dict[str, _CachedAccessToken] = {}
 
     def _resolve_client_id(self, runtime_mode: str) -> str:
@@ -116,7 +175,7 @@ class AxitPlatformClient:
             request_body["grant_type"],
         )
 
-        async with httpx.AsyncClient(timeout=self._timeout_seconds) as client:
+        async with httpx.AsyncClient(timeout=self._token_http_timeout) as client:
             response = await client.post(
                 token_url,
                 headers={
@@ -217,6 +276,16 @@ class AxitPlatformClient:
         access_token = await self._fetch_access_token(token_url, runtime_mode=runtime_mode)
 
         invoke_url = build_agent_chat_url(record)
+        started_at = time.monotonic()
+        logger.info(
+            "AXIT invoke start: agent_id=%s is_orchestrator=%s url=%s runtime_mode=%s "
+            "read_timeout=%ss",
+            record.agent_id,
+            record.is_orchestrator,
+            invoke_url,
+            runtime_mode,
+            self._timeout_seconds,
+        )
         body = {
             "service_id": service_id,
             "session_id": session_id,
@@ -226,17 +295,86 @@ class AxitPlatformClient:
             "text": request.message,
         }
 
-        async with httpx.AsyncClient(timeout=self._timeout_seconds) as client:
-            response = await client.post(
+        try:
+            async with httpx.AsyncClient(timeout=self._invoke_http_timeout) as client:
+                response = await client.post(
+                    invoke_url,
+                    headers={
+                        "Authorization": f"Bearer {access_token}",
+                        "Content-Type": "application/json",
+                    },
+                    json=body,
+                )
+        except httpx.TimeoutException as exc:
+            elapsed = time.monotonic() - started_at
+            logger.error(
+                "AXIT invoke client timeout: url=%s elapsed=%.1fs read_timeout=%ss error=%s",
                 invoke_url,
-                headers={
-                    "Authorization": f"Bearer {access_token}",
-                    "Content-Type": "application/json",
-                },
-                json=body,
+                elapsed,
+                self._timeout_seconds,
+                exc,
             )
-            response.raise_for_status()
+            raise AxitInvokeTimeoutError(
+                f"AXIT invoke timed out after {elapsed:.1f}s (read_timeout={self._timeout_seconds:.0f}s)",
+                elapsed_seconds=elapsed,
+                invoke_url=invoke_url,
+            ) from exc
+        except httpx.RequestError as exc:
+            elapsed = time.monotonic() - started_at
+            logger.error(
+                "AXIT invoke transport error: url=%s elapsed=%.1fs error=%s",
+                invoke_url,
+                elapsed,
+                exc,
+            )
+            raise AxitInvokeError(
+                f"AXIT invoke transport error: {exc}",
+                elapsed_seconds=elapsed,
+                invoke_url=invoke_url,
+            ) from exc
+
+        elapsed = time.monotonic() - started_at
+        if response.status_code == 504:
+            body_preview = response.text.strip()[:500]
+            logger.error(
+                "AXIT invoke gateway timeout: url=%s status=504 elapsed=%.1fs body=%s",
+                invoke_url,
+                elapsed,
+                body_preview,
+            )
+            raise AxitGatewayTimeoutError(
+                "AXIT gateway returned 504 Gateway Timeout",
+                elapsed_seconds=elapsed,
+                invoke_url=invoke_url,
+                status_code=504,
+            )
+
+        if response.status_code >= 400:
+            body_preview = response.text.strip()[:500]
+            logger.error(
+                "AXIT invoke HTTP error: url=%s status=%s elapsed=%.1fs body=%s",
+                invoke_url,
+                response.status_code,
+                elapsed,
+                body_preview,
+            )
+            raise AxitInvokeError(
+                f"AXIT invoke failed with HTTP {response.status_code}: {body_preview or response.reason_phrase}",
+                elapsed_seconds=elapsed,
+                invoke_url=invoke_url,
+                status_code=response.status_code,
+            )
+
+        logger.info(
+            "AXIT invoke success: agent_id=%s status=%s elapsed=%.1fs",
+            record.agent_id,
+            response.status_code,
+            elapsed,
+        )
+        try:
             payload = response.json()
+        except ValueError as exc:
+            raise RuntimeError(f"Unexpected non-JSON invoke response from {invoke_url}") from exc
 
         if not isinstance(payload, dict):
             raise RuntimeError(f"Unexpected invoke response from {invoke_url}")

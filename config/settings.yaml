@@ -15,6 +15,8 @@ server:
   backend_api_port: 8080
   database_path: "data/app.db"
   health_check_interval_seconds: 30
+  # http 모드 AXIT invoke 대기 시간(초). nginx proxy_read_timeout 과 맞추는 것을 권장
+  agent_runtime_http_timeout_seconds: 3600
 
 # 작업 알림 채널 (환경변수로 오버라이드 가능)
 notifications:
@@ -65,6 +67,10 @@ job_processor:
   enabled: true
   poll_interval_seconds: 60
   initial_delay_seconds: 0
+  # http 모드: agentruntime.local_agent_id (기본 helpdesk, 대안 sys-helpdesk)
+  helpdesk_local_agent_id: helpdesk
+  # http 모드: AXIT agent_id 직접 지정 (선택)
+  helpdesk_axit_agent_id: ""
 
 # 나의 노트: Redis 편집 버퍼 → 주기적 파일 영구 저장
 mynotes:

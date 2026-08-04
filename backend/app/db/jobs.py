@@ -4,7 +4,12 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from backend.app.db.database import get_connection
-from backend.app.db.job_datetime import build_sr_num, normalize_job_datetime, now_job_datetime
+from backend.app.db.job_datetime import (
+    build_sr_num,
+    normalize_job_datetime,
+    next_sr_sequence,
+    now_job_datetime,
+)
 
 JOB_STATUS_RECEIVED = 0
 JOB_STATUS_APPROVER_ASSIGNED = 1
@@ -148,6 +153,8 @@ def create_job_from_intake(
     received_at = now_job_datetime()
 
     with get_connection(database_path) as connection:
+        sequence = next_sr_sequence(connection, normalized_request_date)
+        srnum = build_sr_num(normalized_request_date, sequence)
         cursor = connection.execute(
             """
             INSERT INTO jobs (
@@ -170,7 +177,7 @@ def create_job_from_intake(
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                "",
+                srnum,
                 JOB_STATUS_RECEIVED,
                 None,
                 None,
@@ -188,11 +195,6 @@ def create_job_from_intake(
             ),
         )
         idx = int(cursor.lastrowid)
-        srnum = build_sr_num(payload.request_date, idx)
-        connection.execute(
-            "UPDATE jobs SET srnum = ? WHERE idx = ?",
-            (srnum, idx),
-        )
         connection.commit()
 
     created = get_job_by_idx(database_path, idx)

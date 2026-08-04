@@ -28,14 +28,27 @@ def request_date_yyyymmdd(request_date: str) -> str:
     raise ValueError(f"cannot derive YYYYMMDD from request_date: {request_date!r}")
 
 
-def build_sr_num(request_date: str, idx: int) -> str:
-    """SR + YYYYMMDD + _ + 5-digit sequence from idx % 100000.
-
-    The trailing 5 digits are always fixed width (00000..99999).
-    Example: idx 1 -> SR20260717_00001, idx 100000 -> SR20260717_00000
-    """
-    sequence = int(idx) % 100_000
+def build_sr_num(request_date: str, sequence: int) -> str:
+    """SR + YYYYMMDD + _ + 5-digit daily sequence (00001..99999 per date)."""
+    if sequence < 1 or sequence > 99_999:
+        raise ValueError(f"srnum sequence out of range: {sequence}")
     return f"SR{request_date_yyyymmdd(request_date)}_{sequence:05d}"
+
+
+def next_sr_sequence(connection, request_date: str) -> int:
+    """Next 5-digit sequence for the request date; resets to 1 when YYYYMMDD changes."""
+    yyyymmdd = request_date_yyyymmdd(request_date)
+    prefix = f"SR{yyyymmdd}_"
+    row = connection.execute(
+        """
+        SELECT MAX(CAST(SUBSTR(srnum, -5) AS INTEGER))
+        FROM jobs
+        WHERE srnum LIKE ?
+        """,
+        (f"{prefix}%",),
+    ).fetchone()
+    current_max = int(row[0]) if row is not None and row[0] is not None else 0
+    return current_max + 1
 
 
 def normalize_job_datetime(value: str, *, default_time: str = "00:00:00") -> str:

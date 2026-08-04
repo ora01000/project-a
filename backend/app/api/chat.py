@@ -14,6 +14,7 @@ from backend.app.disabled_features import is_removed_agent_id, raise_disabled_fe
 from backend.app.logging.agent_logger import log_agent_interaction
 from backend.app.logging.user_comm_logger import list_user_communications, log_user_communication
 from backend.app.services.agent_runtime_client import AgentInvokeRequest
+from backend.app.services.axit_platform_client import format_axit_invoke_error
 
 router = APIRouter(tags=["chat"])
 
@@ -135,10 +136,11 @@ async def chat_with_agent(agent_id: str, payload: ChatRequest, request: Request)
                 except ValueError as exc:
                     logger.warning("Skipped user comm log for %s: %s", payload.userid, exc)
         except Exception as exc:
-            manager.mark_agent_error(agent_id, str(exc), input_message=payload.message)
+            error_message = format_axit_invoke_error(exc)
+            manager.mark_agent_error(agent_id, error_message, input_message=payload.message)
             yield {
                 "event": "error",
-                "data": json.dumps({"message": str(exc)}),
+                "data": json.dumps({"message": error_message}),
             }
             return
         finally:

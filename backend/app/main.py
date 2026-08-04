@@ -367,6 +367,10 @@ async def lifespan(app: FastAPI):
     _, server_settings, _, database_path = load_settings()
     runtime_mode = normalize_runtime_mode(server_settings.agent_runtime_mode)
     logger.info("AGENT_RUNTIME_MODE=%s", runtime_mode)
+    logger.info(
+        "AGENT_RUNTIME_HTTP_TIMEOUT_SECONDS=%s",
+        server_settings.agent_runtime_http_timeout_seconds,
+    )
     app.state.database_path = init_database(database_path)
     if runtime_mode == "mock":
         from backend.app.services.mock_llm_runtime import load_persisted_runtime_state

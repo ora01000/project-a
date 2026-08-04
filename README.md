@@ -11,7 +11,7 @@ LangGraph 기반 멀티 에이전트 플랫폼입니다. Kubernetes, KubeVirt, v
 
 ## 사전 요구사항
 
-- conda 환경 `py3_12_edu` (Python 3.12)
+- conda 환경 `py3_axit` (Python 3.12)
 - [uv](https://docs.astral.sh/uv/)
 - Node.js 18+
 - 로컬 LLM 서버 (OpenAI 호환)
@@ -20,7 +20,7 @@ LangGraph 기반 멀티 에이전트 플랫폼입니다. Kubernetes, KubeVirt, v
 ## 설치
 
 ```bash
-conda activate py3_12_edu
+conda activate py3_axit
 cd /Users/insu/project-A
 uv sync
 
@@ -73,7 +73,7 @@ servers:
 # kubectl-ai: http://kubectl-ai.ora01000.pe.kr:32716/mcp
 
 # 3. 백엔드
-conda activate py3_12_edu
+conda activate py3_axit
 cd /Users/insu/project-A
 uv run uvicorn backend.app.main:app --host 0.0.0.0 --port 8080 --reload
 

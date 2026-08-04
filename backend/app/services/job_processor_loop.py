@@ -17,9 +17,13 @@ from backend.app.db.jobs import (
     list_jobs,
     update_job_status,
 )
+from backend.app.db.agentruntime import StoredAgentRuntime, build_agent_chat_url, catalog_agent_id
 from backend.app.db.jobs_result import upsert_job_result
-from backend.app.services.agent_runtime_client import AgentInvokeRequest, AgentRuntimeClient
-from backend.app.services.job_processor import build_job_agent_message, resolve_helpdesk_agent_id
+from backend.app.services.agent_runtime_client import AgentInvokeRequest, AgentRuntimeClient, normalize_runtime_mode
+from backend.app.services.job_processor import (
+    build_job_agent_message,
+    try_resolve_helpdesk_runtime_record,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -47,14 +51,24 @@ async def process_approved_job(
     database_path: Path,
     job: JobRecord,
     *,
+    helpdesk_agent_id: str,
+    helpdesk_runtime_record: StoredAgentRuntime | None,
     agent_runtime: AgentRuntimeClient,
-    runtime_mode: str,
     control_plane_base_url: str | None,
     agent_manager=None,
 ) -> None:
-    agent_id = resolve_helpdesk_agent_id(database_path, runtime_mode)
     message = build_job_agent_message(job)
     complete_date = now_job_datetime()
+    agent_id = helpdesk_agent_id
+
+    if helpdesk_runtime_record is not None:
+        logger.info(
+            "job processor delegating srnum=%s to helpdesk idx=%s is_orchestrator=%s url=%s",
+            job.srnum,
+            helpdesk_runtime_record.idx,
+            helpdesk_runtime_record.is_orchestrator,
+            build_agent_chat_url(helpdesk_runtime_record),
+        )
 
     if agent_manager is not None:
         agent_manager.mark_agent_working(agent_id, f"작업 처리: {job.srnum}")
@@ -66,6 +80,9 @@ async def process_approved_job(
                 message=message,
                 trace_id=uuid4().hex,
                 control_plane_base_url=control_plane_base_url,
+                agentruntime_idx=(
+                    helpdesk_runtime_record.idx if helpdesk_runtime_record is not None else None
+                ),
             )
         )
         upsert_job_result(
@@ -115,6 +132,7 @@ async def _dispatch_pending_jobs(
     control_plane_base_url: str | None,
     agent_manager=None,
     state: JobProcessorState,
+    processor_settings: JobProcessorSettings,
 ) -> None:
     jobs = await asyncio.to_thread(
         list_jobs,
@@ -123,6 +141,23 @@ async def _dispatch_pending_jobs(
     )
     if not jobs:
         return
+
+    helpdesk_runtime_record = await asyncio.to_thread(
+        try_resolve_helpdesk_runtime_record,
+        database_path,
+        runtime_mode,
+        settings=processor_settings,
+    )
+    if helpdesk_runtime_record is None:
+        logger.warning(
+            "job processor skipped %s approved job(s): helpdesk orchestrator agentruntime not found "
+            "(http mode, is_orchestrator=1 required). Register orchestrator or set "
+            "JOB_PROCESSOR_HELPDESK_LOCAL_AGENT_ID / JOB_PROCESSOR_HELPDESK_AXIT_AGENT_ID.",
+            len(jobs),
+        )
+        return
+
+    helpdesk_agent_id = catalog_agent_id(helpdesk_runtime_record)
 
     for job in jobs:
         if not await _mark_in_flight(state, job.idx):
@@ -133,8 +168,9 @@ async def _dispatch_pending_jobs(
                 await process_approved_job(
                     database_path,
                     selected_job,
+                    helpdesk_agent_id=helpdesk_agent_id,
+                    helpdesk_runtime_record=helpdesk_runtime_record,
                     agent_runtime=agent_runtime,
-                    runtime_mode=runtime_mode,
                     control_plane_base_url=control_plane_base_url,
                     agent_manager=agent_manager,
                 )
@@ -172,6 +208,28 @@ async def run_job_processor_loop(
         runtime_mode,
     )
 
+    if normalize_runtime_mode(runtime_mode) == "http":
+        helpdesk_runtime_record = await asyncio.to_thread(
+            try_resolve_helpdesk_runtime_record,
+            database_path,
+            runtime_mode,
+            settings=processor,
+        )
+        if helpdesk_runtime_record is None:
+            logger.warning(
+                "job processor: no helpdesk orchestrator agentruntime record in http mode "
+                "(is_orchestrator=1). Approved jobs will be skipped until configured "
+                "(JOB_PROCESSOR_HELPDESK_LOCAL_AGENT_ID or JOB_PROCESSOR_HELPDESK_AXIT_AGENT_ID)."
+            )
+        else:
+            logger.info(
+                "job processor helpdesk target: idx=%s agent_id=%s is_orchestrator=%s url=%s",
+                helpdesk_runtime_record.idx,
+                helpdesk_runtime_record.agent_id,
+                helpdesk_runtime_record.is_orchestrator,
+                build_agent_chat_url(helpdesk_runtime_record),
+            )
+
     try:
         while True:
             try:
@@ -182,6 +240,7 @@ async def run_job_processor_loop(
                     control_plane_base_url=control_plane_base_url,
                     agent_manager=agent_manager,
                     state=state,
+                    processor_settings=processor,
                 )
             except asyncio.CancelledError:
                 raise

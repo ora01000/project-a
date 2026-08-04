@@ -316,6 +316,8 @@ def _migrate_agentruntime_talkable(connection: sqlite3.Connection) -> None:
             "ALTER TABLE agentruntime ADD COLUMN talkable INTEGER NOT NULL DEFAULT 1"
         )
         logger.info("Added agentruntime.talkable column")
+    else:
+        return
 
     from backend.app.db.agentruntime import NON_TALKABLE_LOCAL_AGENT_IDS
 
@@ -338,7 +340,7 @@ def _migrate_agentruntime_talkable(connection: sqlite3.Connection) -> None:
         """,
         tuple(NON_TALKABLE_LOCAL_AGENT_IDS),
     )
-    logger.info("Synced agentruntime talkable flags")
+    logger.info("Backfilled agentruntime.talkable flags for new column")
 
 
 def _migrate_agentruntime_is_orchestrator(connection: sqlite3.Connection) -> None:
@@ -357,6 +359,8 @@ def _migrate_agentruntime_is_orchestrator(connection: sqlite3.Connection) -> Non
             "ALTER TABLE agentruntime ADD COLUMN is_orchestrator INTEGER NOT NULL DEFAULT 0"
         )
         logger.info("Added agentruntime.is_orchestrator column")
+    else:
+        return
 
     from backend.app.db.agentruntime import ORCHESTRATOR_LOCAL_AGENT_IDS
 
@@ -379,7 +383,7 @@ def _migrate_agentruntime_is_orchestrator(connection: sqlite3.Connection) -> Non
         """,
         tuple(ORCHESTRATOR_LOCAL_AGENT_IDS),
     )
-    logger.info("Synced agentruntime is_orchestrator flags")
+    logger.info("Backfilled agentruntime.is_orchestrator flags for new column")
 
 
 def _ensure_jobs_table(connection: sqlite3.Connection) -> None:

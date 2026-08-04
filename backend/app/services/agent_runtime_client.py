@@ -95,6 +95,7 @@ class AgentInvokeRequest:
     session_id: str | None = None
     trace_id: str | None = None
     control_plane_base_url: str | None = None
+    agentruntime_idx: int | None = None
 
 
 @dataclass(frozen=True)
@@ -199,13 +200,19 @@ class LocalAgentRuntimeClient:
 class MockAgentRuntimeClient:
     """Dev runtime: invoke via AXIT mock HTTP APIs; other sandbox APIs disabled."""
 
-    def __init__(self, agent_manager: Any, database_path: str | Path) -> None:
+    def __init__(
+        self,
+        agent_manager: Any,
+        database_path: str | Path,
+        *,
+        axit_timeout_seconds: float = 3600.0,
+    ) -> None:
         self._agent_manager = agent_manager
         self._database_path = database_path
         self._local = LocalAgentRuntimeClient(agent_manager)
         from backend.app.services.axit_platform_client import AxitPlatformClient
 
-        self._axit_client = AxitPlatformClient()
+        self._axit_client = AxitPlatformClient(timeout_seconds=axit_timeout_seconds)
 
     async def invoke(self, request: AgentInvokeRequest) -> AgentInvokeResult:
         from backend.app.agents.base import ToolUsage
@@ -286,12 +293,18 @@ class MockAgentRuntimeClient:
 class ExternalAxitRuntimeClient:
     """Server runtime: delegate all agent execution to external AXIT platform APIs."""
 
-    def __init__(self, agent_manager: Any, database_path: str | Path) -> None:
+    def __init__(
+        self,
+        agent_manager: Any,
+        database_path: str | Path,
+        *,
+        axit_timeout_seconds: float = 3600.0,
+    ) -> None:
         self._agent_manager = agent_manager
         self._database_path = database_path
         from backend.app.services.axit_platform_client import AxitPlatformClient
 
-        self._axit_client = AxitPlatformClient()
+        self._axit_client = AxitPlatformClient(timeout_seconds=axit_timeout_seconds)
 
     def _connected_agent_status(self) -> dict[str, str]:
         from backend.app.db.agentruntime import catalog_agent_id, list_agentruntime_records
@@ -305,14 +318,25 @@ class ExternalAxitRuntimeClient:
 
     async def invoke(self, request: AgentInvokeRequest) -> AgentInvokeResult:
         from backend.app.agents.base import ToolUsage
-        from backend.app.db.agentruntime import get_agentruntime_by_agent_id, get_agentruntime_by_local_agent_id
+        from backend.app.db.agentruntime import (
+            get_agentruntime_by_agent_id,
+            get_agentruntime_by_idx,
+            get_agentruntime_by_local_agent_id,
+        )
         from backend.app.services.axit_platform_client import AxitPlatformInvokeRequest
 
-        runtime_record = get_agentruntime_by_local_agent_id(
-            self._database_path,
-            request.agent_id,
-            runtime_mode="http",
-        )
+        runtime_record = None
+        if request.agentruntime_idx is not None:
+            runtime_record = get_agentruntime_by_idx(
+                self._database_path,
+                request.agentruntime_idx,
+            )
+        if runtime_record is None:
+            runtime_record = get_agentruntime_by_local_agent_id(
+                self._database_path,
+                request.agent_id,
+                runtime_mode="http",
+            )
         if runtime_record is None:
             runtime_record = get_agentruntime_by_agent_id(
                 self._database_path,
@@ -492,7 +516,7 @@ def create_agent_runtime_client(
     database_path: str | Path | None = None,
     http_base_url: str | None = None,
     http_api_key: str = "",
-    http_timeout_seconds: float = 300.0,
+    http_timeout_seconds: float = 3600.0,
 ) -> AgentRuntimeClient:
     """Factory — ``AGENT_RUNTIME_MODE=mock|http`` (``local`` aliases ``mock``)."""
     normalized = normalize_runtime_mode(mode)
@@ -501,11 +525,19 @@ def create_agent_runtime_client(
             raise ValueError("agent_manager is required for mock runtime mode")
         if database_path is None:
             raise ValueError("database_path is required for mock runtime mode")
-        return MockAgentRuntimeClient(agent_manager, database_path)
+        return MockAgentRuntimeClient(
+            agent_manager,
+            database_path,
+            axit_timeout_seconds=http_timeout_seconds,
+        )
     if normalized == "http":
         if agent_manager is None:
             raise ValueError("agent_manager is required for http runtime mode")
         if database_path is None:
             raise ValueError("database_path is required for http runtime mode")
-        return ExternalAxitRuntimeClient(agent_manager, database_path)
+        return ExternalAxitRuntimeClient(
+            agent_manager,
+            database_path,
+            axit_timeout_seconds=http_timeout_seconds,
+        )
     raise ValueError(f"Unsupported AGENT_RUNTIME_MODE: {mode!r} (use mock or http)")

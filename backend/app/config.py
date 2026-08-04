@@ -28,7 +28,7 @@ class ServerSettings(BaseModel):
     health_check_interval_seconds: int = 30
     agent_runtime_mode: str = "mock"
     agent_runtime_http_base_url: str = ""
-    agent_runtime_http_timeout_seconds: float = 300.0
+    agent_runtime_http_timeout_seconds: float = 3600.0
     agent_runtime_api_key: str = ""
     control_plane_base_url: str = ""
 
@@ -93,6 +93,10 @@ class JobProcessorSettings(BaseModel):
     enabled: bool = True
     poll_interval_seconds: int = 60
     initial_delay_seconds: int = 0
+    # http 모드: agentruntime.local_agent_id (기본 helpdesk, 대안 sys-helpdesk)
+    helpdesk_local_agent_id: str = "helpdesk"
+    # http 모드: AXIT agent_id 직접 지정 시 local_agent_id 조회 생략
+    helpdesk_axit_agent_id: str = ""
 
 
 class MyNotesSettings(BaseModel):
@@ -191,6 +195,14 @@ class AppSettings(BaseSettings):
     job_processor_initial_delay_seconds: int | None = Field(
         default=None,
         alias="JOB_PROCESSOR_INITIAL_DELAY_SECONDS",
+    )
+    job_processor_helpdesk_local_agent_id: str | None = Field(
+        default=None,
+        alias="JOB_PROCESSOR_HELPDESK_LOCAL_AGENT_ID",
+    )
+    job_processor_helpdesk_axit_agent_id: str | None = Field(
+        default=None,
+        alias="JOB_PROCESSOR_HELPDESK_AXIT_AGENT_ID",
     )
 
     mynotes_flush_enabled: bool | None = Field(default=None, alias="MY_NOTES_FLUSH_ENABLED")
@@ -525,10 +537,24 @@ def load_job_processor_settings() -> JobProcessorSettings:
     else:
         enabled = _as_bool(processor_yaml.get("enabled"), True)
 
+    if env_settings.job_processor_helpdesk_local_agent_id is not None:
+        helpdesk_local_agent_id = env_settings.job_processor_helpdesk_local_agent_id.strip()
+    else:
+        helpdesk_local_agent_id = str(
+            processor_yaml.get("helpdesk_local_agent_id", "helpdesk"),
+        ).strip()
+
+    if env_settings.job_processor_helpdesk_axit_agent_id is not None:
+        helpdesk_axit_agent_id = env_settings.job_processor_helpdesk_axit_agent_id.strip()
+    else:
+        helpdesk_axit_agent_id = str(processor_yaml.get("helpdesk_axit_agent_id", "")).strip()
+
     return JobProcessorSettings(
         enabled=enabled,
         poll_interval_seconds=max(1, poll_interval_seconds),
         initial_delay_seconds=max(0, initial_delay_seconds),
+        helpdesk_local_agent_id=helpdesk_local_agent_id or "helpdesk",
+        helpdesk_axit_agent_id=helpdesk_axit_agent_id,
     )
 
 
@@ -759,7 +785,7 @@ def load_settings() -> tuple[LLMSettings, ServerSettings, dict[str, MCPServerCon
         ),
         agent_runtime_http_timeout_seconds=float(
             env_settings.agent_runtime_http_timeout_seconds
-            or server_yaml.get("agent_runtime_http_timeout_seconds", 300.0)
+            or server_yaml.get("agent_runtime_http_timeout_seconds", 3600.0)
         ),
         agent_runtime_api_key=(
             env_settings.agent_runtime_api_key
