@@ -102,9 +102,8 @@ async def chat_with_agent(agent_id: str, payload: ChatRequest, request: Request)
         if agent_id not in allowed:
             raise HTTPException(status_code=403, detail="할당되지 않은 에이전트입니다.")
 
-    manager.mark_agent_working(agent_id, "채팅 응답")
-
     async def event_generator() -> AsyncIterator[dict[str, str]]:
+        chat_task_id = manager.mark_agent_working(agent_id, "채팅 응답", task_id=uuid4().hex)
         try:
             result = await _invoke_agent(
                 request,
@@ -144,7 +143,7 @@ async def chat_with_agent(agent_id: str, payload: ChatRequest, request: Request)
             }
             return
         finally:
-            manager.mark_agent_idle(agent_id)
+            manager.mark_agent_idle(agent_id, chat_task_id)
 
     return EventSourceResponse(event_generator())
 

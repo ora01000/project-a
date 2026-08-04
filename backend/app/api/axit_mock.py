@@ -8,6 +8,8 @@ import secrets
 import time
 from typing import Any
 
+from uuid import uuid4
+
 from fastapi import APIRouter, Form, HTTPException, Request
 from pydantic import BaseModel, Field
 
@@ -95,7 +97,7 @@ async def _invoke_axit_agent(agent_id: str, payload: AxitInvokeRequest, request:
     if local_agent_id not in manager.agents:
         raise HTTPException(status_code=404, detail=f"Local agent '{local_agent_id}' not found")
 
-    manager.mark_agent_working(local_agent_id, "AXIT invoke")
+    invoke_task_id = manager.mark_agent_working(local_agent_id, "AXIT invoke", task_id=uuid4().hex)
     try:
         result = await invoke_agent_by_id(manager, local_agent_id, payload.text)
     except Exception as exc:
@@ -103,7 +105,7 @@ async def _invoke_axit_agent(agent_id: str, payload: AxitInvokeRequest, request:
         logger.exception("AXIT mock invoke failed for %s: %s", agent_id, exc)
         raise HTTPException(status_code=502, detail=f"Agent invoke failed: {exc}") from exc
     finally:
-        manager.mark_agent_idle(local_agent_id)
+        manager.mark_agent_idle(local_agent_id, invoke_task_id)
 
     trace_payload: list[Any] = []
     if payload.enable_trace:

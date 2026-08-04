@@ -9,6 +9,10 @@ export interface AgentInfo {
   operation_error?: string | null;
   /** Brief label of current work while operation_status is working. */
   operation_detail?: string | null;
+  /** All in-flight operation labels (concurrent tasks). */
+  operation_details?: string[];
+  /** Number of concurrent in-flight operations. */
+  active_count?: number;
   is_system?: boolean;
   chat_enabled?: boolean;
 }

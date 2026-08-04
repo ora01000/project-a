@@ -59,7 +59,8 @@ export function JobReviewTab({ active, currentUser }: JobReviewTabProps) {
     setIsLoading(true);
     setError(null);
     try {
-      const response = await fetch("/api/jobs");
+      const params = new URLSearchParams({ status_code: "0" });
+      const response = await fetch(`/api/jobs?${params.toString()}`);
       if (!response.ok) {
         throw new Error(await parseError(response, "작업 목록을 불러오지 못했습니다."));
       }

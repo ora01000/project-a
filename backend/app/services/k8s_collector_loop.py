@@ -6,6 +6,7 @@ import asyncio
 import logging
 from datetime import datetime, timedelta
 from pathlib import Path
+from uuid import uuid4
 
 from backend.app.agents.k8s_agent import K8S_CLUSTER_SPECS
 from backend.app.config import K8sCollectorSettings, load_k8s_collector_settings
@@ -50,8 +51,14 @@ def collect_one_cluster(
         (name for cid, name in K8S_CLUSTER_SPECS if cid == cluster_id),
         cluster_id,
     )
+    collect_task_id: str | None = None
     if agent_manager is not None:
-        agent_manager.mark_agent_working(cluster_id, f"K8s 수집: {display_name}")
+        collect_task_id = f"k8s-{cluster_id}-{uuid4().hex}"
+        agent_manager.mark_agent_working(
+            cluster_id,
+            f"K8s 수집: {display_name}",
+            task_id=collect_task_id,
+        )
     try:
         snapshot = collect_cluster_snapshot(cluster_id, collector)
         counts = replace_cluster_snapshot(database_path, snapshot)
@@ -66,8 +73,8 @@ def collect_one_cluster(
         logger.exception("k8s collector failed cluster=%s (%s)", cluster_id, display_name)
         raise
     finally:
-        if agent_manager is not None:
-            agent_manager.mark_agent_idle(cluster_id)
+        if agent_manager is not None and collect_task_id is not None:
+            agent_manager.mark_agent_idle(cluster_id, collect_task_id)
 
 
 def collect_all_clusters(

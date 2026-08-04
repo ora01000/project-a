@@ -72,7 +72,7 @@ class AgentManager:
         self.agent_definitions_by_id: dict[str, AgentDefinition] = {}
         self.agent_operation_status: dict[str, str] = {}
         self.agent_operation_errors: dict[str, str] = {}
-        self.agent_operation_details: dict[str, str] = {}
+        self.agent_operation_tasks: dict[str, dict[str, str]] = {}
         self.agent_active_counts: dict[str, int] = {}
         self.agent_health_status: dict[str, str] = {}
         self._agent_invoke_failures: set[str] = set()
@@ -228,6 +228,7 @@ class AgentManager:
                 del self.agent_operation_status[agent_id]
                 self.agent_operation_errors.pop(agent_id, None)
                 self.agent_active_counts.pop(agent_id, None)
+                self.agent_operation_tasks.pop(agent_id, None)
         self._agent_invoke_failures = {
             agent_id for agent_id in self._agent_invoke_failures if agent_id in next_agent_ids
         }
@@ -251,6 +252,7 @@ class AgentManager:
                 del self.agent_operation_status[agent_id]
                 self.agent_operation_errors.pop(agent_id, None)
                 self.agent_active_counts.pop(agent_id, None)
+                self.agent_operation_tasks.pop(agent_id, None)
         self._agent_invoke_failures = {
             agent_id for agent_id in self._agent_invoke_failures if agent_id in next_agent_ids
         }
@@ -296,27 +298,57 @@ class AgentManager:
         return self.agent_operation_errors.get(agent_id)
 
     def get_operation_detail(self, agent_id: str) -> str | None:
-        detail = self.agent_operation_details.get(agent_id)
-        if not detail:
+        details = self.get_operation_details(agent_id)
+        if not details:
             return None
-        return detail
+        return details[0]
 
-    def mark_agent_working(self, agent_id: str, detail: str | None = None) -> None:
-        self.agent_active_counts[agent_id] = self.agent_active_counts.get(agent_id, 0) + 1
-        self.agent_operation_status[agent_id] = "working"
-        self.agent_operation_errors.pop(agent_id, None)
-        label = (detail or "").strip()
-        if label:
-            self.agent_operation_details[agent_id] = label
-        elif agent_id not in self.agent_operation_details:
-            self.agent_operation_details[agent_id] = "처리 중"
+    def get_operation_details(self, agent_id: str) -> list[str]:
+        tasks = self.agent_operation_tasks.get(agent_id)
+        if not tasks:
+            return []
+        return list(tasks.values())
 
-    def mark_agent_idle(self, agent_id: str) -> None:
-        active_count = max(0, self.agent_active_counts.get(agent_id, 0) - 1)
-        self.agent_active_counts[agent_id] = active_count
-        if active_count == 0 and self.agent_operation_status.get(agent_id) != "error":
+    def get_active_count(self, agent_id: str) -> int:
+        return len(self.agent_operation_tasks.get(agent_id, {}))
+
+    def _sync_operation_state(self, agent_id: str) -> None:
+        count = len(self.agent_operation_tasks.get(agent_id, {}))
+        self.agent_active_counts[agent_id] = count
+        if count > 0:
+            self.agent_operation_status[agent_id] = "working"
+            return
+        if self.agent_operation_status.get(agent_id) != "error":
             self.agent_operation_status[agent_id] = "idle"
-            self.agent_operation_details.pop(agent_id, None)
+
+    def mark_agent_working(
+        self,
+        agent_id: str,
+        detail: str | None = None,
+        *,
+        task_id: str | None = None,
+    ) -> str:
+        from uuid import uuid4
+
+        key = (task_id or "").strip() or uuid4().hex
+        label = (detail or "").strip() or "처리 중"
+        tasks = self.agent_operation_tasks.setdefault(agent_id, {})
+        tasks[key] = label
+        self.agent_operation_errors.pop(agent_id, None)
+        self._sync_operation_state(agent_id)
+        return key
+
+    def mark_agent_idle(self, agent_id: str, task_id: str | None = None) -> None:
+        tasks = self.agent_operation_tasks.get(agent_id)
+        if tasks:
+            if task_id and task_id in tasks:
+                del tasks[task_id]
+            elif not task_id and tasks:
+                last_key = next(reversed(tasks))
+                del tasks[last_key]
+            if not tasks:
+                self.agent_operation_tasks.pop(agent_id, None)
+        self._sync_operation_state(agent_id)
 
     def get_axit_agent_connection_status(self, agent_id: str) -> str:
         """AXIT lambda agents are assumed alive unless invoke has ever failed."""
@@ -341,7 +373,7 @@ class AgentManager:
         self.agent_active_counts[agent_id] = 0
         self.agent_operation_status[agent_id] = "error"
         self.agent_operation_errors[agent_id] = reason
-        self.agent_operation_details.pop(agent_id, None)
+        self.agent_operation_tasks.pop(agent_id, None)
         log_agent_error(agent_id, reason=reason, input_message=input_message)
 
 

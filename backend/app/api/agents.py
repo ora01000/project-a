@@ -128,6 +128,8 @@ def _agent_payload(
         "operation_status": manager.get_operation_status(definition.agent_id),
         "operation_error": manager.get_operation_error(definition.agent_id),
         "operation_detail": manager.get_operation_detail(definition.agent_id),
+        "operation_details": manager.get_operation_details(definition.agent_id),
+        "active_count": manager.get_active_count(definition.agent_id),
         "is_system": False,
         "chat_enabled": _chat_enabled_for_agent(request, definition),
     }

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import logging
+import re
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -18,8 +19,9 @@ from backend.app.config import resolve_agent_runtime_mode
 from backend.app.db.agentruntime import (
     AGENTRUNTIME_TYPE_EXTERNAL,
     StoredAgentRuntime,
-    build_agent_chat_url,
-    build_agent_invocations_url,
+    axit_runtime_api_family,
+    build_axit_invoke_url,
+    build_axit_invocations_url,
     get_agentruntime_by_agent_id,
     runtime_mode_for_type,
 )
@@ -34,12 +36,47 @@ from backend.app.services.axit_config import (
 
 logger = logging.getLogger(__name__)
 
+_UUID_SESSION_ID_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+    re.IGNORECASE,
+)
+
+
+def _normalize_axit_session_id(session_id: str | None) -> str:
+    candidate = (session_id or "").strip()
+    if _UUID_SESSION_ID_RE.match(candidate):
+        return candidate
+    if candidate:
+        logger.warning(
+            "AXIT session_id is not UUID format; generating new id (received=%r)",
+            candidate,
+        )
+    return str(uuid4())
+
 DEFAULT_AXIT_HTTP_TIMEOUT_SECONDS = 3600.0
 DEFAULT_AXIT_TOKEN_TIMEOUT_SECONDS = 60.0
 DEFAULT_AXIT_POLL_INTERVAL_SECONDS = 3.0
 DEFAULT_AXIT_POLL_MAX_ATTEMPTS = 100  # 3s × 100 ≈ 5분
 
 _PENDING_INVOCATION_STATUSES = frozenset({"running", "pending"})
+
+
+def _invocation_status(payload: dict[str, Any]) -> str:
+    raw = (
+        payload.get("agent_invocation_status")
+        or payload.get("orchestrator_invocation_status")
+        or ""
+    )
+    return str(raw).strip().lower()
+
+
+def _invocation_id(payload: dict[str, Any]) -> str:
+    raw = (
+        payload.get("agent_invocation_id")
+        or payload.get("orchestrator_invocation_id")
+        or ""
+    )
+    return str(raw).strip()
 
 
 def build_axit_http_timeout(timeout_seconds: float) -> httpx.Timeout:
@@ -320,12 +357,14 @@ class AxitPlatformClient:
         *,
         runtime_record: StoredAgentRuntime | None = None,
     ) -> _InvokeContext:
-        runtime_mode = resolve_agent_runtime_mode()
-        record = runtime_record or get_agentruntime_by_agent_id(
-            database_path,
-            request.axit_agent_id,
-            runtime_mode=runtime_mode,
-        )
+        if runtime_record is None:
+            record = get_agentruntime_by_agent_id(
+                database_path,
+                request.axit_agent_id,
+                runtime_mode=resolve_agent_runtime_mode(),
+            )
+        else:
+            record = runtime_record
         if record is None:
             raise ValueError(f"agentruntime record not found for agent_id={request.axit_agent_id!r}")
 
@@ -334,7 +373,7 @@ class AxitPlatformClient:
             raise ValueError(
                 f"service_id is required for AXIT invoke (agent_id={request.axit_agent_id!r})",
             )
-        session_id = (request.session_id or str(uuid4())).strip()
+        session_id = _normalize_axit_session_id(request.session_id)
         record_runtime_mode = runtime_mode_for_type(record.type)
         token_url = resolve_axit_token_url(runtime_mode=record_runtime_mode)
         access_token = await self._fetch_access_token(token_url, runtime_mode=record_runtime_mode)
@@ -353,8 +392,8 @@ class AxitPlatformClient:
             session_id=session_id,
             runtime_mode=record_runtime_mode,
             access_token=access_token,
-            invoke_url=build_agent_chat_url(record),
-            invocations_url=build_agent_invocations_url(record),
+            invoke_url=build_axit_invoke_url(record),
+            invocations_url=build_axit_invocations_url(record),
             body=body,
         )
 
@@ -442,9 +481,10 @@ class AxitPlatformClient:
         started_at: float,
     ) -> AxitPlatformInvokeResult:
         logger.info(
-            "AXIT invoke polling start: agent_id=%s service_id=%s session_id=%s url=%s "
+            "AXIT invoke polling start: agent_id=%s api=%s service_id=%s session_id=%s url=%s "
             "interval=%ss max_attempts=%s",
             context.record.agent_id,
+            axit_runtime_api_family(context.record),
             context.service_id,
             context.session_id,
             context.invocations_url,
@@ -468,7 +508,7 @@ class AxitPlatformClient:
                     logger.info("AXIT poll attempt %s/%s: no invocation record yet", attempt, self._poll_max_attempts)
                     continue
 
-                status = str(latest.get("agent_invocation_status") or "").strip().lower()
+                status = _invocation_status(latest)
                 if not status:
                     logger.info("AXIT poll attempt %s/%s: empty invocation status", attempt, self._poll_max_attempts)
                     continue
@@ -482,10 +522,10 @@ class AxitPlatformClient:
                     )
                     continue
 
-                invocation_id = str(latest.get("agent_invocation_id") or "").strip()
+                invocation_id = _invocation_id(latest)
                 if not invocation_id:
                     logger.warning(
-                        "AXIT poll attempt %s/%s: status=%s but agent_invocation_id missing",
+                        "AXIT poll attempt %s/%s: status=%s but invocation id missing",
                         attempt,
                         self._poll_max_attempts,
                         status,
@@ -539,9 +579,10 @@ class AxitPlatformClient:
         )
         started_at = time.monotonic()
         logger.info(
-            "AXIT invoke start: agent_id=%s is_orchestrator=%s url=%s runtime_mode=%s "
+            "AXIT invoke start: agent_id=%s api=%s is_orchestrator=%s url=%s runtime_mode=%s "
             "read_timeout=%ss service_id=%s session_id=%s",
             context.record.agent_id,
+            axit_runtime_api_family(context.record),
             context.record.is_orchestrator,
             context.invoke_url,
             context.runtime_mode,

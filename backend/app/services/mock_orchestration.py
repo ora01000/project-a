@@ -7,6 +7,7 @@ import logging
 import re
 from dataclasses import dataclass
 from typing import Any
+from uuid import uuid4
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
@@ -212,8 +213,13 @@ async def handle_mock_orchestration_query(
     target_id = decision.agent_id
     target_name = decision.agent_name
 
+    route_task_id: str | None = None
     if hasattr(agent_manager, "mark_agent_working"):
-        agent_manager.mark_agent_working(target_id, f"{spec.agent_name}→{target_name}")
+        route_task_id = agent_manager.mark_agent_working(
+            target_id,
+            f"{spec.agent_name}→{target_name}",
+            task_id=uuid4().hex,
+        )
 
     try:
         with prompt_debug_scope(
@@ -250,8 +256,8 @@ async def handle_mock_orchestration_query(
             output_tokens=output_tokens,
         )
     finally:
-        if hasattr(agent_manager, "mark_agent_idle"):
-            agent_manager.mark_agent_idle(target_id)
+        if hasattr(agent_manager, "mark_agent_idle") and route_task_id is not None:
+            agent_manager.mark_agent_idle(target_id, route_task_id)
 
     tools = list(result.tools_used)
     tools.insert(0, ToolUsage(name=f"route:{target_id}", mcp_server=spec.agent_id))

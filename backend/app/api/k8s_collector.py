@@ -18,6 +18,8 @@ class K8sCollectorClusterItem(BaseModel):
     last_update: str | None = None
     operation_status: str = "idle"
     operation_detail: str | None = None
+    operation_details: list[str] = Field(default_factory=list)
+    active_count: int = 0
 
 
 class ManualCollectRequest(BaseModel):
@@ -55,6 +57,8 @@ async def list_k8s_collector_clusters(
             last_update=last_updates.get(cluster_id),
             operation_status=manager.get_operation_status(cluster_id),
             operation_detail=manager.get_operation_detail(cluster_id),
+            operation_details=manager.get_operation_details(cluster_id),
+            active_count=manager.get_active_count(cluster_id),
         )
         for cluster_id, display_name in K8S_CLUSTER_SPECS
     ]

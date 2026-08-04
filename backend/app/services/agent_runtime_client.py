@@ -318,31 +318,15 @@ class ExternalAxitRuntimeClient:
 
     async def invoke(self, request: AgentInvokeRequest) -> AgentInvokeResult:
         from backend.app.agents.base import ToolUsage
-        from backend.app.db.agentruntime import (
-            get_agentruntime_by_agent_id,
-            get_agentruntime_by_idx,
-            get_agentruntime_by_local_agent_id,
-        )
+        from backend.app.db.agentruntime import resolve_agentruntime_for_invoke
         from backend.app.services.axit_platform_client import AxitPlatformInvokeRequest
 
-        runtime_record = None
-        if request.agentruntime_idx is not None:
-            runtime_record = get_agentruntime_by_idx(
-                self._database_path,
-                request.agentruntime_idx,
-            )
-        if runtime_record is None:
-            runtime_record = get_agentruntime_by_local_agent_id(
-                self._database_path,
-                request.agent_id,
-                runtime_mode="http",
-            )
-        if runtime_record is None:
-            runtime_record = get_agentruntime_by_agent_id(
-                self._database_path,
-                request.agent_id,
-                runtime_mode="http",
-            )
+        runtime_record = resolve_agentruntime_for_invoke(
+            self._database_path,
+            catalog_agent_id=request.agent_id,
+            agentruntime_idx=request.agentruntime_idx,
+            runtime_mode="http",
+        )
         if runtime_record is None:
             raise RuntimeError(f"No agentruntime record found for agent_id={request.agent_id!r}")
 

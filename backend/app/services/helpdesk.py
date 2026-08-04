@@ -7,6 +7,7 @@ import logging
 import re
 from dataclasses import dataclass
 from typing import Any
+from uuid import uuid4
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
@@ -260,8 +261,13 @@ async def handle_helpdesk_query(
     target_name = decision.agent_name
     rationale = decision.rationale
 
+    route_task_id: str | None = None
     if hasattr(agent_manager, "mark_agent_working"):
-        agent_manager.mark_agent_working(target_id, f"헬프데스크→{target_name}")
+        route_task_id = agent_manager.mark_agent_working(
+            target_id,
+            f"헬프데스크→{target_name}",
+            task_id=uuid4().hex,
+        )
 
     try:
         with prompt_debug_scope(
@@ -301,8 +307,8 @@ async def handle_helpdesk_query(
             agent_manager.mark_agent_error(target_id, str(exc), input_message=message)
         raise
     finally:
-        if hasattr(agent_manager, "mark_agent_idle"):
-            agent_manager.mark_agent_idle(target_id)
+        if hasattr(agent_manager, "mark_agent_idle") and route_task_id is not None:
+            agent_manager.mark_agent_idle(target_id, route_task_id)
 
     decorated = decorate_helpdesk_response(result.content)
     tools = list(result.tools_used)

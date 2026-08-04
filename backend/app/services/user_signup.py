@@ -8,8 +8,8 @@ from backend.app.db.signup_notifications import (
     delete_signup_notification,
     delete_signup_notifications_for_user,
 )
-from backend.app.db.jobs import create_user_access_request_job
-from backend.app.db.users import User, create_user, delete_users, get_user_by_idx, list_users, update_user
+from backend.app.db.jobs import JobRecord, create_user_access_request_job
+from backend.app.db.users import User, create_user, delete_users, get_user_by_idx, get_user_by_userid, list_users, update_user
 from backend.app.notifications.email_sender import send_signup_rejection_email
 
 logger = logging.getLogger(__name__)
@@ -100,6 +100,24 @@ def approve_signup(database_path: Path, user_idx: int) -> User | None:
     delete_signup_notifications_for_user(database_path, user_idx)
     logger.info("Signup approved for userid=%s", user.userid)
     return updated
+
+
+def approve_pending_user_for_signup_job(database_path: Path, job: JobRecord) -> User | None:
+    """Activate pending user when a signup access-request job (job_type=10) is approved."""
+    from backend.app.db.jobs import JOB_TYPE_SIGNUP
+
+    if job.job_type != JOB_TYPE_SIGNUP:
+        return None
+
+    userid = str(job.madang_id or "").strip()
+    if not userid:
+        raise ValueError("signup job is missing userid (madang_id)")
+
+    user = get_user_by_userid(database_path, userid)
+    if user is None:
+        raise ValueError(f"signup user not found for userid={userid!r}")
+
+    return approve_signup(database_path, user.idx)
 
 
 async def reject_signup(database_path: Path, user_idx: int, reason: str) -> bool:

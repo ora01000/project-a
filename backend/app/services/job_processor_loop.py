@@ -13,6 +13,7 @@ from backend.app.db.jobs import (
     JOB_STATUS_COMPLETED_FAILURE,
     JOB_STATUS_COMPLETED_SUCCESS,
     JOB_STATUS_DIRECT_APPROVED,
+    JOB_TYPE_SIGNUP,
     JobRecord,
     list_jobs,
     update_job_status,
@@ -60,6 +61,7 @@ async def process_approved_job(
     message = build_job_agent_message(job)
     complete_date = now_job_datetime()
     agent_id = helpdesk_agent_id
+    job_task_id = f"job-{job.idx}"
 
     if helpdesk_runtime_record is not None:
         logger.info(
@@ -71,7 +73,11 @@ async def process_approved_job(
         )
 
     if agent_manager is not None:
-        agent_manager.mark_agent_working(agent_id, f"작업 처리: {job.srnum}")
+        agent_manager.mark_agent_working(
+            agent_id,
+            f"작업 처리: {job.srnum}",
+            task_id=job_task_id,
+        )
 
     try:
         result = await agent_runtime.invoke(
@@ -121,7 +127,7 @@ async def process_approved_job(
             )
     finally:
         if agent_manager is not None:
-            agent_manager.mark_agent_idle(agent_id)
+            agent_manager.mark_agent_idle(agent_id, job_task_id)
 
 
 async def _dispatch_pending_jobs(
@@ -138,6 +144,7 @@ async def _dispatch_pending_jobs(
         list_jobs,
         database_path,
         status_code=JOB_STATUS_DIRECT_APPROVED,
+        exclude_job_type=JOB_TYPE_SIGNUP,
     )
     if not jobs:
         return

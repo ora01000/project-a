@@ -7,7 +7,7 @@ import { useTopology } from "../context/TopologyContext";
 import { appendInputHistory, loadInputHistory } from "../utils/inputHistory";
 import { formatResponseTimestamp } from "../utils/messageIndex";
 import { flushSseBuffer, parseSseChunk } from "../utils/parseSse";
-import { createSessionId } from "../utils/sessionId";
+import { createSessionId, isUuidSessionId } from "../utils/sessionId";
 import { AssistantMessageContent } from "./AssistantMessageContent";
 import { CollapsibleUserMessage } from "./CollapsibleUserMessage";
 import { OpenAiBillingConfirmDialog } from "./OpenAiBillingConfirmDialog";
@@ -119,6 +119,10 @@ export function IntegratedChatPanel({
         - COMPOSER_FORM_CHROME,
     );
     return Math.min(maxAgentListHeight, Math.max(MIN_AGENT_LIST_HEIGHT, nextHeight));
+  }, []);
+
+  useEffect(() => {
+    setSessionId((current) => (isUuidSessionId(current) ? current : createSessionId()));
   }, []);
 
   useEffect(() => {

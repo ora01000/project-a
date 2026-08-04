@@ -21,6 +21,7 @@ JOB_STATUS_REJECTED = 12
 JOB_STATUS_CANCELLED = 13
 
 JOB_TYPE_AX_INFRA = 1
+JOB_TYPE_SIGNUP = 10
 
 SIGNUP_ACCESS_REQUEST_JOB_TITLE = "[신규사용자] 접속 권한 신청서"
 
@@ -135,6 +136,7 @@ def list_jobs(
     min_status_code: int | None = None,
     approver: str | None = None,
     exclude_status_code: int | None = None,
+    exclude_job_type: int | None = None,
 ) -> list[JobRecord]:
     clauses: list[str] = []
     params: list[object] = []
@@ -147,6 +149,9 @@ def list_jobs(
     if exclude_status_code is not None:
         clauses.append("status_code != ?")
         params.append(exclude_status_code)
+    if exclude_job_type is not None:
+        clauses.append("job_type != ?")
+        params.append(exclude_job_type)
     if approver is not None and approver.strip():
         clauses.append("approver = ?")
         params.append(approver.strip())
@@ -240,8 +245,24 @@ def create_user_access_request_job(database_path: str | Path, user: User) -> Job
         team_id="",
         channel_id="",
         message_id="",
+        job_type=JOB_TYPE_SIGNUP,
     )
     return create_job_from_intake(database_path, payload)
+
+
+def approval_target_status_code(job: JobRecord) -> int:
+    """Signup access requests complete without agent delegation."""
+    if job.job_type == JOB_TYPE_SIGNUP:
+        return JOB_STATUS_COMPLETED_SUCCESS
+    return JOB_STATUS_DIRECT_APPROVED
+
+
+def _finalize_signup_job_approval(database_path: str | Path, job: JobRecord) -> None:
+    if job.job_type != JOB_TYPE_SIGNUP:
+        return
+    from backend.app.services.user_signup import approve_pending_user_for_signup_job
+
+    approve_pending_user_for_signup_job(database_path, job)
 
 
 def assign_job_approver(
@@ -294,12 +315,17 @@ def direct_approve_job(
     *,
     approver_userid: str,
 ) -> JobRecord:
-    return assign_job_approver(
+    existing = get_job_by_idx(database_path, idx)
+    if existing is None:
+        raise ValueError("job not found")
+    updated = assign_job_approver(
         database_path,
         idx,
         approver_userid=approver_userid,
-        status_code=JOB_STATUS_DIRECT_APPROVED,
+        status_code=approval_target_status_code(existing),
     )
+    _finalize_signup_job_approval(database_path, updated)
+    return updated
 
 
 def _require_assigned_reviewer(job: JobRecord, actor_userid: str) -> None:
@@ -322,6 +348,7 @@ def approve_assigned_job(
     if existing is None:
         raise ValueError("job not found")
     _require_assigned_reviewer(existing, actor_userid)
+    target_status = approval_target_status_code(existing)
 
     with get_connection(database_path) as connection:
         cursor = connection.execute(
@@ -330,7 +357,7 @@ def approve_assigned_job(
             SET status_code = ?
             WHERE idx = ? AND status_code = ? AND approver = ?
             """,
-            (JOB_STATUS_DIRECT_APPROVED, idx, JOB_STATUS_APPROVER_ASSIGNED, actor_userid.strip()),
+            (target_status, idx, JOB_STATUS_APPROVER_ASSIGNED, actor_userid.strip()),
         )
         connection.commit()
         if cursor.rowcount == 0:
@@ -339,6 +366,7 @@ def approve_assigned_job(
     updated = get_job_by_idx(database_path, idx)
     if updated is None:
         raise RuntimeError("Failed to load updated job record")
+    _finalize_signup_job_approval(database_path, updated)
     return updated
 
 

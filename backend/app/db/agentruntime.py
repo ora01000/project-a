@@ -110,37 +110,83 @@ def runtime_mode_for_type(runtime_type: int) -> str:
     return "http" if runtime_type == AGENTRUNTIME_TYPE_EXTERNAL else "mock"
 
 
-def build_agent_chat_url(record: StoredAgentRuntime) -> str:
-    """AXIT agent invoke endpoint based on runtime type and orchestrator flag."""
+def axit_runtime_api_family(record: StoredAgentRuntime) -> str:
+    """Return API family name aligned with server-samples agentApi / orchestratorApi."""
+    return "orchestrator" if record.is_orchestrator else "agent"
+
+
+def _axit_runtime_resource_base(record: StoredAgentRuntime) -> str:
+    """Base URL for one AXIT runtime resource: .../agents/v1/{id} or .../orchestrators/v1/{id}."""
     from backend.app.services.axit_config import resolve_axit_agent_url, resolve_axit_orchestrator_url
 
     runtime_mode = runtime_mode_for_type(record.type)
     if record.is_orchestrator:
-        base = (
-            f"{resolve_axit_orchestrator_url(runtime_mode=runtime_mode).rstrip('/')}"
-            f"/{record.agent_id}"
-        )
-        return f"{base}/invoke"
+        root = resolve_axit_orchestrator_url(runtime_mode=runtime_mode).rstrip("/")
+    else:
+        root = resolve_axit_agent_url(runtime_mode=runtime_mode).rstrip("/")
+    return f"{root}/{record.agent_id}"
 
-    base = f"{resolve_axit_agent_url(runtime_mode=runtime_mode).rstrip('/')}/{record.agent_id}"
+
+def build_axit_invoke_url(record: StoredAgentRuntime) -> str:
+    """Invoke URL: agentApi.invokeAgent or orchestratorApi.invokeOrchestrator."""
+    base = _axit_runtime_resource_base(record)
+    if record.is_orchestrator:
+        return f"{base}/invoke"
     if record.type == AGENTRUNTIME_TYPE_EXTERNAL:
         return f"{base}/invoke"
     return base
 
 
-def build_agent_invocations_url(record: StoredAgentRuntime) -> str:
-    """AXIT invocation list/detail base URL for polling after gateway 504."""
-    from backend.app.services.axit_config import resolve_axit_agent_url, resolve_axit_orchestrator_url
+def build_axit_invocations_url(record: StoredAgentRuntime) -> str:
+    """Invocations base URL for 504 polling after invoke."""
+    return f"{_axit_runtime_resource_base(record)}/invocations"
 
-    runtime_mode = runtime_mode_for_type(record.type)
-    if record.is_orchestrator:
-        base = (
-            f"{resolve_axit_orchestrator_url(runtime_mode=runtime_mode).rstrip('/')}"
-            f"/{record.agent_id}"
-        )
-    else:
-        base = f"{resolve_axit_agent_url(runtime_mode=runtime_mode).rstrip('/')}/{record.agent_id}"
-    return f"{base}/invocations"
+
+def build_agent_chat_url(record: StoredAgentRuntime) -> str:
+    """Backward-compatible alias for build_axit_invoke_url."""
+    return build_axit_invoke_url(record)
+
+
+def build_agent_invocations_url(record: StoredAgentRuntime) -> str:
+    """Backward-compatible alias for build_axit_invocations_url."""
+    return build_axit_invocations_url(record)
+
+
+def resolve_agentruntime_for_invoke(
+    database_path: str | Path,
+    *,
+    catalog_agent_id: str,
+    agentruntime_idx: int | None = None,
+    runtime_mode: str | None = None,
+) -> StoredAgentRuntime | None:
+    """Resolve agentruntime for AXIT invoke using catalog id or explicit idx."""
+    from backend.app.config import resolve_agent_runtime_mode
+    from backend.app.services.agent_runtime_client import normalize_runtime_mode
+
+    mode = normalize_runtime_mode(runtime_mode or resolve_agent_runtime_mode())
+
+    if agentruntime_idx is not None:
+        record = get_agentruntime_by_idx(database_path, agentruntime_idx)
+        if record is not None:
+            return record
+
+    normalized_catalog_id = catalog_agent_id.strip()
+    if not normalized_catalog_id:
+        return None
+
+    record = get_agentruntime_by_local_agent_id(
+        database_path,
+        normalized_catalog_id,
+        runtime_mode=mode,
+    )
+    if record is not None:
+        return record
+
+    return get_agentruntime_by_agent_id(
+        database_path,
+        normalized_catalog_id,
+        runtime_mode=mode,
+    )
 
 
 def _row_to_stored_agentruntime(row) -> StoredAgentRuntime:
