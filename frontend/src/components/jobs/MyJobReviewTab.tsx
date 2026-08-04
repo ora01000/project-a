@@ -4,6 +4,7 @@ import type { AuthUser } from "../../types/auth";
 import type { JobRecord } from "../../types/job";
 import { ConfirmDialog } from "../ConfirmDialog";
 import { JobBlockField, JobInlineField } from "./JobFieldLabel";
+import { JobRejectReasonModal } from "./JobRejectReasonModal";
 
 async function parseError(response: Response, fallback: string): Promise<string> {
   const payload = (await response.json().catch(() => null)) as { detail?: string } | null;
@@ -36,7 +37,9 @@ export function MyJobReviewTab({ active, currentUser }: MyJobReviewTabProps) {
   const [isLoading, setIsLoading] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [confirmApproveOpen, setConfirmApproveOpen] = useState(false);
+  const [rejectModalOpen, setRejectModalOpen] = useState(false);
   const [confirmRejectOpen, setConfirmRejectOpen] = useState(false);
+  const [rejectReason, setRejectReason] = useState("");
 
   const loadJobs = useCallback(async () => {
     setIsLoading(true);
@@ -85,7 +88,9 @@ export function MyJobReviewTab({ active, currentUser }: MyJobReviewTabProps) {
 
   useEffect(() => {
     setConfirmApproveOpen(false);
+    setRejectModalOpen(false);
     setConfirmRejectOpen(false);
+    setRejectReason("");
   }, [selectedIdx]);
 
   const handleApprove = async () => {
@@ -114,7 +119,7 @@ export function MyJobReviewTab({ active, currentUser }: MyJobReviewTabProps) {
   };
 
   const handleReject = async () => {
-    if (!selectedJob) {
+    if (!selectedJob || !rejectReason.trim()) {
       return;
     }
 
@@ -124,12 +129,17 @@ export function MyJobReviewTab({ active, currentUser }: MyJobReviewTabProps) {
       const response = await fetch(`/api/jobs/${selectedJob.idx}/reject`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ actor_userid: currentUser.userid }),
+        body: JSON.stringify({
+          actor_userid: currentUser.userid,
+          drop_reason: rejectReason.trim(),
+        }),
       });
       if (!response.ok) {
         throw new Error(await parseError(response, "작업 반려에 실패했습니다."));
       }
       setConfirmRejectOpen(false);
+      setRejectModalOpen(false);
+      setRejectReason("");
       await loadJobs();
     } catch (err) {
       setError(err instanceof Error ? err.message : "작업 반려에 실패했습니다.");
@@ -205,7 +215,7 @@ export function MyJobReviewTab({ active, currentUser }: MyJobReviewTabProps) {
                 <button
                   type="button"
                   disabled={isSubmitting}
-                  onClick={() => setConfirmRejectOpen(true)}
+                  onClick={() => setRejectModalOpen(true)}
                   className="rounded-md border border-rose-700 bg-rose-950/60 px-3 py-1.5 text-sm font-medium text-rose-100 hover:bg-rose-900/70 disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   반려
@@ -225,13 +235,26 @@ export function MyJobReviewTab({ active, currentUser }: MyJobReviewTabProps) {
           onCancel={() => setConfirmApproveOpen(false)}
         />
       ) : null}
+      {rejectModalOpen ? (
+        <JobRejectReasonModal
+          onClose={() => setRejectModalOpen(false)}
+          onSave={(reason) => {
+            setRejectReason(reason);
+            setRejectModalOpen(false);
+            setConfirmRejectOpen(true);
+          }}
+        />
+      ) : null}
       {confirmRejectOpen && selectedJob ? (
         <ConfirmDialog
           title="작업 반려"
           message={`${selectedJob.srnum} 작업을 반려하시겠습니까?`}
           confirmLabel="반려"
           onConfirm={() => void handleReject()}
-          onCancel={() => setConfirmRejectOpen(false)}
+          onCancel={() => {
+            setConfirmRejectOpen(false);
+            setRejectReason("");
+          }}
         />
       ) : null}
     </>

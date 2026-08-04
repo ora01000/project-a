@@ -18,6 +18,7 @@ JOB_STATUS_DIRECT_APPROVED = 2
 JOB_STATUS_COMPLETED_SUCCESS = 10
 JOB_STATUS_COMPLETED_FAILURE = 11
 JOB_STATUS_REJECTED = 12
+JOB_STATUS_CANCELLED = 13
 
 JOB_TYPE_AX_INFRA = 1
 
@@ -41,7 +42,8 @@ JOB_SELECT_COLUMNS = """
     channel_id,
     message_id,
     received_at,
-    reject_reason
+    reject_reason,
+    drop_reason
 """
 
 
@@ -65,6 +67,7 @@ class JobRecord:
     message_id: str
     received_at: str
     reject_reason: str = ""
+    drop_reason: str = ""
 
 
 @dataclass(frozen=True)
@@ -106,6 +109,7 @@ def _row_to_job(row) -> JobRecord:
         message_id=str(row["message_id"]),
         received_at=str(row["received_at"]),
         reject_reason=str(row["reject_reason"] or ""),
+        drop_reason=str(row["drop_reason"] or ""),
     )
 
 
@@ -130,6 +134,7 @@ def list_jobs(
     status_code: int | None = None,
     min_status_code: int | None = None,
     approver: str | None = None,
+    exclude_status_code: int | None = None,
 ) -> list[JobRecord]:
     clauses: list[str] = []
     params: list[object] = []
@@ -139,6 +144,9 @@ def list_jobs(
     if min_status_code is not None:
         clauses.append("status_code >= ?")
         params.append(min_status_code)
+    if exclude_status_code is not None:
+        clauses.append("status_code != ?")
+        params.append(exclude_status_code)
     if approver is not None and approver.strip():
         clauses.append("approver = ?")
         params.append(approver.strip())
@@ -339,21 +347,23 @@ def reject_assigned_job(
     idx: int,
     *,
     actor_userid: str,
-    reject_reason: str = "",
+    drop_reason: str = "",
 ) -> JobRecord:
     existing = get_job_by_idx(database_path, idx)
     if existing is None:
         raise ValueError("job not found")
     _require_assigned_reviewer(existing, actor_userid)
 
-    normalized_reason = reject_reason.strip()[:200]
+    normalized_reason = drop_reason.strip()[:200]
+    if not normalized_reason:
+        raise ValueError("drop_reason is required")
 
     with get_connection(database_path) as connection:
         cursor = connection.execute(
             """
             UPDATE jobs
             SET status_code = ?,
-                reject_reason = ?
+                drop_reason = ?
             WHERE idx = ? AND status_code = ? AND approver = ?
             """,
             (
@@ -367,6 +377,55 @@ def reject_assigned_job(
         connection.commit()
         if cursor.rowcount == 0:
             raise ValueError("job review state has changed")
+
+    updated = get_job_by_idx(database_path, idx)
+    if updated is None:
+        raise RuntimeError("Failed to load updated job record")
+    return updated
+
+
+def reject_received_job(
+    database_path: str | Path,
+    idx: int,
+    *,
+    actor_userid: str,
+    drop_reason: str = "",
+) -> JobRecord:
+    existing = get_job_by_idx(database_path, idx)
+    if existing is None:
+        raise ValueError("job not found")
+
+    actor = actor_userid.strip()
+    if not actor:
+        raise ValueError("actor_userid is required")
+    if existing.status_code != JOB_STATUS_RECEIVED:
+        raise ValueError("only received jobs can be rejected from intake review")
+    if existing.approver and existing.approver.strip():
+        raise ValueError("approver is already assigned")
+
+    normalized_reason = drop_reason.strip()[:200]
+    if not normalized_reason:
+        raise ValueError("drop_reason is required")
+
+    with get_connection(database_path) as connection:
+        cursor = connection.execute(
+            """
+            UPDATE jobs
+            SET status_code = ?,
+                drop_reason = ?
+            WHERE idx = ? AND status_code = ?
+              AND (approver IS NULL OR TRIM(approver) = '')
+            """,
+            (
+                JOB_STATUS_REJECTED,
+                normalized_reason,
+                idx,
+                JOB_STATUS_RECEIVED,
+            ),
+        )
+        connection.commit()
+        if cursor.rowcount == 0:
+            raise ValueError("job reject state has changed")
 
     updated = get_job_by_idx(database_path, idx)
     if updated is None:
@@ -427,19 +486,70 @@ def rework_job(
         raise ValueError("only assigned approver can rework this job")
     if existing.status_code < JOB_STATUS_COMPLETED_SUCCESS:
         raise ValueError("job is not in a completed state")
+    if existing.status_code == JOB_STATUS_CANCELLED:
+        raise ValueError("cancelled jobs cannot be reworked")
 
     with get_connection(database_path) as connection:
         cursor = connection.execute(
             """
             UPDATE jobs
             SET status_code = ?
-            WHERE idx = ? AND approver = ? AND status_code >= ?
+            WHERE idx = ? AND approver = ? AND status_code >= ? AND status_code != ?
             """,
-            (JOB_STATUS_DIRECT_APPROVED, idx, actor, JOB_STATUS_COMPLETED_SUCCESS),
+            (JOB_STATUS_DIRECT_APPROVED, idx, actor, JOB_STATUS_COMPLETED_SUCCESS, JOB_STATUS_CANCELLED),
         )
         connection.commit()
         if cursor.rowcount == 0:
             raise ValueError("job rework state has changed")
+
+    updated = get_job_by_idx(database_path, idx)
+    if updated is None:
+        raise RuntimeError("Failed to load updated job record")
+    return updated
+
+
+def cancel_failed_job(
+    database_path: str | Path,
+    idx: int,
+    *,
+    actor_userid: str,
+    drop_reason: str = "",
+) -> JobRecord:
+    existing = get_job_by_idx(database_path, idx)
+    if existing is None:
+        raise ValueError("job not found")
+
+    actor = actor_userid.strip()
+    if not actor:
+        raise ValueError("actor_userid is required")
+    if (existing.approver or "").strip() != actor:
+        raise ValueError("only assigned approver can cancel this job")
+    if existing.status_code != JOB_STATUS_COMPLETED_FAILURE:
+        raise ValueError("only failed jobs can be cancelled")
+
+    normalized_reason = drop_reason.strip()[:200]
+    if not normalized_reason:
+        raise ValueError("drop_reason is required")
+
+    with get_connection(database_path) as connection:
+        cursor = connection.execute(
+            """
+            UPDATE jobs
+            SET status_code = ?,
+                drop_reason = ?
+            WHERE idx = ? AND status_code = ? AND approver = ?
+            """,
+            (
+                JOB_STATUS_CANCELLED,
+                normalized_reason,
+                idx,
+                JOB_STATUS_COMPLETED_FAILURE,
+                actor,
+            ),
+        )
+        connection.commit()
+        if cursor.rowcount == 0:
+            raise ValueError("job cancel state has changed")
 
     updated = get_job_by_idx(database_path, idx)
     if updated is None:

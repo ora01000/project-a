@@ -17,4 +17,5 @@ export interface JobRecord {
   message_id: string;
   received_at: string;
   reject_reason?: string;
+  drop_reason?: string;
 }

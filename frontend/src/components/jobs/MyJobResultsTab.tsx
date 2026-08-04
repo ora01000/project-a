@@ -5,6 +5,7 @@ import type { JobRecord } from "../../types/job";
 import type { JobResult } from "../../types/jobResult";
 import { AssistantMessageContent } from "../AssistantMessageContent";
 import { ConfirmDialog } from "../ConfirmDialog";
+import { JobCancelReasonModal } from "./JobCancelReasonModal";
 import { JobBlockField, JobInlineField } from "./JobFieldLabel";
 
 async function parseError(response: Response, fallback: string): Promise<string> {
@@ -42,6 +43,9 @@ function statusLabel(statusCode: number): string {
   if (statusCode === 12) {
     return "작업 반려";
   }
+  if (statusCode === 13) {
+    return "작업 취소";
+  }
   return `상태 ${statusCode}`;
 }
 
@@ -51,6 +55,9 @@ function statusValueButtonClass(statusCode: number): string {
   }
   if (statusCode === 12) {
     return "border-amber-700/80 bg-amber-950/70 text-amber-200";
+  }
+  if (statusCode === 13) {
+    return "border-slate-600 bg-slate-900/80 text-slate-300";
   }
   return "border-emerald-700/80 bg-emerald-950/70 text-emerald-200";
 }
@@ -72,6 +79,7 @@ export function MyJobResultsTab({ active, currentUser, onCopyToNote }: MyJobResu
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isCopyingToNote, setIsCopyingToNote] = useState(false);
   const [confirmReworkOpen, setConfirmReworkOpen] = useState(false);
+  const [cancelModalOpen, setCancelModalOpen] = useState(false);
 
   const loadJobs = useCallback(async () => {
     setIsLoading(true);
@@ -80,6 +88,7 @@ export function MyJobResultsTab({ active, currentUser, onCopyToNote }: MyJobResu
       const params = new URLSearchParams({
         min_status_code: "10",
         approver: currentUser.userid,
+        exclude_status_code: "13",
       });
       const response = await fetch(`/api/jobs?${params.toString()}`);
       if (!response.ok) {
@@ -139,6 +148,7 @@ export function MyJobResultsTab({ active, currentUser, onCopyToNote }: MyJobResu
 
   useEffect(() => {
     setConfirmReworkOpen(false);
+    setCancelModalOpen(false);
     if (!active || selectedIdx === null) {
       setJobResult(null);
       setResultError(null);
@@ -167,6 +177,34 @@ export function MyJobResultsTab({ active, currentUser, onCopyToNote }: MyJobResu
       await loadJobs();
     } catch (err) {
       setError(err instanceof Error ? err.message : "재작업 요청에 실패했습니다.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleCancel = async (dropReason: string) => {
+    if (!selectedJob) {
+      return;
+    }
+
+    setIsSubmitting(true);
+    setError(null);
+    try {
+      const response = await fetch(`/api/jobs/${selectedJob.idx}/cancel`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          actor_userid: currentUser.userid,
+          drop_reason: dropReason,
+        }),
+      });
+      if (!response.ok) {
+        throw new Error(await parseError(response, "작업 취소에 실패했습니다."));
+      }
+      setCancelModalOpen(false);
+      await loadJobs();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "작업 취소에 실패했습니다.");
     } finally {
       setIsSubmitting(false);
     }
@@ -276,7 +314,17 @@ export function MyJobResultsTab({ active, currentUser, onCopyToNote }: MyJobResu
                 ) : null}
               </div>
 
-              <div className="flex shrink-0 border-t border-slate-700/80 pt-3">
+              <div className="flex shrink-0 gap-2 border-t border-slate-700/80 pt-3">
+                {selectedJob.status_code === 11 ? (
+                  <button
+                    type="button"
+                    disabled={isSubmitting}
+                    onClick={() => setCancelModalOpen(true)}
+                    className="rounded-md border border-rose-700 bg-rose-950/60 px-3 py-1.5 text-sm font-medium text-rose-100 hover:bg-rose-900/70 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    작업취소
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   disabled={isSubmitting}
@@ -298,6 +346,13 @@ export function MyJobResultsTab({ active, currentUser, onCopyToNote }: MyJobResu
           confirmLabel="재작업"
           onConfirm={() => void handleRework()}
           onCancel={() => setConfirmReworkOpen(false)}
+        />
+      ) : null}
+      {cancelModalOpen && selectedJob ? (
+        <JobCancelReasonModal
+          defaultReason={jobResult?.result ?? ""}
+          onClose={() => setCancelModalOpen(false)}
+          onSave={(reason) => void handleCancel(reason)}
         />
       ) : null}
     </>

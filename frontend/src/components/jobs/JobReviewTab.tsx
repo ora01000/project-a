@@ -5,6 +5,7 @@ import type { JobRecord } from "../../types/job";
 import type { UserRecord } from "../../types/user";
 import { ConfirmDialog } from "../ConfirmDialog";
 import { JobBlockField, JobFieldLabel, JobInlineField } from "./JobFieldLabel";
+import { JobRejectReasonModal } from "./JobRejectReasonModal";
 
 async function parseError(response: Response, fallback: string): Promise<string> {
   const payload = (await response.json().catch(() => null)) as { detail?: string } | null;
@@ -50,6 +51,9 @@ export function JobReviewTab({ active, currentUser }: JobReviewTabProps) {
   const [isAssigning, setIsAssigning] = useState(false);
   const [confirmAssignOpen, setConfirmAssignOpen] = useState(false);
   const [confirmDirectApproveOpen, setConfirmDirectApproveOpen] = useState(false);
+  const [rejectModalOpen, setRejectModalOpen] = useState(false);
+  const [confirmRejectOpen, setConfirmRejectOpen] = useState(false);
+  const [rejectReason, setRejectReason] = useState("");
 
   const loadJobs = useCallback(async () => {
     setIsLoading(true);
@@ -115,6 +119,9 @@ export function JobReviewTab({ active, currentUser }: JobReviewTabProps) {
     setSelectedApproverUserid("");
     setConfirmAssignOpen(false);
     setConfirmDirectApproveOpen(false);
+    setRejectModalOpen(false);
+    setConfirmRejectOpen(false);
+    setRejectReason("");
   }, [selectedIdx]);
 
   const assignApprover = async (approverUserid: string) => {
@@ -167,6 +174,36 @@ export function JobReviewTab({ active, currentUser }: JobReviewTabProps) {
       await loadJobs();
     } catch (err) {
       setError(err instanceof Error ? err.message : "직접승인에 실패했습니다.");
+    } finally {
+      setIsAssigning(false);
+    }
+  };
+
+  const handleReject = async () => {
+    if (!selectedJob || !rejectReason.trim()) {
+      return;
+    }
+
+    setIsAssigning(true);
+    setError(null);
+    try {
+      const response = await fetch(`/api/jobs/${selectedJob.idx}/reject`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          actor_userid: currentUser.userid,
+          drop_reason: rejectReason.trim(),
+        }),
+      });
+      if (!response.ok) {
+        throw new Error(await parseError(response, "작업 반려에 실패했습니다."));
+      }
+      setConfirmRejectOpen(false);
+      setRejectModalOpen(false);
+      setRejectReason("");
+      await loadJobs();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "작업 반려에 실패했습니다.");
     } finally {
       setIsAssigning(false);
     }
@@ -271,6 +308,14 @@ export function JobReviewTab({ active, currentUser }: JobReviewTabProps) {
                       >
                         직접승인
                       </button>
+                      <button
+                        type="button"
+                        disabled={isAssigning}
+                        onClick={() => setRejectModalOpen(true)}
+                        className="rounded-md border border-rose-700 bg-rose-950/60 px-3 py-1.5 text-sm font-medium text-rose-100 hover:bg-rose-900/70 disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        반려
+                      </button>
                     </div>
                   </div>
                 )}
@@ -296,6 +341,28 @@ export function JobReviewTab({ active, currentUser }: JobReviewTabProps) {
           confirmLabel="직접승인"
           onConfirm={() => void handleDirectApprove()}
           onCancel={() => setConfirmDirectApproveOpen(false)}
+        />
+      ) : null}
+      {rejectModalOpen ? (
+        <JobRejectReasonModal
+          onClose={() => setRejectModalOpen(false)}
+          onSave={(reason) => {
+            setRejectReason(reason);
+            setRejectModalOpen(false);
+            setConfirmRejectOpen(true);
+          }}
+        />
+      ) : null}
+      {confirmRejectOpen && selectedJob ? (
+        <ConfirmDialog
+          title="작업 반려"
+          message={`${selectedJob.srnum} 작업을 반려하시겠습니까?`}
+          confirmLabel="반려"
+          onConfirm={() => void handleReject()}
+          onCancel={() => {
+            setConfirmRejectOpen(false);
+            setRejectReason("");
+          }}
         />
       ) : null}
     </>

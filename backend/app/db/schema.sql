@@ -141,7 +141,8 @@ CREATE TABLE IF NOT EXISTS jobs (
     channel_id VARCHAR(120) NOT NULL,
     message_id VARCHAR(50) NOT NULL,
     received_at TEXT NOT NULL,
-    reject_reason VARCHAR(200) NOT NULL DEFAULT ''
+    reject_reason VARCHAR(200) NOT NULL DEFAULT '',
+    drop_reason VARCHAR(200) NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS jobs_result (

@@ -11,9 +11,7 @@ import { createSessionId } from "../utils/sessionId";
 import { AssistantMessageContent } from "./AssistantMessageContent";
 import { CollapsibleUserMessage } from "./CollapsibleUserMessage";
 import { OpenAiBillingConfirmDialog } from "./OpenAiBillingConfirmDialog";
-import { SignupNotificationCard } from "./users/SignupNotificationCard";
 import { ToolUsageList } from "./ToolUsageList";
-import type { SignupNotification } from "../types/signup";
 import { fetchLlmBillingStatus } from "../utils/llmBilling";
 
 interface IntegratedChatPanelProps {
@@ -24,11 +22,6 @@ interface IntegratedChatPanelProps {
   onToggleFullscreen: () => void;
   onChatComplete?: () => void;
   onCopyToNote?: (content: string, noteName?: string) => Promise<void>;
-  signupNotifications?: SignupNotification[];
-  onSignupApprove?: (userIdx: number) => void;
-  onSignupReject?: (userIdx: number, reason: string) => void;
-  onSignupHold?: (notificationIdx: number) => void;
-  isSignupActionProcessing?: boolean;
 }
 
 function createResponseId(): string {
@@ -94,11 +87,6 @@ export function IntegratedChatPanel({
   onToggleFullscreen,
   onChatComplete,
   onCopyToNote,
-  signupNotifications = [],
-  onSignupApprove,
-  onSignupReject,
-  onSignupHold,
-  isSignupActionProcessing = false,
 }: IntegratedChatPanelProps) {
   const { emitFlow } = useTopology();
   const [selectedAgentId, setSelectedAgentId] = useState("");
@@ -538,20 +526,9 @@ export function IntegratedChatPanel({
               ref={conversationScrollRef}
               className="min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain p-2"
             >
-              {signupNotifications.length === 0 && responses.length === 0 ? (
+              {responses.length === 0 ? (
                 <p className="text-slate-500">대화 내용이 여기에 표시됩니다.</p>
               ) : null}
-
-              {signupNotifications.map((notification) => (
-                <SignupNotificationCard
-                  key={`signup-${notification.idx}`}
-                  notification={notification}
-                  isProcessing={isSignupActionProcessing}
-                  onApprove={(userIdx) => onSignupApprove?.(userIdx)}
-                  onReject={(userIdx, reason) => onSignupReject?.(userIdx, reason)}
-                  onHold={(notificationIdx) => onSignupHold?.(notificationIdx)}
-                />
-              ))}
 
               {responses.map((response) => (
                 <div key={response.id} className="space-y-2">

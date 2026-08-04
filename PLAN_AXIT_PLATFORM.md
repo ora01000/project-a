@@ -441,6 +441,9 @@ Redis는 배포시 패키징 하지 않는다.
 ## 모든 에이전트 응답시간에 따른 504 에러
 http 모드에서 에이전트의 응답시간이 길어질 수 있다. 에이전트는 실제로 수분 동안 처리, 성공하였으나 백엔드에서 504 bad gateway 가 발생한다.
 
+AXIT 플랫폼 120초 타임아웃(504)에 대해 추가 분석 샘플이 있다.
+- server-samples/agentApi.js, server-samples/apiClient.js 추가 분석
+
 ## SRNUM
 jobs.srnum 마지막 5자리 숫자 인덱스 생성에 오동작이 있음. 아래 정의된 포맷에서 YYMMDD 가 바뀌면(즉 날짜가 바뀌면) 5자리 인덱스는 다시 00001 부터 시작한다.
 - jobs
@@ -487,6 +490,8 @@ server-samples/oauth , server-samples/oauth/ENVS 를 참고하여 madang 인증�
   - 1 : AX 인프라 작업 요청서 : default
   - 10 : 신규 가입 요청서
   - 값이 없는 경우 1로 입력한다.
+
+- 
 
 
 

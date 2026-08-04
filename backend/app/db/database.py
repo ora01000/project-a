@@ -115,6 +115,7 @@ def _apply_migrations(connection: sqlite3.Connection) -> None:
     _migrate_jobs_approver_column(connection)
     _migrate_jobs_reject_reason_column(connection)
     _migrate_jobs_job_type_column(connection)
+    _migrate_jobs_drop_reason_column(connection)
     _ensure_jobs_result_table(connection)
     _ensure_mynotes_table(connection)
     _ensure_k8s_inventory_tables(connection)
@@ -418,7 +419,8 @@ def _ensure_jobs_table(connection: sqlite3.Connection) -> None:
             channel_id VARCHAR(120) NOT NULL,
             message_id VARCHAR(50) NOT NULL,
             received_at TEXT NOT NULL,
-            reject_reason VARCHAR(200) NOT NULL DEFAULT ''
+            reject_reason VARCHAR(200) NOT NULL DEFAULT '',
+            drop_reason VARCHAR(200) NOT NULL DEFAULT ''
         )
         """
     )
@@ -480,6 +482,26 @@ def _migrate_jobs_job_type_column(connection: sqlite3.Connection) -> None:
     connection.execute("ALTER TABLE jobs ADD COLUMN job_type INTEGER NOT NULL DEFAULT 1")
     connection.execute("UPDATE jobs SET job_type = 1 WHERE job_type IS NULL OR job_type = 0")
     logger.info("Added jobs.job_type column")
+
+
+def _migrate_jobs_drop_reason_column(connection: sqlite3.Connection) -> None:
+    tables = {
+        str(row[0])
+        for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+    }
+    if "jobs" not in tables:
+        return
+
+    columns = {
+        row["name"] for row in connection.execute("PRAGMA table_info(jobs)").fetchall()
+    }
+    if "drop_reason" in columns:
+        return
+
+    connection.execute(
+        "ALTER TABLE jobs ADD COLUMN drop_reason VARCHAR(200) NOT NULL DEFAULT ''"
+    )
+    logger.info("Added jobs.drop_reason column")
 
 
 def _ensure_jobs_result_table(connection: sqlite3.Connection) -> None:

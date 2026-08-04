@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from backend.app.db.signup_notifications import list_signup_notifications_for_user
+from backend.app.services.auth_provider import MADANG_EMAIL_DOMAINS
 from backend.app.services.user_signup import (
     approve_signup,
     dismiss_signup_notification,
@@ -14,10 +15,13 @@ router = APIRouter(tags=["signup"])
 
 class RegisterUserRequest(BaseModel):
     userid: str = Field(min_length=1, max_length=50)
-    email: str = Field(min_length=1, max_length=50)
+    email_local: str = Field(min_length=1, max_length=40)
+    email_domain: str = Field(min_length=1, max_length=40)
     username: str = Field(min_length=1, max_length=50)
     password: str = Field(min_length=1, max_length=50)
     depart: str = Field(min_length=1, max_length=100)
+    request_reason: str = Field(min_length=1, max_length=200)
+    band: int = Field(default=1, ge=1, le=3)
 
 
 class RegisterUserResponse(BaseModel):
@@ -40,15 +44,26 @@ class RejectSignupRequest(BaseModel):
 async def register_user(payload: RegisterUserRequest, request: Request) -> RegisterUserResponse:
     import sqlite3
 
+    email_domain = payload.email_domain.strip()
+    if email_domain not in MADANG_EMAIL_DOMAINS:
+        raise HTTPException(status_code=400, detail="허용되지 않은 이메일 도메인입니다.")
+
+    email_local = payload.email_local.strip()
+    if "@" in email_local:
+        raise HTTPException(status_code=400, detail="이메일 아이디만 입력해 주세요.")
+
+    email = f"{email_local}{email_domain}"
     database_path = request.app.state.database_path
     try:
         register_pending_user(
             database_path,
-            userid=payload.userid,
-            email=payload.email,
-            username=payload.username,
+            userid=payload.userid.strip(),
+            email=email,
+            username=payload.username.strip(),
             password=payload.password,
-            depart=payload.depart,
+            depart=payload.depart.strip(),
+            band=payload.band,
+            request_reason=payload.request_reason.strip(),
         )
     except sqlite3.IntegrityError as exc:
         raise HTTPException(status_code=409, detail="이미 사용 중인 아이디입니다.") from exc

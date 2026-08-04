@@ -128,6 +128,21 @@ def build_agent_chat_url(record: StoredAgentRuntime) -> str:
     return base
 
 
+def build_agent_invocations_url(record: StoredAgentRuntime) -> str:
+    """AXIT invocation list/detail base URL for polling after gateway 504."""
+    from backend.app.services.axit_config import resolve_axit_agent_url, resolve_axit_orchestrator_url
+
+    runtime_mode = runtime_mode_for_type(record.type)
+    if record.is_orchestrator:
+        base = (
+            f"{resolve_axit_orchestrator_url(runtime_mode=runtime_mode).rstrip('/')}"
+            f"/{record.agent_id}"
+        )
+    else:
+        base = f"{resolve_axit_agent_url(runtime_mode=runtime_mode).rstrip('/')}/{record.agent_id}"
+    return f"{base}/invocations"
+
+
 def _row_to_stored_agentruntime(row) -> StoredAgentRuntime:
     local_agent_id = str(row["local_agent_id"] or "").strip()
     return StoredAgentRuntime(
