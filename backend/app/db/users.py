@@ -19,6 +19,7 @@ class User:
     band: int = DEFAULT_BAND
     agents: str = ""
     last_login: str | None = None
+    request_reason: str = ""
 
 
 def parse_agent_ids(raw: str | None) -> list[str]:
@@ -64,6 +65,11 @@ def _row_to_user(row) -> User:
             band = int(row["band"])
     except (KeyError, IndexError, TypeError, ValueError):
         band = DEFAULT_BAND
+    request_reason = ""
+    try:
+        request_reason = str(row["request_reason"] or "")
+    except (KeyError, IndexError):
+        request_reason = ""
     return User(
         idx=int(row["idx"]),
         userid=str(row["userid"]),
@@ -74,11 +80,12 @@ def _row_to_user(row) -> User:
         band=band,
         agents=agents_value,
         last_login=last_login,
+        request_reason=request_reason,
     )
 
 
 _USER_SELECT = (
-    "SELECT idx, userid, email, username, depart, role, band, agents, last_login FROM users"
+    "SELECT idx, userid, email, username, depart, role, band, agents, last_login, request_reason FROM users"
 )
 
 
@@ -174,13 +181,14 @@ def create_user(
     role: int,
     band: int = DEFAULT_BAND,
     agents: str = "",
+    request_reason: str = "",
 ) -> User:
     encoded_agents = encode_agent_ids(parse_agent_ids(agents))
     with get_connection(database_path) as connection:
         cursor = connection.execute(
             """
-            INSERT INTO users (userid, email, username, password, depart, role, band, agents)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO users (userid, email, username, password, depart, role, band, agents, request_reason)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 userid.strip(),
@@ -191,6 +199,7 @@ def create_user(
                 role,
                 int(band),
                 encoded_agents,
+                request_reason.strip(),
             ),
         )
         connection.commit()
@@ -212,30 +221,49 @@ def update_user(
     depart: str,
     role: int,
     band: int | None = None,
+    request_reason: str | None = None,
 ) -> User | None:
     existing = get_user_by_idx(database_path, idx)
     if existing is None:
         return None
     next_band = existing.band if band is None else int(band)
+    next_request_reason = existing.request_reason if request_reason is None else request_reason.strip()
 
     with get_connection(database_path) as connection:
         if password:
             connection.execute(
                 """
                 UPDATE users
-                SET email = ?, username = ?, password = ?, depart = ?, role = ?, band = ?
+                SET email = ?, username = ?, password = ?, depart = ?, role = ?, band = ?, request_reason = ?
                 WHERE idx = ?
                 """,
-                (email.strip(), username.strip(), password, depart.strip(), role, next_band, idx),
+                (
+                    email.strip(),
+                    username.strip(),
+                    password,
+                    depart.strip(),
+                    role,
+                    next_band,
+                    next_request_reason,
+                    idx,
+                ),
             )
         else:
             connection.execute(
                 """
                 UPDATE users
-                SET email = ?, username = ?, depart = ?, role = ?, band = ?
+                SET email = ?, username = ?, depart = ?, role = ?, band = ?, request_reason = ?
                 WHERE idx = ?
                 """,
-                (email.strip(), username.strip(), depart.strip(), role, next_band, idx),
+                (
+                    email.strip(),
+                    username.strip(),
+                    depart.strip(),
+                    role,
+                    next_band,
+                    next_request_reason,
+                    idx,
+                ),
             )
         connection.commit()
 

@@ -48,6 +48,8 @@ def _apply_migrations(connection: sqlite3.Connection) -> None:
     if "band" not in user_columns:
         connection.execute("ALTER TABLE users ADD COLUMN band INTEGER NOT NULL DEFAULT 1")
         connection.execute("UPDATE users SET band = 1 WHERE band IS NULL OR band = 0")
+    if "request_reason" not in user_columns:
+        connection.execute("ALTER TABLE users ADD COLUMN request_reason VARCHAR(200) NOT NULL DEFAULT ''")
 
     tables = {
         str(row[0])
@@ -111,6 +113,8 @@ def _apply_migrations(connection: sqlite3.Connection) -> None:
 
     _ensure_jobs_table(connection)
     _migrate_jobs_approver_column(connection)
+    _migrate_jobs_reject_reason_column(connection)
+    _migrate_jobs_job_type_column(connection)
     _ensure_jobs_result_table(connection)
     _ensure_mynotes_table(connection)
     _ensure_k8s_inventory_tables(connection)
@@ -400,6 +404,7 @@ def _ensure_jobs_table(connection: sqlite3.Connection) -> None:
             idx INTEGER PRIMARY KEY AUTOINCREMENT,
             srnum VARCHAR(20) NOT NULL UNIQUE,
             status_code INTEGER NOT NULL DEFAULT 0,
+            job_type INTEGER NOT NULL DEFAULT 1,
             approver_registered_date TEXT,
             approver VARCHAR(20),
             job_title VARCHAR(300) NOT NULL,
@@ -412,7 +417,8 @@ def _ensure_jobs_table(connection: sqlite3.Connection) -> None:
             team_id VARCHAR(50) NOT NULL,
             channel_id VARCHAR(120) NOT NULL,
             message_id VARCHAR(50) NOT NULL,
-            received_at TEXT NOT NULL
+            received_at TEXT NOT NULL,
+            reject_reason VARCHAR(200) NOT NULL DEFAULT ''
         )
         """
     )
@@ -435,6 +441,45 @@ def _migrate_jobs_approver_column(connection: sqlite3.Connection) -> None:
 
     connection.execute("ALTER TABLE jobs ADD COLUMN approver VARCHAR(20)")
     logger.info("Added jobs.approver column")
+
+
+def _migrate_jobs_reject_reason_column(connection: sqlite3.Connection) -> None:
+    tables = {
+        str(row[0])
+        for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+    }
+    if "jobs" not in tables:
+        return
+
+    columns = {
+        row["name"] for row in connection.execute("PRAGMA table_info(jobs)").fetchall()
+    }
+    if "reject_reason" in columns:
+        return
+
+    connection.execute(
+        "ALTER TABLE jobs ADD COLUMN reject_reason VARCHAR(200) NOT NULL DEFAULT ''"
+    )
+    logger.info("Added jobs.reject_reason column")
+
+
+def _migrate_jobs_job_type_column(connection: sqlite3.Connection) -> None:
+    tables = {
+        str(row[0])
+        for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+    }
+    if "jobs" not in tables:
+        return
+
+    columns = {
+        row["name"] for row in connection.execute("PRAGMA table_info(jobs)").fetchall()
+    }
+    if "job_type" in columns:
+        return
+
+    connection.execute("ALTER TABLE jobs ADD COLUMN job_type INTEGER NOT NULL DEFAULT 1")
+    connection.execute("UPDATE jobs SET job_type = 1 WHERE job_type IS NULL OR job_type = 0")
+    logger.info("Added jobs.job_type column")
 
 
 def _ensure_jobs_result_table(connection: sqlite3.Connection) -> None:

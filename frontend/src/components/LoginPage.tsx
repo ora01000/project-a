@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 
 import type { AuthUser } from "../types/auth";
 import { startAuthSession, userFromAuthResponse } from "../utils/authSession";
+import { MadangRegisterModal } from "./MadangRegisterModal";
+import { PendingApprovalModal } from "./PendingApprovalModal";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { PasswordInput } from "./PasswordInput";
 import { ProfileCompleteModal } from "./ProfileCompleteModal";
@@ -15,15 +17,22 @@ interface LoginPageProps {
 interface AuthProviderInfo {
   provider_type: string;
   registration_enabled: boolean;
+  madang_auth?: boolean;
 }
 
 interface LoginResponse extends AuthUser {
   access_token?: string;
   expires_in?: number;
   profile_required?: boolean;
+  registration_required?: boolean;
   welcome_back?: boolean;
   previous_last_login?: string | null;
   welcome_notices?: WelcomeNoticeItem[];
+}
+
+interface MadangRegistrationState {
+  userid: string;
+  password: string;
 }
 
 interface WelcomeBackState {
@@ -46,10 +55,13 @@ export function LoginPage({ onLoginSuccess }: LoginPageProps) {
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [showRegisterModal, setShowRegisterModal] = useState(false);
+  const [showPendingApproval, setShowPendingApproval] = useState(false);
   const [pendingMessage, setPendingMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [registrationEnabled, setRegistrationEnabled] = useState(true);
+  const [madangAuth, setMadangAuth] = useState(false);
   const [pendingProfile, setPendingProfile] = useState<PendingProfileState | null>(null);
+  const [madangRegistration, setMadangRegistration] = useState<MadangRegistrationState | null>(null);
   const [welcomeBack, setWelcomeBack] = useState<WelcomeBackState | null>(null);
 
   useEffect(() => {
@@ -63,6 +75,7 @@ export function LoginPage({ onLoginSuccess }: LoginPageProps) {
         const data = (await response.json()) as AuthProviderInfo;
         if (!cancelled) {
           setRegistrationEnabled(Boolean(data.registration_enabled));
+          setMadangAuth(Boolean(data.madang_auth));
         }
       } catch {
         // default: keep registration enabled (db mode)
@@ -93,8 +106,8 @@ export function LoginPage({ onLoginSuccess }: LoginPageProps) {
       });
 
       if (response.status === 403) {
-        const payload = (await response.json().catch(() => null)) as { detail?: string } | null;
-        setPendingMessage(payload?.detail ?? "가입 승인 대기 중입니다. 관리자에게 문의해 주세요.");
+        setPassword("");
+        setShowPendingApproval(true);
         return;
       }
 
@@ -104,6 +117,12 @@ export function LoginPage({ onLoginSuccess }: LoginPageProps) {
       }
 
       const payload = (await response.json()) as LoginResponse;
+
+      if (payload.registration_required) {
+        setMadangRegistration({ userid: trimmedUserid, password });
+        return;
+      }
+
       const accessToken = payload.access_token;
       const expiresInSeconds = payload.expires_in ?? 3600;
       if (!accessToken) {
@@ -144,6 +163,11 @@ export function LoginPage({ onLoginSuccess }: LoginPageProps) {
           <div className="mb-6 text-center">
             <h1 className="text-2xl font-bold text-slate-100">AX 인프라 운영 콘솔</h1>
             <p className="mt-2 text-sm text-slate-400">로그인 후 대시보드를 이용할 수 있습니다.</p>
+            {madangAuth ? (
+              <p className="mt-2 inline-block rounded-full border border-sky-700 bg-sky-950/50 px-3 py-1 text-xs font-medium text-sky-300">
+                마당(Madang) 인증
+              </p>
+            ) : null}
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4">
@@ -213,6 +237,19 @@ export function LoginPage({ onLoginSuccess }: LoginPageProps) {
         />
       ) : null}
 
+      {madangRegistration ? (
+        <MadangRegisterModal
+          userid={madangRegistration.userid}
+          password={madangRegistration.password}
+          onClose={() => setMadangRegistration(null)}
+          onSuccess={(message) => {
+            setMadangRegistration(null);
+            setPassword("");
+            setSuccessMessage(message);
+          }}
+        />
+      ) : null}
+
       {pendingProfile ? (
         <ProfileCompleteModal
           user={pendingProfile.user}
@@ -234,6 +271,15 @@ export function LoginPage({ onLoginSuccess }: LoginPageProps) {
             const { user, accessToken, expiresInSeconds } = welcomeBack;
             setWelcomeBack(null);
             onLoginSuccess(user, accessToken, expiresInSeconds);
+          }}
+        />
+      ) : null}
+
+      {showPendingApproval ? (
+        <PendingApprovalModal
+          onClose={() => {
+            setShowPendingApproval(false);
+            setPassword("");
           }}
         />
       ) : null}

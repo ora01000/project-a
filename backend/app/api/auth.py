@@ -9,14 +9,21 @@ from backend.app.db.users import (
     User,
     build_userid_username_map,
     get_user_by_idx,
+    get_user_by_userid,
     parse_agent_ids,
     record_user_login,
     resolve_username,
     update_user,
 )
 from backend.app.middleware.session_auth import extract_bearer_token, get_request_auth_user
-from backend.app.services.auth_provider import AuthProviderError, login_with_provider
+from backend.app.services.auth_provider import (
+    AuthProviderError,
+    MADANG_EMAIL_DOMAINS,
+    login_with_provider,
+    verify_madang_credentials,
+)
 from backend.app.services.auth_session import create_session, revoke_session
+from backend.app.services.user_signup import register_pending_user
 
 router = APIRouter(tags=["auth"])
 
@@ -66,10 +73,11 @@ class UserResponse(BaseModel):
 
 
 class LoginResponse(UserResponse):
-    access_token: str
+    access_token: str | None = None
     token_type: str = "Bearer"
-    expires_in: int
+    expires_in: int | None = None
     profile_required: bool = False
+    registration_required: bool = False
     welcome_back: bool = False
     previous_last_login: str | None = None
     welcome_notices: list[WelcomeNoticeSummary] = Field(default_factory=list)
@@ -78,6 +86,22 @@ class LoginResponse(UserResponse):
 class AuthProviderResponse(BaseModel):
     provider_type: str
     registration_enabled: bool
+    madang_auth: bool = False
+
+
+class MadangRegisterRequest(BaseModel):
+    userid: str = Field(min_length=1, max_length=50)
+    password: str = Field(min_length=1, max_length=50)
+    email_local: str = Field(min_length=1, max_length=40)
+    email_domain: str = Field(min_length=1, max_length=40)
+    username: str = Field(min_length=1, max_length=50)
+    depart: str = Field(min_length=1, max_length=100)
+    request_reason: str = Field(min_length=1, max_length=200)
+    band: int = Field(default=1, ge=1, le=3)
+
+
+class MadangRegisterResponse(BaseModel):
+    message: str
 
 
 class MeResponse(UserResponse):
@@ -100,9 +124,11 @@ class LogoutResponse(BaseModel):
 @router.get("/auth/provider", response_model=AuthProviderResponse)
 async def get_auth_provider() -> AuthProviderResponse:
     settings = load_auth_provider_settings()
+    is_madang = settings.provider_type == "madang"
     return AuthProviderResponse(
         provider_type=settings.provider_type,
         registration_enabled=settings.provider_type == "db",
+        madang_auth=is_madang,
     )
 
 
@@ -145,6 +171,20 @@ async def login(payload: LoginRequest, request: Request) -> LoginResponse:
     except AuthProviderError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
+    if result.registration_required:
+        return LoginResponse(
+            idx=0,
+            userid=result.userid,
+            email="",
+            username="",
+            depart="",
+            role=0,
+            registration_required=True,
+        )
+
+    if result.user is None:
+        raise HTTPException(status_code=500, detail="로그인 처리 중 오류가 발생했습니다.")
+
     previous_last_login, updated_user = record_user_login(database_path, result.user.idx)
     user = updated_user or result.user
     welcome_back = previous_last_login is not None and not result.profile_required
@@ -171,6 +211,60 @@ async def login(payload: LoginRequest, request: Request) -> LoginResponse:
         welcome_back=welcome_back,
         previous_last_login=previous_last_login,
         welcome_notices=welcome_notices,
+    )
+
+
+@router.post("/auth/madang/register", response_model=MadangRegisterResponse, status_code=201)
+async def register_madang_user(payload: MadangRegisterRequest, request: Request) -> MadangRegisterResponse:
+    import sqlite3
+
+    settings = load_auth_provider_settings()
+    if settings.provider_type != "madang":
+        raise HTTPException(status_code=400, detail="madang 인증 모드에서만 사용할 수 있습니다.")
+
+    email_domain = payload.email_domain.strip()
+    if email_domain not in MADANG_EMAIL_DOMAINS:
+        raise HTTPException(status_code=400, detail="허용되지 않은 이메일 도메인입니다.")
+
+    email_local = payload.email_local.strip()
+    if "@" in email_local:
+        raise HTTPException(status_code=400, detail="이메일 아이디만 입력해 주세요.")
+
+    email = f"{email_local}{email_domain}"
+    normalized_userid = payload.userid.strip()
+    database_path = request.app.state.database_path
+
+    try:
+        is_valid = await verify_madang_credentials(
+            settings=settings,
+            userid=normalized_userid,
+            password=payload.password,
+        )
+    except AuthProviderError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+    if not is_valid:
+        raise HTTPException(status_code=401, detail="아이디 또는 비밀번호가 올바르지 않습니다.")
+
+    if get_user_by_userid(database_path, normalized_userid) is not None:
+        raise HTTPException(status_code=409, detail="이미 등록된 사용자입니다.")
+
+    try:
+        register_pending_user(
+            database_path,
+            userid=normalized_userid,
+            email=email,
+            username=payload.username.strip(),
+            password="",
+            depart=payload.depart.strip(),
+            band=payload.band,
+            request_reason=payload.request_reason.strip(),
+        )
+    except sqlite3.IntegrityError as exc:
+        raise HTTPException(status_code=409, detail="이미 사용 중인 아이디입니다.") from exc
+
+    return MadangRegisterResponse(
+        message="가입 신청이 접수되었습니다. 관리자 승인 후 로그인할 수 있습니다.",
     )
 
 

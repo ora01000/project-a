@@ -4,6 +4,7 @@ const PUBLIC_API_ROUTES: Array<{ method: string; path: string }> = [
   { method: "GET", path: "/api/auth/provider" },
   { method: "POST", path: "/api/auth/login" },
   { method: "POST", path: "/api/auth/register" },
+  { method: "POST", path: "/api/auth/madang/register" },
   { method: "POST", path: "/api/jobs" },
   { method: "GET", path: "/api/release-notes" },
 ];

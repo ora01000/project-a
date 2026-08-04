@@ -2,6 +2,7 @@ export interface JobRecord {
   idx: number;
   srnum: string;
   status_code: number;
+  job_type?: number;
   approver_registered_date: string | null;
   approver: string | null;
   job_title: string;
@@ -15,4 +16,5 @@ export interface JobRecord {
   channel_id: string;
   message_id: string;
   received_at: string;
+  reject_reason?: string;
 }

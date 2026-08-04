@@ -8,7 +8,8 @@ CREATE TABLE IF NOT EXISTS users (
     role INTEGER NOT NULL,
     band INTEGER NOT NULL DEFAULT 1,
     agents VARCHAR(200) NOT NULL DEFAULT '',
-    last_login TEXT
+    last_login TEXT,
+    request_reason VARCHAR(200) NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS agentruntime (
@@ -126,6 +127,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     idx INTEGER PRIMARY KEY AUTOINCREMENT,
     srnum VARCHAR(20) NOT NULL UNIQUE,
     status_code INTEGER NOT NULL DEFAULT 0,
+    job_type INTEGER NOT NULL DEFAULT 1,
     approver_registered_date TEXT,
     approver VARCHAR(20),
     job_title VARCHAR(300) NOT NULL,
@@ -138,7 +140,8 @@ CREATE TABLE IF NOT EXISTS jobs (
     team_id VARCHAR(50) NOT NULL,
     channel_id VARCHAR(120) NOT NULL,
     message_id VARCHAR(50) NOT NULL,
-    received_at TEXT NOT NULL
+    received_at TEXT NOT NULL,
+    reject_reason VARCHAR(200) NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS jobs_result (

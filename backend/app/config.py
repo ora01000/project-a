@@ -241,6 +241,13 @@ class AppSettings(BaseSettings):
 
     auth_provider_type: str = Field(default="db", alias="AUTH_PROVIDER_TYPE")
     oauth_proxy: str = Field(default="", alias="OAUTH_PROXY")
+    oauth_url: str = Field(default="", alias="OAUTH_URL")
+    oauth_client_id: str = Field(default="", alias="OAUTH_CLIENT_ID")
+    oauth_client_secret: str = Field(default="", alias="OAUTH_CLIENT_SECRET")
+    oauth_grant_type: str = Field(default="password", alias="OAUTH_GRANT_TYPE")
+    oauth_scope: str = Field(default="EA", alias="OAUTH_SCOPE")
+    oauth_auth_type: str = Field(default="IM", alias="OAUTH_AUTH_TYPE")
+    oauth_verify_ssl: bool | None = Field(default=None, alias="OAUTH_VERIFY_SSL")
 
     redis_url: str = Field(default="redis://localhost:6379/0", alias="REDIS_URL")
     auth_session_ttl_seconds: int | None = Field(default=None, alias="AUTH_SESSION_TTL_SECONDS")
@@ -678,6 +685,13 @@ class AuthSessionSettings(BaseModel):
 class AuthProviderSettings(BaseModel):
     provider_type: str = "db"
     oauth_proxy: str = ""
+    oauth_url: str = ""
+    oauth_client_id: str = ""
+    oauth_client_secret: str = ""
+    oauth_grant_type: str = "password"
+    oauth_scope: str = "EA"
+    oauth_auth_type: str = "IM"
+    oauth_verify_ssl: bool = False
 
 
 class AgentRuntimeSettings(BaseModel):
@@ -736,7 +750,34 @@ def load_auth_provider_settings() -> AuthProviderSettings:
         raw_type = "db"
 
     oauth_proxy = (env_settings.oauth_proxy or auth_yaml.get("oauth_proxy") or "").strip()
-    return AuthProviderSettings(provider_type=raw_type, oauth_proxy=oauth_proxy)
+    oauth_url = (env_settings.oauth_url or auth_yaml.get("oauth_url") or "").strip()
+    oauth_client_id = (env_settings.oauth_client_id or auth_yaml.get("oauth_client_id") or "").strip()
+    oauth_client_secret = (
+        env_settings.oauth_client_secret or auth_yaml.get("oauth_client_secret") or ""
+    ).strip()
+    oauth_grant_type = (
+        env_settings.oauth_grant_type or auth_yaml.get("oauth_grant_type") or "password"
+    ).strip()
+    oauth_scope = (env_settings.oauth_scope or auth_yaml.get("oauth_scope") or "EA").strip()
+    oauth_auth_type = (env_settings.oauth_auth_type or auth_yaml.get("oauth_auth_type") or "IM").strip()
+    verify_raw = (
+        env_settings.oauth_verify_ssl
+        if env_settings.oauth_verify_ssl is not None
+        else auth_yaml.get("oauth_verify_ssl")
+    )
+    oauth_verify_ssl = _as_bool(verify_raw, default=False)
+
+    return AuthProviderSettings(
+        provider_type=raw_type,
+        oauth_proxy=oauth_proxy,
+        oauth_url=oauth_url,
+        oauth_client_id=oauth_client_id,
+        oauth_client_secret=oauth_client_secret,
+        oauth_grant_type=oauth_grant_type,
+        oauth_scope=oauth_scope,
+        oauth_auth_type=oauth_auth_type,
+        oauth_verify_ssl=oauth_verify_ssl,
+    )
 
 
 def load_settings() -> tuple[LLMSettings, ServerSettings, dict[str, MCPServerConfig], str]:

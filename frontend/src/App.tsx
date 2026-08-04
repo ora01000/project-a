@@ -12,7 +12,7 @@ import { UserListPage } from "./components/users/UserListPage";
 import type { AgentInfo, HealthInfo } from "./types/agent";
 import type { AuthUser } from "./types/auth";
 import type { AppView } from "./types/navigation";
-import { ROLE_ADMIN } from "./types/user";
+import { ROLE_ADMIN, ROLE_PENDING } from "./types/user";
 import { logoutSession, setUnauthorizedHandler } from "./utils/api";
 import {
   clearAuthUser,
@@ -94,6 +94,13 @@ export default function App() {
 
         const payload = (await response.json()) as Record<string, unknown>;
         const restoredUser = userFromAuthResponse(payload);
+        if (restoredUser.role === ROLE_PENDING) {
+          clearAuthUser();
+          if (!cancelled) {
+            setUser(null);
+          }
+          return;
+        }
         const expiresIn = typeof payload.expires_in === "number" ? payload.expires_in : 3600;
         if (!cancelled) {
           startAuthSession(restoredUser, token, expiresIn);

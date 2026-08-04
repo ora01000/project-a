@@ -8,6 +8,7 @@ from backend.app.db.signup_notifications import (
     delete_signup_notification,
     delete_signup_notifications_for_user,
 )
+from backend.app.db.jobs import create_user_access_request_job
 from backend.app.db.users import User, create_user, delete_users, get_user_by_idx, list_users, update_user
 from backend.app.notifications.email_sender import send_signup_rejection_email
 
@@ -58,6 +59,8 @@ def register_pending_user(
     username: str,
     password: str,
     depart: str,
+    band: int = 1,
+    request_reason: str = "",
 ) -> User:
     signup_date = format_display_datetime()
     user = create_user(
@@ -68,8 +71,11 @@ def register_pending_user(
         password=password,
         depart=depart,
         role=ROLE_PENDING,
+        band=band,
+        request_reason=request_reason,
     )
     _notify_admins(database_path, user=user, signup_date=signup_date)
+    create_user_access_request_job(database_path, user)
     logger.info("Pending signup registered for userid=%s", user.userid)
     return user
 

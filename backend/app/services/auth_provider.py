@@ -1,7 +1,8 @@
-"""Authentication providers: local DB and madang OAuth proxy."""
+"""Authentication providers: local DB and madang OAuth."""
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from dataclasses import dataclass
 from pathlib import Path
@@ -9,10 +10,12 @@ from pathlib import Path
 import httpx
 
 from backend.app.config import AuthProviderSettings, load_auth_provider_settings
-from backend.app.db.roles import ROLE_PENDING, ROLE_USER
-from backend.app.db.users import User, authenticate_user, create_user, get_user_by_userid
+from backend.app.db.roles import ROLE_PENDING
+from backend.app.db.users import User, authenticate_user, get_user_by_userid
 
 logger = logging.getLogger(__name__)
+
+MADANG_EMAIL_DOMAINS = frozenset({"@lguplus.co.kr", "@lgupluspartners.co.kr"})
 
 
 class AuthProviderError(Exception):
@@ -24,42 +27,126 @@ class AuthProviderError(Exception):
 
 @dataclass(frozen=True)
 class LoginResult:
-    user: User
+    user: User | None = None
     profile_required: bool = False
+    registration_required: bool = False
+    userid: str = ""
 
 
-async def verify_madang_credentials(*, oauth_proxy: str, userid: str, password: str) -> bool:
-    """Call madang OAuth proxy. Logic-only; tests omitted.
+def sha512_hex(value: str) -> str:
+    return hashlib.sha512(value.encode()).hexdigest()
 
-    Expected contract (default):
-      POST {OAUTH_PROXY}/login
-      JSON body: {"userid": "...", "password": "..."}
-      HTTP 2xx => authenticated
-    """
-    base = oauth_proxy.strip().rstrip("/")
-    if not base:
-        raise AuthProviderError(500, "OAUTH_PROXY 가 설정되지 않았습니다.")
 
-    url = f"{base}/login"
+def _madang_http_client(*, verify_ssl: bool) -> httpx.AsyncClient:
+    return httpx.AsyncClient(timeout=30.0, verify=verify_ssl)
+
+
+async def verify_madang_via_direct_oauth(
+    *,
+    settings: AuthProviderSettings,
+    userid: str,
+    password: str,
+) -> bool:
+    """Port of server-samples/oauth/login.jsp — password grant to madang token API."""
+    if not settings.oauth_url or not settings.oauth_client_id or not settings.oauth_client_secret:
+        raise AuthProviderError(
+            500,
+            "madang OAuth 설정(OAUTH_URL, OAUTH_CLIENT_ID, OAUTH_CLIENT_SECRET)이 필요합니다.",
+        )
+
+    hashed_password = sha512_hex(password)
+    form_data = {
+        "grant_type": settings.oauth_grant_type,
+        "client_id": settings.oauth_client_id,
+        "client_secret": settings.oauth_client_secret,
+        "scope": settings.oauth_scope,
+        "auth_type": settings.oauth_auth_type,
+        "user_id": userid,
+        "password": hashed_password,
+    }
+
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with _madang_http_client(verify_ssl=settings.oauth_verify_ssl) as client:
             response = await client.post(
-                url,
-                json={"userid": userid, "password": password},
+                settings.oauth_url,
+                data=form_data,
+                headers={
+                    "Content-Type": "application/x-www-form-urlencoded",
+                    "Accept": "application/json",
+                },
             )
     except httpx.HTTPError as exc:
-        logger.warning("Madang OAuth proxy request failed: %s", exc)
+        logger.warning("Madang OAuth token request failed: %s", exc)
         raise AuthProviderError(502, "인증 서버에 연결할 수 없습니다.") from exc
 
-    if response.is_success:
+    if response.status_code == 200:
         return True
 
     logger.info(
-        "Madang OAuth proxy rejected login userid=%s status=%s",
+        "Madang OAuth rejected login userid=%s status=%s",
         userid,
         response.status_code,
     )
     return False
+
+
+async def verify_madang_via_proxy(
+    *,
+    oauth_proxy: str,
+    userid: str,
+    password: str,
+    verify_ssl: bool,
+) -> bool:
+    """Call deployed oauth proxy (Basic Auth), compatible with login.jsp."""
+    base = oauth_proxy.strip().rstrip("/")
+    if not base:
+        raise AuthProviderError(500, "OAUTH_PROXY 가 설정되지 않았습니다.")
+
+    candidates = (f"{base}/login", f"{base}/login.jsp")
+    last_status: int | None = None
+
+    try:
+        async with _madang_http_client(verify_ssl=verify_ssl) as client:
+            for url in candidates:
+                response = await client.post(url, auth=(userid, password))
+                last_status = response.status_code
+                if response.is_success:
+                    return True
+    except httpx.HTTPError as exc:
+        logger.warning("Madang OAuth proxy request failed: %s", exc)
+        raise AuthProviderError(502, "인증 서버에 연결할 수 없습니다.") from exc
+
+    logger.info(
+        "Madang OAuth proxy rejected login userid=%s status=%s",
+        userid,
+        last_status,
+    )
+    return False
+
+
+async def verify_madang_credentials(
+    *,
+    settings: AuthProviderSettings,
+    userid: str,
+    password: str,
+) -> bool:
+    if settings.oauth_url and settings.oauth_client_id and settings.oauth_client_secret:
+        return await verify_madang_via_direct_oauth(
+            settings=settings,
+            userid=userid,
+            password=password,
+        )
+    if settings.oauth_proxy:
+        return await verify_madang_via_proxy(
+            oauth_proxy=settings.oauth_proxy,
+            userid=userid,
+            password=password,
+            verify_ssl=settings.oauth_verify_ssl,
+        )
+    raise AuthProviderError(
+        500,
+        "madang 인증 설정이 없습니다. OAUTH_URL 또는 OAUTH_PROXY 를 설정해 주세요.",
+    )
 
 
 async def login_with_provider(
@@ -74,7 +161,7 @@ async def login_with_provider(
 
     if auth_settings.provider_type == "madang":
         is_valid = await verify_madang_credentials(
-            oauth_proxy=auth_settings.oauth_proxy,
+            settings=auth_settings,
             userid=normalized_userid,
             password=password,
         )
@@ -90,17 +177,7 @@ async def login_with_provider(
                 )
             return LoginResult(user=existing, profile_required=False)
 
-        created = create_user(
-            database_path,
-            userid=normalized_userid,
-            email="",
-            username=normalized_userid,
-            password="",
-            depart="",
-            role=ROLE_USER,
-        )
-        logger.info("Madang login created local user userid=%s", normalized_userid)
-        return LoginResult(user=created, profile_required=True)
+        return LoginResult(registration_required=True, userid=normalized_userid)
 
     user = authenticate_user(database_path, normalized_userid, password)
     if user is None:

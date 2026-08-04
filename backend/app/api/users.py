@@ -30,6 +30,7 @@ class UserResponse(BaseModel):
     band: int = 1
     agents: str = ""
     agent_ids: list[str] = Field(default_factory=list)
+    request_reason: str = ""
 
     @classmethod
     def from_user(cls, user: User) -> "UserResponse":
@@ -44,6 +45,7 @@ class UserResponse(BaseModel):
             band=user.band,
             agents=user.agents or "",
             agent_ids=agent_ids,
+            request_reason=user.request_reason,
         )
 
 

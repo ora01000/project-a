@@ -9,6 +9,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
 from backend.app.config import load_auth_session_settings
+from backend.app.db.roles import ROLE_PENDING
 from backend.app.db.users import User, get_user_by_idx
 from backend.app.services.auth_session import validate_and_touch_session
 
@@ -18,6 +19,7 @@ PUBLIC_API_ROUTES: set[tuple[str, str]] = {
     ("GET", "/api/auth/provider"),
     ("POST", "/api/auth/login"),
     ("POST", "/api/auth/register"),
+    ("POST", "/api/auth/madang/register"),
     ("POST", "/api/jobs"),
     ("GET", "/api/release-notes"),
 }
@@ -84,6 +86,12 @@ class SessionAuthMiddleware(BaseHTTPMiddleware):
         if user is None:
             logger.warning("Session user not found: idx=%s", session.user_idx)
             return JSONResponse(status_code=401, content={"detail": "사용자를 찾을 수 없습니다."})
+
+        if user.role == ROLE_PENDING:
+            return JSONResponse(
+                status_code=403,
+                content={"detail": "가입 승인 대기 중입니다. 관리자에게 문의해 주세요."},
+            )
 
         request.state.auth_user = user
         request.state.auth_token = token

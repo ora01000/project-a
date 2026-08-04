@@ -8,6 +8,7 @@ export interface UserRecord {
   band: number;
   agents?: string;
   agent_ids?: string[];
+  request_reason?: string;
 }
 
 export interface UserFormValues {

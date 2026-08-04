@@ -94,10 +94,18 @@ k8s_collector:
   # contexts:
   #   dtest-k8s: orbstack
 
-# 인증 프로바이더 (환경변수 AUTH_PROVIDER_TYPE / OAUTH_PROXY 로 오버라이드)
+# 인증 프로바이더 (환경변수 AUTH_PROVIDER_TYPE / OAUTH_* 로 오버라이드)
 auth:
   provider_type: "db"   # db | madang
   oauth_proxy: ""
+  # madang 직접 연동 (login.jsp Python 포팅) — 아래 3개가 모두 설정되면 OAUTH_PROXY 대신 사용
+  oauth_url: ""
+  oauth_client_id: ""
+  oauth_client_secret: ""
+  oauth_grant_type: "password"
+  oauth_scope: "EA"
+  oauth_auth_type: "IM"
+  oauth_verify_ssl: false
 
 # Redis (세션·캐시, 배포 시 별도 프로세스 — 패키징하지 않음)
 redis:

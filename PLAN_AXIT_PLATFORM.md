@@ -435,6 +435,59 @@ Redis는 배포시 패키징 하지 않는다.
 작업 결과 > 상태 의 내용은 텍스트 레이블 버튼으로 한다
 
 
+## 작업요청서 수신기에서 작업 승인후 에이전트 호출 오류
+작업요청서 수신기 데몬에서 에이전트에 작업 위임시 agentruntime.is_orchestrator 값을 고려하여 에이전트 URL 을 적용하지 않는다. 
+
+## 모든 에이전트 응답시간에 따른 504 에러
+http 모드에서 에이전트의 응답시간이 길어질 수 있다. 에이전트는 실제로 수분 동안 처리, 성공하였으나 백엔드에서 504 bad gateway 가 발생한다.
+
+## SRNUM
+jobs.srnum 마지막 5자리 숫자 인덱스 생성에 오동작이 있음. 아래 정의된 포맷에서 YYMMDD 가 바뀌면(즉 날짜가 바뀌면) 5자리 인덱스는 다시 00001 부터 시작한다.
+- jobs
+ - srnum varchar, format : {"SR" + YYMMDD + "_" + #####} 자동 생성
+
+## madang IDP 를 연동
+server-samples/oauth , server-samples/oauth/ENVS 를 참고하여 madang 인증인 경우 API콜하고 인증 결과를 받아 로그인하는 로직을 추가한다. 인증 방식은 현재 DB 기반 인증과 madang IDP 인증을 환경변수로 선택할 수 있다.
+- madang 인증인 경우 users 테이블의 password는 비교하지 않는다.
+- madang 인증인 경우 로그인 창에서 마당 인증임을 표시한다.
+- 이 프로젝트에 맞게 python으로 포팅한다.
+- 인증 API 콜을 통해 ID/PW 매칭이 성공인 경우
+  - users 테이블에 userid 가 존재하는 경우 그대로 인증 성공으로 간주한다.
+  - users 테이블에 userid 가 없는 경우 신규 사용자로 판단한다.
+    - 새로운 사용자 정보 입력을 위한 팝업을 띄운다.
+    - 새로운 사용자 등록 팝업에는 다음 정보를 기입한다.
+      - 이메일 도메인 : @lguplus.co.kr, @lgupluspartners.co.kr 둘 중 하나를 선택하게 한다.
+      - 사용자 이름
+      - 요청 사유
+      - 조직
+      - 직급 : band 값 중 선택한다(1:사원, 2:선임, 3:책임)
+      - role 은 입력받지 않는다. 5(승인대기) 로 넣으며, 화면에 표시하지 않는다.
+
+- jobs.reject_reason varchar(200) 컬럼을 추가한다.
+- users.request_reason varchar(200) 컬럼을 추가한다.
+
+- 승인 대기 상태인 사용자는 인증이 성공해도 화면 진입이 불가하다.
+  - 승인 대기 중이며 관리자에게 문의하라는 내용의 문구를 팝업으로 출력하고 관리자 정보는 다음으로 표시한다.
+    - IT플랫폼운영팀 윤인수
+  - 창을 닫으면 로그인 화면으로 돌아간다.
+- 신규 가입자가 정보를 저장하면 가입 요청서가 발송된다. 가입 요청은 jobs 테이블에 입력된다.
+  - srnum : 동일 규칙으로 생성
+  - status_code : 0
+  - job_title : "[신규사용자] 접속 권한 신청서"
+  - requester_name : users.username + " " + users.depart
+  - requester_email : users.email
+  - job_content : users.request_reason
+  - request_date : 레코드 입력 일시
+  - madang_id : users.userid
+  - team_id, channel_id, message_id : 공백
+  - received_at : 레코드 입력 일시
+  - job_type : 1
+
+- jobs.job_type int 컬럼 추가
+  - 1 : AX 인프라 작업 요청서 : default
+  - 10 : 신규 가입 요청서
+  - 값이 없는 경우 1로 입력한다.
+
 
 
 

@@ -43,6 +43,7 @@ class JobRecordResponse(BaseModel):
     idx: int
     srnum: str
     status_code: int
+    job_type: int = 1
     approver_registered_date: str | None = None
     approver: str | None = None
     job_title: str
@@ -56,6 +57,7 @@ class JobRecordResponse(BaseModel):
     channel_id: str
     message_id: str
     received_at: str
+    reject_reason: str = ""
 
     @classmethod
     def from_record(cls, record: JobRecord) -> "JobRecordResponse":
@@ -63,6 +65,7 @@ class JobRecordResponse(BaseModel):
             idx=record.idx,
             srnum=record.srnum,
             status_code=record.status_code,
+            job_type=record.job_type,
             approver_registered_date=record.approver_registered_date,
             approver=record.approver,
             job_title=record.job_title,
@@ -76,6 +79,7 @@ class JobRecordResponse(BaseModel):
             channel_id=record.channel_id,
             message_id=record.message_id,
             received_at=record.received_at,
+            reject_reason=record.reject_reason,
         )
 
 
@@ -214,6 +218,10 @@ class JobReviewActionRequest(BaseModel):
     actor_userid: str = Field(min_length=1, max_length=20)
 
 
+class JobRejectRequest(JobReviewActionRequest):
+    reject_reason: str = Field(default="", max_length=200)
+
+
 @router.post("/jobs/{idx}/approve", response_model=JobRecordResponse)
 async def approve_job_review(
     request: Request,
@@ -235,11 +243,16 @@ async def approve_job_review(
 async def reject_job_review(
     request: Request,
     idx: int,
-    body: JobReviewActionRequest,
+    body: JobRejectRequest,
 ) -> JobRecordResponse:
     database_path = request.app.state.database_path
     try:
-        record = reject_assigned_job(database_path, idx, actor_userid=body.actor_userid)
+        record = reject_assigned_job(
+            database_path,
+            idx,
+            actor_userid=body.actor_userid,
+            reject_reason=body.reject_reason,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:

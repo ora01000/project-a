@@ -10,6 +10,7 @@ from backend.app.db.job_datetime import (
     next_sr_sequence,
     now_job_datetime,
 )
+from backend.app.db.users import User
 
 JOB_STATUS_RECEIVED = 0
 JOB_STATUS_APPROVER_ASSIGNED = 1
@@ -18,10 +19,15 @@ JOB_STATUS_COMPLETED_SUCCESS = 10
 JOB_STATUS_COMPLETED_FAILURE = 11
 JOB_STATUS_REJECTED = 12
 
+JOB_TYPE_AX_INFRA = 1
+
+SIGNUP_ACCESS_REQUEST_JOB_TITLE = "[신규사용자] 접속 권한 신청서"
+
 JOB_SELECT_COLUMNS = """
     idx,
     srnum,
     status_code,
+    job_type,
     approver_registered_date,
     approver,
     job_title,
@@ -34,7 +40,8 @@ JOB_SELECT_COLUMNS = """
     team_id,
     channel_id,
     message_id,
-    received_at
+    received_at,
+    reject_reason
 """
 
 
@@ -43,6 +50,7 @@ class JobRecord:
     idx: int
     srnum: str
     status_code: int
+    job_type: int
     approver_registered_date: str | None
     approver: str | None
     job_title: str
@@ -56,6 +64,7 @@ class JobRecord:
     channel_id: str
     message_id: str
     received_at: str
+    reject_reason: str = ""
 
 
 @dataclass(frozen=True)
@@ -70,6 +79,7 @@ class JobIntakePayload:
     team_id: str
     channel_id: str
     message_id: str
+    job_type: int = JOB_TYPE_AX_INFRA
 
 
 def _row_to_job(row) -> JobRecord:
@@ -79,6 +89,7 @@ def _row_to_job(row) -> JobRecord:
         idx=int(row["idx"]),
         srnum=str(row["srnum"]),
         status_code=int(row["status_code"]),
+        job_type=int(row["job_type"] if row["job_type"] is not None else JOB_TYPE_AX_INFRA),
         approver_registered_date=(
             str(approver_registered_date) if approver_registered_date is not None else None
         ),
@@ -94,6 +105,7 @@ def _row_to_job(row) -> JobRecord:
         channel_id=str(row["channel_id"]),
         message_id=str(row["message_id"]),
         received_at=str(row["received_at"]),
+        reject_reason=str(row["reject_reason"] or ""),
     )
 
 
@@ -160,6 +172,7 @@ def create_job_from_intake(
             INSERT INTO jobs (
                 srnum,
                 status_code,
+                job_type,
                 approver_registered_date,
                 approver,
                 job_title,
@@ -174,11 +187,12 @@ def create_job_from_intake(
                 message_id,
                 received_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 srnum,
                 JOB_STATUS_RECEIVED,
+                int(payload.job_type),
                 None,
                 None,
                 payload.job_title.strip(),
@@ -201,6 +215,25 @@ def create_job_from_intake(
     if created is None:
         raise RuntimeError("Failed to load created job record")
     return created
+
+
+def create_user_access_request_job(database_path: str | Path, user: User) -> JobRecord:
+    """Create a signup access-request job for a pending user."""
+    requester_name = f"{user.username.strip()} {user.depart.strip()}".strip()
+    submitted_at = now_job_datetime()
+    payload = JobIntakePayload(
+        job_title=SIGNUP_ACCESS_REQUEST_JOB_TITLE,
+        requester_name=requester_name,
+        requester_email=user.email.strip(),
+        requester_depart=user.depart.strip(),
+        job_content=user.request_reason.strip(),
+        request_date=submitted_at,
+        madang_id=user.userid.strip(),
+        team_id="",
+        channel_id="",
+        message_id="",
+    )
+    return create_job_from_intake(database_path, payload)
 
 
 def assign_job_approver(
@@ -306,20 +339,30 @@ def reject_assigned_job(
     idx: int,
     *,
     actor_userid: str,
+    reject_reason: str = "",
 ) -> JobRecord:
     existing = get_job_by_idx(database_path, idx)
     if existing is None:
         raise ValueError("job not found")
     _require_assigned_reviewer(existing, actor_userid)
 
+    normalized_reason = reject_reason.strip()[:200]
+
     with get_connection(database_path) as connection:
         cursor = connection.execute(
             """
             UPDATE jobs
-            SET status_code = ?
+            SET status_code = ?,
+                reject_reason = ?
             WHERE idx = ? AND status_code = ? AND approver = ?
             """,
-            (JOB_STATUS_REJECTED, idx, JOB_STATUS_APPROVER_ASSIGNED, actor_userid.strip()),
+            (
+                JOB_STATUS_REJECTED,
+                normalized_reason,
+                idx,
+                JOB_STATUS_APPROVER_ASSIGNED,
+                actor_userid.strip(),
+            ),
         )
         connection.commit()
         if cursor.rowcount == 0:
