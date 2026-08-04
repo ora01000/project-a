@@ -13,8 +13,13 @@ from backend.app.db.users import get_user_by_userid, parse_agent_ids
 from backend.app.disabled_features import is_removed_agent_id, raise_disabled_feature
 from backend.app.logging.agent_logger import log_agent_interaction
 from backend.app.logging.user_comm_logger import list_user_communications, log_user_communication
+from backend.app.middleware.session_auth import get_request_auth_user
 from backend.app.services.agent_runtime_client import AgentInvokeRequest
 from backend.app.services.axit_platform_client import format_axit_invoke_error
+from backend.app.services.chat_input_history_store import (
+    append_chat_input_history,
+    get_chat_input_history,
+)
 
 router = APIRouter(tags=["chat"])
 
@@ -40,6 +45,52 @@ class UserCommLogResponse(BaseModel):
     user_id: str
     date: str
     entries: list[UserCommLogEntry]
+
+
+class ChatInputHistoryResponse(BaseModel):
+    agent_id: str
+    messages: list[str]
+
+
+class ChatInputHistoryAppendRequest(BaseModel):
+    message: str = Field(min_length=1)
+
+
+def _ensure_chat_agent_access(request: Request, agent_id: str) -> None:
+    manager = request.app.state.agent_manager
+    if agent_id not in manager.agents:
+        raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
+
+    user = get_request_auth_user(request)
+    allowed = set(parse_agent_ids(user.agents))
+    if agent_id not in allowed:
+        raise HTTPException(status_code=403, detail="할당되지 않은 에이전트입니다.")
+
+
+@router.get("/chat/input-history/{agent_id}", response_model=ChatInputHistoryResponse)
+async def get_chat_input_history_endpoint(agent_id: str, request: Request) -> ChatInputHistoryResponse:
+    if is_removed_agent_id(agent_id):
+        raise_disabled_feature()
+
+    _ensure_chat_agent_access(request, agent_id)
+    user = get_request_auth_user(request)
+    messages = await get_chat_input_history(user.userid, agent_id)
+    return ChatInputHistoryResponse(agent_id=agent_id, messages=messages)
+
+
+@router.post("/chat/input-history/{agent_id}", response_model=ChatInputHistoryResponse)
+async def append_chat_input_history_endpoint(
+    agent_id: str,
+    payload: ChatInputHistoryAppendRequest,
+    request: Request,
+) -> ChatInputHistoryResponse:
+    if is_removed_agent_id(agent_id):
+        raise_disabled_feature()
+
+    _ensure_chat_agent_access(request, agent_id)
+    user = get_request_auth_user(request)
+    messages = await append_chat_input_history(user.userid, agent_id, payload.message)
+    return ChatInputHistoryResponse(agent_id=agent_id, messages=messages)
 
 
 def _serialize_tools(tools_used: list[ToolUsage]) -> list[dict[str, str | None]]:

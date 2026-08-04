@@ -43,8 +43,18 @@ export function ChatPanel({ agentId, disabled = false, expanded = false }: ChatP
   useEffect(() => {
     setTurns([]);
     setInput("");
-    setInputHistory(loadInputHistory(agentId));
     setHistoryIndex(-1);
+
+    let cancelled = false;
+    void loadInputHistory(agentId).then((history) => {
+      if (!cancelled) {
+        setInputHistory(history);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
   }, [agentId]);
 
   const userScrollKey = useMemo(
@@ -127,7 +137,7 @@ export function ChatPanel({ agentId, disabled = false, expanded = false }: ChatP
       return;
     }
 
-    const nextHistory = appendInputHistory(agentId, trimmed);
+    const nextHistory = await appendInputHistory(agentId, trimmed);
     setInputHistory(nextHistory);
     setHistoryIndex(-1);
     setInput("");

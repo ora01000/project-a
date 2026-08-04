@@ -250,8 +250,17 @@ export function IntegratedChatPanel({
       return;
     }
 
-    setInputHistory(loadInputHistory(selectedAgentId));
+    let cancelled = false;
     setHistoryIndex(-1);
+    void loadInputHistory(selectedAgentId).then((history) => {
+      if (!cancelled) {
+        setInputHistory(history);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
   }, [selectedAgentId]);
 
   const responseScrollKey = useMemo(
@@ -319,7 +328,7 @@ export function IntegratedChatPanel({
       return;
     }
 
-    const nextHistory = appendInputHistory(selectedAgent.id, trimmed);
+    const nextHistory = await appendInputHistory(selectedAgent.id, trimmed);
     setInputHistory(nextHistory);
     setHistoryIndex(-1);
     setInput("");

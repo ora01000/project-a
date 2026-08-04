@@ -517,6 +517,8 @@ server-samples/oauth , server-samples/oauth/ENVS 를 참고하여 madang 인증�
 - 작업 검토 탭
   - jobs.status_code : 0 인 작업만 출력한다.
 
+- 대화형 터미널 입력 히스토리(최대 10개)를 Redis에 저장한다. (`chat:input-history:{userid}:{agent_id}`)
+
 
 
 
