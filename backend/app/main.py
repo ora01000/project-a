@@ -28,12 +28,12 @@ from backend.app.api.notices import router as notices_router
 from backend.app.api.mock_llm import router as mock_llm_router
 from backend.app.api.mynotes import router as mynotes_router
 from backend.app.api.postman_debug import router as postman_debug_router
-from backend.app.api.prompt_debug import router as prompt_debug_router
 from backend.app.api.release import router as release_router
 from backend.app.api.signup import router as signup_router
 from backend.app.api.token_usage import router as token_usage_router
 from backend.app.api.users import router as users_router
 from backend.app.api.teams_inbound_debug import router as teams_inbound_debug_router
+from backend.app.api.whatap_webhook import router as whatap_webhook_router
 from backend.app.api.axit_mock import router as axit_mock_router
 from backend.app.config import (
     load_auth_session_settings,
@@ -502,7 +502,6 @@ def create_app() -> FastAPI:
     app.include_router(signup_router, prefix="/api")
     app.include_router(users_router, prefix="/api")
     app.include_router(agent_logs_router, prefix="/api")
-    app.include_router(prompt_debug_router, prefix="/api")
     app.include_router(agentruntime_records_router, prefix="/api")
     app.include_router(token_usage_router, prefix="/api")
     app.include_router(agents_router, prefix="/api")
@@ -517,6 +516,7 @@ def create_app() -> FastAPI:
     app.include_router(mock_llm_router, prefix="/api")
     app.include_router(release_router, prefix="/api")
     app.include_router(teams_inbound_debug_router, prefix="/api")
+    app.include_router(whatap_webhook_router, prefix="/api")
     app.include_router(axit_mock_router)
     return app
 

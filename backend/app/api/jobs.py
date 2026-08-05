@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 from backend.app.db.jobs import (
     JOB_STATUS_APPROVER_ASSIGNED,
     JOB_STATUS_RECEIVED,
+    JOB_TYPE_SIGNUP,
     JobRecord,
     approve_assigned_job,
     assign_job_approver,
@@ -22,6 +23,8 @@ from backend.app.db.jobs import (
     rework_job,
 )
 from backend.app.db.jobs_result import JobResultRecord, get_job_result_by_srnum
+from backend.app.db.roles import is_admin_role
+from backend.app.middleware.session_auth import get_request_auth_user
 from backend.app.services.job_intake import receive_job_request
 
 logger = logging.getLogger(__name__)
@@ -124,6 +127,10 @@ async def submit_job_request(
     return JobIntakeResponse.from_record(record)
 
 
+def _hide_signup_jobs_for_viewer(viewer_role: int) -> bool:
+    return not is_admin_role(viewer_role)
+
+
 @router.get("/jobs", response_model=list[JobRecordResponse])
 async def list_job_records(
     request: Request,
@@ -133,12 +140,14 @@ async def list_job_records(
     exclude_status_code: int | None = Query(default=None),
 ) -> list[JobRecordResponse]:
     database_path = request.app.state.database_path
+    viewer = get_request_auth_user(request)
     records = list_jobs(
         database_path,
         status_code=status_code,
         min_status_code=min_status_code,
         approver=approver,
         exclude_status_code=exclude_status_code,
+        exclude_job_type=JOB_TYPE_SIGNUP if _hide_signup_jobs_for_viewer(viewer.role) else None,
     )
     return [JobRecordResponse.from_record(record) for record in records]
 
@@ -146,8 +155,11 @@ async def list_job_records(
 @router.get("/jobs/{idx}", response_model=JobRecordResponse)
 async def get_job_record(request: Request, idx: int) -> JobRecordResponse:
     database_path = request.app.state.database_path
+    viewer = get_request_auth_user(request)
     record = get_job_by_idx(database_path, idx)
     if record is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if record.job_type == JOB_TYPE_SIGNUP and _hide_signup_jobs_for_viewer(viewer.role):
         raise HTTPException(status_code=404, detail="Job not found")
     return JobRecordResponse.from_record(record)
 

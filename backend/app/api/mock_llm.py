@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from backend.app.config import resolve_agent_runtime_mode
-from backend.app.db.roles import ROLE_ADMIN
+from backend.app.db.roles import is_admin_role
 from backend.app.services.agent_runtime_client import normalize_runtime_mode
 from backend.app.services.mock_llm_runtime import (
     describe_local_llm_settings,
@@ -45,7 +45,7 @@ class MockLlmUpdateRequest(BaseModel):
 
 
 def _require_admin(viewer_role: int) -> None:
-    if viewer_role != ROLE_ADMIN:
+    if not is_admin_role(viewer_role):
         raise HTTPException(status_code=403, detail="관리자만 수행할 수 있습니다.")
 
 

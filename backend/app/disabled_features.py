@@ -4,11 +4,7 @@ from __future__ import annotations
 
 from fastapi import HTTPException
 
-from backend.app.agents.system_agents import WHATAP_EVENT_AGENT_ID
-
-REMOVED_AGENT_IDS = frozenset({
-    WHATAP_EVENT_AGENT_ID,
-})
+REMOVED_AGENT_IDS: frozenset[str] = frozenset()
 
 DISABLED_FEATURE_DETAIL = "요청한 기능이 비활성화되었습니다."
 

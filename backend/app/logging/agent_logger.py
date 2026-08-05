@@ -6,6 +6,11 @@ from typing import Any
 
 from backend.app.agents.base import ToolUsage
 from backend.app.config import PROJECT_ROOT
+from backend.app.services.whatap_constants import (
+    WHATAP_EVENT_LOG_SOURCE,
+    WHATAP_LOG_AGENT_IDS,
+    is_whatap_log_agent_id,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +33,9 @@ def log_agent_interaction(
     input_message: str,
     output_message: str,
     tools_used: list[ToolUsage],
+    *,
+    user_id: str | None = None,
+    user_name: str | None = None,
 ) -> None:
     ensure_agent_logs_dir()
 
@@ -38,6 +46,12 @@ def log_agent_interaction(
         "output_message": output_message,
         "tools": _serialize_tools(tools_used),
     }
+    normalized_user_id = (user_id or "").strip()
+    normalized_user_name = (user_name or "").strip()
+    if normalized_user_id:
+        entry["user_id"] = normalized_user_id
+    if normalized_user_name:
+        entry["user_name"] = normalized_user_name
 
     log_path = AGENT_LOGS_DIR / f"{agent_id}.log"
     line = json.dumps(entry, ensure_ascii=False)
@@ -54,6 +68,8 @@ def log_agent_error(
     *,
     reason: str,
     input_message: str | None = None,
+    user_id: str | None = None,
+    user_name: str | None = None,
 ) -> None:
     ensure_agent_logs_dir()
 
@@ -65,6 +81,12 @@ def log_agent_error(
     }
     if input_message is not None:
         entry["input_message"] = input_message
+    normalized_user_id = (user_id or "").strip()
+    normalized_user_name = (user_name or "").strip()
+    if normalized_user_id:
+        entry["user_id"] = normalized_user_id
+    if normalized_user_name:
+        entry["user_name"] = normalized_user_name
 
     log_path = AGENT_LOGS_DIR / f"{agent_id}.log"
     line = json.dumps(entry, ensure_ascii=False)
@@ -76,12 +98,19 @@ def log_agent_error(
         logger.error("Failed to write agent error log for %s: %s", agent_id, exc)
 
 
-def list_all_agent_logs(limit: int | None = None) -> list[dict[str, Any]]:
+def list_all_agent_logs(
+    limit: int | None = None,
+    *,
+    viewer_user_id: str | None = None,
+    admin_view: bool = False,
+    agent_id: str | None = None,
+    exclude_agent_ids: frozenset[str] | None = None,
+) -> list[dict[str, Any]]:
     ensure_agent_logs_dir()
     entries: list[dict[str, Any]] = []
 
     for log_path in sorted(AGENT_LOGS_DIR.glob("*.log")):
-        agent_id = log_path.stem
+        file_agent_id = log_path.stem
         try:
             with log_path.open(encoding="utf-8") as file:
                 for line in file:
@@ -95,10 +124,49 @@ def list_all_agent_logs(limit: int | None = None) -> list[dict[str, Any]]:
                     if not isinstance(entry, dict):
                         continue
                     if "agent_id" not in entry:
-                        entry["agent_id"] = agent_id
+                        entry["agent_id"] = file_agent_id
                     entries.append(entry)
         except OSError as exc:
             logger.warning("Failed to read agent log %s: %s", log_path, exc)
+
+    normalized_agent_id = (agent_id or "").strip() or None
+    if normalized_agent_id:
+        if normalized_agent_id == WHATAP_EVENT_LOG_SOURCE:
+            entries = [
+                entry
+                for entry in entries
+                if is_whatap_log_agent_id(str(entry.get("agent_id") or ""))
+            ]
+        else:
+            entries = [
+                entry
+                for entry in entries
+                if str(entry.get("agent_id") or "").strip() == normalized_agent_id
+            ]
+
+    if exclude_agent_ids:
+        expanded_exclude = set(exclude_agent_ids)
+        if WHATAP_EVENT_LOG_SOURCE in expanded_exclude:
+            expanded_exclude |= set(WHATAP_LOG_AGENT_IDS)  # need import
+        entries = [
+            entry
+            for entry in entries
+            if str(entry.get("agent_id") or "").strip() not in expanded_exclude
+        ]
+
+    if not admin_view:
+        if normalized_agent_id == WHATAP_EVENT_LOG_SOURCE:
+            pass
+        else:
+            normalized_viewer = (viewer_user_id or "").strip()
+            if normalized_viewer:
+                entries = [
+                    entry
+                    for entry in entries
+                    if str(entry.get("user_id") or "").strip() == normalized_viewer
+                ]
+            else:
+                entries = []
 
     entries.sort(key=lambda entry: str(entry.get("timestamp", "")), reverse=True)
     if limit is not None and limit > 0:

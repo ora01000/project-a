@@ -1,46 +1,33 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
-import type { AgentInfo, HealthInfo } from "../types/agent";
-import { ROLE_ADMIN } from "../types/user";
+import type { AuthUser } from "../types/auth";
+import { WHATAP_EVENT_LOG_SOURCE } from "../types/agent-log";
 import { AgentLogsPanel } from "./AgentLogsPanel";
-import { PromptDebugPanel } from "./PromptDebugPanel";
-import { TopologyMap } from "./TopologyMap";
 
 interface DetailInfoPanelProps {
-  agents: AgentInfo[];
-  health: HealthInfo | null;
-  viewerRole: number;
+  currentUser: AuthUser;
   activeTab?: DetailTab;
   onActiveTabChange?: (tab: DetailTab) => void;
 }
 
-type DetailTab = "topology" | "logs" | "debug";
+type DetailTab = "logs" | "whatap";
 
-const BASE_TABS: { id: DetailTab; label: string }[] = [
-  { id: "topology", label: "Topology 맵" },
-  { id: "logs", label: "로그" },
+const TABS: { id: DetailTab; label: string }[] = [
+  { id: "logs", label: "대화로그" },
+  { id: "whatap", label: "Whatap 이벤트 수신" },
 ];
 
+const GENERAL_LOG_EXCLUDE_AGENT_IDS = [WHATAP_EVENT_LOG_SOURCE];
 const DEFAULT_HEIGHT = 500;
 const MIN_HEIGHT = 200;
 const MAX_HEIGHT_RATIO = 0.85;
 
 export function DetailInfoPanel({
-  agents,
-  health,
-  viewerRole,
+  currentUser,
   activeTab: controlledActiveTab,
   onActiveTabChange,
 }: DetailInfoPanelProps) {
-  const isAdmin = viewerRole === ROLE_ADMIN;
-  const tabs = useMemo(() => {
-    if (!isAdmin) {
-      return BASE_TABS;
-    }
-    return [...BASE_TABS, { id: "debug" as const, label: "디버깅" }];
-  }, [isAdmin]);
-
-  const [internalActiveTab, setInternalActiveTab] = useState<DetailTab>("topology");
+  const [internalActiveTab, setInternalActiveTab] = useState<DetailTab>("logs");
   const activeTab = controlledActiveTab ?? internalActiveTab;
   const [height, setHeight] = useState(DEFAULT_HEIGHT);
   const isDraggingRef = useRef(false);
@@ -54,16 +41,6 @@ export function DetailInfoPanel({
     }
     setInternalActiveTab(tab);
   };
-
-  useEffect(() => {
-    if (!isAdmin && activeTab === "debug") {
-      if (onActiveTabChange) {
-        onActiveTabChange("topology");
-      } else {
-        setInternalActiveTab("topology");
-      }
-    }
-  }, [activeTab, isAdmin, onActiveTabChange]);
 
   const clampHeight = useCallback((nextHeight: number) => {
     const maxHeight = Math.max(MIN_HEIGHT, window.innerHeight * MAX_HEIGHT_RATIO);
@@ -123,7 +100,7 @@ export function DetailInfoPanel({
       </header>
 
       <div className="flex shrink-0 gap-1 overflow-x-auto border-b border-slate-700 px-3 pt-2">
-        {tabs.map((tab) => (
+        {TABS.map((tab) => (
           <button
             key={tab.id}
             type="button"
@@ -139,20 +116,21 @@ export function DetailInfoPanel({
         ))}
       </div>
 
-      <div
-        className={`min-h-0 flex-1 overscroll-contain p-4 ${
-          activeTab === "topology" || activeTab === "debug"
-            ? "flex flex-col overflow-hidden"
-            : "overflow-y-auto"
-        }`}
-      >
-        {activeTab === "topology" ? (
-          <TopologyMap agents={agents} health={health} embedded />
-        ) : activeTab === "logs" ? (
-          <AgentLogsPanel />
-        ) : activeTab === "debug" && isAdmin ? (
-          <PromptDebugPanel agents={agents} />
-        ) : null}
+      <div className="min-h-0 flex-1 overflow-hidden overscroll-contain flex flex-col p-4">
+        {activeTab === "whatap" ? (
+          <AgentLogsPanel
+            currentUser={currentUser}
+            agentId={WHATAP_EVENT_LOG_SOURCE}
+            emptyMessage="표시할 Whatap 이벤트가 없습니다."
+            loadingMessage="Whatap 이벤트 로그를 불러오는 중..."
+            errorMessage="Whatap 이벤트 로그를 불러오지 못했습니다."
+          />
+        ) : (
+          <AgentLogsPanel
+            currentUser={currentUser}
+            excludeAgentIds={GENERAL_LOG_EXCLUDE_AGENT_IDS}
+          />
+        )}
       </div>
     </section>
   );

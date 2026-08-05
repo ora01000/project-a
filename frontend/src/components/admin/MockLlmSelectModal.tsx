@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-import { ROLE_ADMIN } from "../../types/user";
+import { hasAdminAccess } from "../../types/user";
 
 interface MockLlmOption {
   id: "local" | "openai";
@@ -80,7 +80,7 @@ export function MockLlmSelectModal({ viewerRole, onClose }: MockLlmSelectModalPr
   }, []);
 
   const handleApply = async () => {
-    if (viewerRole !== ROLE_ADMIN) {
+    if (!hasAdminAccess(viewerRole)) {
       setError("관리자만 변경할 수 있습니다.");
       return;
     }

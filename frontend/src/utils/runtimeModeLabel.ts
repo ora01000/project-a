@@ -10,7 +10,3 @@ export function runtimeModeLabel(mode: string | undefined): string {
   }
   return RUNTIME_MODE_LABELS[mode] ?? `Runtime (${mode})`;
 }
-
-export function runtimeTopologyNodeLabel(mode: string | undefined): string {
-  return runtimeModeLabel(mode);
-}

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import type { AgentInfo, HealthInfo } from "../types/agent";
+import type { AgentInfo } from "../types/agent";
 import type { AuthUser } from "../types/auth";
 import { AgentGrid } from "./AgentGrid";
 import { AgentNodeListPanel } from "./AgentNodeListPanel";
@@ -17,7 +17,6 @@ const PANEL_RESIZE_HANDLE_WIDTH = 8;
 
 interface DashboardPageProps {
   agents: AgentInfo[];
-  health: HealthInfo | null;
   error: string | null;
   user: AuthUser;
   integratedChatFullscreen: boolean;
@@ -27,7 +26,6 @@ interface DashboardPageProps {
 
 export function DashboardPage({
   agents,
-  health,
   error,
   user,
   integratedChatFullscreen,
@@ -99,7 +97,7 @@ export function DashboardPage({
     return () => window.removeEventListener("resize", handleWindowResize);
   }, [clampChatPanelWidth]);
 
-  const [detailTab, setDetailTab] = useState<DetailTab>("topology");
+  const [detailTab, setDetailTab] = useState<DetailTab>("logs");
 
   const assignedAgents = useMemo(() => {
     const assignedIds = new Set(
@@ -144,9 +142,7 @@ export function DashboardPage({
               </div>
 
               <DetailInfoPanel
-                agents={assignedAgents}
-                health={health}
-                viewerRole={user.role}
+                currentUser={user}
                 activeTab={detailTab}
                 onActiveTabChange={setDetailTab}
               />

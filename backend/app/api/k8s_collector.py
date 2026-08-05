@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 
 from backend.app.agents.k8s_agent import K8S_CLUSTER_SPECS
 from backend.app.db.k8s_inventory import get_k8s_cluster_last_updates
-from backend.app.db.roles import ROLE_ADMIN
+from backend.app.db.roles import is_admin_role
 from backend.app.services.k8s_collector_loop import collect_one_cluster
 
 router = APIRouter(tags=["k8s-collector"])
@@ -34,7 +34,7 @@ class ManualCollectResponse(BaseModel):
 
 
 def _require_admin(viewer_role: int) -> None:
-    if viewer_role != ROLE_ADMIN:
+    if not is_admin_role(viewer_role):
         raise HTTPException(status_code=403, detail="관리자만 수행할 수 있습니다.")
 
 

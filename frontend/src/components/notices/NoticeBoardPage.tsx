@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { AuthUser } from "../../types/auth";
 import type { NoticeFormValues, NoticeRecord } from "../../types/notice";
 import { noticeScheduleStatus } from "../../types/notice";
-import { ROLE_ADMIN } from "../../types/user";
+import { hasAdminAccess } from "../../types/user";
 import { ConfirmDialog } from "../ConfirmDialog";
 import { NoticeFormModal } from "./NoticeFormModal";
 
@@ -17,7 +17,7 @@ async function parseError(response: Response, fallback: string): Promise<string>
 }
 
 export function NoticeBoardPage({ user }: NoticeBoardPageProps) {
-  const isAdmin = user.role === ROLE_ADMIN;
+  const isAdmin = hasAdminAccess(user.role);
   const [notices, setNotices] = useState<NoticeRecord[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);

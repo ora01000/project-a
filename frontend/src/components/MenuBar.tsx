@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 
 import type { AuthUser } from "../types/auth";
 import type { AppView } from "../types/navigation";
-import { ROLE_ADMIN } from "../types/user";
+import { hasAdminAccess } from "../types/user";
 import { formatUserLabel } from "../utils/authSession";
 import { formatCurrentTime } from "../utils/datetime";
 import { AGENT_MANAGEMENT_DISABLED_MESSAGE, TOKEN_MANAGEMENT_DISABLED_MESSAGE } from "../utils/runtimeCapabilities";
@@ -53,7 +53,7 @@ export function MenuBar({ activeView, user, onNavigate, onLogout, onUserUpdated 
   const userMenuRef = useRef<HTMLDivElement>(null);
   const settingsMenuRef = useRef<HTMLDivElement>(null);
   const userLabel = formatUserLabel(user);
-  const isAdmin = user.role === ROLE_ADMIN;
+  const isAdmin = hasAdminAccess(user.role);
   const isMockRuntime = runtimeMode === "mock" || runtimeMode === "local";
 
   useEffect(() => {

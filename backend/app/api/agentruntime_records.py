@@ -19,7 +19,7 @@ from backend.app.db.agentruntime import (
     resolve_active_agentruntime_type,
     update_agentruntime_record,
 )
-from backend.app.db.roles import ROLE_ADMIN
+from backend.app.db.roles import is_admin_role
 
 router = APIRouter(tags=["agentruntime"])
 
@@ -70,7 +70,7 @@ def _normalize_runtime_type(value: int) -> int:
 
 
 def _require_admin(viewer_role: int) -> None:
-    if viewer_role != ROLE_ADMIN:
+    if not is_admin_role(viewer_role):
         raise HTTPException(status_code=403, detail="관리자만 수행할 수 있습니다.")
 
 

@@ -109,6 +109,7 @@ def _apply_migrations(connection: sqlite3.Connection) -> None:
     _migrate_agentruntime_drop_url_columns(connection)
     _migrate_agentruntime_talkable(connection)
     _migrate_agentruntime_is_orchestrator(connection)
+    _migrate_remove_whatap_agentruntime(connection)
     _drop_legacy_product_tables(connection)
 
     _ensure_jobs_table(connection)
@@ -119,6 +120,33 @@ def _apply_migrations(connection: sqlite3.Connection) -> None:
     _ensure_jobs_result_table(connection)
     _ensure_mynotes_table(connection)
     _ensure_k8s_inventory_tables(connection)
+    _migrate_root_user(connection)
+
+
+def _migrate_root_user(connection: sqlite3.Connection) -> None:
+    row = connection.execute(
+        "SELECT 1 FROM users WHERE userid = 'root' LIMIT 1",
+    ).fetchone()
+    if row is not None:
+        return
+
+    root_seed = next(user for user in INITIAL_USERS if user["userid"] == "root")
+    connection.execute(
+        """
+        INSERT INTO users (userid, email, username, password, depart, role, band)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            root_seed["userid"],
+            root_seed["email"],
+            root_seed["username"],
+            root_seed["password"],
+            root_seed["depart"],
+            root_seed["role"],
+            root_seed["band"],
+        ),
+    )
+    logger.info("Inserted root system user")
 
 
 def _migrate_agentruntime_registered_datetime(connection: sqlite3.Connection) -> None:
@@ -389,6 +417,29 @@ def _migrate_agentruntime_is_orchestrator(connection: sqlite3.Connection) -> Non
         tuple(ORCHESTRATOR_LOCAL_AGENT_IDS),
     )
     logger.info("Backfilled agentruntime.is_orchestrator flags for new column")
+
+
+def _migrate_remove_whatap_agentruntime(connection: sqlite3.Connection) -> None:
+    tables = {
+        str(row[0])
+        for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+    }
+    if "agentruntime" not in tables:
+        return
+
+    from backend.app.services.whatap_constants import LEGACY_WHATAP_LOCAL_AGENT_IDS
+
+    placeholders = ", ".join("?" for _ in LEGACY_WHATAP_LOCAL_AGENT_IDS)
+    cursor = connection.execute(
+        f"""
+        DELETE FROM agentruntime
+        WHERE local_agent_id IN ({placeholders})
+           OR agent_id IN ({placeholders})
+        """,
+        tuple(LEGACY_WHATAP_LOCAL_AGENT_IDS) * 2,
+    )
+    if cursor.rowcount:
+        logger.info("Removed %s whatap agentruntime row(s)", cursor.rowcount)
 
 
 def _ensure_jobs_table(connection: sqlite3.Connection) -> None:

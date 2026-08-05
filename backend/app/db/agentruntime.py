@@ -18,11 +18,10 @@ MOCKUP_CLIENT_ID = "mock-client-id"
 MOCKUP_CLIENT_SECRET = "mock-client-secret"
 DEFAULT_SERVICE_ID = "prvops"
 
-NON_TALKABLE_LOCAL_AGENT_IDS: frozenset[str] = frozenset({"whatap-event", "job-scheduler"})
+NON_TALKABLE_LOCAL_AGENT_IDS: frozenset[str] = frozenset({"job-scheduler"})
 
 ORCHESTRATOR_LOCAL_AGENT_IDS: frozenset[str] = frozenset({
     "helpdesk",
-    "whatap-event",
     "job-scheduler",
     "archi-analysis",
 })

@@ -9,7 +9,8 @@ from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
 from backend.app.agents.base import AgentInvokeResult, ToolUsage
-from backend.app.db.users import get_user_by_userid, parse_agent_ids
+from backend.app.db.roles import is_admin_role
+from backend.app.db.users import parse_agent_ids
 from backend.app.disabled_features import is_removed_agent_id, raise_disabled_feature
 from backend.app.logging.agent_logger import log_agent_interaction
 from backend.app.logging.user_comm_logger import list_user_communications, log_user_communication
@@ -145,13 +146,13 @@ async def chat_with_agent(agent_id: str, payload: ChatRequest, request: Request)
     if agent_id not in manager.agents:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
 
-    if payload.userid:
-        user = get_user_by_userid(request.app.state.database_path, payload.userid)
-        if user is None:
-            raise HTTPException(status_code=404, detail="사용자를 찾을 수 없습니다.")
-        allowed = set(parse_agent_ids(user.agents))
-        if agent_id not in allowed:
-            raise HTTPException(status_code=403, detail="할당되지 않은 에이전트입니다.")
+    auth_user = get_request_auth_user(request)
+    if payload.userid and payload.userid.strip() != auth_user.userid:
+        raise HTTPException(status_code=403, detail="요청 사용자와 세션 사용자가 일치하지 않습니다.")
+
+    allowed = set(parse_agent_ids(auth_user.agents))
+    if agent_id not in allowed:
+        raise HTTPException(status_code=403, detail="할당되지 않은 에이전트입니다.")
 
     async def event_generator() -> AsyncIterator[dict[str, str]]:
         chat_task_id = manager.mark_agent_working(agent_id, "채팅 응답", task_id=uuid4().hex)
@@ -170,21 +171,22 @@ async def chat_with_agent(agent_id: str, payload: ChatRequest, request: Request)
                 input_message=payload.message,
                 output_message=result.content,
                 tools_used=result.tools_used,
+                user_id=auth_user.userid,
+                user_name=auth_user.username,
             )
 
-            if payload.userid:
-                try:
-                    definition = manager.get_definition(agent_id)
-                    log_user_communication(
-                        payload.userid,
-                        agent_id=agent_id,
-                        agent_name=definition.name,
-                        user_message=payload.message,
-                        assistant_message=result.content,
-                        tools_used=result.tools_used,
-                    )
-                except ValueError as exc:
-                    logger.warning("Skipped user comm log for %s: %s", payload.userid, exc)
+            try:
+                definition = manager.get_definition(agent_id)
+                log_user_communication(
+                    auth_user.userid,
+                    agent_id=agent_id,
+                    agent_name=definition.name,
+                    user_message=payload.message,
+                    assistant_message=result.content,
+                    tools_used=result.tools_used,
+                )
+            except ValueError as exc:
+                logger.warning("Skipped user comm log for %s: %s", auth_user.userid, exc)
         except Exception as exc:
             error_message = format_axit_invoke_error(exc)
             manager.mark_agent_error(agent_id, error_message, input_message=payload.message)
@@ -202,11 +204,17 @@ async def chat_with_agent(agent_id: str, payload: ChatRequest, request: Request)
 @router.get("/chat/logs/{userid}", response_model=UserCommLogResponse)
 async def get_user_chat_logs(
     userid: str,
+    request: Request,
     log_date: str | None = Query(default=None, alias="date"),
 ) -> UserCommLogResponse:
+    viewer = get_request_auth_user(request)
+    normalized_userid = userid.strip()
+    if normalized_userid != viewer.userid and not is_admin_role(viewer.role):
+        raise HTTPException(status_code=403, detail="다른 사용자의 로그를 조회할 수 없습니다.")
+
     try:
         target_date = date.fromisoformat(log_date) if log_date else None
-        payload = list_user_communications(userid, log_date=target_date)
+        payload = list_user_communications(normalized_userid, log_date=target_date)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

@@ -1,11 +1,12 @@
+import json
 import logging
 from datetime import UTC, datetime
 from typing import Any
 
 from pydantic import BaseModel, Field
 
-from backend.app.agents.system_agents import WHATAP_EVENT_AGENT
 from backend.app.logging.agent_logger import log_agent_interaction
+from backend.app.services.whatap_constants import WHATAP_EVENT_LOG_SOURCE
 
 logger = logging.getLogger(__name__)
 
@@ -41,14 +42,7 @@ def _normalize_payload(payload: dict[str, Any]) -> WhatapEventPayload:
 
 
 async def _process_event(event: WhatapEventPayload) -> None:
-    """Placeholder for downstream Whatap event processing.
-
-    Future implementations may:
-    - persist events to database
-    - trigger job workflows
-    - send notifications (email/Teams)
-    - correlate with inventory data
-    """
+    """Placeholder for downstream Whatap event processing."""
     logger.info(
         "Whatap event received (stub): type=%s project=%s server=%s level=%s",
         event.event_type,
@@ -74,9 +68,10 @@ async def handle_whatap_webhook(payload: dict[str, Any]) -> WhatapEventResult:
         f"server={event.server_name or 'unknown'}, "
         f"level={event.level or 'unknown'}"
     )
+    payload_json = json.dumps(payload, ensure_ascii=False, indent=2)
     log_agent_interaction(
-        agent_id=WHATAP_EVENT_AGENT.agent_id,
-        input_message=str(payload),
+        agent_id=WHATAP_EVENT_LOG_SOURCE,
+        input_message=payload_json,
         output_message=summary,
         tools_used=[],
     )

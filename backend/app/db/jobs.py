@@ -257,12 +257,55 @@ def approval_target_status_code(job: JobRecord) -> int:
     return JOB_STATUS_DIRECT_APPROVED
 
 
+def _resolve_user_display_name(
+    database_path: str | Path,
+    userid: str,
+    *,
+    fallback: str = "",
+) -> str:
+    from backend.app.db.users import get_user_by_userid
+
+    normalized_userid = userid.strip()
+    if normalized_userid:
+        user = get_user_by_userid(database_path, normalized_userid)
+        if user is not None and user.username.strip():
+            return user.username.strip()
+    normalized_fallback = fallback.strip()
+    if normalized_fallback:
+        return normalized_fallback
+    return normalized_userid
+
+
+def _record_signup_job_approval_result(database_path: str | Path, job: JobRecord) -> None:
+    from backend.app.db.jobs_result import upsert_job_result
+
+    approver_userid = (job.approver or "").strip()
+    if not approver_userid:
+        raise ValueError("signup job approval result requires approver")
+
+    approver_name = _resolve_user_display_name(database_path, approver_userid, fallback=approver_userid)
+    requester_userid = (job.madang_id or "").strip()
+    requester_name = _resolve_user_display_name(
+        database_path,
+        requester_userid,
+        fallback=job.requester_name,
+    )
+    result_text = f"{approver_name} 이 {requester_name} 의 접속 권한을 승인완료 하였습니다"
+    upsert_job_result(
+        database_path,
+        srnum=job.srnum,
+        result=result_text,
+        complete_date=now_job_datetime(),
+    )
+
+
 def _finalize_signup_job_approval(database_path: str | Path, job: JobRecord) -> None:
     if job.job_type != JOB_TYPE_SIGNUP:
         return
     from backend.app.services.user_signup import approve_pending_user_for_signup_job
 
     approve_pending_user_for_signup_job(database_path, job)
+    _record_signup_job_approval_result(database_path, job)
 
 
 def assign_job_approver(
@@ -272,13 +315,15 @@ def assign_job_approver(
     approver_userid: str,
     status_code: int = JOB_STATUS_APPROVER_ASSIGNED,
 ) -> JobRecord:
+    from backend.app.db.roles import is_hidden_system_user
     from backend.app.db.users import get_user_by_userid
 
     userid = approver_userid.strip()
     if not userid:
         raise ValueError("approver is required")
 
-    if get_user_by_userid(database_path, userid) is None:
+    approver = get_user_by_userid(database_path, userid)
+    if approver is None or is_hidden_system_user(approver.userid, approver.role):
         raise ValueError(f"unknown approver userid: {userid}")
 
     existing = get_job_by_idx(database_path, idx)

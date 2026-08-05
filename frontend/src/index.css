@@ -18,17 +18,6 @@ body {
   border-radius: 0.75rem;
 }
 
-.topology-flow-line {
-  stroke-dasharray: 10 8;
-  animation: topology-flow 0.8s linear infinite;
-}
-
-@keyframes topology-flow {
-  to {
-    stroke-dashoffset: -18;
-  }
-}
-
 .job-content-html ol,
 .job-content-html ul {
   margin: 0.5rem 0;

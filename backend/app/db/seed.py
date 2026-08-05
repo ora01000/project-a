@@ -13,6 +13,15 @@ class SeedUser(TypedDict):
 
 INITIAL_USERS: list[SeedUser] = [
     {
+        "userid": "root",
+        "email": "isyun@lguplus.co.kr",
+        "username": "관리자",
+        "password": "root-internal-bypass-only",
+        "depart": "IT플랫폼운영팀",
+        "role": 100,
+        "band": 3,
+    },
+    {
         "userid": "isyun",
         "email": "isyun@lguplus.co.kr",
         "username": "윤인수",

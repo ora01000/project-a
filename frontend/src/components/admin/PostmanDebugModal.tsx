@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-import { ROLE_ADMIN } from "../../types/user";
+import { hasAdminAccess } from "../../types/user";
 
 interface PostmanDebugModalProps {
   viewerRole: number;
@@ -25,7 +25,7 @@ export function PostmanDebugModal({ viewerRole, onClose }: PostmanDebugModalProp
   const [isSending, setIsSending] = useState(false);
 
   const handleSend = async () => {
-    if (viewerRole !== ROLE_ADMIN) {
+    if (!hasAdminAccess(viewerRole)) {
       setError("관리자만 실행할 수 있습니다.");
       return;
     }

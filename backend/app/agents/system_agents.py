@@ -16,14 +16,7 @@ class SystemAgentInfo:
     chat_enabled: bool = False
 
 
-WHATAP_EVENT_AGENT_ID = "sys-whatap-events"
 HELPDESK_AGENT_ID = "sys-helpdesk"
-
-WHATAP_EVENT_AGENT = SystemAgentInfo(
-    agent_id=WHATAP_EVENT_AGENT_ID,
-    name="Whatap 이벤트 수신",
-    role="Whatap 외부 시스템 webhook 이벤트 수신",
-)
 
 HELPDESK_AGENT = SystemAgentInfo(
     agent_id=HELPDESK_AGENT_ID,

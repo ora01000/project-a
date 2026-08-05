@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
 
-import { TopologyProvider } from "./context/TopologyContext";
 import { DashboardPage } from "./components/DashboardPage";
 import { LoginPage } from "./components/LoginPage";
 import { MenuBar } from "./components/MenuBar";
@@ -9,10 +8,10 @@ import { NoticeBoardPage } from "./components/notices/NoticeBoardPage";
 import { AgentConnectionListPage } from "./components/agentruntime/AgentConnectionListPage";
 import { AgentAssignmentPage } from "./components/users/AgentAssignmentPage";
 import { UserListPage } from "./components/users/UserListPage";
-import type { AgentInfo, HealthInfo } from "./types/agent";
+import type { AgentInfo } from "./types/agent";
 import type { AuthUser } from "./types/auth";
 import type { AppView } from "./types/navigation";
-import { ROLE_ADMIN, ROLE_PENDING } from "./types/user";
+import { ROLE_PENDING, hasAdminAccess } from "./types/user";
 import { logoutSession, setUnauthorizedHandler } from "./utils/api";
 import {
   clearAuthUser,
@@ -28,7 +27,6 @@ export default function App() {
   const [authBootstrapping, setAuthBootstrapping] = useState(() => Boolean(getAccessToken()));
   const [activeView, setActiveView] = useState<AppView>("dashboard");
   const [agents, setAgents] = useState<AgentInfo[]>([]);
-  const [health, setHealth] = useState<HealthInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [integratedChatFullscreen, setIntegratedChatFullscreen] = useState(false);
 
@@ -55,7 +53,6 @@ export default function App() {
     setUser(null);
     setActiveView("dashboard");
     setAgents([]);
-    setHealth(null);
     setError(null);
     setIntegratedChatFullscreen(false);
   }, []);
@@ -66,7 +63,6 @@ export default function App() {
       setUser(null);
       setActiveView("dashboard");
       setAgents([]);
-      setHealth(null);
       setError(null);
       setIntegratedChatFullscreen(false);
     });
@@ -164,20 +160,17 @@ export default function App() {
     }
 
     try {
-      const [agentsResponse, healthResponse, usersResponse] = await Promise.all([
+      const [agentsResponse, usersResponse] = await Promise.all([
         fetch("/api/agents"),
-        fetch("/api/health"),
         fetch(`/api/users?viewer_role=${userRole}`),
       ]);
 
-      if (!agentsResponse.ok || !healthResponse.ok) {
+      if (!agentsResponse.ok) {
         throw new Error("백엔드 API에 연결할 수 없습니다.");
       }
 
       const agentsData = (await agentsResponse.json()) as AgentInfo[];
-      const healthData = (await healthResponse.json()) as HealthInfo;
       setAgents(agentsData);
-      setHealth(healthData);
       setError(null);
 
       if (usersResponse.ok) {
@@ -233,7 +226,7 @@ export default function App() {
     const adminOnlyViews: AppView[] = ["agent-assignment", "agent-connections"];
     const disabledViews: AppView[] = ["token-management"];
     if (
-      (user.role !== ROLE_ADMIN && adminOnlyViews.includes(activeView)) ||
+      (!hasAdminAccess(user.role) && adminOnlyViews.includes(activeView)) ||
       disabledViews.includes(activeView)
     ) {
       setActiveView("dashboard");
@@ -253,7 +246,7 @@ export default function App() {
   }
 
   return (
-    <TopologyProvider>
+    <>
       <div className="flex h-screen flex-col overflow-hidden bg-slate-950 px-6 py-6">
         <header className="mb-4 shrink-0">
           <h1 className="text-2xl font-bold text-slate-100">AX 인프라 운영 콘솔</h1>
@@ -273,7 +266,6 @@ export default function App() {
         {activeView === "dashboard" ? (
           <DashboardPage
             agents={agents}
-            health={health}
             error={error}
             user={user}
             integratedChatFullscreen={integratedChatFullscreen}
@@ -286,17 +278,17 @@ export default function App() {
           <UserListPage currentUserIdx={user.idx} currentUserRole={user.role} />
         ) : null}
 
-        {activeView === "agent-assignment" && user.role === ROLE_ADMIN ? (
+        {activeView === "agent-assignment" && hasAdminAccess(user.role) ? (
           <AgentAssignmentPage onClose={() => setActiveView("dashboard")} />
         ) : null}
 
-        {activeView === "agent-connections" && user.role === ROLE_ADMIN ? (
+        {activeView === "agent-connections" && hasAdminAccess(user.role) ? (
           <AgentConnectionListPage user={user} onAgentRuntimeChanged={loadDashboardData} />
         ) : null}
 
         {activeView === "notice-board" ? <NoticeBoardPage user={user} /> : null}
       </div>
       <TeamsInboundDebugWatcher />
-    </TopologyProvider>
+    </>
   );
 }

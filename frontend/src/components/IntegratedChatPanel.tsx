@@ -2,8 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { AgentInfo, IntegratedChatResponse, ToolUsage } from "../types/agent";
 import type { AuthUser } from "../types/auth";
-import { agentNodeId, LLM_NODE_ID, mcpNodeId } from "../types/topology";
-import { useTopology } from "../context/TopologyContext";
 import { appendInputHistory, loadInputHistory } from "../utils/inputHistory";
 import { formatResponseTimestamp } from "../utils/messageIndex";
 import { flushSseBuffer, parseSseChunk } from "../utils/parseSse";
@@ -88,7 +86,6 @@ export function IntegratedChatPanel({
   onChatComplete,
   onCopyToNote,
 }: IntegratedChatPanelProps) {
-  const { emitFlow } = useTopology();
   const [selectedAgentId, setSelectedAgentId] = useState("");
   const [input, setInput] = useState("");
   const [responses, setResponses] = useState<IntegratedChatResponse[]>([]);
@@ -333,7 +330,6 @@ export function IntegratedChatPanel({
     setHistoryIndex(-1);
     setInput("");
     setIsLoading(true);
-    emitFlow(agentNodeId(selectedAgent.id), LLM_NODE_ID);
 
     const createdAt = new Date().toISOString();
     const responseId = createResponseId();
@@ -390,11 +386,6 @@ export function IntegratedChatPanel({
           if (event.event === "tools") {
             const payload = JSON.parse(event.data) as { tools: ToolUsage[] };
             toolsUsed = payload.tools ?? [];
-            for (const tool of toolsUsed) {
-              if (tool.mcp_server) {
-                emitFlow(agentNodeId(selectedAgent.id), mcpNodeId(tool.mcp_server));
-              }
-            }
             updateLastResponse(assistantText, toolsUsed);
             continue;
           }

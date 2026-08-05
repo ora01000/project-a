@@ -18,9 +18,11 @@ logger = logging.getLogger(__name__)
 PUBLIC_API_ROUTES: set[tuple[str, str]] = {
     ("GET", "/api/auth/provider"),
     ("POST", "/api/auth/login"),
+    ("POST", "/api/auth/madang/admin-bypass"),
     ("POST", "/api/auth/register"),
     ("POST", "/api/auth/madang/register"),
     ("POST", "/api/jobs"),
+    ("POST", "/api/webhooks/whatap"),
     ("GET", "/api/release-notes"),
 }
 

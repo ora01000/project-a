@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { ConfirmDialog } from "../ConfirmDialog";
 import { UserFormModal } from "./UserFormModal";
 import type { UserFormValues, UserRecord } from "../../types/user";
-import { ROLE_ADMIN, bandLabel, roleLabel } from "../../types/user";
+import { hasAdminAccess, bandLabel, roleLabel } from "../../types/user";
 
 interface UserListPageProps {
   currentUserIdx: number;
@@ -16,7 +16,7 @@ async function parseError(response: Response, fallback: string): Promise<string>
 }
 
 export function UserListPage({ currentUserIdx, currentUserRole }: UserListPageProps) {
-  const canManageUsers = currentUserRole === ROLE_ADMIN;
+  const canManageUsers = hasAdminAccess(currentUserRole);
   const [users, setUsers] = useState<UserRecord[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);

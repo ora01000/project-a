@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 
-import { ROLE_ADMIN } from "../../types/user";
+import { hasAdminAccess } from "../../types/user";
 
 interface K8sCollectorCluster {
   agent_id: string;
@@ -49,7 +49,7 @@ export function InfraCollectModal({ viewerRole, onClose }: InfraCollectModalProp
   }, [loadClusters]);
 
   const handleCollect = async (clusterId: string) => {
-    if (viewerRole !== ROLE_ADMIN) {
+    if (!hasAdminAccess(viewerRole)) {
       setError("관리자만 수집을 실행할 수 있습니다.");
       return;
     }

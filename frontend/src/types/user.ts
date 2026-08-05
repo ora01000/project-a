@@ -22,6 +22,9 @@ export interface UserFormValues {
 }
 
 export function roleLabel(role: number): string {
+  if (role === 100) {
+    return "superadmin";
+  }
   if (role === 0) {
     return "admin";
   }
@@ -34,6 +37,11 @@ export function roleLabel(role: number): string {
 export const ROLE_ADMIN = 0;
 export const ROLE_USER = 1;
 export const ROLE_PENDING = 5;
+export const ROLE_SUPERADMIN = 100;
+
+export function hasAdminAccess(role: number): boolean {
+  return role === ROLE_ADMIN || role === ROLE_SUPERADMIN;
+}
 
 export const BAND_EMPLOYEE = 1;
 export const BAND_SENIOR = 2;

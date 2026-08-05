@@ -4,7 +4,7 @@ from fastapi import APIRouter, Body, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from backend.app.db.assignable_agents import known_assignable_agent_ids
-from backend.app.db.roles import ROLE_ADMIN
+from backend.app.db.roles import is_admin_role, is_hidden_system_user
 from backend.app.db.users import (
     User,
     create_user,
@@ -108,7 +108,7 @@ def _validate_agent_ids(request: Request, agent_ids: list[str]) -> list[str]:
 
 
 def _require_admin(viewer_role: int) -> None:
-    if viewer_role != ROLE_ADMIN:
+    if not is_admin_role(viewer_role):
         raise HTTPException(status_code=403, detail="관리자만 수행할 수 있습니다.")
 
 
@@ -121,6 +121,8 @@ async def get_users(request: Request, viewer_role: int | None = None) -> list[Us
 @router.post("/users", response_model=UserResponse, status_code=201)
 async def add_user(payload: CreateUserRequest, request: Request) -> UserResponse:
     _require_admin(payload.viewer_role)
+    if is_hidden_system_user(payload.userid.strip()):
+        raise HTTPException(status_code=400, detail="사용할 수 없는 아이디입니다.")
     database_path = request.app.state.database_path
     try:
         user = create_user(
@@ -153,6 +155,8 @@ async def save_user_agent_assignments(
         existing = get_user_by_idx(database_path, item.idx)
         if existing is None:
             raise HTTPException(status_code=404, detail=f"사용자를 찾을 수 없습니다: idx={item.idx}")
+        if is_hidden_system_user(existing.userid, existing.role):
+            raise HTTPException(status_code=404, detail=f"사용자를 찾을 수 없습니다: idx={item.idx}")
         agent_ids = _validate_agent_ids(request, item.agent_ids)
         updated = update_user_agents(database_path, item.idx, agent_ids)
         if updated is None:
@@ -171,6 +175,8 @@ async def modify_user(idx: int, payload: UpdateUserRequest, request: Request) ->
     database_path = request.app.state.database_path
     existing = get_user_by_idx(database_path, idx)
     if existing is None:
+        raise HTTPException(status_code=404, detail="사용자를 찾을 수 없습니다.")
+    if is_hidden_system_user(existing.userid, existing.role):
         raise HTTPException(status_code=404, detail="사용자를 찾을 수 없습니다.")
 
     password = payload.password.strip() if payload.password else None
