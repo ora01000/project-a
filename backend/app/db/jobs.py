@@ -45,7 +45,9 @@ JOB_SELECT_COLUMNS = """
     received_at,
     reject_reason,
     drop_reason,
-    ai_audit_comment
+    ai_audit_comment,
+    ai_audit_date,
+    ai_audit_cnt
 """
 
 
@@ -71,6 +73,8 @@ class JobRecord:
     reject_reason: str = ""
     drop_reason: str = ""
     ai_audit_comment: str = ""
+    ai_audit_date: str | None = None
+    ai_audit_cnt: int = 0
 
 
 @dataclass(frozen=True)
@@ -114,6 +118,12 @@ def _row_to_job(row) -> JobRecord:
         reject_reason=str(row["reject_reason"] or ""),
         drop_reason=str(row["drop_reason"] or ""),
         ai_audit_comment=str(row["ai_audit_comment"] or ""),
+        ai_audit_date=(
+            str(row["ai_audit_date"]).strip()
+            if row["ai_audit_date"] is not None and str(row["ai_audit_date"]).strip()
+            else None
+        ),
+        ai_audit_cnt=int(row["ai_audit_cnt"] if row["ai_audit_cnt"] is not None else 0),
     )
 
 
@@ -633,11 +643,8 @@ def cancel_failed_job(
     return updated
 
 
-AI_AUDIT_COMMENT_MAX_LENGTH = 200
-
-
 def normalize_ai_audit_comment(value: str) -> str:
-    return value.strip()[:AI_AUDIT_COMMENT_MAX_LENGTH]
+    return value.strip()
 
 
 def update_job_ai_audit_comment(
@@ -649,14 +656,18 @@ def update_job_ai_audit_comment(
     if not normalized:
         raise ValueError("ai_audit_comment is required")
 
+    audited_at = now_job_datetime()
+
     with get_connection(database_path) as connection:
         cursor = connection.execute(
             """
             UPDATE jobs
-            SET ai_audit_comment = ?
+            SET ai_audit_comment = ?,
+                ai_audit_cnt = ai_audit_cnt + 1,
+                ai_audit_date = ?
             WHERE idx = ?
             """,
-            (normalized, idx),
+            (normalized, audited_at, idx),
         )
         connection.commit()
         if cursor.rowcount == 0:

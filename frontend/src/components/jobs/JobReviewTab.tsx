@@ -5,6 +5,7 @@ import type { JobRecord } from "../../types/job";
 import type { UserRecord } from "../../types/user";
 import { ConfirmDialog } from "../ConfirmDialog";
 import { JobBlockField, JobFieldLabel, JobInlineField } from "./JobFieldLabel";
+import { JobAiAuditCommentBlock } from "./JobAiAuditCommentBlock";
 import { JobAiReviewButton } from "./JobAiReviewButton";
 import { JobRejectReasonModal } from "./JobRejectReasonModal";
 
@@ -40,9 +41,10 @@ function srnumButtonClass(job: JobRecord, isSelected: boolean): string {
 interface JobReviewTabProps {
   active: boolean;
   currentUser: AuthUser;
+  onCopyToNote?: (content: string, noteName?: string) => Promise<void>;
 }
 
-export function JobReviewTab({ active, currentUser }: JobReviewTabProps) {
+export function JobReviewTab({ active, currentUser, onCopyToNote }: JobReviewTabProps) {
   const [jobs, setJobs] = useState<JobRecord[]>([]);
   const [users, setUsers] = useState<UserRecord[]>([]);
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
@@ -269,6 +271,13 @@ export function JobReviewTab({ active, currentUser }: JobReviewTabProps) {
                     dangerouslySetInnerHTML={{ __html: selectedJob.job_content }}
                   />
                 </JobBlockField>
+                <JobAiAuditCommentBlock
+                  comment={selectedJob.ai_audit_comment}
+                  auditCount={selectedJob.ai_audit_cnt}
+                  auditDate={selectedJob.ai_audit_date}
+                  noteNamePrefix={selectedJob.srnum}
+                  onCopyToNote={onCopyToNote}
+                />
               </div>
 
               <div className="shrink-0 border-t border-slate-700/80 pt-3">

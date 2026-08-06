@@ -33,9 +33,9 @@ function renderActiveTab(
 ) {
   switch (tab) {
     case "review":
-      return <JobReviewTab active currentUser={currentUser} />;
+      return <JobReviewTab active currentUser={currentUser} onCopyToNote={onCopyToNote} />;
     case "my-review":
-      return <MyJobReviewTab active currentUser={currentUser} />;
+      return <MyJobReviewTab active currentUser={currentUser} onCopyToNote={onCopyToNote} />;
     case "my-results":
       return <MyJobResultsTab active currentUser={currentUser} onCopyToNote={onCopyToNote} />;
     case "rejected-jobs":

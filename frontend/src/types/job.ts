@@ -19,4 +19,6 @@ export interface JobRecord {
   reject_reason?: string;
   drop_reason?: string;
   ai_audit_comment?: string;
+  ai_audit_date?: string | null;
+  ai_audit_cnt?: number;
 }

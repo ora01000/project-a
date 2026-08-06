@@ -74,6 +74,8 @@ class JobRecordResponse(BaseModel):
     reject_reason: str = ""
     drop_reason: str = ""
     ai_audit_comment: str = ""
+    ai_audit_date: str | None = None
+    ai_audit_cnt: int = 0
 
     @classmethod
     def from_record(cls, record: JobRecord) -> "JobRecordResponse":
@@ -98,6 +100,8 @@ class JobRecordResponse(BaseModel):
             reject_reason=record.reject_reason,
             drop_reason=record.drop_reason,
             ai_audit_comment=record.ai_audit_comment,
+            ai_audit_date=record.ai_audit_date,
+            ai_audit_cnt=record.ai_audit_cnt,
         )
 
 
@@ -330,6 +334,8 @@ def _ensure_job_ai_review_access(job: JobRecord, viewer_userid: str, viewer_role
 
 class JobAiReviewResponse(BaseModel):
     ai_audit_comment: str
+    ai_audit_date: str | None = None
+    ai_audit_cnt: int = 0
 
 
 @router.post("/jobs/{idx}/ai-review", response_model=JobAiReviewResponse)
@@ -400,7 +406,11 @@ async def ai_review_job(
         logger.exception("Failed to persist AI audit comment for idx=%s", job.idx)
         raise HTTPException(status_code=500, detail="AI 검토 결과 저장에 실패했습니다.") from exc
 
-    return JobAiReviewResponse(ai_audit_comment=updated_job.ai_audit_comment)
+    return JobAiReviewResponse(
+        ai_audit_comment=updated_job.ai_audit_comment,
+        ai_audit_date=updated_job.ai_audit_date,
+        ai_audit_cnt=updated_job.ai_audit_cnt,
+    )
 
 
 @router.post("/jobs/{idx}/rework", response_model=JobRecordResponse)

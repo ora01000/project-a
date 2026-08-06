@@ -4,6 +4,7 @@ import type { AuthUser } from "../../types/auth";
 import type { JobRecord } from "../../types/job";
 import { ConfirmDialog } from "../ConfirmDialog";
 import { JobBlockField, JobInlineField } from "./JobFieldLabel";
+import { JobAiAuditCommentBlock } from "./JobAiAuditCommentBlock";
 import { JobAiReviewButton } from "./JobAiReviewButton";
 import { JobRejectReasonModal } from "./JobRejectReasonModal";
 
@@ -29,9 +30,10 @@ function srnumButtonClass(isSelected: boolean): string {
 interface MyJobReviewTabProps {
   active: boolean;
   currentUser: AuthUser;
+  onCopyToNote?: (content: string, noteName?: string) => Promise<void>;
 }
 
-export function MyJobReviewTab({ active, currentUser }: MyJobReviewTabProps) {
+export function MyJobReviewTab({ active, currentUser, onCopyToNote }: MyJobReviewTabProps) {
   const [jobs, setJobs] = useState<JobRecord[]>([]);
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -202,13 +204,13 @@ export function MyJobReviewTab({ active, currentUser }: MyJobReviewTabProps) {
                     dangerouslySetInnerHTML={{ __html: selectedJob.job_content }}
                   />
                 </JobBlockField>
-                {selectedJob.ai_audit_comment?.trim() ? (
-                  <JobBlockField label="AI 검토결과" bullet="🤖">
-                    <div className="rounded-md border border-violet-800/60 bg-violet-950/30 p-3 text-sm text-violet-100">
-                      {selectedJob.ai_audit_comment}
-                    </div>
-                  </JobBlockField>
-                ) : null}
+                <JobAiAuditCommentBlock
+                  comment={selectedJob.ai_audit_comment}
+                  auditCount={selectedJob.ai_audit_cnt}
+                  auditDate={selectedJob.ai_audit_date}
+                  noteNamePrefix={selectedJob.srnum}
+                  onCopyToNote={onCopyToNote}
+                />
               </div>
 
               <div className="flex shrink-0 items-center justify-between gap-2 border-t border-slate-700/80 pt-3">

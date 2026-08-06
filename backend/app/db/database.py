@@ -119,6 +119,8 @@ def _apply_migrations(connection: sqlite3.Connection) -> None:
     _migrate_jobs_job_type_column(connection)
     _migrate_jobs_drop_reason_column(connection)
     _migrate_jobs_ai_audit_comment_column(connection)
+    _migrate_jobs_ai_audit_comment_to_text(connection)
+    _migrate_jobs_ai_audit_meta_columns(connection)
     _ensure_jobs_result_table(connection)
     _ensure_mynotes_table(connection)
     _ensure_k8s_inventory_tables(connection)
@@ -624,9 +626,60 @@ def _migrate_jobs_ai_audit_comment_column(connection: sqlite3.Connection) -> Non
         return
 
     connection.execute(
-        "ALTER TABLE jobs ADD COLUMN ai_audit_comment VARCHAR(200) NOT NULL DEFAULT ''"
+        "ALTER TABLE jobs ADD COLUMN ai_audit_comment TEXT NOT NULL DEFAULT ''"
     )
     logger.info("Added jobs.ai_audit_comment column")
+
+
+def _migrate_jobs_ai_audit_comment_to_text(connection: sqlite3.Connection) -> None:
+    """Document ai_audit_comment as TEXT; SQLite does not enforce VARCHAR length."""
+    tables = {
+        str(row[0])
+        for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+    }
+    if "jobs" not in tables:
+        return
+
+    columns = {
+        row["name"] for row in connection.execute("PRAGMA table_info(jobs)").fetchall()
+    }
+    if "ai_audit_comment" not in columns:
+        return
+
+    column_types = {
+        str(row["name"]): str(row["type"]).upper()
+        for row in connection.execute("PRAGMA table_info(jobs)").fetchall()
+    }
+    current_type = column_types.get("ai_audit_comment", "")
+    if current_type == "TEXT":
+        return
+
+    logger.info(
+        "jobs.ai_audit_comment is stored as %s in SQLite (no length limit); "
+        "application no longer truncates values",
+        current_type or "unknown",
+    )
+
+
+def _migrate_jobs_ai_audit_meta_columns(connection: sqlite3.Connection) -> None:
+    tables = {
+        str(row[0])
+        for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+    }
+    if "jobs" not in tables:
+        return
+
+    columns = {
+        row["name"] for row in connection.execute("PRAGMA table_info(jobs)").fetchall()
+    }
+    if "ai_audit_date" not in columns:
+        connection.execute("ALTER TABLE jobs ADD COLUMN ai_audit_date TEXT")
+        logger.info("Added jobs.ai_audit_date column")
+    if "ai_audit_cnt" not in columns:
+        connection.execute(
+            "ALTER TABLE jobs ADD COLUMN ai_audit_cnt INTEGER NOT NULL DEFAULT 0"
+        )
+        logger.info("Added jobs.ai_audit_cnt column")
 
 
 def _ensure_jobs_result_table(connection: sqlite3.Connection) -> None:
