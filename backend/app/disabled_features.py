@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from fastapi import HTTPException
 
-REMOVED_AGENT_IDS: frozenset[str] = frozenset()
+REMOVED_AGENT_IDS: frozenset[str] = frozenset({"inventory", "sys-inventory"})
 
 DISABLED_FEATURE_DETAIL = "요청한 기능이 비활성화되었습니다."
 

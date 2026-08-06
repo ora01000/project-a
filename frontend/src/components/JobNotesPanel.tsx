@@ -7,14 +7,16 @@ import { MyJobReviewTab } from "./jobs/MyJobReviewTab";
 import { MyNotesHeaderButtons } from "./jobs/MyNotesHeaderButtons";
 import { MyNotesTab } from "./jobs/MyNotesTab";
 import { RejectedJobsTab } from "./jobs/RejectedJobsTab";
+import { WhatapEventReportTab } from "./jobs/WhatapEventReportTab";
 import { useMyNotes } from "./jobs/useMyNotes";
 
-type JobNotesTab = "review" | "my-review" | "my-results" | "rejected-jobs" | "my-notes";
+type JobNotesTab = "review" | "my-review" | "my-results" | "whatap-report" | "rejected-jobs" | "my-notes";
 
 const TABS: { id: JobNotesTab; label: string }[] = [
   { id: "review", label: "작업 검토" },
   { id: "my-review", label: "나의 검토작업" },
   { id: "my-results", label: "나의 작업결과" },
+  { id: "whatap-report", label: "Whatap 이벤트 리포트" },
   { id: "rejected-jobs", label: "반려된 작업" },
   { id: "my-notes", label: "나의 노트" },
 ];
@@ -38,6 +40,8 @@ function renderActiveTab(
       return <MyJobReviewTab active currentUser={currentUser} onCopyToNote={onCopyToNote} />;
     case "my-results":
       return <MyJobResultsTab active currentUser={currentUser} onCopyToNote={onCopyToNote} />;
+    case "whatap-report":
+      return <WhatapEventReportTab active onCopyToNote={onCopyToNote} />;
     case "rejected-jobs":
       return <RejectedJobsTab active />;
     case "my-notes":

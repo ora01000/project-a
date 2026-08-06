@@ -1,4 +1,4 @@
-"""Helpdesk system agent: route user queries to regular/inventory agents unchanged."""
+"""Helpdesk system agent: route user queries to regular agents."""
 
 from __future__ import annotations
 
@@ -63,7 +63,7 @@ def _extract_json_block(text: str) -> dict[str, Any] | None:
 
 
 def _callable_agent_catalog(agent_manager: Any) -> list[AgentDefinition]:
-    """Regular agents including inventory; exclude system agents and helpdesk itself."""
+    """Regular agents; exclude system agents and helpdesk itself."""
     catalog: list[AgentDefinition] = []
     for definition in getattr(agent_manager, "agent_definitions", []) or []:
         if definition.agent_id == HELPDESK_AGENT.agent_id:
@@ -212,7 +212,7 @@ async def handle_helpdesk_query(
     *,
     agent_runtime: Any | None = None,
 ) -> AgentInvokeResult:
-    """Route the user message to one regular/inventory agent, or answer general inquiries directly."""
+    """Route the user message to one regular agent, or answer general inquiries directly."""
     from backend.app.services.agent_invocation import AgentInvocationError, invoke_agent_by_id
 
     catalog = _callable_agent_catalog(agent_manager)

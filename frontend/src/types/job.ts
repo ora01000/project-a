@@ -1,3 +1,7 @@
+export const JOB_TYPE_AX_INFRA = 1;
+export const JOB_TYPE_WHATAP = 2;
+export const JOB_TYPE_SIGNUP = 10;
+
 export interface JobRecord {
   idx: number;
   srnum: string;

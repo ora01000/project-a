@@ -13,9 +13,9 @@ import {
 import { formatCurrentTime } from "../utils/datetime";
 import { AboutModal } from "./AboutModal";
 import { ConfirmDialog } from "./ConfirmDialog";
-import { InfraCollectModal } from "./admin/InfraCollectModal";
 import { MockLlmSelectModal } from "./admin/MockLlmSelectModal";
 import { PostmanDebugModal } from "./admin/PostmanDebugModal";
+import { WhatapEventTestModal } from "./admin/WhatapEventTestModal";
 import { ProfileEditModal } from "./ProfileEditModal";
 import { ReleaseNotesModal } from "./ReleaseNotesModal";
 import { TableDebugModal } from "./TableDebugModal";
@@ -49,7 +49,7 @@ export function MenuBar({ activeView, user, onNavigate, onLogout, onUserUpdated 
   const [showTableDebug, setShowTableDebug] = useState(false);
   const [showPostmanDebug, setShowPostmanDebug] = useState(false);
   const [showMockLlmSelect, setShowMockLlmSelect] = useState(false);
-  const [showInfraCollect, setShowInfraCollect] = useState(false);
+  const [showWhatapEventTest, setShowWhatapEventTest] = useState(false);
   const [runtimeMode, setRuntimeMode] = useState<string>("mock");
   const [showProfileEdit, setShowProfileEdit] = useState(false);
   const [showSaveSuccess, setShowSaveSuccess] = useState(false);
@@ -246,7 +246,7 @@ export function MenuBar({ activeView, user, onNavigate, onLogout, onUserUpdated 
                   showTableDebug ||
                         showPostmanDebug ||
                         showMockLlmSelect ||
-                        showInfraCollect ||
+                        showWhatapEventTest ||
                   showThemeSettings,
               )}
             >
@@ -264,7 +264,7 @@ export function MenuBar({ activeView, user, onNavigate, onLogout, onUserUpdated 
                         showTableDebug ||
                         showPostmanDebug ||
                         showMockLlmSelect ||
-                        showInfraCollect
+                        showWhatapEventTest
                           ? "bg-slate-800 text-sky-200"
                           : "text-slate-200 hover:bg-slate-800"
                       }`}
@@ -274,17 +274,6 @@ export function MenuBar({ activeView, user, onNavigate, onLogout, onUserUpdated 
                     </button>
                     {showAdminWorkMenu ? (
                       <div className="absolute left-full top-0 z-30 ml-1 min-w-[180px] rounded-md border border-slate-700 bg-slate-900 py-1 shadow-lg">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setShowSettingsMenu(false);
-                            setShowAdminWorkMenu(false);
-                            setShowInfraCollect(true);
-                          }}
-                          className="block w-full px-3 py-2 text-left text-sm text-slate-200 hover:bg-slate-800"
-                        >
-                          인프라 정보 수집
-                        </button>
                         <button
                           type="button"
                           onClick={() => {
@@ -309,6 +298,17 @@ export function MenuBar({ activeView, user, onNavigate, onLogout, onUserUpdated 
                             (목업)LLM 변경
                           </button>
                         ) : null}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowSettingsMenu(false);
+                            setShowAdminWorkMenu(false);
+                            setShowWhatapEventTest(true);
+                          }}
+                          className="block w-full px-3 py-2 text-left text-sm text-slate-200 hover:bg-slate-800"
+                        >
+                          Whatap 이벤트 테스트
+                        </button>
                         <button
                           type="button"
                           onClick={() => {
@@ -447,8 +447,8 @@ export function MenuBar({ activeView, user, onNavigate, onLogout, onUserUpdated 
       {showTableDebug && isAdmin ? (
         <TableDebugModal onClose={() => setShowTableDebug(false)} />
       ) : null}
-      {showInfraCollect && isAdmin ? (
-        <InfraCollectModal viewerRole={user.role} onClose={() => setShowInfraCollect(false)} />
+      {showWhatapEventTest && isAdmin ? (
+        <WhatapEventTestModal viewerRole={user.role} onClose={() => setShowWhatapEventTest(false)} />
       ) : null}
       {showProfileEdit ? (
         <ProfileEditModal

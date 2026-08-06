@@ -5,7 +5,6 @@ description = "LangGraph multi-agent platform for K8s, KubeVirt, and vCenter"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "chromadb>=1.5.9",
     "fastapi>=0.139.0",
     "httpx>=0.28.1",
     "jaydebeapi>=1.2.3",
@@ -14,7 +13,6 @@ dependencies = [
     "langchain-mcp-adapters>=0.3.0",
     "langchain-openai>=1.3.3",
     "langgraph>=1.2.8",
-    "openshift>=0.13.2",
     "pydantic-settings>=2.14.2",
     "pyyaml>=6.0.3",
     "redis>=8.1.0",

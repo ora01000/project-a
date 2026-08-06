@@ -123,7 +123,6 @@ def _apply_migrations(connection: sqlite3.Connection) -> None:
     _migrate_jobs_ai_audit_meta_columns(connection)
     _ensure_jobs_result_table(connection)
     _ensure_mynotes_table(connection)
-    _ensure_k8s_inventory_tables(connection)
     _migrate_root_user(connection)
 
 
@@ -726,152 +725,18 @@ def _ensure_mynotes_table(connection: sqlite3.Connection) -> None:
 
 
 def _drop_legacy_product_tables(connection: sqlite3.Connection) -> None:
-    for table_name in ("job_notifications", "inventory", "agents"):
+    for table_name in (
+        "job_notifications",
+        "inventory",
+        "agents",
+        "k8s_pods",
+        "k8s_pvcs",
+        "k8s_deployments",
+        "k8s_namespaces",
+        "k8s_nodes",
+        "k8s_cluster",
+    ):
         connection.execute(f"DROP TABLE IF EXISTS {table_name}")
-
-
-def _ensure_k8s_inventory_tables(connection: sqlite3.Connection) -> None:
-    tables = {
-        str(row[0])
-        for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
-    }
-
-    if "k8s_cluster" not in tables:
-        connection.execute(
-            """
-            CREATE TABLE k8s_cluster (
-                idx INTEGER PRIMARY KEY AUTOINCREMENT,
-                cluster_name VARCHAR(50) NOT NULL UNIQUE,
-                last_update TEXT
-            )
-            """
-        )
-
-    needs_rebuild = False
-    if "k8s_nodes" not in tables:
-        needs_rebuild = True
-    else:
-        node_columns = {
-            row["name"]: str(row["type"]).upper()
-            for row in connection.execute("PRAGMA table_info(k8s_nodes)").fetchall()
-        }
-        cluster_type = node_columns.get("cluster_id", "")
-        # Legacy schema stored cluster name as VARCHAR(50).
-        if "VARCHAR" in cluster_type or "CHAR" in cluster_type or "TEXT" in cluster_type:
-            needs_rebuild = True
-            logger.info("Migrating k8s_* tables: cluster_id VARCHAR -> INTEGER (k8s_cluster.idx)")
-
-    if needs_rebuild:
-        for table_name in (
-            "k8s_pods",
-            "k8s_pvcs",
-            "k8s_deployments",
-            "k8s_namespaces",
-            "k8s_nodes",
-        ):
-            connection.execute(f"DROP TABLE IF EXISTS {table_name}")
-
-        connection.execute(
-            """
-            CREATE TABLE k8s_nodes (
-                idx INTEGER PRIMARY KEY AUTOINCREMENT,
-                cluster_id INTEGER NOT NULL,
-                node_name VARCHAR(50) NOT NULL,
-                node_cpu INTEGER,
-                node_mem INTEGER,
-                node_os VARCHAR(50),
-                node_k8s_ver VARCHAR(50),
-                FOREIGN KEY (cluster_id) REFERENCES k8s_cluster(idx)
-            )
-            """
-        )
-        connection.execute(
-            """
-            CREATE TABLE k8s_namespaces (
-                idx INTEGER PRIMARY KEY AUTOINCREMENT,
-                cluster_id INTEGER NOT NULL,
-                namespace VARCHAR(50) NOT NULL,
-                okd_display_name VARCHAR(100),
-                resource_quota_cpu_limit REAL,
-                resource_quota_mem_limit INTEGER,
-                resource_quota_pod_limit INTEGER,
-                okd_egressip1 VARCHAR(20),
-                okd_egressip2 VARCHAR(20),
-                FOREIGN KEY (cluster_id) REFERENCES k8s_cluster(idx)
-            )
-            """
-        )
-        connection.execute(
-            """
-            CREATE TABLE k8s_deployments (
-                idx INTEGER PRIMARY KEY AUTOINCREMENT,
-                cluster_id INTEGER NOT NULL,
-                namespace_id INTEGER NOT NULL,
-                name VARCHAR(50) NOT NULL,
-                type VARCHAR(20) NOT NULL,
-                replicas INTEGER,
-                resource_cpu_request REAL,
-                resource_mem_request INTEGER,
-                resource_cpu_limit REAL,
-                resource_mem_limit INTEGER,
-                containers_cnt INTEGER,
-                containers_name VARCHAR(300),
-                containers_image VARCHAR(500),
-                FOREIGN KEY (cluster_id) REFERENCES k8s_cluster(idx),
-                FOREIGN KEY (namespace_id) REFERENCES k8s_namespaces(idx)
-            )
-            """
-        )
-        connection.execute(
-            """
-            CREATE TABLE k8s_pvcs (
-                idx INTEGER PRIMARY KEY AUTOINCREMENT,
-                cluster_id INTEGER NOT NULL,
-                namespace_id INTEGER NOT NULL,
-                deployment_id INTEGER,
-                name VARCHAR(50) NOT NULL,
-                storage_class VARCHAR(20),
-                capacity INTEGER,
-                used INTEGER,
-                access_mode VARCHAR(20),
-                FOREIGN KEY (cluster_id) REFERENCES k8s_cluster(idx),
-                FOREIGN KEY (namespace_id) REFERENCES k8s_namespaces(idx),
-                FOREIGN KEY (deployment_id) REFERENCES k8s_deployments(idx)
-            )
-            """
-        )
-        connection.execute(
-            """
-            CREATE TABLE k8s_pods (
-                idx INTEGER PRIMARY KEY AUTOINCREMENT,
-                cluster_id INTEGER NOT NULL,
-                namespace_id INTEGER NOT NULL,
-                deployment_id INTEGER,
-                name VARCHAR(50) NOT NULL,
-                scheduled_node INTEGER,
-                FOREIGN KEY (cluster_id) REFERENCES k8s_cluster(idx),
-                FOREIGN KEY (namespace_id) REFERENCES k8s_namespaces(idx),
-                FOREIGN KEY (deployment_id) REFERENCES k8s_deployments(idx),
-                FOREIGN KEY (scheduled_node) REFERENCES k8s_nodes(idx)
-            )
-            """
-        )
-
-    _sync_k8s_cluster_rows(connection)
-
-
-def _sync_k8s_cluster_rows(connection: sqlite3.Connection) -> None:
-    from backend.app.agents.k8s_agent import K8S_CLUSTER_SPECS
-
-    for cluster_name, _display_name in K8S_CLUSTER_SPECS:
-        connection.execute(
-            """
-            INSERT INTO k8s_cluster (cluster_name, last_update)
-            VALUES (?, NULL)
-            ON CONFLICT(cluster_name) DO NOTHING
-            """,
-            (cluster_name,),
-        )
 
 
 def seed_initial_users(connection: sqlite3.Connection) -> int:

@@ -54,17 +54,6 @@ class RuntimeHealthResponse(BaseModel):
     status: str
 
 
-class RuntimeInventoryApprovalRequest(BaseModel):
-    trace_id: str = Field(min_length=1)
-    caller_agent_id: str
-    caller_agent_name: str
-    query: str = Field(min_length=1)
-
-
-class RuntimeInventoryApprovalResponse(BaseModel):
-    approved: bool
-
-
 def definition_to_payload(definition: AgentDefinition) -> AgentDefinitionPayload:
     return AgentDefinitionPayload(
         agent_id=definition.agent_id,

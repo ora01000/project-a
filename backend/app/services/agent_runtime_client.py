@@ -115,7 +115,7 @@ class AgentRuntimeClient(Protocol):
     """Contract between Control Plane and external Agent Runtime sandbox."""
 
     async def invoke(self, request: AgentInvokeRequest) -> AgentInvokeResult:
-        """Chat / helpdesk / inventory / system agent execution."""
+        """Chat / helpdesk / system agent execution."""
         ...
 
     async def invoke_planned_step(self, request: AgentPlannedStepRequest) -> AgentInvokeResult:

@@ -22,9 +22,17 @@ JOB_STATUS_REJECTED = 12
 JOB_STATUS_CANCELLED = 13
 
 JOB_TYPE_AX_INFRA = 1
+JOB_TYPE_WHATAP = 2
 JOB_TYPE_SIGNUP = 10
 
 SIGNUP_ACCESS_REQUEST_JOB_TITLE = "[신규사용자] 접속 권한 신청서"
+
+WHATAP_REQUESTER_NAME = "Whatap"
+WHATAP_REQUESTER_EMAIL = "whatap@admin.io"
+WHATAP_REQUESTER_DEPART = "Whatap"
+WHATAP_MADANG_ID = "whatap"
+WHATAP_JOB_TITLE_PREFIX = "[Whatap 이벤트]"
+WHATAP_JOB_TITLE_SUFFIX = "에서 발생한 이벤트 분석(자동)"
 
 JOB_SELECT_COLUMNS = """
     idx,
@@ -149,6 +157,7 @@ def list_jobs(
     status_code: int | None = None,
     min_status_code: int | None = None,
     approver: str | None = None,
+    job_type: int | None = None,
     exclude_status_code: int | None = None,
     exclude_job_type: int | None = None,
 ) -> list[JobRecord]:
@@ -163,6 +172,9 @@ def list_jobs(
     if exclude_status_code is not None:
         clauses.append("status_code != ?")
         params.append(exclude_status_code)
+    if job_type is not None:
+        clauses.append("job_type = ?")
+        params.append(job_type)
     if exclude_job_type is not None:
         clauses.append("job_type != ?")
         params.append(exclude_job_type)
@@ -276,6 +288,83 @@ def create_job_from_intake(
     created = get_job_by_idx(database_path, idx)
     if created is None:
         raise RuntimeError("Failed to load created job record")
+    return created
+
+
+def build_whatap_event_job_title(project_name: str | None) -> str:
+    project = (project_name or "").strip() or "unknown"
+    title = f"{WHATAP_JOB_TITLE_PREFIX}{project}{WHATAP_JOB_TITLE_SUFFIX}"
+    if len(title) <= 300:
+        return title
+    max_project_len = 300 - len(WHATAP_JOB_TITLE_PREFIX) - len(WHATAP_JOB_TITLE_SUFFIX)
+    if max_project_len < 1:
+        return title[:300]
+    truncated_project = project[:max_project_len]
+    return f"{WHATAP_JOB_TITLE_PREFIX}{truncated_project}{WHATAP_JOB_TITLE_SUFFIX}"
+
+
+def create_whatap_event_job(
+    database_path: str | Path,
+    *,
+    job_title: str,
+    job_content: str,
+    request_date: str,
+) -> JobRecord:
+    """Create an auto-approved Whatap event job (job_type=2, status_code=2)."""
+    normalized_request_date = normalize_job_datetime(request_date)
+    received_at = now_job_datetime()
+    approver_registered_at = received_at
+
+    with get_connection(database_path) as connection:
+        sequence = next_sr_sequence(connection, normalized_request_date)
+        srnum = build_sr_num(normalized_request_date, sequence)
+        cursor = connection.execute(
+            """
+            INSERT INTO jobs (
+                srnum,
+                status_code,
+                job_type,
+                approver_registered_date,
+                approver,
+                job_title,
+                requester_name,
+                requester_email,
+                requester_depart,
+                job_content,
+                request_date,
+                madang_id,
+                team_id,
+                channel_id,
+                message_id,
+                received_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                srnum,
+                JOB_STATUS_DIRECT_APPROVED,
+                JOB_TYPE_WHATAP,
+                approver_registered_at,
+                None,
+                job_title.strip(),
+                WHATAP_REQUESTER_NAME,
+                WHATAP_REQUESTER_EMAIL,
+                WHATAP_REQUESTER_DEPART,
+                job_content,
+                normalized_request_date,
+                WHATAP_MADANG_ID,
+                "",
+                "",
+                "",
+                received_at,
+            ),
+        )
+        idx = int(cursor.lastrowid)
+        connection.commit()
+
+    created = get_job_by_idx(database_path, idx)
+    if created is None:
+        raise RuntimeError("Failed to load created Whatap job record")
     return created
 
 

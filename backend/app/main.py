@@ -22,7 +22,6 @@ from backend.app.api.auth import router as auth_router
 from backend.app.api.chat import router as chat_router
 from backend.app.api.debug import router as debug_router
 from backend.app.api.jobs import router as jobs_router
-from backend.app.api.k8s_collector import router as k8s_collector_router
 from backend.app.api.llm import router as llm_router
 from backend.app.api.notices import router as notices_router
 from backend.app.api.mock_llm import router as mock_llm_router
@@ -32,12 +31,12 @@ from backend.app.api.release import router as release_router
 from backend.app.api.signup import router as signup_router
 from backend.app.api.users import router as users_router
 from backend.app.api.teams_inbound_debug import router as teams_inbound_debug_router
+from backend.app.api.whatap_test import router as whatap_test_router
 from backend.app.api.whatap_webhook import router as whatap_webhook_router
 from backend.app.api.axit_mock import router as axit_mock_router
 from backend.app.config import (
     load_auth_session_settings,
     load_job_processor_settings,
-    load_k8s_collector_settings,
     load_mynotes_settings,
     load_redis_settings,
     load_settings,
@@ -55,7 +54,6 @@ from backend.app.disabled_features import filter_agent_definitions
 from backend.app.logging.prompt_debug import bind_token_tracker
 from backend.app.logging.agent_logger import ensure_agent_logs_dir, log_agent_error
 from backend.app.logging.user_comm_logger import initialize_user_comm_logs
-from backend.app.services.k8s_collector_loop import run_k8s_collector_loop
 from backend.app.services.job_processor_loop import run_job_processor_loop
 from backend.app.services.mynote_flush_loop import run_mynote_flush_loop
 from backend.app.usage.token_tracker import TokenTracker
@@ -204,9 +202,6 @@ class AgentManager:
         if any(status in {"connected", "partial", "ready", "degraded"} for status in active_statuses):
             return "partial"
         return active_statuses[0]
-
-    def get_inventory_health_status(self) -> str:
-        return "disabled"
 
     def sync_remote_catalog(self, database_path: Path) -> None:
         """Refresh http-mode agent catalog and health badges from DB without MCP rebuild."""
@@ -434,16 +429,6 @@ async def lifespan(app: FastAPI):
             server_settings.health_check_interval_seconds,
         )
     )
-    k8s_collector_settings = load_k8s_collector_settings()
-    k8s_collector_task: asyncio.Task | None = None
-    if k8s_collector_settings.enabled:
-        k8s_collector_task = asyncio.create_task(
-            run_k8s_collector_loop(
-                Path(app.state.database_path),
-                k8s_collector_settings,
-                agent_manager=agent_manager,
-            )
-        )
     job_processor_settings = load_job_processor_settings()
     job_processor_task: asyncio.Task | None = None
     if job_processor_settings.enabled:
@@ -472,10 +457,6 @@ async def lifespan(app: FastAPI):
         health_task.cancel()
         with suppress(asyncio.CancelledError):
             await health_task
-        if k8s_collector_task is not None:
-            k8s_collector_task.cancel()
-            with suppress(asyncio.CancelledError):
-                await k8s_collector_task
         if job_processor_task is not None:
             job_processor_task.cancel()
             with suppress(asyncio.CancelledError):
@@ -505,7 +486,6 @@ def create_app() -> FastAPI:
     app.include_router(agents_router, prefix="/api")
     app.include_router(jobs_router, prefix="/api")
     app.include_router(mynotes_router, prefix="/api")
-    app.include_router(k8s_collector_router, prefix="/api")
     app.include_router(notices_router, prefix="/api")
     app.include_router(chat_router, prefix="/api")
     app.include_router(llm_router, prefix="/api")
@@ -515,6 +495,7 @@ def create_app() -> FastAPI:
     app.include_router(release_router, prefix="/api")
     app.include_router(teams_inbound_debug_router, prefix="/api")
     app.include_router(whatap_webhook_router, prefix="/api")
+    app.include_router(whatap_test_router, prefix="/api")
     app.include_router(axit_mock_router)
     return app
 

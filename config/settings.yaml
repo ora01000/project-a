@@ -41,12 +41,6 @@ notifications:
     channel_id: ""
     timeout_seconds: 30
 
-# 시스템 인벤토리 (ChromaDB) - 환경변수로 오버라이드 가능
-inventory:
-  chroma_data_path: "data/chroma"
-  csv_path: "data/inventory/inventory.csv"
-  upload_path: "data/inventory/uploads"
-
 # Whatap 이벤트 수신 webhook
 whatap:
   webhook_secret: ""
@@ -84,22 +78,6 @@ mynotes:
   enabled: true
   flush_interval_seconds: 300
   initial_delay_seconds: 0
-
-# Kubernetes/OpenShift 클러스터 수집 (openshift DynamicClient, 동기)
-# - 기동 시/스케줄 자동 수집은 중지 (수동 수집 UI 사용)
-# - schedule_enabled 를 true 로 켜면 매일 00:10 부터 등록 순서대로 5분 간격 재개
-k8s_collector:
-  enabled: true
-  collect_on_startup: false
-  schedule_enabled: false
-  schedule_hour: 0
-  schedule_minute: 10
-  stagger_minutes: 5
-  # Deployed path; if missing, collector uses local kubeconfig (KUBECONFIG/~/.kube/config)
-  kubeconfig: /etc/k8s-kubeconfig/k8s-kubeconfig
-  fallback_to_current_context: true
-  # contexts:
-  #   dtest-k8s: orbstack
 
 # 인증 프로바이더 (환경변수 AUTH_PROVIDER_TYPE / OAUTH_* 로 오버라이드)
 auth:

@@ -68,12 +68,6 @@ class NotificationSettings(BaseModel):
     teams: TeamsNotificationSettings = Field(default_factory=TeamsNotificationSettings)
 
 
-class InventorySettings(BaseModel):
-    chroma_data_path: str = "data/chroma"
-    csv_path: str = "data/inventory/inventory.csv"
-    upload_path: str = "data/inventory/uploads"
-
-
 class WhatapSettings(BaseModel):
     webhook_secret: str = ""
 
@@ -110,22 +104,6 @@ class MyNotesSettings(BaseModel):
     enabled: bool = True
     flush_interval_seconds: int = 300
     initial_delay_seconds: int = 0
-
-
-class K8sCollectorSettings(BaseModel):
-    enabled: bool = True
-    # Daily local schedule: first agent at HH:MM, then +stagger_minutes per agent order.
-    schedule_hour: int = 0
-    schedule_minute: int = 10
-    stagger_minutes: int = 5
-    collect_on_startup: bool = False
-    # Periodic schedule is paused until explicitly re-enabled.
-    schedule_enabled: bool = False
-    # Default mounted kubeconfig; missing file => local kubernetes access.
-    kubeconfig: str = "/etc/k8s-kubeconfig/k8s-kubeconfig"
-    fallback_to_current_context: bool = True
-    # Optional map: cluster_id -> kubeconfig context name
-    contexts: dict[str, str] = {}
 
 
 class AppSettings(BaseSettings):
@@ -179,9 +157,6 @@ class AppSettings(BaseSettings):
     teams_channel_id: str = Field(default="", alias="TEAMS_CHANNEL_ID")
     teams_timeout_seconds: float = Field(default=30.0, alias="TEAMS_TIMEOUT_SECONDS")
 
-    chroma_data_path: str = Field(default="data/chroma", alias="CHROMA_DATA_PATH")
-    inventory_csv_path: str = Field(default="data/inventory/inventory.csv", alias="INVENTORY_CSV_PATH")
-    inventory_upload_path: str = Field(default="data/inventory/uploads", alias="INVENTORY_UPLOAD_PATH")
     whatap_webhook_secret: str = Field(default="", alias="WHATAP_WEBHOOK_SECRET")
 
     user_comm_log: str = Field(default="data/user_comm_logs", alias="USER_COMM_LOG")
@@ -228,30 +203,6 @@ class AppSettings(BaseSettings):
     mynotes_flush_initial_delay_seconds: int | None = Field(
         default=None,
         alias="MY_NOTES_FLUSH_INITIAL_DELAY_SECONDS",
-    )
-
-    k8s_collector_enabled: bool | None = Field(default=None, alias="K8S_COLLECTOR_ENABLED")
-    k8s_collector_schedule_hour: int | None = Field(default=None, alias="K8S_COLLECTOR_SCHEDULE_HOUR")
-    k8s_collector_schedule_minute: int | None = Field(
-        default=None,
-        alias="K8S_COLLECTOR_SCHEDULE_MINUTE",
-    )
-    k8s_collector_stagger_minutes: int | None = Field(
-        default=None,
-        alias="K8S_COLLECTOR_STAGGER_MINUTES",
-    )
-    k8s_collector_collect_on_startup: bool | None = Field(
-        default=None,
-        alias="K8S_COLLECTOR_COLLECT_ON_STARTUP",
-    )
-    k8s_collector_schedule_enabled: bool | None = Field(
-        default=None,
-        alias="K8S_COLLECTOR_SCHEDULE_ENABLED",
-    )
-    k8s_collector_kubeconfig: str | None = Field(default=None, alias="K8S_COLLECTOR_KUBECONFIG")
-    k8s_collector_fallback_current_context: bool | None = Field(
-        default=None,
-        alias="K8S_COLLECTOR_FALLBACK_CURRENT_CONTEXT",
     )
 
     auth_provider_type: str = Field(default="db", alias="AUTH_PROVIDER_TYPE")
@@ -455,18 +406,6 @@ def load_notification_settings() -> NotificationSettings:
     return NotificationSettings(email=email, teams=teams)
 
 
-def load_inventory_settings() -> InventorySettings:
-    yaml_settings = _load_yaml(CONFIG_DIR / "settings.yaml")
-    inventory_yaml = yaml_settings.get("inventory", {})
-    env_settings = AppSettings()
-
-    return InventorySettings(
-        chroma_data_path=env_settings.chroma_data_path or inventory_yaml.get("chroma_data_path", "data/chroma"),
-        csv_path=env_settings.inventory_csv_path or inventory_yaml.get("csv_path", "data/inventory/inventory.csv"),
-        upload_path=env_settings.inventory_upload_path or inventory_yaml.get("upload_path", "data/inventory/uploads"),
-    )
-
-
 def load_whatap_settings() -> WhatapSettings:
     yaml_settings = _load_yaml(CONFIG_DIR / "settings.yaml")
     whatap_yaml = yaml_settings.get("whatap", {})
@@ -636,78 +575,6 @@ def load_mynotes_settings() -> MyNotesSettings:
         enabled=enabled,
         flush_interval_seconds=max(30, flush_interval_seconds),
         initial_delay_seconds=max(0, initial_delay_seconds),
-    )
-
-
-def load_k8s_collector_settings() -> K8sCollectorSettings:
-    yaml_settings = _load_yaml(CONFIG_DIR / "settings.yaml")
-    collector_yaml = yaml_settings.get("k8s_collector", {})
-    env_settings = AppSettings()
-
-    def _int_setting(env_value: int | None, yaml_key: str, default: int) -> int:
-        raw = env_value if env_value is not None else collector_yaml.get(yaml_key, default)
-        try:
-            return int(raw)
-        except (TypeError, ValueError):
-            return default
-
-    schedule_hour = _int_setting(env_settings.k8s_collector_schedule_hour, "schedule_hour", 0)
-    schedule_minute = _int_setting(
-        env_settings.k8s_collector_schedule_minute,
-        "schedule_minute",
-        10,
-    )
-    stagger_minutes = _int_setting(
-        env_settings.k8s_collector_stagger_minutes,
-        "stagger_minutes",
-        5,
-    )
-
-    if env_settings.k8s_collector_enabled is not None:
-        enabled = env_settings.k8s_collector_enabled
-    else:
-        enabled = _as_bool(collector_yaml.get("enabled"), True)
-
-    if env_settings.k8s_collector_collect_on_startup is not None:
-        collect_on_startup = env_settings.k8s_collector_collect_on_startup
-    else:
-        collect_on_startup = _as_bool(collector_yaml.get("collect_on_startup"), False)
-
-    if env_settings.k8s_collector_schedule_enabled is not None:
-        schedule_enabled = env_settings.k8s_collector_schedule_enabled
-    else:
-        schedule_enabled = _as_bool(collector_yaml.get("schedule_enabled"), False)
-
-    if env_settings.k8s_collector_fallback_current_context is not None:
-        fallback = env_settings.k8s_collector_fallback_current_context
-    else:
-        fallback = _as_bool(collector_yaml.get("fallback_to_current_context"), True)
-
-    kubeconfig = (
-        env_settings.k8s_collector_kubeconfig
-        if env_settings.k8s_collector_kubeconfig is not None
-        else str(collector_yaml.get("kubeconfig") or "/etc/k8s-kubeconfig/k8s-kubeconfig")
-    ).strip()
-
-    raw_contexts = collector_yaml.get("contexts") or {}
-    contexts: dict[str, str] = {}
-    if isinstance(raw_contexts, dict):
-        for key, value in raw_contexts.items():
-            cluster_id = str(key).strip()
-            context_name = str(value).strip()
-            if cluster_id and context_name:
-                contexts[cluster_id] = context_name
-
-    return K8sCollectorSettings(
-        enabled=enabled,
-        schedule_hour=min(23, max(0, schedule_hour)),
-        schedule_minute=min(59, max(0, schedule_minute)),
-        stagger_minutes=max(1, stagger_minutes),
-        collect_on_startup=collect_on_startup,
-        schedule_enabled=schedule_enabled,
-        kubeconfig=kubeconfig,
-        fallback_to_current_context=fallback,
-        contexts=contexts,
     )
 
 

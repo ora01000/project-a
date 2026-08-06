@@ -152,15 +152,19 @@ async def list_job_records(
     status_code: int | None = Query(default=None),
     min_status_code: int | None = Query(default=None),
     approver: str | None = Query(default=None),
+    job_type: int | None = Query(default=None),
     exclude_status_code: int | None = Query(default=None),
 ) -> list[JobRecordResponse]:
     database_path = request.app.state.database_path
     viewer = get_request_auth_user(request)
+    if job_type == JOB_TYPE_SIGNUP and _hide_signup_jobs_for_viewer(viewer.role):
+        return []
     records = list_jobs(
         database_path,
         status_code=status_code,
         min_status_code=min_status_code,
         approver=approver,
+        job_type=job_type,
         exclude_status_code=exclude_status_code,
         exclude_job_type=JOB_TYPE_SIGNUP if _hide_signup_jobs_for_viewer(viewer.role) else None,
     )
