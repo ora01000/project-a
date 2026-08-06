@@ -80,6 +80,52 @@ def _callable_catalog(
     return catalog
 
 
+async def _direct_orchestrator_answer(
+    spec: MockPlatformAgentSpec,
+    message: str,
+) -> AgentInvokeResult:
+    record_orchestration(
+        agent_id=spec.agent_id,
+        agent_name=spec.agent_name,
+        event="mock_orchestrator_direct_start",
+        detail=f"question_chars={len(message)}",
+        input_tokens=estimate_tokens(message),
+    )
+
+    with prompt_debug_scope(
+        caller_agent_id=spec.agent_id,
+        caller_agent_name=spec.agent_name,
+    ):
+        llm = wrap_llm_for_prompt_debug(
+            get_llm(),
+            agent_id=spec.agent_id,
+            agent_name=spec.agent_name,
+        )
+        response = await llm.ainvoke(
+            [
+                SystemMessage(content=spec.system_prompt.strip()),
+                HumanMessage(content=message),
+            ],
+        )
+
+    content = response.content if isinstance(response.content, str) else str(response.content)
+    input_tokens, output_tokens = extract_token_usage_from_text(message, content)
+    record_orchestration(
+        agent_id=spec.agent_id,
+        agent_name=spec.agent_name,
+        event="mock_orchestrator_direct_complete",
+        detail=content[:500],
+        response=content[:2000],
+        output_tokens=output_tokens,
+    )
+    return AgentInvokeResult(
+        content=content,
+        tools_used=[ToolUsage(name="direct:orchestrator", mcp_server=spec.agent_id)],
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+    )
+
+
 async def _select_delegate_agent(
     spec: MockPlatformAgentSpec,
     message: str,
@@ -171,14 +217,7 @@ async def handle_mock_orchestration_query(
 
     catalog = _callable_catalog(agent_manager, spec)
     if not catalog:
-        content = "호출 가능한 인프라 에이전트가 없습니다. 관리자에게 문의해 주세요."
-        input_tokens, output_tokens = extract_token_usage_from_text(message, content)
-        return AgentInvokeResult(
-            content=content,
-            tools_used=[],
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
-        )
+        return await _direct_orchestrator_answer(spec, message)
 
     try:
         decision = await _select_delegate_agent(spec, message, catalog)

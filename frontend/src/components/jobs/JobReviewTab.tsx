@@ -5,6 +5,7 @@ import type { JobRecord } from "../../types/job";
 import type { UserRecord } from "../../types/user";
 import { ConfirmDialog } from "../ConfirmDialog";
 import { JobBlockField, JobFieldLabel, JobInlineField } from "./JobFieldLabel";
+import { JobAiReviewButton } from "./JobAiReviewButton";
 import { JobRejectReasonModal } from "./JobRejectReasonModal";
 
 async function parseError(response: Response, fallback: string): Promise<string> {
@@ -292,31 +293,39 @@ export function JobReviewTab({ active, currentUser }: JobReviewTabProps) {
                         ))}
                       </select>
                     </div>
-                    <div className="flex flex-wrap gap-2">
-                      <button
-                        type="button"
-                        disabled={!selectedApproverUserid || isAssigning}
-                        onClick={() => setConfirmAssignOpen(true)}
-                        className="rounded-md border border-sky-700 bg-sky-950/60 px-3 py-1.5 text-sm font-medium text-sky-100 hover:bg-sky-900/70 disabled:cursor-not-allowed disabled:opacity-40"
-                      >
-                        적용
-                      </button>
-                      <button
-                        type="button"
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          disabled={!selectedApproverUserid || isAssigning}
+                          onClick={() => setConfirmAssignOpen(true)}
+                          className="rounded-md border border-sky-700 bg-sky-950/60 px-3 py-1.5 text-sm font-medium text-sky-100 hover:bg-sky-900/70 disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                          적용
+                        </button>
+                        <button
+                          type="button"
+                          disabled={isAssigning}
+                          onClick={() => setConfirmDirectApproveOpen(true)}
+                          className="rounded-md border border-emerald-700 bg-emerald-950/60 px-3 py-1.5 text-sm font-medium text-emerald-100 hover:bg-emerald-900/70 disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                          직접승인
+                        </button>
+                        <button
+                          type="button"
+                          disabled={isAssigning}
+                          onClick={() => setRejectModalOpen(true)}
+                          className="rounded-md border border-rose-700 bg-rose-950/60 px-3 py-1.5 text-sm font-medium text-rose-100 hover:bg-rose-900/70 disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                          반려
+                        </button>
+                      </div>
+                      <JobAiReviewButton
+                        jobIdx={selectedJob.idx}
                         disabled={isAssigning}
-                        onClick={() => setConfirmDirectApproveOpen(true)}
-                        className="rounded-md border border-emerald-700 bg-emerald-950/60 px-3 py-1.5 text-sm font-medium text-emerald-100 hover:bg-emerald-900/70 disabled:cursor-not-allowed disabled:opacity-40"
-                      >
-                        직접승인
-                      </button>
-                      <button
-                        type="button"
-                        disabled={isAssigning}
-                        onClick={() => setRejectModalOpen(true)}
-                        className="rounded-md border border-rose-700 bg-rose-950/60 px-3 py-1.5 text-sm font-medium text-rose-100 hover:bg-rose-900/70 disabled:cursor-not-allowed disabled:opacity-40"
-                      >
-                        반려
-                      </button>
+                        onError={setError}
+                        onSuccess={() => void loadJobs()}
+                      />
                     </div>
                   </div>
                 )}

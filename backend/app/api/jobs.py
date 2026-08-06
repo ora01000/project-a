@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
@@ -21,10 +22,17 @@ from backend.app.db.jobs import (
     reject_assigned_job,
     reject_received_job,
     rework_job,
+    update_job_ai_audit_comment,
 )
 from backend.app.db.jobs_result import JobResultRecord, get_job_result_by_srnum
 from backend.app.db.roles import is_admin_role
 from backend.app.middleware.session_auth import get_request_auth_user
+from backend.app.services.agent_runtime_client import AgentInvokeRequest
+from backend.app.services.job_auditor import (
+    build_job_review_message,
+    resolve_job_auditor_agent_id,
+    try_resolve_job_auditor_runtime_record,
+)
 from backend.app.services.job_intake import receive_job_request
 
 logger = logging.getLogger(__name__)
@@ -65,6 +73,7 @@ class JobRecordResponse(BaseModel):
     received_at: str
     reject_reason: str = ""
     drop_reason: str = ""
+    ai_audit_comment: str = ""
 
     @classmethod
     def from_record(cls, record: JobRecord) -> "JobRecordResponse":
@@ -88,6 +97,7 @@ class JobRecordResponse(BaseModel):
             received_at=record.received_at,
             reject_reason=record.reject_reason,
             drop_reason=record.drop_reason,
+            ai_audit_comment=record.ai_audit_comment,
         )
 
 
@@ -298,6 +308,99 @@ async def reject_job_review(
         logger.exception("Job reject failed")
         raise HTTPException(status_code=500, detail="Failed to reject job") from exc
     return JobRecordResponse.from_record(record)
+
+
+def _ensure_job_ai_review_access(job: JobRecord, viewer_userid: str, viewer_role: int) -> None:
+    if job.job_type == JOB_TYPE_SIGNUP and _hide_signup_jobs_for_viewer(viewer_role):
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    if job.status_code == JOB_STATUS_RECEIVED:
+        if not is_admin_role(viewer_role):
+            raise HTTPException(status_code=403, detail="접수 작업 AI 검토는 관리자만 수행할 수 있습니다.")
+        return
+
+    if job.status_code == JOB_STATUS_APPROVER_ASSIGNED:
+        approver = (job.approver or "").strip()
+        if is_admin_role(viewer_role) or viewer_userid == approver:
+            return
+        raise HTTPException(status_code=403, detail="지정된 승인자 또는 관리자만 AI 검토할 수 있습니다.")
+
+    raise HTTPException(status_code=400, detail="현재 상태에서는 AI 검토를 수행할 수 없습니다.")
+
+
+class JobAiReviewResponse(BaseModel):
+    ai_audit_comment: str
+
+
+@router.post("/jobs/{idx}/ai-review", response_model=JobAiReviewResponse)
+async def ai_review_job(
+    request: Request,
+    idx: int,
+) -> JobAiReviewResponse:
+    database_path = request.app.state.database_path
+    viewer = get_request_auth_user(request)
+    job = get_job_by_idx(database_path, idx)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    _ensure_job_ai_review_access(job, viewer.userid, viewer.role)
+
+    runtime_mode = getattr(request.app.state, "agent_runtime_mode", "mock")
+    agent_runtime = request.app.state.agent_runtime
+    agent_manager = request.app.state.agent_manager
+    control_plane_base_url = getattr(request.app.state, "control_plane_base_url", None)
+
+    try:
+        auditor_agent_id = resolve_job_auditor_agent_id(database_path, runtime_mode)
+        auditor_runtime_record = try_resolve_job_auditor_runtime_record(
+            database_path,
+            runtime_mode,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    message = build_job_review_message(job)
+    review_task_id = f"job-ai-review-{job.idx}"
+
+    if agent_manager is not None:
+        agent_manager.mark_agent_working(
+            auditor_agent_id,
+            f"AI 검토: {job.srnum}",
+            task_id=review_task_id,
+        )
+
+    try:
+        result = await agent_runtime.invoke(
+            AgentInvokeRequest(
+                agent_id=auditor_agent_id,
+                message=message,
+                trace_id=uuid4().hex,
+                control_plane_base_url=control_plane_base_url,
+                agentruntime_idx=(
+                    auditor_runtime_record.idx if auditor_runtime_record is not None else None
+                ),
+            )
+        )
+    except Exception as exc:
+        logger.exception("Job AI review failed for idx=%s srnum=%s", job.idx, job.srnum)
+        raise HTTPException(status_code=500, detail=f"AI 검토 요청에 실패했습니다: {exc}") from exc
+    finally:
+        if agent_manager is not None:
+            agent_manager.mark_agent_idle(auditor_agent_id, task_id=review_task_id)
+
+    try:
+        updated_job = update_job_ai_audit_comment(
+            database_path,
+            job.idx,
+            result.content,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Failed to persist AI audit comment for idx=%s", job.idx)
+        raise HTTPException(status_code=500, detail="AI 검토 결과 저장에 실패했습니다.") from exc
+
+    return JobAiReviewResponse(ai_audit_comment=updated_job.ai_audit_comment)
 
 
 @router.post("/jobs/{idx}/rework", response_model=JobRecordResponse)

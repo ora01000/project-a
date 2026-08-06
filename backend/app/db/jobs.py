@@ -44,7 +44,8 @@ JOB_SELECT_COLUMNS = """
     message_id,
     received_at,
     reject_reason,
-    drop_reason
+    drop_reason,
+    ai_audit_comment
 """
 
 
@@ -69,6 +70,7 @@ class JobRecord:
     received_at: str
     reject_reason: str = ""
     drop_reason: str = ""
+    ai_audit_comment: str = ""
 
 
 @dataclass(frozen=True)
@@ -111,6 +113,7 @@ def _row_to_job(row) -> JobRecord:
         received_at=str(row["received_at"]),
         reject_reason=str(row["reject_reason"] or ""),
         drop_reason=str(row["drop_reason"] or ""),
+        ai_audit_comment=str(row["ai_audit_comment"] or ""),
     )
 
 
@@ -623,6 +626,41 @@ def cancel_failed_job(
         connection.commit()
         if cursor.rowcount == 0:
             raise ValueError("job cancel state has changed")
+
+    updated = get_job_by_idx(database_path, idx)
+    if updated is None:
+        raise RuntimeError("Failed to load updated job record")
+    return updated
+
+
+AI_AUDIT_COMMENT_MAX_LENGTH = 200
+
+
+def normalize_ai_audit_comment(value: str) -> str:
+    return value.strip()[:AI_AUDIT_COMMENT_MAX_LENGTH]
+
+
+def update_job_ai_audit_comment(
+    database_path: str | Path,
+    idx: int,
+    ai_audit_comment: str,
+) -> JobRecord:
+    normalized = normalize_ai_audit_comment(ai_audit_comment)
+    if not normalized:
+        raise ValueError("ai_audit_comment is required")
+
+    with get_connection(database_path) as connection:
+        cursor = connection.execute(
+            """
+            UPDATE jobs
+            SET ai_audit_comment = ?
+            WHERE idx = ?
+            """,
+            (normalized, idx),
+        )
+        connection.commit()
+        if cursor.rowcount == 0:
+            raise ValueError("job not found")
 
     updated = get_job_by_idx(database_path, idx)
     if updated is None:

@@ -99,6 +99,13 @@ class JobProcessorSettings(BaseModel):
     helpdesk_axit_agent_id: str = ""
 
 
+class JobAuditorSettings(BaseModel):
+    # http 모드: agentruntime.local_agent_id (기본 JOB_AUDITOR_AGENT)
+    local_agent_id: str = "JOB_AUDITOR_AGENT"
+    # http 모드: AXIT agent_id 직접 지정 (선택)
+    axit_agent_id: str = ""
+
+
 class MyNotesSettings(BaseModel):
     enabled: bool = True
     flush_interval_seconds: int = 300
@@ -203,6 +210,14 @@ class AppSettings(BaseSettings):
     job_processor_helpdesk_axit_agent_id: str | None = Field(
         default=None,
         alias="JOB_PROCESSOR_HELPDESK_AXIT_AGENT_ID",
+    )
+    job_auditor_local_agent_id: str | None = Field(
+        default=None,
+        alias="JOB_AUDITOR_LOCAL_AGENT_ID",
+    )
+    job_auditor_axit_agent_id: str | None = Field(
+        default=None,
+        alias="JOB_AUDITOR_AXIT_AGENT_ID",
     )
 
     mynotes_flush_enabled: bool | None = Field(default=None, alias="MY_NOTES_FLUSH_ENABLED")
@@ -562,6 +577,29 @@ def load_job_processor_settings() -> JobProcessorSettings:
         initial_delay_seconds=max(0, initial_delay_seconds),
         helpdesk_local_agent_id=helpdesk_local_agent_id or "helpdesk",
         helpdesk_axit_agent_id=helpdesk_axit_agent_id,
+    )
+
+
+def load_job_auditor_settings() -> JobAuditorSettings:
+    yaml_settings = _load_yaml(CONFIG_DIR / "settings.yaml")
+    auditor_yaml = yaml_settings.get("job_auditor", {})
+    env_settings = AppSettings()
+
+    if env_settings.job_auditor_local_agent_id is not None:
+        local_agent_id = env_settings.job_auditor_local_agent_id.strip()
+    else:
+        local_agent_id = str(
+            auditor_yaml.get("local_agent_id", "JOB_AUDITOR_AGENT"),
+        ).strip()
+
+    if env_settings.job_auditor_axit_agent_id is not None:
+        axit_agent_id = env_settings.job_auditor_axit_agent_id.strip()
+    else:
+        axit_agent_id = str(auditor_yaml.get("axit_agent_id", "")).strip()
+
+    return JobAuditorSettings(
+        local_agent_id=local_agent_id or "JOB_AUDITOR_AGENT",
+        axit_agent_id=axit_agent_id,
     )
 
 

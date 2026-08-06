@@ -18,12 +18,13 @@ MOCKUP_CLIENT_ID = "mock-client-id"
 MOCKUP_CLIENT_SECRET = "mock-client-secret"
 DEFAULT_SERVICE_ID = "prvops"
 
-NON_TALKABLE_LOCAL_AGENT_IDS: frozenset[str] = frozenset({"job-scheduler"})
+NON_TALKABLE_LOCAL_AGENT_IDS: frozenset[str] = frozenset({"job-scheduler", "job_auditor"})
 
 ORCHESTRATOR_LOCAL_AGENT_IDS: frozenset[str] = frozenset({
     "helpdesk",
     "job-scheduler",
     "archi-analysis",
+    "job_auditor",
 })
 
 _AXIT_AGENT_ID_NAMESPACE = uuid.UUID("00000000-0000-4000-8000-000000000000")

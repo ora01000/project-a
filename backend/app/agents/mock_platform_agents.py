@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 
 from backend.app.agents.base import AgentDefinition
+from backend.app.config import PROJECT_ROOT
 from backend.app.agents.infra_diagram_prompt import (
     INFRA_D2_ANALYSIS_GUIDELINES,
     INFRA_D2_MANIFEST_SHAPE_MAPPING,
@@ -55,6 +57,17 @@ class MockPlatformAgentSpec:
         )
 
 
+JOB_AUDITOR_LOCAL_AGENT_ID = "job_auditor"
+JOB_AUDITOR_AXIT_LOCAL_AGENT_ID = "JOB_AUDITOR_AGENT"
+JOB_AUDITOR_SYS_PROMPT_PATH = PROJECT_ROOT / "job_auditor_sys_prompt.md"
+
+
+def _load_system_prompt_file(path: Path) -> str:
+    return path.read_text(encoding="utf-8").strip()
+
+
+JOB_AUDITOR_SYSTEM_PROMPT = _load_system_prompt_file(JOB_AUDITOR_SYS_PROMPT_PATH)
+
 MOCK_PLATFORM_AGENT_SPECS: tuple[MockPlatformAgentSpec, ...] = (
     MockPlatformAgentSpec(
         agent_id="job-scheduler",
@@ -86,6 +99,13 @@ MOCK_PLATFORM_AGENT_SPECS: tuple[MockPlatformAgentSpec, ...] = (
         agent_name="헬프데스크",
         description="문의응대",
         system_prompt="You are an agent that handles infrastructure inquiries. When you receive a user request, identify the infrastructure and call the appropriate agent to provide a correct answer.",
+    ),
+    MockPlatformAgentSpec(
+        agent_id=JOB_AUDITOR_LOCAL_AGENT_ID,
+        agent_name="작업검토",
+        description="작업 내용에 대한 검토를 수행하고 필요시 작업 계획서를 작성",
+        system_prompt=JOB_AUDITOR_SYSTEM_PROMPT,
+        callable_agent_ids=(),
     ),
 )
 

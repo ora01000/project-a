@@ -72,6 +72,13 @@ job_processor:
   # http 모드: AXIT agent_id 직접 지정 (선택)
   helpdesk_axit_agent_id: ""
 
+# 작업 검토 탭 AI 검토 (job auditor orchestrator)
+job_auditor:
+  # http 모드: agentruntime.local_agent_id (AXIT runtime 등록값 JOB_AUDITOR_AGENT)
+  local_agent_id: JOB_AUDITOR_AGENT
+  # http 모드: AXIT agent_id 직접 지정 (선택)
+  axit_agent_id: ""
+
 # 나의 노트: Redis 편집 버퍼 → 주기적 파일 영구 저장
 mynotes:
   enabled: true

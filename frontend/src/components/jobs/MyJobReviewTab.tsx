@@ -4,6 +4,7 @@ import type { AuthUser } from "../../types/auth";
 import type { JobRecord } from "../../types/job";
 import { ConfirmDialog } from "../ConfirmDialog";
 import { JobBlockField, JobInlineField } from "./JobFieldLabel";
+import { JobAiReviewButton } from "./JobAiReviewButton";
 import { JobRejectReasonModal } from "./JobRejectReasonModal";
 
 async function parseError(response: Response, fallback: string): Promise<string> {
@@ -201,25 +202,40 @@ export function MyJobReviewTab({ active, currentUser }: MyJobReviewTabProps) {
                     dangerouslySetInnerHTML={{ __html: selectedJob.job_content }}
                   />
                 </JobBlockField>
+                {selectedJob.ai_audit_comment?.trim() ? (
+                  <JobBlockField label="AI 검토결과" bullet="🤖">
+                    <div className="rounded-md border border-violet-800/60 bg-violet-950/30 p-3 text-sm text-violet-100">
+                      {selectedJob.ai_audit_comment}
+                    </div>
+                  </JobBlockField>
+                ) : null}
               </div>
 
-              <div className="flex shrink-0 gap-2 border-t border-slate-700/80 pt-3">
-                <button
-                  type="button"
+              <div className="flex shrink-0 items-center justify-between gap-2 border-t border-slate-700/80 pt-3">
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    disabled={isSubmitting}
+                    onClick={() => setConfirmApproveOpen(true)}
+                    className="rounded-md border border-emerald-700 bg-emerald-950/60 px-3 py-1.5 text-sm font-medium text-emerald-100 hover:bg-emerald-900/70 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    승인
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isSubmitting}
+                    onClick={() => setRejectModalOpen(true)}
+                    className="rounded-md border border-rose-700 bg-rose-950/60 px-3 py-1.5 text-sm font-medium text-rose-100 hover:bg-rose-900/70 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    반려
+                  </button>
+                </div>
+                <JobAiReviewButton
+                  jobIdx={selectedJob.idx}
                   disabled={isSubmitting}
-                  onClick={() => setConfirmApproveOpen(true)}
-                  className="rounded-md border border-emerald-700 bg-emerald-950/60 px-3 py-1.5 text-sm font-medium text-emerald-100 hover:bg-emerald-900/70 disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  승인
-                </button>
-                <button
-                  type="button"
-                  disabled={isSubmitting}
-                  onClick={() => setRejectModalOpen(true)}
-                  className="rounded-md border border-rose-700 bg-rose-950/60 px-3 py-1.5 text-sm font-medium text-rose-100 hover:bg-rose-900/70 disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  반려
-                </button>
+                  onError={setError}
+                  onSuccess={() => void loadJobs()}
+                />
               </div>
             </div>
           ) : null}

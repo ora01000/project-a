@@ -110,6 +110,7 @@ def _apply_migrations(connection: sqlite3.Connection) -> None:
     _migrate_agentruntime_talkable(connection)
     _migrate_agentruntime_is_orchestrator(connection)
     _migrate_remove_whatap_agentruntime(connection)
+    _migrate_seed_job_auditor_mock_agentruntime(connection)
     _drop_legacy_product_tables(connection)
 
     _ensure_jobs_table(connection)
@@ -117,6 +118,7 @@ def _apply_migrations(connection: sqlite3.Connection) -> None:
     _migrate_jobs_reject_reason_column(connection)
     _migrate_jobs_job_type_column(connection)
     _migrate_jobs_drop_reason_column(connection)
+    _migrate_jobs_ai_audit_comment_column(connection)
     _ensure_jobs_result_table(connection)
     _ensure_mynotes_table(connection)
     _ensure_k8s_inventory_tables(connection)
@@ -442,6 +444,58 @@ def _migrate_remove_whatap_agentruntime(connection: sqlite3.Connection) -> None:
         logger.info("Removed %s whatap agentruntime row(s)", cursor.rowcount)
 
 
+def _migrate_seed_job_auditor_mock_agentruntime(connection: sqlite3.Connection) -> None:
+    tables = {
+        str(row[0])
+        for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+    }
+    if "agentruntime" not in tables:
+        return
+
+    from backend.app.agents.mock_platform_agents import JOB_AUDITOR_LOCAL_AGENT_ID, get_mock_platform_agent_spec
+    from backend.app.db.agentruntime import AGENTRUNTIME_TYPE_MOCKUP, mockup_row_from_preset
+
+    spec = get_mock_platform_agent_spec(JOB_AUDITOR_LOCAL_AGENT_ID)
+    if spec is None:
+        return
+
+    existing = connection.execute(
+        """
+        SELECT idx FROM agentruntime
+        WHERE type = ? AND local_agent_id = ?
+        """,
+        (AGENTRUNTIME_TYPE_MOCKUP, JOB_AUDITOR_LOCAL_AGENT_ID),
+    ).fetchone()
+    if existing is not None:
+        connection.execute(
+            """
+            UPDATE agentruntime
+            SET agent_name = ?, description = ?, talkable = 0, is_orchestrator = 1
+            WHERE idx = ?
+            """,
+            (spec.agent_name, spec.description, int(existing["idx"])),
+        )
+        return
+
+    row = mockup_row_from_preset(spec.to_runtime_preset())
+    row["talkable"] = False
+    row["is_orchestrator"] = True
+    connection.execute(
+        """
+        INSERT INTO agentruntime (
+            type, agent_name, agent_id, local_agent_id, description,
+            registered_date, service_id, talkable, is_orchestrator
+        )
+        VALUES (
+            :type, :agent_name, :agent_id, :local_agent_id, :description,
+            :registered_date, :service_id, :talkable, :is_orchestrator
+        )
+        """,
+        row,
+    )
+    logger.info("Seeded mock agentruntime row for job auditor (%s)", JOB_AUDITOR_LOCAL_AGENT_ID)
+
+
 def _ensure_jobs_table(connection: sqlite3.Connection) -> None:
     tables = {
         str(row[0])
@@ -553,6 +607,26 @@ def _migrate_jobs_drop_reason_column(connection: sqlite3.Connection) -> None:
         "ALTER TABLE jobs ADD COLUMN drop_reason VARCHAR(200) NOT NULL DEFAULT ''"
     )
     logger.info("Added jobs.drop_reason column")
+
+
+def _migrate_jobs_ai_audit_comment_column(connection: sqlite3.Connection) -> None:
+    tables = {
+        str(row[0])
+        for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+    }
+    if "jobs" not in tables:
+        return
+
+    columns = {
+        row["name"] for row in connection.execute("PRAGMA table_info(jobs)").fetchall()
+    }
+    if "ai_audit_comment" in columns:
+        return
+
+    connection.execute(
+        "ALTER TABLE jobs ADD COLUMN ai_audit_comment VARCHAR(200) NOT NULL DEFAULT ''"
+    )
+    logger.info("Added jobs.ai_audit_comment column")
 
 
 def _ensure_jobs_result_table(connection: sqlite3.Connection) -> None:

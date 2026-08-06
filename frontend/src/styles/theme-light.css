@@ -166,8 +166,14 @@
 [data-theme="light"] .bg-violet-950\/40 {
   background-color: rgb(237 233 254 / 0.85);
 }
+[data-theme="light"] .bg-violet-950\/60 {
+  background-color: rgb(221 214 254 / 0.95);
+}
 [data-theme="light"] .bg-violet-900\/40 {
   background-color: rgb(237 233 254 / 0.8);
+}
+[data-theme="light"] .hover\:bg-violet-900\/70:hover {
+  background-color: rgb(221 214 254);
 }
 
 /* ── Slate text ── */
@@ -264,6 +270,9 @@
 /* ── Violet text ── */
 [data-theme="light"] .text-violet-50 {
   color: rgb(76 29 149);
+}
+[data-theme="light"] .text-violet-100 {
+  color: rgb(91 33 182);
 }
 [data-theme="light"] .text-violet-200 {
   color: rgb(109 40 217);
@@ -387,6 +396,9 @@
   border-color: rgb(159 18 57 / 0.6);
 }
 
+[data-theme="light"] .border-violet-700 {
+  border-color: rgb(109 40 217);
+}
 [data-theme="light"] .border-violet-600\/50 {
   border-color: rgb(124 58 237 / 0.5);
 }
