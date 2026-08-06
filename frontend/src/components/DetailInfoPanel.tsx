@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { AuthUser } from "../types/auth";
 import { WHATAP_EVENT_LOG_SOURCE } from "../types/agent-log";
 import { AgentLogsPanel } from "./AgentLogsPanel";
+import { JobWorkflowPanel } from "./JobWorkflowPanel";
 
 interface DetailInfoPanelProps {
   currentUser: AuthUser;
@@ -10,11 +11,12 @@ interface DetailInfoPanelProps {
   onActiveTabChange?: (tab: DetailTab) => void;
 }
 
-type DetailTab = "logs" | "whatap";
+type DetailTab = "logs" | "whatap" | "workflow";
 
 const TABS: { id: DetailTab; label: string }[] = [
-  { id: "logs", label: "대화로그" },
+  { id: "workflow", label: "작업 진행" },
   { id: "whatap", label: "Whatap 이벤트 수신" },
+  { id: "logs", label: "대화로그" },
 ];
 
 const GENERAL_LOG_EXCLUDE_AGENT_IDS = [WHATAP_EVENT_LOG_SOURCE];
@@ -27,7 +29,7 @@ export function DetailInfoPanel({
   activeTab: controlledActiveTab,
   onActiveTabChange,
 }: DetailInfoPanelProps) {
-  const [internalActiveTab, setInternalActiveTab] = useState<DetailTab>("logs");
+  const [internalActiveTab, setInternalActiveTab] = useState<DetailTab>("workflow");
   const activeTab = controlledActiveTab ?? internalActiveTab;
   const [height, setHeight] = useState(DEFAULT_HEIGHT);
   const isDraggingRef = useRef(false);
@@ -117,7 +119,9 @@ export function DetailInfoPanel({
       </div>
 
       <div className="min-h-0 flex-1 overflow-hidden overscroll-contain flex flex-col p-4">
-        {activeTab === "whatap" ? (
+        {activeTab === "workflow" ? (
+          <JobWorkflowPanel currentUser={currentUser} active={activeTab === "workflow"} />
+        ) : activeTab === "whatap" ? (
           <AgentLogsPanel
             currentUser={currentUser}
             agentId={WHATAP_EVENT_LOG_SOURCE}

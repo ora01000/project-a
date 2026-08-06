@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import type { AuthUser } from "../../types/auth";
 import type { JobRecord } from "../../types/job";
+import { requestJobWorkflowRefresh } from "../../utils/jobWorkflowRefresh";
 import { ConfirmDialog } from "../ConfirmDialog";
 import { JobBlockField, JobInlineField } from "./JobFieldLabel";
 import { JobAiAuditCommentBlock } from "./JobAiAuditCommentBlock";
@@ -114,6 +115,7 @@ export function MyJobReviewTab({ active, currentUser, onCopyToNote }: MyJobRevie
       }
       setConfirmApproveOpen(false);
       await loadJobs();
+      requestJobWorkflowRefresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "작업 승인에 실패했습니다.");
     } finally {
@@ -144,6 +146,7 @@ export function MyJobReviewTab({ active, currentUser, onCopyToNote }: MyJobRevie
       setRejectModalOpen(false);
       setRejectReason("");
       await loadJobs();
+      requestJobWorkflowRefresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "작업 반려에 실패했습니다.");
     } finally {
@@ -236,7 +239,10 @@ export function MyJobReviewTab({ active, currentUser, onCopyToNote }: MyJobRevie
                   jobIdx={selectedJob.idx}
                   disabled={isSubmitting}
                   onError={setError}
-                  onSuccess={() => void loadJobs()}
+                  onSuccess={() => {
+                    void loadJobs();
+                    requestJobWorkflowRefresh();
+                  }}
                 />
               </div>
             </div>

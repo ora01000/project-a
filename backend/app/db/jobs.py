@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from backend.app.db.database import get_connection
+from backend.app.db.roles import is_admin_role
 from backend.app.db.job_datetime import (
     build_sr_num,
     normalize_job_datetime,
@@ -168,6 +169,41 @@ def list_jobs(
     if approver is not None and approver.strip():
         clauses.append("approver = ?")
         params.append(approver.strip())
+
+    where_sql = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    with get_connection(database_path) as connection:
+        rows = connection.execute(
+            f"""
+            SELECT {JOB_SELECT_COLUMNS}
+            FROM jobs
+            {where_sql}
+            ORDER BY idx DESC
+            """,
+            params,
+        ).fetchall()
+    return [_row_to_job(row) for row in rows]
+
+
+def list_jobs_for_workflow(
+    database_path: str | Path,
+    *,
+    viewer_userid: str,
+    viewer_role: int,
+    exclude_job_type: int | None = None,
+) -> list[JobRecord]:
+    clauses: list[str] = []
+    params: list[object] = []
+
+    normalized_viewer = viewer_userid.strip()
+    if not is_admin_role(viewer_role):
+        if not normalized_viewer:
+            return []
+        clauses.append("(madang_id = ? OR approver = ?)")
+        params.extend([normalized_viewer, normalized_viewer])
+
+    if exclude_job_type is not None:
+        clauses.append("job_type != ?")
+        params.append(exclude_job_type)
 
     where_sql = f"WHERE {' AND '.join(clauses)}" if clauses else ""
     with get_connection(database_path) as connection:

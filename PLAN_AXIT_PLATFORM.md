@@ -635,3 +635,24 @@ axit runtime 에 추가할 에이전트의 loca_agent_id 는 JOB_AUDITOR_AGENT �
     - jobs.ai_audit_comment 에 업데이트
     - 나의 작업검토 > 작업상세 패널에 AI 검토결과가 있을 시 작업내용 다음에 출력
 
+- http 모드에서 테스트 결과
+  - 작업 검토 탭
+    - AI검토 버튼은 있으나, 작성 상세 에 AI 검토 결과를 표시하지 않는다. 나의 검토작업 탭과 동일하게 AI검토결과를 표시한다.
+  - AI검토 결과의 내용이 md 인 경우 MD 렌더링이 안된다.
+  - jobs.ai_audit_comment 업데이트시 varchar(200)에 안맞는것 같다. 컬럼 타입을 text로 변경
+
+- AI 검토 결과 정보 보완
+  - 컬럼 추가
+    - jobs.ai_audit_date datetime 컬럼 추가
+    - jobs.ai_audit_cnt int 컬럼 추가, default 0
+  - 해당 job의 AI 검토가 실행된 차수를 jobs.ai_audit_cnt 에 업데이트한다.
+  - 해당 차수의 comment 입력 시각을 jobs.ai_audit_date 에 기록한다.
+
+  - UI 에서는 AI검토결과 표현시 검토 차수 정보와 검토 완료 시각을 표시한다.
+
+- AI 검토결과 내용을 나의 노트로 복사할 수 있도록 버튼을 추가한다
+
+
+## 추상적인 의견 기록
+- PaaS 일별 리포트를 메일로 받고 있다 이를 활용하는 방안
+

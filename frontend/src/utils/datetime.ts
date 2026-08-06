@@ -60,7 +60,12 @@ export function formatMessageIndex(num: number, date: Date): string {
 }
 
 export function formatCurrentTime(date: Date): string {
-  return formatResponseTimestamp(date);
+  const weekday = new Intl.DateTimeFormat("ko-KR", {
+    timeZone: DISPLAY_TIMEZONE,
+    weekday: "short",
+  }).format(date);
+  const { year, month, day, hour, minute, second } = getDateTimeParts(date);
+  return `${year}년 ${month}월 ${day}일(${weekday}) ${hour}:${minute}:${second}`;
 }
 
 export function formatLocaleDateTime(

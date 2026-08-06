@@ -3,9 +3,14 @@ import { useEffect, useRef, useState } from "react";
 import type { AuthUser } from "../types/auth";
 import type { AppView } from "../types/navigation";
 import { hasAdminAccess } from "../types/user";
-import { formatUserLabel } from "../utils/authSession";
+import {
+  extendAuthSession,
+  formatAuthSessionRemaining,
+  formatUserLabel,
+  getAuthSessionRemainingMs,
+  SESSION_EXTEND_THRESHOLD_MS,
+} from "../utils/authSession";
 import { formatCurrentTime } from "../utils/datetime";
-import { AGENT_MANAGEMENT_DISABLED_MESSAGE, TOKEN_MANAGEMENT_DISABLED_MESSAGE } from "../utils/runtimeCapabilities";
 import { AboutModal } from "./AboutModal";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { InfraCollectModal } from "./admin/InfraCollectModal";
@@ -35,6 +40,9 @@ function menuButtonClass(isActive: boolean): string {
 export function MenuBar({ activeView, user, onNavigate, onLogout, onUserUpdated }: MenuBarProps) {
   const [currentTime, setCurrentTime] = useState(formatCurrentTime(new Date()));
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+  const [showSessionExtendConfirm, setShowSessionExtendConfirm] = useState(false);
+  const [sessionRemainingMs, setSessionRemainingMs] = useState(() => getAuthSessionRemainingMs());
+  const [isExtendingSession, setIsExtendingSession] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
   const [showReleaseNotes, setShowReleaseNotes] = useState(false);
   const [showThemeSettings, setShowThemeSettings] = useState(false);
@@ -59,9 +67,28 @@ export function MenuBar({ activeView, user, onNavigate, onLogout, onUserUpdated 
   useEffect(() => {
     const timer = window.setInterval(() => {
       setCurrentTime(formatCurrentTime(new Date()));
+      setSessionRemainingMs(getAuthSessionRemainingMs());
     }, 1000);
     return () => window.clearInterval(timer);
   }, []);
+
+  const canExtendSession =
+    sessionRemainingMs > 0 && sessionRemainingMs <= SESSION_EXTEND_THRESHOLD_MS;
+
+  const handleConfirmSessionExtend = () => {
+    setShowSessionExtendConfirm(false);
+    setIsExtendingSession(true);
+    void extendAuthSession()
+      .then(() => {
+        setSessionRemainingMs(getAuthSessionRemainingMs());
+      })
+      .catch(() => {
+        // 401 등은 fetch 인터셉터가 처리
+      })
+      .finally(() => {
+        setIsExtendingSession(false);
+      });
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -138,14 +165,6 @@ export function MenuBar({ activeView, user, onNavigate, onLogout, onUserUpdated 
                 <div className="absolute left-0 top-full z-20 mt-1 min-w-[160px] rounded-md border border-slate-700 bg-slate-900 py-1 shadow-lg">
                   <button
                     type="button"
-                    disabled
-                    title={AGENT_MANAGEMENT_DISABLED_MESSAGE}
-                    className="block w-full cursor-not-allowed px-3 py-2 text-left text-sm text-slate-500"
-                  >
-                    에이전트 관리
-                  </button>
-                  <button
-                    type="button"
                     onClick={() => {
                       onNavigate("agent-connections");
                       setShowAgentMenu(false);
@@ -171,14 +190,6 @@ export function MenuBar({ activeView, user, onNavigate, onLogout, onUserUpdated 
                     }`}
                   >
                     에이전트 할당
-                  </button>
-                  <button
-                    type="button"
-                    disabled
-                    title={TOKEN_MANAGEMENT_DISABLED_MESSAGE}
-                    className="block w-full cursor-not-allowed px-3 py-2 text-left text-sm text-slate-500"
-                  >
-                    토큰관리
                   </button>
                 </div>
               ) : null}
@@ -362,7 +373,26 @@ export function MenuBar({ activeView, user, onNavigate, onLogout, onUserUpdated 
         </div>
 
         <div className="flex flex-wrap items-center gap-3 text-sm text-slate-300">
-          <time className="font-mono text-slate-400">{currentTime}</time>
+          <div className="flex items-center gap-2">
+            <time className="font-mono text-slate-400">{currentTime}</time>
+            <button
+              type="button"
+              disabled={!canExtendSession || isExtendingSession}
+              onClick={() => setShowSessionExtendConfirm(true)}
+              title={
+                canExtendSession
+                  ? "세션 만료 전 연장 (클릭)"
+                  : "세션 만료까지 남은 시간 (5분 이하일 때 연장 가능)"
+              }
+              className={`rounded-md border px-2.5 py-1 font-mono text-xs transition ${
+                canExtendSession
+                  ? "border-amber-600/80 bg-amber-950/40 text-amber-100 hover:bg-amber-900/50 disabled:opacity-50"
+                  : "cursor-default border-slate-700 text-slate-500 disabled:opacity-100"
+              }`}
+            >
+              {formatAuthSessionRemaining(sessionRemainingMs)}
+            </button>
+          </div>
           <button
             type="button"
             onClick={() => setShowProfileEdit(true)}
@@ -392,6 +422,16 @@ export function MenuBar({ activeView, user, onNavigate, onLogout, onUserUpdated 
             setShowLogoutConfirm(false);
             onLogout();
           }}
+        />
+      ) : null}
+
+      {showSessionExtendConfirm ? (
+        <ConfirmDialog
+          title="세션 연장"
+          message="세션을 연장하시겠습니까?"
+          confirmLabel="연장"
+          onCancel={() => setShowSessionExtendConfirm(false)}
+          onConfirm={handleConfirmSessionExtend}
         />
       ) : null}
 

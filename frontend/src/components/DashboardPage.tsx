@@ -97,7 +97,7 @@ export function DashboardPage({
     return () => window.removeEventListener("resize", handleWindowResize);
   }, [clampChatPanelWidth]);
 
-  const [detailTab, setDetailTab] = useState<DetailTab>("logs");
+  const [detailTab, setDetailTab] = useState<DetailTab>("workflow");
 
   const assignedAgents = useMemo(() => {
     const assignedIds = new Set(

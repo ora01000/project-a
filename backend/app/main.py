@@ -30,7 +30,6 @@ from backend.app.api.mynotes import router as mynotes_router
 from backend.app.api.postman_debug import router as postman_debug_router
 from backend.app.api.release import router as release_router
 from backend.app.api.signup import router as signup_router
-from backend.app.api.token_usage import router as token_usage_router
 from backend.app.api.users import router as users_router
 from backend.app.api.teams_inbound_debug import router as teams_inbound_debug_router
 from backend.app.api.whatap_webhook import router as whatap_webhook_router
@@ -503,7 +502,6 @@ def create_app() -> FastAPI:
     app.include_router(users_router, prefix="/api")
     app.include_router(agent_logs_router, prefix="/api")
     app.include_router(agentruntime_records_router, prefix="/api")
-    app.include_router(token_usage_router, prefix="/api")
     app.include_router(agents_router, prefix="/api")
     app.include_router(jobs_router, prefix="/api")
     app.include_router(mynotes_router, prefix="/api")

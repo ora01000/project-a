@@ -81,6 +81,27 @@ export function getAuthSessionRemainingMs(now = Date.now()): number {
   return Math.max(0, expiresAt - now);
 }
 
+/** Remaining session time in minutes for menu bar display. */
+export function formatAuthSessionRemaining(remainingMs: number): string {
+  const totalMinutes = Math.floor(Math.max(0, remainingMs) / 60000);
+  return `세션: ${totalMinutes}분`;
+}
+
+export const SESSION_EXTEND_THRESHOLD_MS = 5 * 60 * 1000;
+
+export async function extendAuthSession(): Promise<number> {
+  const response = await fetch("/api/auth/me");
+  if (!response.ok) {
+    const payload = (await response.json().catch(() => null)) as { detail?: string } | null;
+    throw new Error(payload?.detail ?? "세션 연장에 실패했습니다.");
+  }
+  const payload = (await response.json()) as { expires_in?: number };
+  const expiresInSeconds =
+    typeof payload.expires_in === "number" && payload.expires_in > 0 ? payload.expires_in : 3600;
+  touchAuthSession(expiresInSeconds);
+  return expiresInSeconds;
+}
+
 export function startAuthSession(
   user: AuthUser,
   accessToken: string,

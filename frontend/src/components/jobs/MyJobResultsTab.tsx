@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { AuthUser } from "../../types/auth";
 import type { JobRecord } from "../../types/job";
 import type { JobResult } from "../../types/jobResult";
+import { requestJobWorkflowRefresh } from "../../utils/jobWorkflowRefresh";
 import { AssistantMessageContent } from "../AssistantMessageContent";
 import { ConfirmDialog } from "../ConfirmDialog";
 import { JobCancelReasonModal } from "./JobCancelReasonModal";
@@ -175,6 +176,7 @@ export function MyJobResultsTab({ active, currentUser, onCopyToNote }: MyJobResu
       }
       setConfirmReworkOpen(false);
       await loadJobs();
+      requestJobWorkflowRefresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "재작업 요청에 실패했습니다.");
     } finally {
@@ -203,6 +205,7 @@ export function MyJobResultsTab({ active, currentUser, onCopyToNote }: MyJobResu
       }
       setCancelModalOpen(false);
       await loadJobs();
+      requestJobWorkflowRefresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "작업 취소에 실패했습니다.");
     } finally {

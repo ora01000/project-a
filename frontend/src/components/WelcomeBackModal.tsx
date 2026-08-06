@@ -1,8 +1,10 @@
+import type { ReactNode } from "react";
+import { useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import type { ReactNode } from "react";
 
 import { bandLabel } from "../types/user";
+import { setWelcomeBackHiddenForToday } from "../utils/welcomeBackHide";
 
 export interface WelcomeNoticeItem {
   idx: number;
@@ -66,6 +68,7 @@ export function WelcomeBackModal({
   notices,
   onClose,
 }: WelcomeBackModalProps) {
+  const [hideToday, setHideToday] = useState(true);
   const titleBand = bandLabel(band);
   const titleName = titleBand ? `${username} ${titleBand}` : username;
 
@@ -128,10 +131,24 @@ export function WelcomeBackModal({
           )}
         </div>
 
-        <div className="mt-5 flex shrink-0 justify-end">
+        <div className="mt-5 flex shrink-0 items-center justify-between gap-3">
+          <label className="flex items-center gap-2 text-sm text-slate-300">
+            <input
+              type="checkbox"
+              checked={hideToday}
+              onChange={(event) => setHideToday(event.target.checked)}
+              className="rounded border-slate-600 bg-slate-900 text-sky-600 focus:ring-sky-500"
+            />
+            오늘하루 보지않기
+          </label>
           <button
             type="button"
-            onClick={onClose}
+            onClick={() => {
+              if (hideToday) {
+                setWelcomeBackHiddenForToday();
+              }
+              onClose();
+            }}
             className="rounded-md bg-sky-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-sky-500"
           >
             확인

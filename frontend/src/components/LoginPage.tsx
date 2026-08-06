@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 
 import type { AuthUser } from "../types/auth";
 import { startAuthSession, userFromAuthResponse } from "../utils/authSession";
+import { isWelcomeBackHiddenToday } from "../utils/welcomeBackHide";
 import { AdminBypassPasskeyModal } from "./AdminBypassPasskeyModal";
 import { MadangRegisterModal } from "./MadangRegisterModal";
 import { PendingApprovalModal } from "./PendingApprovalModal";
@@ -106,6 +107,10 @@ export function LoginPage({ onLoginSuccess }: LoginPageProps) {
     }
 
     if (payload.welcome_back) {
+      if (isWelcomeBackHiddenToday()) {
+        onLoginSuccess(user, accessToken, expiresInSeconds);
+        return;
+      }
       setWelcomeBack({
         user,
         accessToken,

@@ -34,6 +34,7 @@ from backend.app.services.job_auditor import (
     try_resolve_job_auditor_runtime_record,
 )
 from backend.app.services.job_intake import receive_job_request
+from backend.app.services.job_workflow import JobWorkflowItem, JobWorkflowStep, list_job_workflows
 
 logger = logging.getLogger(__name__)
 
@@ -164,6 +165,58 @@ async def list_job_records(
         exclude_job_type=JOB_TYPE_SIGNUP if _hide_signup_jobs_for_viewer(viewer.role) else None,
     )
     return [JobRecordResponse.from_record(record) for record in records]
+
+
+class JobWorkflowStepResponse(BaseModel):
+    status_code: int
+    label: str
+    timestamp: str | None = None
+    detail: str = ""
+
+    @classmethod
+    def from_step(cls, step: JobWorkflowStep) -> "JobWorkflowStepResponse":
+        return cls(
+            status_code=step.status_code,
+            label=step.label,
+            timestamp=step.timestamp,
+            detail=step.detail,
+        )
+
+
+class JobWorkflowItemResponse(BaseModel):
+    idx: int
+    srnum: str
+    requester_name: str
+    requester_userid: str
+    approver: str | None = None
+    approver_name: str = ""
+    status_code: int
+    steps: list[JobWorkflowStepResponse]
+
+    @classmethod
+    def from_item(cls, item: JobWorkflowItem) -> "JobWorkflowItemResponse":
+        return cls(
+            idx=item.idx,
+            srnum=item.srnum,
+            requester_name=item.requester_name,
+            requester_userid=item.requester_userid,
+            approver=item.approver,
+            approver_name=item.approver_name,
+            status_code=item.status_code,
+            steps=[JobWorkflowStepResponse.from_step(step) for step in item.steps],
+        )
+
+
+@router.get("/jobs/workflow", response_model=list[JobWorkflowItemResponse])
+async def list_job_workflow_items(request: Request) -> list[JobWorkflowItemResponse]:
+    database_path = request.app.state.database_path
+    viewer = get_request_auth_user(request)
+    items = list_job_workflows(
+        database_path,
+        viewer_userid=viewer.userid,
+        viewer_role=viewer.role,
+    )
+    return [JobWorkflowItemResponse.from_item(item) for item in items]
 
 
 @router.get("/jobs/{idx}", response_model=JobRecordResponse)

@@ -8,6 +8,7 @@ import { flushSseBuffer, parseSseChunk } from "../utils/parseSse";
 import { createSessionId, isUuidSessionId } from "../utils/sessionId";
 import { AssistantMessageContent } from "./AssistantMessageContent";
 import { CollapsibleUserMessage } from "./CollapsibleUserMessage";
+import { JobIntakePanel } from "./JobIntakePanel";
 import { OpenAiBillingConfirmDialog } from "./OpenAiBillingConfirmDialog";
 import { ToolUsageList } from "./ToolUsageList";
 import { fetchLlmBillingStatus } from "../utils/llmBilling";
@@ -48,6 +49,13 @@ const CHAT_HEADER_HEIGHT = 100;
 const COMPOSER_FORM_CHROME = 24 + 8;
 /** 대화창에 유지·렌더링할 최근 질의/응답 쌍 개수 */
 const VISIBLE_CHAT_RESPONSE_LIMIT = 10;
+
+type TerminalContentTab = "chat" | "job-intake";
+
+const CONTENT_TABS: { id: TerminalContentTab; label: string }[] = [
+  { id: "chat", label: "대화창" },
+  { id: "job-intake", label: "작업접수" },
+];
 
 function keepRecentResponses(entries: IntegratedChatResponse[]): IntegratedChatResponse[] {
   if (entries.length <= VISIBLE_CHAT_RESPONSE_LIMIT) {
@@ -96,6 +104,7 @@ export function IntegratedChatPanel({
   const [billingConfirmPrompt, setBillingConfirmPrompt] = useState<string | null>(null);
   const [billingConfirmModel, setBillingConfirmModel] = useState<string | null>(null);
   const [copyingResponseId, setCopyingResponseId] = useState<string | null>(null);
+  const [contentTab, setContentTab] = useState<TerminalContentTab>("chat");
   const conversationScrollRef = useRef<HTMLDivElement>(null);
   const layoutRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -512,66 +521,93 @@ export function IntegratedChatPanel({
       </header>
 
       <div className="flex min-h-0 flex-1 flex-col">
-        <div className="flex min-h-0 flex-1 flex-col gap-1 px-3 pt-3">
-          <div className="flex items-center justify-between gap-2">
-            <div className="text-xs font-medium tracking-wide text-slate-300">대화창</div>
+        <div className="flex shrink-0 gap-1 overflow-x-auto border-b border-slate-700 px-3 pt-2">
+          {CONTENT_TABS.map((tab) => (
             <button
+              key={tab.id}
               type="button"
-              onClick={handleResetSession}
-              disabled={isLoading}
-              title="에이전트 호출 세션 UUID를 새로 생성합니다"
-              className="shrink-0 rounded-md border border-slate-600 px-2 py-1 text-xs text-slate-200 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+              onClick={() => setContentTab(tab.id)}
+              className={`shrink-0 rounded-t-md px-3 py-2 text-xs font-medium ${
+                contentTab === tab.id
+                  ? "border border-b-0 border-slate-600 bg-slate-800 text-sky-200"
+                  : "text-slate-400 hover:bg-slate-800/60 hover:text-slate-200"
+              }`}
             >
-              세션 초기화
+              {tab.label}
             </button>
-          </div>
-          <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-md border border-slate-800 bg-slate-950/50 text-sm">
-            <div
-              ref={conversationScrollRef}
-              className="min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain p-2"
-            >
-              {responses.length === 0 ? (
-                <p className="text-slate-500">대화 내용이 여기에 표시됩니다.</p>
-              ) : null}
-
-              {responses.map((response) => (
-                <div key={response.id} className="space-y-2">
-                  <CollapsibleUserMessage
-                    content={response.userContent}
-                    createdAt={response.createdAt}
-                  />
-                  <div className="rounded-md border border-emerald-800/40 bg-emerald-950/35 px-2 py-2 text-slate-100 break-words">
-                    <div className="mb-1 flex items-start justify-between gap-2">
-                      <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[10px] leading-tight text-emerald-300/80">
-                        <span className="rounded-full border border-emerald-700/50 bg-emerald-950/60 px-2 py-0.5 text-emerald-200">
-                          {response.agentName}
-                        </span>
-                        <span>{formatResponseTimestamp(new Date(response.createdAt))}</span>
-                      </div>
-                      {response.assistantContent && onCopyToNote ? (
-                        <button
-                          type="button"
-                          disabled={copyingResponseId === response.id}
-                          onClick={() => void handleCopyResponseToNote(response)}
-                          className="shrink-0 rounded-md border border-slate-600 bg-slate-900/80 px-2 py-0.5 text-[10px] font-medium text-slate-200 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40"
-                        >
-                          {copyingResponseId === response.id ? "복사 중..." : "노트로 복사"}
-                        </button>
-                      ) : null}
-                    </div>
-                    <ToolUsageList tools={response.toolsUsed} />
-                    {response.assistantContent ? (
-                      <AssistantMessageContent content={response.assistantContent} />
-                    ) : (
-                      <span className="text-slate-500">응답 생성 중...</span>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
+          ))}
         </div>
 
+        <div className="flex min-h-0 flex-1 flex-col gap-1 px-3 pt-2">
+          {contentTab === "chat" ? (
+            <>
+              <div className="flex items-center justify-between gap-2">
+                <div className="text-xs font-medium tracking-wide text-slate-300">대화 내용</div>
+                <button
+                  type="button"
+                  onClick={handleResetSession}
+                  disabled={isLoading}
+                  title="에이전트 호출 세션 UUID를 새로 생성합니다"
+                  className="shrink-0 rounded-md border border-slate-600 px-2 py-1 text-xs text-slate-200 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  세션 초기화
+                </button>
+              </div>
+              <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-md border border-slate-800 bg-slate-950/50 text-sm">
+                <div
+                  ref={conversationScrollRef}
+                  className="min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain p-2"
+                >
+                  {responses.length === 0 ? (
+                    <p className="text-slate-500">대화 내용이 여기에 표시됩니다.</p>
+                  ) : null}
+
+                  {responses.map((response) => (
+                    <div key={response.id} className="space-y-2">
+                      <CollapsibleUserMessage
+                        content={response.userContent}
+                        createdAt={response.createdAt}
+                      />
+                      <div className="rounded-md border border-emerald-800/40 bg-emerald-950/35 px-2 py-2 text-slate-100 break-words">
+                        <div className="mb-1 flex items-start justify-between gap-2">
+                          <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[10px] leading-tight text-emerald-300/80">
+                            <span className="rounded-full border border-emerald-700/50 bg-emerald-950/60 px-2 py-0.5 text-emerald-200">
+                              {response.agentName}
+                            </span>
+                            <span>{formatResponseTimestamp(new Date(response.createdAt))}</span>
+                          </div>
+                          {response.assistantContent && onCopyToNote ? (
+                            <button
+                              type="button"
+                              disabled={copyingResponseId === response.id}
+                              onClick={() => void handleCopyResponseToNote(response)}
+                              className="shrink-0 rounded-md border border-slate-600 bg-slate-900/80 px-2 py-0.5 text-[10px] font-medium text-slate-200 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40"
+                            >
+                              {copyingResponseId === response.id ? "복사 중..." : "노트로 복사"}
+                            </button>
+                          ) : null}
+                        </div>
+                        <ToolUsageList tools={response.toolsUsed} />
+                        {response.assistantContent ? (
+                          <AssistantMessageContent content={response.assistantContent} />
+                        ) : (
+                          <span className="text-slate-500">응답 생성 중...</span>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </>
+          ) : (
+            <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-md border border-slate-800 bg-slate-950/50 text-sm">
+              <JobIntakePanel user={user} />
+            </div>
+          )}
+        </div>
+
+        {contentTab === "chat" ? (
+          <>
         <div
           role="separator"
           aria-orientation="horizontal"
@@ -685,6 +721,8 @@ export function IntegratedChatPanel({
             )}
           </div>
         </form>
+          </>
+        ) : null}
       </div>
       {billingConfirmPrompt ? (
         <OpenAiBillingConfirmDialog

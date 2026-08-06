@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { AuthUser } from "../../types/auth";
 import type { JobRecord } from "../../types/job";
 import type { UserRecord } from "../../types/user";
+import { requestJobWorkflowRefresh } from "../../utils/jobWorkflowRefresh";
 import { ConfirmDialog } from "../ConfirmDialog";
 import { JobBlockField, JobFieldLabel, JobInlineField } from "./JobFieldLabel";
 import { JobAiAuditCommentBlock } from "./JobAiAuditCommentBlock";
@@ -147,6 +148,7 @@ export function JobReviewTab({ active, currentUser, onCopyToNote }: JobReviewTab
       setConfirmAssignOpen(false);
       setConfirmDirectApproveOpen(false);
       await loadJobs();
+      requestJobWorkflowRefresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "작업 승인자 지정에 실패했습니다.");
     } finally {
@@ -176,6 +178,7 @@ export function JobReviewTab({ active, currentUser, onCopyToNote }: JobReviewTab
       }
       setConfirmDirectApproveOpen(false);
       await loadJobs();
+      requestJobWorkflowRefresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "직접승인에 실패했습니다.");
     } finally {
@@ -206,6 +209,7 @@ export function JobReviewTab({ active, currentUser, onCopyToNote }: JobReviewTab
       setRejectModalOpen(false);
       setRejectReason("");
       await loadJobs();
+      requestJobWorkflowRefresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "작업 반려에 실패했습니다.");
     } finally {
@@ -333,7 +337,10 @@ export function JobReviewTab({ active, currentUser, onCopyToNote }: JobReviewTab
                         jobIdx={selectedJob.idx}
                         disabled={isAssigning}
                         onError={setError}
-                        onSuccess={() => void loadJobs()}
+                        onSuccess={() => {
+                          void loadJobs();
+                          requestJobWorkflowRefresh();
+                        }}
                       />
                     </div>
                   </div>

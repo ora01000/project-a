@@ -224,11 +224,7 @@ export default function App() {
       return;
     }
     const adminOnlyViews: AppView[] = ["agent-assignment", "agent-connections"];
-    const disabledViews: AppView[] = ["token-management"];
-    if (
-      (!hasAdminAccess(user.role) && adminOnlyViews.includes(activeView)) ||
-      disabledViews.includes(activeView)
-    ) {
+    if (!hasAdminAccess(user.role) && adminOnlyViews.includes(activeView)) {
       setActiveView("dashboard");
     }
   }, [activeView, user]);
