@@ -3,7 +3,35 @@
 프로젝트 최초 개발일(2026-07-08) 이후 변경 이력을 **최근순**으로 요약합니다.  
 출처: git 커밋, `ADDITIONAL_PLAN.md`, 워킹 트리 반영분(2026-07-15~18).
 
-**현재 버전:** 1.1B / 릴리즈 `260806`
+**현재 버전:** 1.2B / 릴리즈 `260807`
+
+---
+
+## 2026-08-07 — K8S 인프라 scrape·스케줄·형상 분석 (`260807`)
+
+### K8S 인프라 수집
+- 관리자 **K8S 인프라 구성** UI·API로 클러스터 등록·수동 수집 재도입
+- 수집 결과를 클러스터별 동적 테이블(`{cluster}_k8s_*`)에 저장, 수집 전 백업(`_{YYYYMMDD_HHMMSS}`)
+- 백업 테이블은 stamp 기준 **최근 4세대만 유지** 후 나머지 drop
+- OVN-Kubernetes **EgressIP** ↔ Namespace `egressIPSelector` 매칭, NetNamespace(레거시) 병행
+- DynamicClient **ResourceField → dict 정규화**로 http 모드 수집 누락 수정
+- 네임스페이스 컬럼 `using_egressip` / `egressip_assigned_node` 추가
+
+### 스케줄(cron)
+- `k8s_cluster.cron` / `cron_expr` 컬럼, UI 스케줄 ON/OFF·cron 표현식(기본 `0 23 * * 6`)
+- 백엔드 스케줄러가 `cron=true` 클러스터를 표현식 시각에 자동 수집
+
+### 인프라 형상 분석
+- 작업 노트 **인프라 형상** 탭: 클러스터 목록·요약(버전·개수)·형상 변경 추이 차트
+- latest + 백업(최대 4) 시점의 nodes/namespaces/deployments/pvcs 개수 추이
+
+### 기타
+- 테이블 디버그 API: 하이픈 포함 클러스터 테이블명 조회 허용
+- 의존성: `croniter`, `openshift`(기존 수집 경로)
+
+### 릴리즈
+- About: 버전 **1.2B**, 릴리즈 **260807**
+- Docker 이미지 태그: `260807` (`linux/amd64`)
 
 ---
 
@@ -276,11 +304,11 @@
 | 항목 | 내용 |
 |------|------|
 | 제품명 | AX 인프라 운영 콘솔 |
-| 버전 | 1.1B |
-| 릴리즈 | 260806 |
+| 버전 | 1.2B |
+| 릴리즈 | 260807 |
 | 백엔드 이미지 | `ora01000/project-a-backend:<tag>` |
 | 프론트 이미지 | `ora01000/project-a-frontend:<tag>` |
-| 최근 태그 예 | `260805`, `260806` |
+| 최근 태그 예 | `260805`, `260806`, `260807` |
 
 ---
 
