@@ -1066,3 +1066,26 @@ k8s_cluster 를 infra_cluster 로 변경하고 컬럼을 추가한다. 향후 k8
   - openshift-*
   - kube-*
   - default
+
+## 의사결정 메모 (2026-08-07) — OKD 멀티 파드
+
+### 현재 병목
+- Frontend(nginx 정적): 상태 없음 → replica 즉시 가능
+- Backend SQLite(`data/app.db`): 다중 writer 불가. RWX PVC 공유는 비권장
+- 백그라운드 루프(scrape cron / job processor / mynote flush)가 API 프로세스마다 기동 → 중복 실행
+- `data/mynotes`, `data/user_comm_logs` 로컬 파일 의존
+
+### 권장 목표 구조
+- frontend Deployment replicas=N
+- backend-api Deployment replicas=N (API만, 스케줄 루프 OFF)
+- backend-worker Deployment replicas=1 (scrape / job processor / mynote flush)
+- PostgreSQL (공유 트랜잭션 DB) + Redis (세션·짧은 캐시·분산 락)
+
+### Phase
+0. Frontend replica/HPA, Backend는 SQLite 전제 replicas=1
+1. `DATABASE_URL` 기반 PostgreSQL 이전 (스키마·마이그레이션·동적 inventory 중기 정규화)
+2. API/worker 역할 분리 (`BACKEND_ROLE=api|worker|all`)
+3. mynotes·comm_logs를 DB/stdout 등 공유 가능 저장소로 이전
+4. OKD Deployment/HPA/프로브/Secret 매니페스트
+
+상세: `docs/ARCHITECTURE_MULTIPOD.md`, 매니페스트: `deploy/okd/`

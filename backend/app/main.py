@@ -36,7 +36,9 @@ from backend.app.api.whatap_webhook import router as whatap_webhook_router
 from backend.app.api.axit_mock import router as axit_mock_router
 from backend.app.api.k8s_infra import router as k8s_infra_router
 from backend.app.config import (
+    backend_role_runs_workers,
     load_auth_session_settings,
+    load_backend_role,
     load_job_processor_settings,
     load_k8s_collector_settings,
     load_mynotes_settings,
@@ -432,9 +434,13 @@ async def lifespan(app: FastAPI):
             server_settings.health_check_interval_seconds,
         )
     )
+    backend_role = load_backend_role()
+    run_workers = backend_role_runs_workers(backend_role)
+    logger.info("backend role=%s run_workers=%s", backend_role, run_workers)
+
     job_processor_settings = load_job_processor_settings()
     job_processor_task: asyncio.Task | None = None
-    if job_processor_settings.enabled:
+    if run_workers and job_processor_settings.enabled:
         job_processor_task = asyncio.create_task(
             run_job_processor_loop(
                 Path(app.state.database_path),
@@ -447,7 +453,7 @@ async def lifespan(app: FastAPI):
         )
     mynotes_settings = load_mynotes_settings()
     mynote_flush_task: asyncio.Task | None = None
-    if mynotes_settings.enabled:
+    if run_workers and mynotes_settings.enabled:
         mynote_flush_task = asyncio.create_task(
             run_mynote_flush_loop(
                 Path(app.state.database_path),
@@ -456,7 +462,7 @@ async def lifespan(app: FastAPI):
         )
     k8s_collector_settings = load_k8s_collector_settings()
     k8s_scrape_task: asyncio.Task | None = None
-    if k8s_collector_settings.schedule_enabled:
+    if run_workers and k8s_collector_settings.schedule_enabled:
         k8s_scrape_task = asyncio.create_task(
             run_k8s_scrape_scheduler_loop(
                 Path(app.state.database_path),
@@ -495,6 +501,19 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
     app.add_middleware(SessionAuthMiddleware)
+
+    @app.get("/healthz")
+    async def healthz():
+        from fastapi.responses import JSONResponse
+
+        return JSONResponse({"status": "ok", "role": load_backend_role()})
+
+    @app.get("/readyz")
+    async def readyz():
+        from fastapi.responses import JSONResponse
+
+        return JSONResponse({"status": "ready", "role": load_backend_role()})
+
     app.include_router(auth_router, prefix="/api")
     app.include_router(signup_router, prefix="/api")
     app.include_router(users_router, prefix="/api")

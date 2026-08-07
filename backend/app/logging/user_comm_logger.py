@@ -119,6 +119,9 @@ def _maybe_cleanup_retention(settings: UserCommLogSettings) -> None:
 
 def initialize_user_comm_logs(settings: UserCommLogSettings | None = None) -> Path:
     settings = settings or load_user_comm_log_settings()
+    if settings.backend == "stdout":
+        logger.info("user_comm_logs backend=stdout (no local directory)")
+        return Path("/dev/null")
     log_dir = _resolve_log_dir(settings)
     log_dir.mkdir(parents=True, exist_ok=True)
     cleanup_expired_logs(settings)
@@ -138,14 +141,10 @@ def log_user_communication(
     settings = settings or load_user_comm_log_settings()
     safe_user_id = _sanitize_user_id(user_id)
     log_date = _local_date()
-    log_dir = _resolve_log_dir(settings)
-    user_dir = log_dir / safe_user_id
-    user_dir.mkdir(parents=True, exist_ok=True)
-
-    log_path = _log_file_path(log_dir, safe_user_id, log_date)
-    lock_key = f"{safe_user_id}:{log_date.isoformat()}"
     entry = {
         "timestamp": now_display_datetime().isoformat(),
+        "user_id": safe_user_id,
+        "date": log_date.isoformat(),
         "agent_id": agent_id,
         "agent_name": agent_name,
         "user_message": user_message,
@@ -153,9 +152,29 @@ def log_user_communication(
         "tools": _serialize_tools(tools_used or []),
     }
 
+    if settings.backend == "stdout":
+        print(json.dumps(entry, ensure_ascii=False), flush=True)
+        return
+
+    log_dir = _resolve_log_dir(settings)
+    user_dir = log_dir / safe_user_id
+    user_dir.mkdir(parents=True, exist_ok=True)
+
+    log_path = _log_file_path(log_dir, safe_user_id, log_date)
+    lock_key = f"{safe_user_id}:{log_date.isoformat()}"
+
     with _get_file_lock(lock_key):
         payload = _load_log_file(log_path, safe_user_id, log_date)
-        payload["entries"].append(entry)
+        payload["entries"].append(
+            {
+                "timestamp": entry["timestamp"],
+                "agent_id": agent_id,
+                "agent_name": agent_name,
+                "user_message": user_message,
+                "assistant_message": assistant_message,
+                "tools": entry["tools"],
+            }
+        )
         try:
             with log_path.open("w", encoding="utf-8") as file:
                 json.dump(payload, file, ensure_ascii=False, indent=2)

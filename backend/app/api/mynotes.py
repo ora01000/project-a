@@ -80,8 +80,8 @@ class SaveMyNoteContentRequest(BaseModel):
     content: str = ""
 
 
-async def _load_mynote_content(record: MyNoteRecord) -> str:
-    file_content = read_mynote_content(record)
+async def _load_mynote_content(record: MyNoteRecord, database_path) -> str:
+    file_content = read_mynote_content(record, database_path=database_path)
     return await hydrate_mynote_content(record, file_content=file_content)
 
 
@@ -126,7 +126,7 @@ async def get_my_note(
     record = get_mynote_by_idx(database_path, idx)
     if record is None or record.userid != userid.strip():
         raise HTTPException(status_code=404, detail="Note not found")
-    content = await _load_mynote_content(record)
+    content = await _load_mynote_content(record, database_path)
     return MyNoteDetailResponse.from_record(record, content=content)
 
 
@@ -173,7 +173,10 @@ async def rename_my_note(
 
     old_note_name = existing.note_name
     try:
-        await hydrate_mynote_content(existing, file_content=read_mynote_content(existing))
+        await hydrate_mynote_content(
+            existing,
+            file_content=read_mynote_content(existing, database_path=database_path),
+        )
         record = update_mynote_name(
             database_path,
             idx,

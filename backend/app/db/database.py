@@ -8,7 +8,9 @@ from backend.app.db.seed import INITIAL_USERS
 logger = logging.getLogger(__name__)
 
 SCHEMA_PATH = Path(__file__).with_name("schema.sql")
+SCHEMA_POSTGRES_PATH = Path(__file__).with_name("schema.postgres.sql")
 DEFAULT_DATABASE_PATH = PROJECT_ROOT / "data" / "app.db"
+POSTGRES_STATE_TOKEN = Path("/var/run/project-a/postgresql")
 
 
 def resolve_database_path(database_path: str | Path | None = None) -> Path:
@@ -21,13 +23,16 @@ def resolve_database_path(database_path: str | Path | None = None) -> Path:
     return path
 
 
-def get_connection(database_path: str | Path | None = None) -> sqlite3.Connection:
-    path = resolve_database_path(database_path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    connection = sqlite3.connect(path)
-    connection.row_factory = sqlite3.Row
-    connection.execute("PRAGMA foreign_keys = ON")
-    return connection
+def get_connection(database_path: str | Path | None = None):
+    """Return sqlite3 or PostgresConnection based on DATABASE_URL / path."""
+    from backend.app.db.engine import connect_postgres, connect_sqlite, load_database_config
+
+    config = load_database_config(database_path=database_path)
+    if config.dialect == "postgresql":
+        assert config.database_url
+        return connect_postgres(config.database_url)
+    assert config.sqlite_path
+    return connect_sqlite(config.sqlite_path)
 
 
 def _apply_schema(connection: sqlite3.Connection) -> None:
@@ -705,9 +710,12 @@ def _ensure_jobs_result_table(connection: sqlite3.Connection) -> None:
 def _ensure_mynotes_table(connection: sqlite3.Connection) -> None:
     tables = {
         str(row[0])
-        for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+        for row in connection.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        ).fetchall()
     }
     if "mynotes" in tables:
+        _ensure_mynote_contents_table(connection)
         return
 
     connection.execute(
@@ -723,6 +731,29 @@ def _ensure_mynotes_table(connection: sqlite3.Connection) -> None:
         """
     )
     logger.info("Created mynotes table")
+    _ensure_mynote_contents_table(connection)
+
+
+def _ensure_mynote_contents_table(connection) -> None:
+    tables = {
+        str(row[0])
+        for row in connection.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        ).fetchall()
+    }
+    if "mynote_contents" in tables:
+        return
+    connection.execute(
+        """
+        CREATE TABLE mynote_contents (
+            note_idx INTEGER PRIMARY KEY,
+            content TEXT NOT NULL DEFAULT '',
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (note_idx) REFERENCES mynotes(idx) ON DELETE CASCADE
+        )
+        """
+    )
+    logger.info("Created mynote_contents table")
 
 
 def _drop_legacy_product_tables(connection: sqlite3.Connection) -> None:
@@ -804,19 +835,31 @@ def _sync_infra_cluster_rows(connection: sqlite3.Connection) -> None:
         )
 
 
-def seed_initial_users(connection: sqlite3.Connection) -> int:
+def seed_initial_users(connection) -> int:
     row = connection.execute("SELECT COUNT(*) AS count FROM users").fetchone()
     existing_count = int(row["count"]) if row else 0
     if existing_count > 0:
         logger.info("Skip user seeding: users table already has %s record(s)", existing_count)
         return 0
 
+    rows = [
+        (
+            user["userid"],
+            user["email"],
+            user["username"],
+            user["password"],
+            user["depart"],
+            user["role"],
+            user["band"],
+        )
+        for user in INITIAL_USERS
+    ]
     connection.executemany(
         """
         INSERT INTO users (userid, email, username, password, depart, role, band)
-        VALUES (:userid, :email, :username, :password, :depart, :role, :band)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
         """,
-        INITIAL_USERS,
+        rows,
     )
     connection.commit()
     logger.info("Seeded %s initial user record(s)", len(INITIAL_USERS))
@@ -824,6 +867,23 @@ def seed_initial_users(connection: sqlite3.Connection) -> int:
 
 
 def init_database(database_path: str | Path | None = None) -> Path:
+    from backend.app.db.engine import (
+        advisory_lock,
+        connect_postgres,
+        load_database_config,
+    )
+
+    config = load_database_config(database_path=database_path)
+    if config.dialect == "postgresql":
+        assert config.database_url
+        schema_sql = SCHEMA_POSTGRES_PATH.read_text(encoding="utf-8")
+        with connect_postgres(config.database_url) as connection:
+            with advisory_lock(connection):
+                connection.executescript(schema_sql)
+                seed_initial_users(connection)
+        logger.info("PostgreSQL database initialized via DATABASE_URL")
+        return POSTGRES_STATE_TOKEN
+
     path = resolve_database_path(database_path)
     path.parent.mkdir(parents=True, exist_ok=True)
 

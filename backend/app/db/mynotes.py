@@ -212,6 +212,56 @@ def write_mynote_content_file(record: MyNoteRecord, content: str) -> None:
     file_path.write_text(content, encoding="utf-8")
 
 
+def write_mynote_content_db(
+    database_path: str | Path,
+    record: MyNoteRecord,
+    content: str,
+) -> None:
+    updated_at = now_job_datetime()
+    with get_connection(database_path) as connection:
+        connection.execute(
+            """
+            INSERT INTO mynote_contents (note_idx, content, updated_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(note_idx) DO UPDATE SET
+                content = excluded.content,
+                updated_at = excluded.updated_at
+            """,
+            (record.idx, content, updated_at),
+        )
+        connection.commit()
+
+
+def read_mynote_content_db(database_path: str | Path, record: MyNoteRecord) -> str:
+    with get_connection(database_path) as connection:
+        row = connection.execute(
+            """
+            SELECT content FROM mynote_contents WHERE note_idx = ?
+            """,
+            (record.idx,),
+        ).fetchone()
+    if row is None:
+        return ""
+    return str(row["content"] or "")
+
+
+def _mynote_content_backend() -> str:
+    from backend.app.config import load_mynotes_settings
+
+    return load_mynotes_settings().content_backend
+
+
+def persist_mynote_content(
+    database_path: str | Path,
+    record: MyNoteRecord,
+    content: str,
+) -> None:
+    if _mynote_content_backend() == "database":
+        write_mynote_content_db(database_path, record, content)
+        return
+    write_mynote_content_file(record, content)
+
+
 def save_mynote_content(
     database_path: str | Path,
     idx: int,
@@ -225,7 +275,7 @@ def save_mynote_content(
     if existing.userid != _sanitize_user_id(userid):
         raise ValueError("note does not belong to this user")
 
-    write_mynote_content_file(existing, content)
+    persist_mynote_content(database_path, existing, content)
 
     last_update = now_job_datetime()
     with get_connection(database_path) as connection:
@@ -247,7 +297,25 @@ def save_mynote_content(
     return updated
 
 
-def read_mynote_content(record: MyNoteRecord) -> str:
+def read_mynote_content(
+    record: MyNoteRecord,
+    *,
+    database_path: str | Path | None = None,
+) -> str:
+    if _mynote_content_backend() == "database":
+        if database_path is None:
+            raise ValueError("database_path is required for database content backend")
+        content = read_mynote_content_db(database_path, record)
+        if content:
+            return content
+        # Fallback: migrate from file once if present.
+        file_path = resolve_origin_file_path(record.origin_file)
+        if file_path.exists():
+            file_content = file_path.read_text(encoding="utf-8")
+            write_mynote_content_db(database_path, record, file_content)
+            return file_content
+        return ""
+
     file_path = resolve_origin_file_path(record.origin_file)
     if not file_path.exists():
         return ""

@@ -1,0 +1,134 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ax-backend-api
+  labels:
+    app: ax-platform
+    component: backend-api
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: ax-platform
+      component: backend-api
+  template:
+    metadata:
+      labels:
+        app: ax-platform
+        component: backend-api
+    spec:
+      containers:
+        - name: backend
+          image: ora01000/project-a-backend:260807
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: BACKEND_ROLE
+              value: api
+            - name: BACKEND_HOST
+              value: "0.0.0.0"
+            - name: AGENT_RUNTIME_MODE
+              valueFrom:
+                configMapKeyRef:
+                  name: ax-platform-config
+                  key: AGENT_RUNTIME_MODE
+            - name: MY_NOTES_CONTENT_BACKEND
+              valueFrom:
+                configMapKeyRef:
+                  name: ax-platform-config
+                  key: MY_NOTES_CONTENT_BACKEND
+            - name: USER_COMM_LOG_BACKEND
+              valueFrom:
+                configMapKeyRef:
+                  name: ax-platform-config
+                  key: USER_COMM_LOG_BACKEND
+            - name: TZ
+              valueFrom:
+                configMapKeyRef:
+                  name: ax-platform-config
+                  key: TZ
+                  optional: true
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: ax-platform-secrets
+                  key: DATABASE_URL
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: ax-platform-secrets
+                  key: REDIS_URL
+            - name: AGENT_RUNTIME_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: ax-platform-secrets
+                  key: AGENT_RUNTIME_API_KEY
+                  optional: true
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 200m
+              memory: 512Mi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+          volumeMounts:
+            - name: kubeconfig
+              mountPath: /etc/k8s
+              readOnly: true
+      volumes:
+        - name: kubeconfig
+          secret:
+            secretName: ax-k8s-kubeconfig
+            optional: true
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ax-backend-api
+  labels:
+    app: ax-platform
+    component: backend-api
+spec:
+  selector:
+    app: ax-platform
+    component: backend-api
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: ax-backend-api
+  labels:
+    app: ax-platform
+    component: backend-api
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: ax-backend-api
+  minReplicas: 2
+  maxReplicas: 8
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70

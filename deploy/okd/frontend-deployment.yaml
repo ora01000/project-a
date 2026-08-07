@@ -1,0 +1,94 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ax-frontend
+  labels:
+    app: ax-platform
+    component: frontend
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: ax-platform
+      component: frontend
+  template:
+    metadata:
+      labels:
+        app: ax-platform
+        component: frontend
+    spec:
+      containers:
+        - name: frontend
+          image: ora01000/project-a-frontend:260807
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: BACKEND_API_HOST
+              value: ax-backend-api
+            - name: BACKEND_API_PORT
+              value: "8080"
+            - name: TZ
+              valueFrom:
+                configMapKeyRef:
+                  name: ax-platform-config
+                  key: TZ
+                  optional: true
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: "1"
+              memory: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ax-frontend
+  labels:
+    app: ax-platform
+    component: frontend
+spec:
+  selector:
+    app: ax-platform
+    component: frontend
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: ax-frontend
+  labels:
+    app: ax-platform
+    component: frontend
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: ax-frontend
+  minReplicas: 2
+  maxReplicas: 6
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70

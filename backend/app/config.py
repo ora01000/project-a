@@ -75,6 +75,8 @@ class WhatapSettings(BaseModel):
 class UserCommLogSettings(BaseModel):
     log_dir: str = "data/user_comm_logs"
     retention_days: int = 30
+    # file: local JSON files (single-pod). stdout: structured JSON lines for cluster logging.
+    backend: str = "file"
 
 
 class JobRequesterSettings(BaseModel):
@@ -104,6 +106,8 @@ class MyNotesSettings(BaseModel):
     enabled: bool = True
     flush_interval_seconds: int = 300
     initial_delay_seconds: int = 0
+    # file: data/mynotes/*.md. database: mynote_contents table (multi-pod safe).
+    content_backend: str = "file"
 
 
 class K8sCollectorSettings(BaseModel):
@@ -139,6 +143,8 @@ class AppSettings(BaseSettings):
     backend_api_host: str = Field(default="localhost", alias="BACKEND_API_HOST")
     backend_api_port: int | None = Field(default=None, alias="BACKEND_API_PORT")
     database_path: str = Field(default="data/app.db", alias="DATABASE_PATH")
+    database_url: str = Field(default="", alias="DATABASE_URL")
+    backend_role: str = Field(default="all", alias="BACKEND_ROLE")
     health_check_interval_seconds: int = Field(default=30, alias="HEALTH_CHECK_INTERVAL_SECONDS")
     agent_runtime_mode: str = Field(default="mock", alias="AGENT_RUNTIME_MODE")
     agent_runtime_http_base_url: str = Field(default="", alias="AGENT_RUNTIME_HTTP_BASE_URL")
@@ -175,6 +181,12 @@ class AppSettings(BaseSettings):
 
     user_comm_log: str = Field(default="data/user_comm_logs", alias="USER_COMM_LOG")
     user_comm_retention: int = Field(default=30, alias="USER_COMM_RETENTION")
+    user_comm_log_backend: str | None = Field(default=None, alias="USER_COMM_LOG_BACKEND")
+
+    mynotes_content_backend: str | None = Field(
+        default=None,
+        alias="MY_NOTES_CONTENT_BACKEND",
+    )
 
     job_requester_enabled: bool | None = Field(default=None, alias="JOB_REQUESTER_ENABLED")
     job_requester_interval_minutes: int | None = Field(default=None, alias="JOB_REQUESTER_INTERVAL_MINUTES")
@@ -459,9 +471,17 @@ def load_user_comm_log_settings() -> UserCommLogSettings:
     except (TypeError, ValueError):
         retention_days = 30
 
+    backend = (
+        env_settings.user_comm_log_backend
+        or str(comm_yaml.get("backend", "file"))
+    ).strip().lower() or "file"
+    if backend not in {"file", "stdout"}:
+        backend = "file"
+
     return UserCommLogSettings(
         log_dir=env_settings.user_comm_log or comm_yaml.get("log_dir", "data/user_comm_logs"),
         retention_days=max(1, retention_days),
+        backend=backend,
     )
 
 
@@ -603,11 +623,43 @@ def load_mynotes_settings() -> MyNotesSettings:
     else:
         enabled = _as_bool(mynotes_yaml.get("enabled"), True)
 
+    content_backend = (
+        env_settings.mynotes_content_backend
+        or str(mynotes_yaml.get("content_backend", "file"))
+    ).strip().lower() or "file"
+    if content_backend not in {"file", "database"}:
+        content_backend = "file"
+
     return MyNotesSettings(
         enabled=enabled,
         flush_interval_seconds=max(30, flush_interval_seconds),
         initial_delay_seconds=max(0, initial_delay_seconds),
+        content_backend=content_backend,
     )
+
+
+def load_backend_role() -> str:
+    """Return api | worker | all (default all for local single-process)."""
+    env_settings = AppSettings()
+    yaml_settings = _load_yaml(CONFIG_DIR / "settings.yaml")
+    server_yaml = yaml_settings.get("server", {})
+    role = (
+        env_settings.backend_role
+        or str(server_yaml.get("backend_role", "all"))
+    ).strip().lower() or "all"
+    if role not in {"api", "worker", "all"}:
+        return "all"
+    return role
+
+
+def backend_role_runs_api(role: str | None = None) -> bool:
+    resolved = (role or load_backend_role()).strip().lower()
+    return resolved in {"api", "all"}
+
+
+def backend_role_runs_workers(role: str | None = None) -> bool:
+    resolved = (role or load_backend_role()).strip().lower()
+    return resolved in {"worker", "all"}
 
 
 class RedisSettings(BaseModel):

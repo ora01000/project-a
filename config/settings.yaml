@@ -73,11 +73,20 @@ job_auditor:
   # http 모드: AXIT agent_id 직접 지정 (선택)
   axit_agent_id: ""
 
-# 나의 노트: Redis 편집 버퍼 → 주기적 파일 영구 저장
+# 나의 노트: Redis 편집 버퍼 → 주기적 영구 저장
 mynotes:
   enabled: true
   flush_interval_seconds: 300
   initial_delay_seconds: 0
+  # file | database (multi-pod: database + PostgreSQL 권장)
+  content_backend: file
+
+# 사용자 대화 로그
+user_comm_log:
+  log_dir: data/user_comm_logs
+  retention_days: 30
+  # file | stdout (multi-pod: stdout → 클러스터 로깅)
+  backend: file
 
 # K8S 인프라 scrape (관리자 UI 수동 수집 + cron 스케줄)
 # http 모드: /etc/k8s/kubeconfig 마운트 필요
@@ -108,6 +117,10 @@ auth:
 # Redis (세션·캐시, 배포 시 별도 프로세스 — 패키징하지 않음)
 redis:
   url: "redis://localhost:6379/0"
+
+# 서버 역할 (로컬 기본 all / OKD: api|worker)
+# server:
+#   backend_role: all
 
 # Bearer 세션 (B-2): 슬라이딩 TTL + 절대 상한
 auth_session:
