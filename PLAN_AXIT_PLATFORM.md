@@ -900,3 +900,169 @@ using_egressip 는 다음 정보에서 가져옴
 
 egressip_assigned_node 는 다음 정보에서 가져옴
 - namespace 와 매칭된 EgressIP 의 .status.items[0].node
+
+인프라 scrape 시 이전 테이블 보관 개수 제한
+- 수집 이후 백업되는 테이블은 날짜 기준으로 최근 4개 까지만 유지하고 drop 한다.
+
+인프라 scrape 에 스케줄(cron) 기능을 추가
+- k8s_cluster 테이블에 다음 컬럼을 추가한다.
+  - cron boolean
+  - cron_expr varchar(20)
+- K8S 인프라 구성 팝업 UI
+  - 수집 컬럼 뒤에 다음 컬럼을 배치한다.
+  - 스케줄 : on/off 토글 버튼
+  - Cron : cron 표현식, default 로 매주 토요일 23시 00분 동작으로 예시를 표시
+- k8s_cluster.cron = true 인 경우 백엔드는 cron_expr 에 맞춰 수집한다
+
+# 인프라 형상 분석
+작업 노트 > 인프라 형상 탭 생성
+- 왼쪽 패널 : 인프라 목록
+  - k8s_cluster 테이블에 있는 인프라(클러스터) 목록을 텍스트 레이블 버튼으로 리스트
+- 오른쪽 패널 : 형상 분석
+  - 상단 패널 / 하단 패널로 분리
+  - 상단 패널 : 요약
+    - 인프라 정보를 표기한다.
+    - 클러스터 이름
+    - 클러스터 버전
+    - 노드 개수
+    - 네임스페이스(프로젝트) 개수
+    - 배포 개수
+    - PVC 개수
+  - 하단 패널 : 형상 변경 추이 - 최대 5개의 아래 테이블을 바탕으로 
+    - {cluster_name}_{k8s_nodes | k8s_namespaces | k8s_deployments | k8s_pvcs } -> latest
+    - {cluster_name}_{k8s_nodes | k8s_namespaces | k8s_deployments | k8s_pvcs }_YYYYMMDD_HHMMSS 
+    요약 차트 생성
+
+  - 요약 차트
+    - 차트 크기를 하단 패널의 크기에 맞춘다
+  - 사용자 조회 테이블
+    - 역할 컬럼 다음에 최근 로그인 시각 컬럼 추가
+
+# 인프라 테이블 구조 수정
+k8s_cluster 를 infra_cluster 로 변경하고 컬럼을 추가한다. 향후 k8s 외 인프라도 등록하여 일관된 방식으로 적용하기 위함이다.
+
+- 테이블 명 : k8s_cluster -> infra_cluster
+  - 컬럼 추가
+    - infra_type varchar(20) : default "k8s"
+
+기존 k8s_cluster 테이블을 참조하는 모든 로직과 다른 테이블을 점검하고 수정한다
+
+메뉴 관리자 작업 > K8S 인프라 구성 은 "인프라 구성"으로 변경한다.
+인프라 구성 메뉴에서 편집 클릭시 infra 타입을 선택하여 입력할 수 있게 한다. 현재 정의된 인프라 타입은 "k8s", "kubevirt" 2가지다
+
+
+인프라 정보 scrape 백엔드 - infra_type = kubevirt
+- infra_cluster 에 등록된 infra_type = kubevirt 에 대해 동작한다.
+  - 사용자가 infra_cluster 에 클러스터 정보를 추가하고 수집을 하면 각 클러스터 별로 테이블을 동적 생성한다.
+  - 저장 테이블
+    - 테이블#2 명 : {cluster_name}_kubevirt_nodes
+      - 컬럼
+        - idx : int, auto increment, pk
+        - node_name : varchar(50)
+        - node_cpu : int
+        - node_mem : int
+        - node_os : varchar(50)
+        - node_k8s_ver : varchar(50)
+    - 테이블#3 명 : {cluster_name}_kubevirt_namespaces
+      - 컬럼
+        - idx : int, auto increment, pk
+        - namespace : varchar(50)
+        - okd_display_name : varchar(100)
+        - resource_quota_cpu_limit : float, 개 단위로 환산
+        - resource_quota_mem_limit : int, Gi 단위로 환산
+        - resource_quota_pod_limit : int
+        - okd_egressip1 : varchar(20)
+        - okd_egressip2 : varchar(20)
+        - using_egressip : varchar(20)
+        - egressip_assigned_node : varchar(50)
+    - 테이블#4 명 : {cluster_name}_kubevirt_deployments
+      - 컬럼
+        - idx : int, auto increment, pk
+        - namespace_id : int, kubevirt_namespaces.idx
+        - name : varchar(50)
+        - type : varchar(20), deployment | statusfulset | deploymentconfig | daemonset 중 1
+        - replicas : int
+        - resource_cpu_request : float, 개 단위로 환산
+        - resource_mem_request : int, Gi 단위로 환산
+        - resource_cpu_limit : float, 개 단위로 환산
+        - resource_mem_limit : int, Gi 단위로 환산
+        - containers_cnt : int
+        - containers_name : varchar(300) -> json list 
+        - containers_image : varchar(500) -> json list
+    - 테이블#5 명 : {cluster_name}_kubevirt_pvcs
+      - 컬럼
+        - idx : int, auto increment, pk
+        - namespace_id : int, kubevirt_namespaces.idx
+        - deployment_id : int, kubevirt_deployments.idx
+        - name : varchar(50)
+        - storage_class : varchar(20)
+        - capacity : int. Gi 단위로 환산
+        - used : int, Gi 단위로 환산
+        - access_mode : varchar(20)
+
+    - 테이블#6 명 : {cluster_name}_kubevirt_vms
+      - 컬럼
+        - idx : int, auto increment, pk
+        - namespace_id : int, kubevirt_namespaces.idx
+        - name : varchar(50)
+        - run_strategy VARCHAR(20)          -- Always / RerunOnFailure / Manual / Halted ...
+        - printable_status VARCHAR(30)      -- from VirtualMachine.status
+        - ready INTEGER                     -- 0/1
+        - vmi_phase VARCHAR(20)             -- from VMI if present
+        - node_name VARCHAR(50)             -- from VMI
+        - ip_address VARCHAR(45)            -- primary guest/pod IP
+        - cpu_cores REAL
+        - memory_gi INTEGER
+        - disk_count INTEGER
+        - network_count INTEGER
+        - volume_names VARCHAR(300)         -- JSON list
+        - os_info VARCHAR(100)
+        - created_at TEXT
+
+    - 테이블#7 명 : {cluster}_kubevirt_vm_volumes
+      - 컬럼
+        - idx : int, auto increment, pk
+        - vm_id INTEGER NOT NULL            -- kubevirt_vms.idx
+        - volume_name VARCHAR(50)
+        - pvc_name VARCHAR(50)
+        - capacity_gi INTEGER
+        - FOREIGN KEY (vm_id) REFERENCES "{cluster}_kubevirt_vms"(idx)
+
+
+- 인프라 정보 scrape 백엔드 동작
+  - openshift 라이브러리 사용
+  - 목업(로컬) 테스트의 경우 ocp/okd 가 아닌 일반 kubernetes(orbstack)으로 ocp/okd 용 커스텀api(ex. DeployemtnConfig, egressIPs 등) 수집하고자 하는 object가 없으므로, 값이 없는 경우 이를 무시하고 동작하도록 구성
+    - http 모드에서 kubeconfig가 필요하다.
+      - kubeconfig는 configmap 으로 마운트하며 마운트경로는 /etc/k8s/kubeconfig 이다.
+    - 목업은 로컬이므로 kubeconfig가 필요하지 않다.
+
+- 인프라 형상 탭 kubevirt 인프라 표시
+인프라 목록 에서 클러스터 명 다음에 infra_type 을 함께 표시한다.
+  - 오른쪽 요약 패널에서 kubevirt 인 경우
+    - 요약 정보에 VM 정보와 볼륨 정보를 요약에 추가한다.
+    - 형상 변경 추이에 VM 정보와 볼륨정보를 추가한다.
+
+인프라 형상 탭
+- 요약, 형상 변경 추이 패널의 오른쪽에 상세정보 패널을 추가, 가로 길이 약 40%로 배치
+- 상세정보 패널 : k8s 인 경우
+  - 네임스페이스, 노드 텍스트 레이블 버튼 만 배치된다
+    - 네임스페이스 선택하면 네임스페이스 목록이 텍스트 레이블 버튼으로 출력되고 중단/하단 패널이 생성된다.
+      - 중단 패널에는 네임스페이스의 상세정보 표시
+      - 하단 패널에는 네임스페이스 내 deployment, pvc 정보 출력
+    - 노드 선택하면 노드 목록이 텍스트 레이블 버튼으로 출력되고 하단 패널이 생성된다.
+      - 하단 패널에 노드 상세정보 출력
+- 상세정보 패널 : kubevirt 인 경우
+  - 네임스페이스, 노드, VM 텍스트 레이블 버튼 만 배치된다
+    - 네임스페이스 선택하면 네임스페이스 목록이 텍스트 레이블 버튼으로 출력되고 중단/하단 패널이 생성된다.
+      - 중단 패널에는 네임스페이스의 상세정보 표시
+      - 하단 패널에는 네임스페이스 내 deployment, pvc 정보 출력
+    - 노드 선택하면 노드 목록이 텍스트 레이블 버튼으로 출력되고 하단 패널이 생성된다.
+      - 하단 패널에 노드 상세정보 출력
+    - VM 선택하면 VM 목록이 텍스트 레이블 버튼으로 출력되고 하단 패널이 생성된다.
+      - VM을 선택하면 하단 패널에 VM 상제정보와 연결된 볼륨 정보가 출력된다.
+
+
+- infra_type = k8s | kubevirt 에 대해 시스템 네임스페이스는 수집 제외한다.
+  - openshift-*
+  - kube-*
+  - default
