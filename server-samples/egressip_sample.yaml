@@ -1,0 +1,22 @@
+apiVersion: k8s.ovn.org/v1
+kind: EgressIP
+metadata:
+  annotations:
+    kubectl.kubernetes.io/last-applied-configuration: |
+      {"apiVersion":"k8s.ovn.org/v1","kind":"EgressIP","metadata":{"annotations":{},"name":"d-biz-i-nuac-svc"},"spec":{"egressIPs":["172.23.38.93"],"namespaceSelector":{"matchLabels":{"egressIPSelector":"d-biz-i-nuac-svc"}}}}
+  creationTimestamp: "2025-11-06T08:34:30Z"
+  generation: 2
+  name: d-biz-i-nuac-svc
+  resourceVersion: "329443442"
+  uid: b90b5fb3-7993-489a-b07d-fc7cd991f498
+spec:
+  egressIPs:
+  - 172.23.38.93
+  namespaceSelector:
+    matchLabels:
+      egressIPSelector: d-biz-i-nuac-svc
+status:
+  items:
+  - egressIP: 172.23.38.93
+    node: dprsvinf02v.dprsv-k8s.lguplus.co.kr
+
