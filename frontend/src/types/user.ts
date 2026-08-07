@@ -9,6 +9,7 @@ export interface UserRecord {
   agents?: string;
   agent_ids?: string[];
   request_reason?: string;
+  last_login?: string | null;
 }
 
 export interface UserFormValues {

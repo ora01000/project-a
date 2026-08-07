@@ -167,6 +167,7 @@ export function UserListPage({ currentUserIdx, currentUserRole }: UserListPagePr
                 <th className="px-3 py-2">직책</th>
                 <th className="px-3 py-2">조직</th>
                 <th className="px-3 py-2">역할</th>
+                <th className="px-3 py-2">최근 로그인 시각</th>
                 {canManageUsers ? <th className="px-3 py-2">작업</th> : null}
               </tr>
             </thead>
@@ -180,6 +181,9 @@ export function UserListPage({ currentUserIdx, currentUserRole }: UserListPagePr
                   <td className="px-3 py-2">{user.depart}</td>
                   <td className="px-3 py-2">
                     {user.role}: {roleLabel(user.role)}
+                  </td>
+                  <td className="px-3 py-2 font-mono text-xs text-slate-300">
+                    {user.last_login?.trim() || "-"}
                   </td>
                   {canManageUsers ? (
                     <td className="px-3 py-2">

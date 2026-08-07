@@ -4,10 +4,13 @@ import { hasAdminAccess } from "../../types/user";
 
 /** Default: every Saturday 23:00 (Asia/Seoul minute cron). */
 const DEFAULT_CRON_EXPR = "0 23 * * 6";
+const DEFAULT_INFRA_TYPE = "k8s";
+const INFRA_TYPE_OPTIONS = ["k8s", "kubevirt"] as const;
 
 interface K8sClusterRow {
   idx: number | null;
   cluster_name: string;
+  infra_type: string;
   last_update: string | null;
   cron: boolean;
   cron_expr: string;
@@ -50,12 +53,14 @@ type ApiCluster = {
   last_update: string | null;
   cron?: boolean;
   cron_expr?: string;
+  infra_type?: string;
 };
 
 function mapApiRows(data: ApiCluster[]): K8sClusterRow[] {
   return data.map((item) => ({
     idx: item.idx,
     cluster_name: item.cluster_name,
+    infra_type: (item.infra_type || DEFAULT_INFRA_TYPE).slice(0, 20),
     last_update: item.last_update,
     cron: Boolean(item.cron),
     cron_expr: (item.cron_expr || DEFAULT_CRON_EXPR).slice(0, 20),
@@ -100,6 +105,7 @@ export function K8sInfraConfigModal({ viewerRole, onClose }: K8sInfraConfigModal
       {
         idx: null,
         cluster_name: "",
+        infra_type: DEFAULT_INFRA_TYPE,
         last_update: null,
         cron: false,
         cron_expr: DEFAULT_CRON_EXPR,
@@ -140,6 +146,7 @@ export function K8sInfraConfigModal({ viewerRole, onClose }: K8sInfraConfigModal
     const payload = rows.map((row) => ({
       idx: row.idx,
       cluster_name: row.cluster_name.trim(),
+      infra_type: (row.infra_type.trim() || DEFAULT_INFRA_TYPE).slice(0, 20),
       cron: row.cron,
       cron_expr: (row.cron_expr.trim() || DEFAULT_CRON_EXPR).slice(0, 20),
     }));
@@ -194,6 +201,7 @@ export function K8sInfraConfigModal({ viewerRole, onClose }: K8sInfraConfigModal
         result.counts.namespaces != null ? `ns=${result.counts.namespaces}` : null,
         result.counts.deployments != null ? `deploy=${result.counts.deployments}` : null,
         result.counts.pvcs != null ? `pvc=${result.counts.pvcs}` : null,
+        result.counts.vms != null ? `vms=${result.counts.vms}` : null,
       ]
         .filter(Boolean)
         .join(", ");
@@ -237,10 +245,10 @@ export function K8sInfraConfigModal({ viewerRole, onClose }: K8sInfraConfigModal
         <header className="flex items-center justify-between border-b border-slate-700 px-4 py-3">
           <div>
             <h2 id="k8s-infra-config-title" className="text-sm font-semibold text-slate-100">
-              K8S 인프라 구성
+              인프라 구성
             </h2>
             <p className="mt-0.5 text-xs text-slate-500">
-              클러스터 목록·스케줄을 관리하고 수동으로 인프라 정보를 수집합니다.
+              인프라 목록·스케줄을 관리하고 k8s/kubevirt 클러스터를 수집합니다.
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -292,6 +300,7 @@ export function K8sInfraConfigModal({ viewerRole, onClose }: K8sInfraConfigModal
                 <tr className="border-b border-slate-700 text-left text-slate-400">
                   <th className="px-3 py-2">idx</th>
                   <th className="px-3 py-2">cluster_name</th>
+                  <th className="px-3 py-2">infra_type</th>
                   <th className="px-3 py-2">last_update</th>
                   <th className="px-3 py-2">상태</th>
                   <th className="px-3 py-2 text-right">{isEditMode ? "삭제" : "수집"}</th>
@@ -320,6 +329,27 @@ export function K8sInfraConfigModal({ viewerRole, onClose }: K8sInfraConfigModal
                           />
                         ) : (
                           <span className="font-mono text-xs">{row.cluster_name}</span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2">
+                        {isEditMode ? (
+                          <select
+                            value={row.infra_type || DEFAULT_INFRA_TYPE}
+                            onChange={(event) => {
+                              updateRow(row.localKey, { infra_type: event.target.value });
+                            }}
+                            className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1 font-mono text-xs text-slate-100 focus:border-sky-600 focus:outline-none"
+                          >
+                            {INFRA_TYPE_OPTIONS.map((type) => (
+                              <option key={type} value={type}>
+                                {type}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <span className="font-mono text-xs text-slate-400">
+                            {row.infra_type || DEFAULT_INFRA_TYPE}
+                          </span>
                         )}
                       </td>
                       <td className="px-3 py-2 text-slate-400">{row.last_update ?? "-"}</td>

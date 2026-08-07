@@ -322,7 +322,7 @@ export function MenuBar({ activeView, user, onNavigate, onLogout, onUserUpdated 
                           }}
                           className="block w-full px-3 py-2 text-left text-sm text-slate-200 hover:bg-slate-800"
                         >
-                          K8S 인프라 구성
+                          인프라 구성
                         </button>
                         <button
                           type="button"

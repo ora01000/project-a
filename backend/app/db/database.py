@@ -735,7 +735,7 @@ def _drop_legacy_product_tables(connection: sqlite3.Connection) -> None:
 
 
 def _ensure_k8s_inventory_tables(connection: sqlite3.Connection) -> None:
-    """Keep only k8s_cluster; inventory lives in per-cluster dynamic tables."""
+    """Ensure infra_cluster registry; inventory lives in per-cluster dynamic tables."""
     from backend.app.db.k8s_inventory import drop_legacy_shared_inventory_tables
 
     tables = {
@@ -743,48 +743,61 @@ def _ensure_k8s_inventory_tables(connection: sqlite3.Connection) -> None:
         for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
     }
 
-    if "k8s_cluster" not in tables:
+    if "k8s_cluster" in tables and "infra_cluster" not in tables:
+        connection.execute("ALTER TABLE k8s_cluster RENAME TO infra_cluster")
+        logger.info("Renamed k8s_cluster -> infra_cluster")
+        tables.discard("k8s_cluster")
+        tables.add("infra_cluster")
+
+    if "infra_cluster" not in tables:
         connection.execute(
             """
-            CREATE TABLE k8s_cluster (
+            CREATE TABLE infra_cluster (
                 idx INTEGER PRIMARY KEY AUTOINCREMENT,
                 cluster_name VARCHAR(50) NOT NULL UNIQUE,
                 last_update TEXT,
                 cron INTEGER NOT NULL DEFAULT 0,
-                cron_expr VARCHAR(20) NOT NULL DEFAULT '0 23 * * 6'
+                cron_expr VARCHAR(20) NOT NULL DEFAULT '0 23 * * 6',
+                infra_type VARCHAR(20) NOT NULL DEFAULT 'k8s'
             )
             """
         )
-        logger.info("Created k8s_cluster table")
+        logger.info("Created infra_cluster table")
     else:
         columns = {
             str(row["name"])
-            for row in connection.execute("PRAGMA table_info(k8s_cluster)").fetchall()
+            for row in connection.execute("PRAGMA table_info(infra_cluster)").fetchall()
         }
         if "cron" not in columns:
             connection.execute(
-                "ALTER TABLE k8s_cluster ADD COLUMN cron INTEGER NOT NULL DEFAULT 0"
+                "ALTER TABLE infra_cluster ADD COLUMN cron INTEGER NOT NULL DEFAULT 0"
             )
-            logger.info("Added k8s_cluster.cron")
+            logger.info("Added infra_cluster.cron")
         if "cron_expr" not in columns:
             connection.execute(
-                "ALTER TABLE k8s_cluster ADD COLUMN cron_expr VARCHAR(20) "
+                "ALTER TABLE infra_cluster ADD COLUMN cron_expr VARCHAR(20) "
                 "NOT NULL DEFAULT '0 23 * * 6'"
             )
-            logger.info("Added k8s_cluster.cron_expr")
+            logger.info("Added infra_cluster.cron_expr")
+        if "infra_type" not in columns:
+            connection.execute(
+                "ALTER TABLE infra_cluster ADD COLUMN infra_type VARCHAR(20) "
+                "NOT NULL DEFAULT 'k8s'"
+            )
+            logger.info("Added infra_cluster.infra_type")
 
     drop_legacy_shared_inventory_tables(connection)
-    _sync_k8s_cluster_rows(connection)
+    _sync_infra_cluster_rows(connection)
 
 
-def _sync_k8s_cluster_rows(connection: sqlite3.Connection) -> None:
+def _sync_infra_cluster_rows(connection: sqlite3.Connection) -> None:
     from backend.app.agents.k8s_agent import K8S_CLUSTER_SPECS
 
     for cluster_name, _display_name in K8S_CLUSTER_SPECS:
         connection.execute(
             """
-            INSERT INTO k8s_cluster (cluster_name, last_update, cron, cron_expr)
-            VALUES (?, NULL, 0, '0 23 * * 6')
+            INSERT INTO infra_cluster (cluster_name, last_update, cron, cron_expr, infra_type)
+            VALUES (?, NULL, 0, '0 23 * * 6', 'k8s')
             ON CONFLICT(cluster_name) DO NOTHING
             """,
             (cluster_name,),

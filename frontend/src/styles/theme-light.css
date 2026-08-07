@@ -439,6 +439,12 @@
 [data-theme="light"] .hover\:bg-slate-800\/60:hover {
   background-color: rgb(241 245 249 / 0.6);
 }
+[data-theme="light"] .hover\:bg-slate-900:hover {
+  background-color: rgb(226 232 240);
+}
+[data-theme="light"] .hover\:bg-slate-900\/80:hover {
+  background-color: rgb(241 245 249 / 0.85);
+}
 [data-theme="light"] .hover\:border-slate-500:hover {
   border-color: rgb(148 163 184);
 }

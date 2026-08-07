@@ -114,7 +114,7 @@ class K8sCollectorSettings(BaseModel):
     contexts: dict[str, str] = Field(default_factory=dict)
     # Injected from agent runtime mode at load time
     runtime_mode: str = "mock"
-    # Background cron scrape loop (per-cluster enable lives in k8s_cluster.cron)
+    # Background cron scrape loop (per-cluster enable lives in infra_cluster.cron)
     schedule_enabled: bool = True
     schedule_poll_interval_seconds: int = 30
     schedule_initial_delay_seconds: int = 5

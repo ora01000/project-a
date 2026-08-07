@@ -1,7 +1,7 @@
 """Persist Kubernetes inventory into per-cluster dynamic SQLite tables.
 
 Layout:
-  k8s_cluster (shared registry)
+  infra_cluster (shared registry; formerly k8s_cluster)
   {cluster_name}_k8s_nodes
   {cluster_name}_k8s_namespaces
   {cluster_name}_k8s_deployments
@@ -130,10 +130,15 @@ class K8sClusterRecord:
     last_update: str | None = None
     cron: bool = False
     cron_expr: str = "0 23 * * 6"
+    infra_type: str = "k8s"
 
 
 DEFAULT_CRON_EXPR = "0 23 * * 6"  # every Saturday 23:00
+DEFAULT_INFRA_TYPE = "k8s"
+KNOWN_INFRA_TYPES = frozenset({"k8s", "kubevirt"})
 _CRON_EXPR_MAX_LEN = 20
+_INFRA_TYPE_MAX_LEN = 20
+_INFRA_TYPE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,19}$")
 MAX_SHAPE_HISTORY_POINTS = 5
 
 
@@ -143,6 +148,8 @@ class K8sShapeCounts:
     namespaces: int = 0
     deployments: int = 0
     pvcs: int = 0
+    vms: int = 0
+    volumes: int = 0
 
 
 @dataclass
@@ -160,6 +167,7 @@ class K8sClusterShapeAnalysis:
     cluster_version: str | None
     summary: K8sShapeCounts
     history: list[K8sShapeHistoryPoint] = field(default_factory=list)
+    infra_type: str = DEFAULT_INFRA_TYPE
 
 
 def _table_row_count(connection, table_name: str, tables: set[str]) -> int:
@@ -191,6 +199,33 @@ def _counts_for_suffix_tables(
         namespaces=_table_row_count(connection, ns_t, tables),
         deployments=_table_row_count(connection, dep_t, tables),
         pvcs=_table_row_count(connection, pvc_t, tables),
+    )
+
+
+def _counts_for_kubevirt_tables(
+    connection,
+    *,
+    cluster_name: str,
+    stamp: str | None,
+    tables: set[str],
+) -> K8sShapeCounts:
+    from backend.app.db.kubevirt_inventory import kubevirt_inventory_tables
+
+    nodes_t, ns_t, dep_t, pvc_t, vms_t, vol_t = kubevirt_inventory_tables(cluster_name)
+    if stamp:
+        nodes_t = f"{nodes_t}_{stamp}"
+        ns_t = f"{ns_t}_{stamp}"
+        dep_t = f"{dep_t}_{stamp}"
+        pvc_t = f"{pvc_t}_{stamp}"
+        vms_t = f"{vms_t}_{stamp}"
+        vol_t = f"{vol_t}_{stamp}"
+    return K8sShapeCounts(
+        nodes=_table_row_count(connection, nodes_t, tables),
+        namespaces=_table_row_count(connection, ns_t, tables),
+        deployments=_table_row_count(connection, dep_t, tables),
+        pvcs=_table_row_count(connection, pvc_t, tables),
+        vms=_table_row_count(connection, vms_t, tables),
+        volumes=_table_row_count(connection, vol_t, tables),
     )
 
 
@@ -237,24 +272,40 @@ def get_cluster_shape_analysis(
     with get_connection(database_path) as connection:
         row = connection.execute(
             """
-            SELECT idx, cluster_name, last_update, cron, cron_expr
-            FROM k8s_cluster
+            SELECT idx, cluster_name, last_update, cron, cron_expr, infra_type
+            FROM infra_cluster
             WHERE cluster_name = ?
             """,
             (name,),
         ).fetchone()
         if row is None:
             return None
+        infra_type = str(row["infra_type"] or DEFAULT_INFRA_TYPE).strip() or DEFAULT_INFRA_TYPE
+        if infra_type not in KNOWN_INFRA_TYPES:
+            return None
 
         tables = _list_user_tables(connection)
-        nodes_t, _, _, _ = cluster_inventory_tables(name)
-        summary = _counts_for_suffix_tables(
+        is_kubevirt = infra_type == "kubevirt"
+        if is_kubevirt:
+            from backend.app.db.kubevirt_inventory import (
+                kubevirt_inventory_tables,
+                list_kubevirt_inventory_backup_stamps,
+            )
+
+            nodes_t, _, _, _, _, _ = kubevirt_inventory_tables(name)
+            count_fn = _counts_for_kubevirt_tables
+            stamps = list_kubevirt_inventory_backup_stamps(connection, name)
+        else:
+            nodes_t, _, _, _ = cluster_inventory_tables(name)
+            count_fn = _counts_for_suffix_tables
+            stamps = list_cluster_inventory_backup_stamps(connection, name)
+
+        summary = count_fn(
             connection, cluster_name=name, stamp=None, tables=tables
         )
         version = _cluster_version_from_nodes(connection, nodes_t, tables)
         last_update = str(row["last_update"]) if row["last_update"] else None
 
-        stamps = list_cluster_inventory_backup_stamps(connection, name)
         # Newest backups first; keep room for live "latest" point.
         backup_limit = max(0, keep - 1)
         selected_stamps = stamps[:backup_limit]
@@ -267,7 +318,7 @@ def get_cluster_shape_analysis(
                     label=_format_stamp_label(stamp),
                     stamp=stamp,
                     is_latest=False,
-                    counts=_counts_for_suffix_tables(
+                    counts=count_fn(
                         connection, cluster_name=name, stamp=stamp, tables=tables
                     ),
                 )
@@ -287,6 +338,7 @@ def get_cluster_shape_analysis(
         cluster_version=version,
         summary=summary,
         history=history,
+        infra_type=infra_type,
     )
 
 
@@ -322,6 +374,22 @@ def validate_cron_expr(cron_expr: str | None) -> str:
     return text
 
 
+def validate_infra_type(infra_type: str | None) -> str:
+    text = (infra_type or "").strip() or DEFAULT_INFRA_TYPE
+    if len(text) > _INFRA_TYPE_MAX_LEN:
+        raise ValueError(
+            f"infra_type은 {_INFRA_TYPE_MAX_LEN}자를 초과할 수 없습니다."
+        )
+    if not _INFRA_TYPE_RE.match(text):
+        raise ValueError(
+            "infra_type은 영문/숫자/._- 만 사용할 수 있습니다."
+        )
+    if text not in KNOWN_INFRA_TYPES:
+        allowed = ", ".join(sorted(KNOWN_INFRA_TYPES))
+        raise ValueError(f"지원하지 않는 infra_type 입니다: {text} (허용: {allowed})")
+    return text
+
+
 def _as_bool(value: Any, *, default: bool = False) -> bool:
     if value is None:
         return default
@@ -341,12 +409,15 @@ def _cluster_record_from_row(row: Any) -> K8sClusterRecord:
     keys = set(row.keys()) if hasattr(row, "keys") else set()
     cron_raw = row["cron"] if "cron" in keys else 0
     cron_expr_raw = row["cron_expr"] if "cron_expr" in keys else DEFAULT_CRON_EXPR
+    infra_type_raw = row["infra_type"] if "infra_type" in keys else DEFAULT_INFRA_TYPE
     return K8sClusterRecord(
         idx=int(row["idx"]),
         cluster_name=str(row["cluster_name"]),
         last_update=str(row["last_update"]) if row["last_update"] else None,
         cron=_as_bool(cron_raw, default=False),
         cron_expr=str(cron_expr_raw or DEFAULT_CRON_EXPR)[:_CRON_EXPR_MAX_LEN],
+        infra_type=str(infra_type_raw or DEFAULT_INFRA_TYPE)[:_INFRA_TYPE_MAX_LEN]
+        or DEFAULT_INFRA_TYPE,
     )
 
 
@@ -602,10 +673,16 @@ def prune_cluster_inventory_backups(
 
 
 def drop_cluster_inventory_tables(connection, cluster_name: str) -> list[str]:
-    """Drop per-cluster inventory tables and their timestamped backups."""
+    """Drop per-cluster inventory tables (k8s + kubevirt) and timestamped backups."""
+    from backend.app.db.kubevirt_inventory import KUBEVIRT_INVENTORY_SUFFIXES
+
     dropped: list[str] = []
     try:
-        prefixes = [f"{validate_cluster_name(cluster_name)}_{suffix}" for suffix in INVENTORY_SUFFIXES]
+        name = validate_cluster_name(cluster_name)
+        prefixes = [
+            f"{name}_{suffix}"
+            for suffix in (*INVENTORY_SUFFIXES, *KUBEVIRT_INVENTORY_SUFFIXES)
+        ]
     except ValueError:
         return dropped
 
@@ -628,11 +705,13 @@ def rename_cluster_inventory_tables(
     new_name: str,
 ) -> list[tuple[str, str]]:
     """Rename live per-cluster tables when cluster_name changes."""
+    from backend.app.db.kubevirt_inventory import KUBEVIRT_INVENTORY_SUFFIXES
+
     if old_name == new_name:
         return []
     renamed: list[tuple[str, str]] = []
     tables = _list_user_tables(connection)
-    for suffix in INVENTORY_SUFFIXES:
+    for suffix in (*INVENTORY_SUFFIXES, *KUBEVIRT_INVENTORY_SUFFIXES):
         old_table = f"{old_name}_{suffix}"
         new_table = f"{new_name}_{suffix}"
         if old_table not in tables:
@@ -648,28 +727,47 @@ def rename_cluster_inventory_tables(
     return renamed
 
 
-def list_k8s_clusters(database_path: str | Path) -> list[K8sClusterRecord]:
+def list_infra_clusters(
+    database_path: str | Path,
+    *,
+    infra_types: tuple[str, ...] | None = None,
+) -> list[K8sClusterRecord]:
+    """List infra_cluster rows for the given types (default: all known types)."""
+    types = infra_types or tuple(sorted(KNOWN_INFRA_TYPES))
+    if not types:
+        return []
+    placeholders = ", ".join("?" for _ in types)
     with get_connection(database_path) as connection:
         rows = connection.execute(
-            """
-            SELECT idx, cluster_name, last_update, cron, cron_expr
-            FROM k8s_cluster
+            f"""
+            SELECT idx, cluster_name, last_update, cron, cron_expr, infra_type
+            FROM infra_cluster
+            WHERE infra_type IN ({placeholders})
             ORDER BY cluster_name
-            """
+            """,
+            types,
         ).fetchall()
     return [_cluster_record_from_row(row) for row in rows]
 
 
+def list_k8s_clusters(database_path: str | Path) -> list[K8sClusterRecord]:
+    """List infra_cluster rows with infra_type=k8s (scrape / shape)."""
+    return list_infra_clusters(database_path, infra_types=(DEFAULT_INFRA_TYPE,))
+
+
 def list_scheduled_k8s_clusters(database_path: str | Path) -> list[K8sClusterRecord]:
-    """Clusters with cron scheduling enabled."""
+    """Cron-enabled clusters for scrapeable infra types (k8s + kubevirt)."""
+    managed = tuple(sorted(KNOWN_INFRA_TYPES))
+    placeholders = ", ".join("?" for _ in managed)
     with get_connection(database_path) as connection:
         rows = connection.execute(
-            """
-            SELECT idx, cluster_name, last_update, cron, cron_expr
-            FROM k8s_cluster
-            WHERE cron = 1
+            f"""
+            SELECT idx, cluster_name, last_update, cron, cron_expr, infra_type
+            FROM infra_cluster
+            WHERE cron = 1 AND infra_type IN ({placeholders})
             ORDER BY cluster_name
-            """
+            """,
+            managed,
         ).fetchall()
     return [_cluster_record_from_row(row) for row in rows]
 
@@ -681,8 +779,8 @@ def get_k8s_cluster(
     with get_connection(database_path) as connection:
         row = connection.execute(
             """
-            SELECT idx, cluster_name, last_update, cron, cron_expr
-            FROM k8s_cluster
+            SELECT idx, cluster_name, last_update, cron, cron_expr, infra_type
+            FROM infra_cluster
             WHERE idx = ?
             """,
             (cluster_idx,),
@@ -695,13 +793,21 @@ def get_k8s_cluster(
 def delete_k8s_cluster(database_path: str | Path, cluster_idx: int) -> bool:
     with get_connection(database_path) as connection:
         row = connection.execute(
-            "SELECT idx, cluster_name FROM k8s_cluster WHERE idx = ?",
+            """
+            SELECT idx, cluster_name, infra_type
+            FROM infra_cluster
+            WHERE idx = ?
+            """,
             (cluster_idx,),
         ).fetchone()
         if row is None:
             return False
+        infra_type = validate_infra_type(
+            str(row["infra_type"] or DEFAULT_INFRA_TYPE)
+        )
+        # K8S inventory tables share cluster_name prefix; safe no-op for other types.
         drop_cluster_inventory_tables(connection, str(row["cluster_name"]))
-        connection.execute("DELETE FROM k8s_cluster WHERE idx = ?", (cluster_idx,))
+        connection.execute("DELETE FROM infra_cluster WHERE idx = ?", (cluster_idx,))
         connection.commit()
     return True
 
@@ -710,15 +816,15 @@ def save_k8s_clusters(
     database_path: str | Path,
     clusters: list[dict[str, Any]],
 ) -> list[K8sClusterRecord]:
-    """Replace k8s_cluster rows with the provided list.
+    """Replace known infra_cluster rows with the provided list.
 
     - Existing idx kept when present
     - Names must be unique and non-empty
     - Clusters removed from the list are deleted (with per-cluster table drop)
     - Renamed clusters rename their inventory tables
-    - Persists cron / cron_expr when provided
+    - Persists cron / cron_expr / infra_type when provided
     """
-    normalized: list[tuple[int | None, str, bool, str]] = []
+    normalized: list[tuple[int | None, str, bool, str, str]] = []
     seen_names: set[str] = set()
     for item in clusters:
         name = validate_cluster_name(str(item.get("cluster_name") or ""))
@@ -735,16 +841,25 @@ def save_k8s_clusters(
                 raise ValueError(f"잘못된 idx 입니다: {raw_idx}")
         cron_enabled = _as_bool(item.get("cron"), default=False)
         cron_expr = validate_cron_expr(item.get("cron_expr"))
-        normalized.append((idx, name, cron_enabled, cron_expr))
+        infra_type = validate_infra_type(item.get("infra_type") or DEFAULT_INFRA_TYPE)
+        normalized.append((idx, name, cron_enabled, cron_expr, infra_type))
+
+    managed_types = tuple(sorted(KNOWN_INFRA_TYPES))
+    placeholders = ", ".join("?" for _ in managed_types)
 
     with get_connection(database_path) as connection:
         existing_rows = connection.execute(
-            "SELECT idx, cluster_name, last_update, cron, cron_expr FROM k8s_cluster"
+            f"""
+            SELECT idx, cluster_name, last_update, cron, cron_expr, infra_type
+            FROM infra_cluster
+            WHERE infra_type IN ({placeholders})
+            """,
+            managed_types,
         ).fetchall()
         existing_by_idx = {int(row["idx"]): row for row in existing_rows}
         keep_ids: set[int] = set()
 
-        for idx, name, cron_enabled, cron_expr in normalized:
+        for idx, name, cron_enabled, cron_expr, infra_type in normalized:
             if idx is not None:
                 if idx not in existing_by_idx:
                     raise ValueError(f"존재하지 않는 클러스터 idx 입니다: {idx}")
@@ -753,20 +868,22 @@ def save_k8s_clusters(
                     rename_cluster_inventory_tables(connection, old_name, name)
                 connection.execute(
                     """
-                    UPDATE k8s_cluster
-                    SET cluster_name = ?, cron = ?, cron_expr = ?
+                    UPDATE infra_cluster
+                    SET cluster_name = ?, cron = ?, cron_expr = ?, infra_type = ?
                     WHERE idx = ?
                     """,
-                    (name, 1 if cron_enabled else 0, cron_expr, idx),
+                    (name, 1 if cron_enabled else 0, cron_expr, infra_type, idx),
                 )
                 keep_ids.add(idx)
             else:
                 cursor = connection.execute(
                     """
-                    INSERT INTO k8s_cluster (cluster_name, last_update, cron, cron_expr)
-                    VALUES (?, NULL, ?, ?)
+                    INSERT INTO infra_cluster (
+                        cluster_name, last_update, cron, cron_expr, infra_type
+                    )
+                    VALUES (?, NULL, ?, ?, ?)
                     """,
-                    (name, 1 if cron_enabled else 0, cron_expr),
+                    (name, 1 if cron_enabled else 0, cron_expr, infra_type),
                 )
                 keep_ids.add(int(cursor.lastrowid))
 
@@ -775,29 +892,39 @@ def save_k8s_clusters(
             if cluster_id in keep_ids:
                 continue
             drop_cluster_inventory_tables(connection, str(row["cluster_name"]))
-            connection.execute("DELETE FROM k8s_cluster WHERE idx = ?", (cluster_id,))
+            connection.execute("DELETE FROM infra_cluster WHERE idx = ?", (cluster_id,))
 
         connection.commit()
 
-    return list_k8s_clusters(database_path)
+    return list_infra_clusters(database_path)
 
 
 def get_or_create_k8s_cluster(connection, cluster_name: str) -> int:
     name = validate_cluster_name(cluster_name)
 
     row = connection.execute(
-        "SELECT idx FROM k8s_cluster WHERE cluster_name = ?",
+        """
+        SELECT idx, infra_type FROM infra_cluster
+        WHERE cluster_name = ?
+        """,
         (name,),
     ).fetchone()
     if row is not None:
+        infra_type = str(row["infra_type"] or DEFAULT_INFRA_TYPE).strip() or DEFAULT_INFRA_TYPE
+        if infra_type != DEFAULT_INFRA_TYPE:
+            raise ValueError(
+                f"cluster_name '{name}' 은 infra_type={infra_type} 로 이미 등록되어 있습니다."
+            )
         return int(row["idx"])
 
     cursor = connection.execute(
         """
-        INSERT INTO k8s_cluster (cluster_name, last_update, cron, cron_expr)
-        VALUES (?, NULL, 0, ?)
+        INSERT INTO infra_cluster (
+            cluster_name, last_update, cron, cron_expr, infra_type
+        )
+        VALUES (?, NULL, 0, ?, ?)
         """,
-        (name, DEFAULT_CRON_EXPR),
+        (name, DEFAULT_CRON_EXPR, DEFAULT_INFRA_TYPE),
     )
     return int(cursor.lastrowid)
 
@@ -811,7 +938,7 @@ def touch_k8s_cluster_last_update(
     stamp = format_display_datetime(when) if when is not None else format_display_datetime()
     connection.execute(
         """
-        UPDATE k8s_cluster
+        UPDATE infra_cluster
         SET last_update = ?
         WHERE idx = ?
         """,
@@ -831,7 +958,7 @@ def replace_cluster_snapshot(
     with get_connection(database_path) as connection:
         if cluster_idx is not None:
             row = connection.execute(
-                "SELECT idx, cluster_name, last_update FROM k8s_cluster WHERE idx = ?",
+                "SELECT idx, cluster_name, last_update FROM infra_cluster WHERE idx = ?",
                 (cluster_idx,),
             ).fetchone()
             if row is None:
@@ -844,7 +971,7 @@ def replace_cluster_snapshot(
         else:
             cluster_id = get_or_create_k8s_cluster(connection, cluster_name)
             row = connection.execute(
-                "SELECT last_update FROM k8s_cluster WHERE idx = ?",
+                "SELECT last_update FROM infra_cluster WHERE idx = ?",
                 (cluster_id,),
             ).fetchone()
             previous_last_update = (

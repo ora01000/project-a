@@ -3,7 +3,40 @@
 프로젝트 최초 개발일(2026-07-08) 이후 변경 이력을 **최근순**으로 요약합니다.  
 출처: git 커밋, `ADDITIONAL_PLAN.md`, 워킹 트리 반영분(2026-07-15~18).
 
-**현재 버전:** 1.2B / 릴리즈 `260807`
+**현재 버전:** 1.3B / 릴리즈 `270807`
+
+---
+
+## 2026-08-07 — KubeVirt scrape·인프라 형상 상세 (`270807`)
+
+### 인프라 레지스트리
+- `k8s_cluster` → **`infra_cluster`** 이관, `infra_type`(`k8s` | `kubevirt`) 컬럼
+- 관리자 메뉴 **인프라 구성**, 클러스터별 유형 선택·수집
+
+### KubeVirt 수집
+- `infra_type=kubevirt` 클러스터 수집 → `{cluster}_kubevirt_*` 동적 테이블
+  (nodes / namespaces / deployments / pvcs / vms / vm_volumes)
+- K8S와 동일 백업·4세대 prune, DynamicClient·kubeconfig(http) 규칙 공유
+- 수동 수집·cron 스케줄러가 k8s·kubevirt 모두 지원
+
+### 시스템 네임스페이스 제외
+- k8s·kubevirt 수집 시 `default`, `openshift-*`, `kube-*` 네임스페이스 및 하위 리소스 제외
+
+### 인프라 형상 분석
+- 목록에 **infra_type** 표시, kubevirt 요약·추이에 **VM / Volumes** 추가
+- 오른쪽 **상세정보** 패널(~40%): 네임스페이스·노드(·VM) 탐색
+  - 네임스페이스: 상세 + deployment·PVC
+  - 노드: 노드 상세
+  - VM(kubevirt): VM 상세 + 연결 볼륨
+- 카테고리 전환 시 이전 선택으로 잘못된 상세 요청하던 오류 수정
+- 밝은 테마에서 상세 항목 버튼 hover 색상 보정
+
+### 기타
+- 사용자 목록 **최근 로그인 시각** 표시
+
+### 릴리즈
+- About: 버전 **1.3B**, 릴리즈 **270807**
+- Docker 이미지 태그: `270807` (`linux/amd64`)
 
 ---
 
@@ -304,11 +337,11 @@
 | 항목 | 내용 |
 |------|------|
 | 제품명 | AX 인프라 운영 콘솔 |
-| 버전 | 1.2B |
-| 릴리즈 | 260807 |
+| 버전 | 1.3B |
+| 릴리즈 | 270807 |
 | 백엔드 이미지 | `ora01000/project-a-backend:<tag>` |
 | 프론트 이미지 | `ora01000/project-a-frontend:<tag>` |
-| 최근 태그 예 | `260805`, `260806`, `260807` |
+| 최근 태그 예 | `260806`, `260807`, `270807` |
 
 ---
 

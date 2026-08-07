@@ -31,6 +31,7 @@ class UserResponse(BaseModel):
     agents: str = ""
     agent_ids: list[str] = Field(default_factory=list)
     request_reason: str = ""
+    last_login: str | None = None
 
     @classmethod
     def from_user(cls, user: User) -> "UserResponse":
@@ -46,6 +47,7 @@ class UserResponse(BaseModel):
             agents=user.agents or "",
             agent_ids=agent_ids,
             request_reason=user.request_reason,
+            last_login=user.last_login,
         )
 
 

@@ -42,6 +42,22 @@ _WORKLOAD_KIND_TO_TYPE = {
     "DeploymentConfig": "deploymentconfig",
 }
 
+# System namespaces excluded from inventory scrape (k8s / kubevirt).
+_EXCLUDED_NAMESPACE_EXACT = frozenset({"default"})
+
+
+def is_excluded_system_namespace(namespace: str | None) -> bool:
+    """True for openshift-*, kube-*, and default (PLAN system NS skip)."""
+    name = (namespace or "").strip()
+    if not name:
+        return True
+    if name in _EXCLUDED_NAMESPACE_EXACT:
+        return True
+    if name.startswith("openshift-") or name.startswith("kube-"):
+        return True
+    return False
+
+
 
 class KubeconfigRequiredError(RuntimeError):
     """Raised when http mode requires a mounted kubeconfig that is missing."""
@@ -457,7 +473,7 @@ def _collect_namespaces(dyn: DynamicClient) -> list[K8sNamespaceRow]:
     namespace_labels: dict[str, dict[str, str]] = {}
     for item in namespace_items:
         name = str(_attr(item, "metadata", "name", default="") or "")
-        if not name:
+        if not name or is_excluded_system_namespace(name):
             continue
         raw_labels = _attr(item, "metadata", "labels", default={}) or {}
         mapped = _as_mapping(raw_labels)
@@ -469,7 +485,7 @@ def _collect_namespaces(dyn: DynamicClient) -> list[K8sNamespaceRow]:
     rows: list[K8sNamespaceRow] = []
     for item in namespace_items:
         name = str(_attr(item, "metadata", "name", default="") or "")
-        if not name:
+        if not name or is_excluded_system_namespace(name):
             continue
         annotations = _attr(item, "metadata", "annotations", default={}) or {}
         if not isinstance(annotations, dict):
@@ -504,7 +520,7 @@ def _workload_rows(
     for item in _safe_list(dyn, api_version, kind):
         namespace = str(_attr(item, "metadata", "namespace", default="") or "")
         name = str(_attr(item, "metadata", "name", default="") or "")
-        if not namespace or not name:
+        if not namespace or not name or is_excluded_system_namespace(namespace):
             continue
         if kind == "DaemonSet":
             replicas = _attr(item, "status", "desiredNumberScheduled")
@@ -559,6 +575,8 @@ def _index_replicaset_owners(dyn: DynamicClient) -> dict[tuple[str, str], tuple[
     for item in _safe_list(dyn, "apps/v1", "ReplicaSet"):
         namespace = str(_attr(item, "metadata", "namespace", default="") or "")
         rs_name = str(_attr(item, "metadata", "name", default="") or "")
+        if not namespace or not rs_name or is_excluded_system_namespace(namespace):
+            continue
         owners = _attr(item, "metadata", "ownerReferences", default=[]) or []
         for owner in owners:
             if str(_attr(owner, "kind", default="")) == "Deployment":
@@ -595,7 +613,7 @@ def _collect_pods(
     for item in _safe_list(dyn, "v1", "Pod"):
         namespace = str(_attr(item, "metadata", "namespace", default="") or "")
         name = str(_attr(item, "metadata", "name", default="") or "")
-        if not namespace or not name:
+        if not namespace or not name or is_excluded_system_namespace(namespace):
             continue
         owners = _attr(item, "metadata", "ownerReferences", default=[]) or []
         dep_name, dep_type = _owner_workload(list(owners), namespace, rs_map)
@@ -621,7 +639,11 @@ def _pvc_to_workload(
     for item in _safe_list(dyn, "v1", "Pod"):
         namespace = str(_attr(item, "metadata", "namespace", default="") or "")
         pod_name = str(_attr(item, "metadata", "name", default="") or "")
-        if not namespace or not pod_name:
+        if (
+            not namespace
+            or not pod_name
+            or is_excluded_system_namespace(namespace)
+        ):
             continue
         owners = next(
             (
@@ -650,7 +672,7 @@ def _collect_pvcs(
     for item in _safe_list(dyn, "v1", "PersistentVolumeClaim"):
         namespace = str(_attr(item, "metadata", "namespace", default="") or "")
         name = str(_attr(item, "metadata", "name", default="") or "")
-        if not namespace or not name:
+        if not namespace or not name or is_excluded_system_namespace(namespace):
             continue
         storage_class = _attr(item, "spec", "storageClassName")
         requests = _attr(item, "spec", "resources", "requests", default={}) or {}

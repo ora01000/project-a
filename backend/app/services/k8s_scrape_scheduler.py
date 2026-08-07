@@ -15,6 +15,7 @@ from backend.app.services.k8s_collector import (
     KubeconfigRequiredError,
     collect_and_persist_cluster,
 )
+from backend.app.services.kubevirt_collector import collect_and_persist_kubevirt
 from backend.app.timezone import DISPLAY_TIMEZONE, now_display_datetime
 
 logger = logging.getLogger(__name__)
@@ -69,30 +70,41 @@ async def run_due_k8s_scrapes(
 
         tracking[record.idx] = minute_key
         logger.info(
-            "k8s scrape schedule due cluster=%s idx=%s cron_expr=%s",
+            "infra scrape schedule due cluster=%s idx=%s type=%s cron_expr=%s",
             record.cluster_name,
             record.idx,
+            record.infra_type,
             expr,
         )
         try:
-            await asyncio.to_thread(
-                collect_and_persist_cluster,
-                database_path,
-                cluster_idx=record.idx,
-                cluster_name=record.cluster_name,
-                settings=collector,
-                runtime_mode=runtime_mode,
-            )
+            if record.infra_type == "kubevirt":
+                await asyncio.to_thread(
+                    collect_and_persist_kubevirt,
+                    database_path,
+                    cluster_idx=record.idx,
+                    cluster_name=record.cluster_name,
+                    settings=collector,
+                    runtime_mode=runtime_mode,
+                )
+            else:
+                await asyncio.to_thread(
+                    collect_and_persist_cluster,
+                    database_path,
+                    cluster_idx=record.idx,
+                    cluster_name=record.cluster_name,
+                    settings=collector,
+                    runtime_mode=runtime_mode,
+                )
             collected.append(record.idx)
         except KubeconfigRequiredError as exc:
             logger.warning(
-                "k8s scrape schedule skipped cluster=%s: %s",
+                "infra scrape schedule skipped cluster=%s: %s",
                 record.cluster_name,
                 exc,
             )
         except Exception:
             logger.exception(
-                "k8s scrape schedule failed cluster=%s idx=%s",
+                "infra scrape schedule failed cluster=%s idx=%s",
                 record.cluster_name,
                 record.idx,
             )
