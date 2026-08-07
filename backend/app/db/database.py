@@ -749,11 +749,29 @@ def _ensure_k8s_inventory_tables(connection: sqlite3.Connection) -> None:
             CREATE TABLE k8s_cluster (
                 idx INTEGER PRIMARY KEY AUTOINCREMENT,
                 cluster_name VARCHAR(50) NOT NULL UNIQUE,
-                last_update TEXT
+                last_update TEXT,
+                cron INTEGER NOT NULL DEFAULT 0,
+                cron_expr VARCHAR(20) NOT NULL DEFAULT '0 23 * * 6'
             )
             """
         )
         logger.info("Created k8s_cluster table")
+    else:
+        columns = {
+            str(row["name"])
+            for row in connection.execute("PRAGMA table_info(k8s_cluster)").fetchall()
+        }
+        if "cron" not in columns:
+            connection.execute(
+                "ALTER TABLE k8s_cluster ADD COLUMN cron INTEGER NOT NULL DEFAULT 0"
+            )
+            logger.info("Added k8s_cluster.cron")
+        if "cron_expr" not in columns:
+            connection.execute(
+                "ALTER TABLE k8s_cluster ADD COLUMN cron_expr VARCHAR(20) "
+                "NOT NULL DEFAULT '0 23 * * 6'"
+            )
+            logger.info("Added k8s_cluster.cron_expr")
 
     drop_legacy_shared_inventory_tables(connection)
     _sync_k8s_cluster_rows(connection)
@@ -765,8 +783,8 @@ def _sync_k8s_cluster_rows(connection: sqlite3.Connection) -> None:
     for cluster_name, _display_name in K8S_CLUSTER_SPECS:
         connection.execute(
             """
-            INSERT INTO k8s_cluster (cluster_name, last_update)
-            VALUES (?, NULL)
+            INSERT INTO k8s_cluster (cluster_name, last_update, cron, cron_expr)
+            VALUES (?, NULL, 0, '0 23 * * 6')
             ON CONFLICT(cluster_name) DO NOTHING
             """,
             (cluster_name,),

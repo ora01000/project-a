@@ -8,6 +8,7 @@ Layout:
   {cluster_name}_k8s_pvcs
 
 Backups before replace: {table}_{YYYYMMDD_HHMMSS}
+Retention: keep the newest MAX_INVENTORY_BACKUP_GENERATIONS stamp sets per cluster.
 """
 
 from __future__ import annotations
@@ -32,6 +33,9 @@ INVENTORY_SUFFIXES = (
     "k8s_pvcs",
 )
 
+# Keep this many timestamped backup generations per cluster (by YYYYMMDD_HHMMSS).
+MAX_INVENTORY_BACKUP_GENERATIONS = 4
+
 # Shared (pre-260806-fix) tables to drop on migrate.
 LEGACY_SHARED_INVENTORY_TABLES = (
     "k8s_pods",
@@ -42,6 +46,7 @@ LEGACY_SHARED_INVENTORY_TABLES = (
 )
 
 _BACKUP_STAMP_RE = re.compile(r"[^0-9]")
+_BACKUP_STAMP_SUFFIX_RE = re.compile(r"^\d{8}_\d{6}$")
 _CLUSTER_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,49}$")
 _LEGACY_SHARED_BACKUP_RE = re.compile(
     r"^k8s_(?:pods|pvcs|deployments|namespaces|nodes)_\d{8}_\d{6}$"
@@ -123,6 +128,166 @@ class K8sClusterRecord:
     idx: int
     cluster_name: str
     last_update: str | None = None
+    cron: bool = False
+    cron_expr: str = "0 23 * * 6"
+
+
+DEFAULT_CRON_EXPR = "0 23 * * 6"  # every Saturday 23:00
+_CRON_EXPR_MAX_LEN = 20
+MAX_SHAPE_HISTORY_POINTS = 5
+
+
+@dataclass
+class K8sShapeCounts:
+    nodes: int = 0
+    namespaces: int = 0
+    deployments: int = 0
+    pvcs: int = 0
+
+
+@dataclass
+class K8sShapeHistoryPoint:
+    label: str
+    stamp: str | None
+    is_latest: bool
+    counts: K8sShapeCounts
+
+
+@dataclass
+class K8sClusterShapeAnalysis:
+    cluster_name: str
+    last_update: str | None
+    cluster_version: str | None
+    summary: K8sShapeCounts
+    history: list[K8sShapeHistoryPoint] = field(default_factory=list)
+
+
+def _table_row_count(connection, table_name: str, tables: set[str]) -> int:
+    if table_name not in tables:
+        return 0
+    row = connection.execute(
+        f"SELECT COUNT(*) AS cnt FROM {_quote_ident(table_name)}"
+    ).fetchone()
+    if row is None:
+        return 0
+    return int(row["cnt"] if hasattr(row, "keys") else row[0])
+
+
+def _counts_for_suffix_tables(
+    connection,
+    *,
+    cluster_name: str,
+    stamp: str | None,
+    tables: set[str],
+) -> K8sShapeCounts:
+    nodes_t, ns_t, dep_t, pvc_t = cluster_inventory_tables(cluster_name)
+    if stamp:
+        nodes_t = f"{nodes_t}_{stamp}"
+        ns_t = f"{ns_t}_{stamp}"
+        dep_t = f"{dep_t}_{stamp}"
+        pvc_t = f"{pvc_t}_{stamp}"
+    return K8sShapeCounts(
+        nodes=_table_row_count(connection, nodes_t, tables),
+        namespaces=_table_row_count(connection, ns_t, tables),
+        deployments=_table_row_count(connection, dep_t, tables),
+        pvcs=_table_row_count(connection, pvc_t, tables),
+    )
+
+
+def _cluster_version_from_nodes(
+    connection,
+    nodes_table: str,
+    tables: set[str],
+) -> str | None:
+    if nodes_table not in tables:
+        return None
+    row = connection.execute(
+        f"""
+        SELECT node_k8s_ver AS ver, COUNT(*) AS cnt
+        FROM {_quote_ident(nodes_table)}
+        WHERE node_k8s_ver IS NOT NULL AND TRIM(node_k8s_ver) != ''
+        GROUP BY node_k8s_ver
+        ORDER BY cnt DESC, ver ASC
+        LIMIT 1
+        """
+    ).fetchone()
+    if row is None:
+        return None
+    ver = row["ver"] if hasattr(row, "keys") else row[0]
+    text = str(ver or "").strip()
+    return text[:50] if text else None
+
+
+def _format_stamp_label(stamp: str) -> str:
+    if _BACKUP_STAMP_SUFFIX_RE.fullmatch(stamp):
+        return f"{stamp[:4]}-{stamp[4:6]}-{stamp[6:8]} {stamp[9:11]}:{stamp[11:13]}:{stamp[13:15]}"
+    return stamp
+
+
+def get_cluster_shape_analysis(
+    database_path: str | Path,
+    cluster_name: str,
+    *,
+    max_points: int = MAX_SHAPE_HISTORY_POINTS,
+) -> K8sClusterShapeAnalysis | None:
+    """Build live summary + up to ``max_points`` history snapshots (oldest→newest)."""
+    name = validate_cluster_name(cluster_name)
+    keep = max(1, int(max_points))
+
+    with get_connection(database_path) as connection:
+        row = connection.execute(
+            """
+            SELECT idx, cluster_name, last_update, cron, cron_expr
+            FROM k8s_cluster
+            WHERE cluster_name = ?
+            """,
+            (name,),
+        ).fetchone()
+        if row is None:
+            return None
+
+        tables = _list_user_tables(connection)
+        nodes_t, _, _, _ = cluster_inventory_tables(name)
+        summary = _counts_for_suffix_tables(
+            connection, cluster_name=name, stamp=None, tables=tables
+        )
+        version = _cluster_version_from_nodes(connection, nodes_t, tables)
+        last_update = str(row["last_update"]) if row["last_update"] else None
+
+        stamps = list_cluster_inventory_backup_stamps(connection, name)
+        # Newest backups first; keep room for live "latest" point.
+        backup_limit = max(0, keep - 1)
+        selected_stamps = stamps[:backup_limit]
+
+        history: list[K8sShapeHistoryPoint] = []
+        # Chronological: oldest backup → newest backup → latest
+        for stamp in reversed(selected_stamps):
+            history.append(
+                K8sShapeHistoryPoint(
+                    label=_format_stamp_label(stamp),
+                    stamp=stamp,
+                    is_latest=False,
+                    counts=_counts_for_suffix_tables(
+                        connection, cluster_name=name, stamp=stamp, tables=tables
+                    ),
+                )
+            )
+        history.append(
+            K8sShapeHistoryPoint(
+                label="latest" if not last_update else last_update,
+                stamp=None,
+                is_latest=True,
+                counts=summary,
+            )
+        )
+
+    return K8sClusterShapeAnalysis(
+        cluster_name=name,
+        last_update=last_update,
+        cluster_version=version,
+        summary=summary,
+        history=history,
+    )
 
 
 def validate_cluster_name(cluster_name: str) -> str:
@@ -136,6 +301,53 @@ def validate_cluster_name(cluster_name: str) -> str:
             "cluster_name은 영문/숫자/._- 만 사용할 수 있으며 테이블명으로 안전해야 합니다."
         )
     return name
+
+
+def validate_cron_expr(cron_expr: str | None) -> str:
+    """Validate a 5-field cron expression (max 20 chars). Empty -> default."""
+    text = (cron_expr or "").strip() or DEFAULT_CRON_EXPR
+    if len(text) > _CRON_EXPR_MAX_LEN:
+        raise ValueError(
+            f"cron_expr은 {_CRON_EXPR_MAX_LEN}자를 초과할 수 없습니다."
+        )
+    try:
+        from croniter import croniter
+
+        if not croniter.is_valid(text):
+            raise ValueError(f"잘못된 cron 표현식입니다: {text}")
+    except ValueError:
+        raise
+    except Exception as exc:
+        raise ValueError(f"잘못된 cron 표현식입니다: {text}") from exc
+    return text
+
+
+def _as_bool(value: Any, *, default: bool = False) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "on", "y"}:
+        return True
+    if text in {"0", "false", "no", "off", "n", ""}:
+        return False
+    return default
+
+
+def _cluster_record_from_row(row: Any) -> K8sClusterRecord:
+    keys = set(row.keys()) if hasattr(row, "keys") else set()
+    cron_raw = row["cron"] if "cron" in keys else 0
+    cron_expr_raw = row["cron_expr"] if "cron_expr" in keys else DEFAULT_CRON_EXPR
+    return K8sClusterRecord(
+        idx=int(row["idx"]),
+        cluster_name=str(row["cluster_name"]),
+        last_update=str(row["last_update"]) if row["last_update"] else None,
+        cron=_as_bool(cron_raw, default=False),
+        cron_expr=str(cron_expr_raw or DEFAULT_CRON_EXPR)[:_CRON_EXPR_MAX_LEN],
+    )
 
 
 def cluster_inventory_table(cluster_name: str, suffix: str) -> str:
@@ -332,6 +544,63 @@ def backup_cluster_inventory_tables(
     return created
 
 
+def _backup_stamp_from_table(live_table: str, table_name: str) -> str | None:
+    """Return YYYYMMDD_HHMMSS if table_name is a backup of live_table."""
+    prefix = f"{live_table}_"
+    if not table_name.startswith(prefix):
+        return None
+    stamp = table_name[len(prefix) :]
+    if _BACKUP_STAMP_SUFFIX_RE.fullmatch(stamp):
+        return stamp
+    return None
+
+
+def list_cluster_inventory_backup_stamps(connection, cluster_name: str) -> list[str]:
+    """Unique backup stamps for a cluster, newest first (YYYYMMDD_HHMMSS)."""
+    stamps: set[str] = set()
+    tables = _list_user_tables(connection)
+    for live_table in cluster_inventory_tables(cluster_name):
+        for table_name in tables:
+            stamp = _backup_stamp_from_table(live_table, table_name)
+            if stamp:
+                stamps.add(stamp)
+    return sorted(stamps, reverse=True)
+
+
+def prune_cluster_inventory_backups(
+    connection,
+    cluster_name: str,
+    *,
+    keep: int = MAX_INVENTORY_BACKUP_GENERATIONS,
+) -> list[str]:
+    """Drop backup table generations older than the newest ``keep`` stamps."""
+    keep_n = max(0, int(keep))
+    stamps = list_cluster_inventory_backup_stamps(connection, cluster_name)
+    stale_stamps = set(stamps[keep_n:])
+    if not stale_stamps:
+        return []
+
+    dropped: list[str] = []
+    tables = _list_user_tables(connection)
+    for live_table in cluster_inventory_tables(cluster_name):
+        for table_name in sorted(tables):
+            stamp = _backup_stamp_from_table(live_table, table_name)
+            if stamp is None or stamp not in stale_stamps:
+                continue
+            connection.execute(f"DROP TABLE IF EXISTS {_quote_ident(table_name)}")
+            dropped.append(table_name)
+            tables.discard(table_name)
+
+    if dropped:
+        logger.info(
+            "Pruned cluster=%s inventory backups keep=%s dropped=%s",
+            cluster_name,
+            keep_n,
+            dropped,
+        )
+    return dropped
+
+
 def drop_cluster_inventory_tables(connection, cluster_name: str) -> list[str]:
     """Drop per-cluster inventory tables and their timestamped backups."""
     dropped: list[str] = []
@@ -383,19 +652,26 @@ def list_k8s_clusters(database_path: str | Path) -> list[K8sClusterRecord]:
     with get_connection(database_path) as connection:
         rows = connection.execute(
             """
-            SELECT idx, cluster_name, last_update
+            SELECT idx, cluster_name, last_update, cron, cron_expr
             FROM k8s_cluster
             ORDER BY cluster_name
             """
         ).fetchall()
-    return [
-        K8sClusterRecord(
-            idx=int(row["idx"]),
-            cluster_name=str(row["cluster_name"]),
-            last_update=str(row["last_update"]) if row["last_update"] else None,
-        )
-        for row in rows
-    ]
+    return [_cluster_record_from_row(row) for row in rows]
+
+
+def list_scheduled_k8s_clusters(database_path: str | Path) -> list[K8sClusterRecord]:
+    """Clusters with cron scheduling enabled."""
+    with get_connection(database_path) as connection:
+        rows = connection.execute(
+            """
+            SELECT idx, cluster_name, last_update, cron, cron_expr
+            FROM k8s_cluster
+            WHERE cron = 1
+            ORDER BY cluster_name
+            """
+        ).fetchall()
+    return [_cluster_record_from_row(row) for row in rows]
 
 
 def get_k8s_cluster(
@@ -405,7 +681,7 @@ def get_k8s_cluster(
     with get_connection(database_path) as connection:
         row = connection.execute(
             """
-            SELECT idx, cluster_name, last_update
+            SELECT idx, cluster_name, last_update, cron, cron_expr
             FROM k8s_cluster
             WHERE idx = ?
             """,
@@ -413,11 +689,7 @@ def get_k8s_cluster(
         ).fetchone()
     if row is None:
         return None
-    return K8sClusterRecord(
-        idx=int(row["idx"]),
-        cluster_name=str(row["cluster_name"]),
-        last_update=str(row["last_update"]) if row["last_update"] else None,
-    )
+    return _cluster_record_from_row(row)
 
 
 def delete_k8s_cluster(database_path: str | Path, cluster_idx: int) -> bool:
@@ -438,14 +710,15 @@ def save_k8s_clusters(
     database_path: str | Path,
     clusters: list[dict[str, Any]],
 ) -> list[K8sClusterRecord]:
-    """Replace k8s_cluster rows with the provided list (name-only upsert).
+    """Replace k8s_cluster rows with the provided list.
 
     - Existing idx kept when present
     - Names must be unique and non-empty
     - Clusters removed from the list are deleted (with per-cluster table drop)
     - Renamed clusters rename their inventory tables
+    - Persists cron / cron_expr when provided
     """
-    normalized: list[tuple[int | None, str]] = []
+    normalized: list[tuple[int | None, str, bool, str]] = []
     seen_names: set[str] = set()
     for item in clusters:
         name = validate_cluster_name(str(item.get("cluster_name") or ""))
@@ -460,16 +733,18 @@ def save_k8s_clusters(
             idx = int(raw_idx)
             if idx < 1:
                 raise ValueError(f"잘못된 idx 입니다: {raw_idx}")
-        normalized.append((idx, name))
+        cron_enabled = _as_bool(item.get("cron"), default=False)
+        cron_expr = validate_cron_expr(item.get("cron_expr"))
+        normalized.append((idx, name, cron_enabled, cron_expr))
 
     with get_connection(database_path) as connection:
         existing_rows = connection.execute(
-            "SELECT idx, cluster_name, last_update FROM k8s_cluster"
+            "SELECT idx, cluster_name, last_update, cron, cron_expr FROM k8s_cluster"
         ).fetchall()
         existing_by_idx = {int(row["idx"]): row for row in existing_rows}
         keep_ids: set[int] = set()
 
-        for idx, name in normalized:
+        for idx, name, cron_enabled, cron_expr in normalized:
             if idx is not None:
                 if idx not in existing_by_idx:
                     raise ValueError(f"존재하지 않는 클러스터 idx 입니다: {idx}")
@@ -477,17 +752,21 @@ def save_k8s_clusters(
                 if old_name != name:
                     rename_cluster_inventory_tables(connection, old_name, name)
                 connection.execute(
-                    "UPDATE k8s_cluster SET cluster_name = ? WHERE idx = ?",
-                    (name, idx),
+                    """
+                    UPDATE k8s_cluster
+                    SET cluster_name = ?, cron = ?, cron_expr = ?
+                    WHERE idx = ?
+                    """,
+                    (name, 1 if cron_enabled else 0, cron_expr, idx),
                 )
                 keep_ids.add(idx)
             else:
                 cursor = connection.execute(
                     """
-                    INSERT INTO k8s_cluster (cluster_name, last_update)
-                    VALUES (?, NULL)
+                    INSERT INTO k8s_cluster (cluster_name, last_update, cron, cron_expr)
+                    VALUES (?, NULL, ?, ?)
                     """,
-                    (name,),
+                    (name, 1 if cron_enabled else 0, cron_expr),
                 )
                 keep_ids.add(int(cursor.lastrowid))
 
@@ -515,10 +794,10 @@ def get_or_create_k8s_cluster(connection, cluster_name: str) -> int:
 
     cursor = connection.execute(
         """
-        INSERT INTO k8s_cluster (cluster_name, last_update)
-        VALUES (?, NULL)
+        INSERT INTO k8s_cluster (cluster_name, last_update, cron, cron_expr)
+        VALUES (?, NULL, 0, ?)
         """,
-        (name,),
+        (name, DEFAULT_CRON_EXPR),
     )
     return int(cursor.lastrowid)
 
@@ -576,6 +855,7 @@ def replace_cluster_snapshot(
         backups = backup_cluster_inventory_tables(
             connection, cluster_name, stamp=stamp
         )
+        pruned = prune_cluster_inventory_backups(connection, cluster_name)
         nodes_t, ns_t, dep_t, pvc_t = ensure_cluster_inventory_tables(
             connection, cluster_name
         )
@@ -705,15 +985,18 @@ def replace_cluster_snapshot(
         "pvcs": len(snapshot.pvcs),
     }
     logger.info(
-        "Replaced per-cluster inventory cluster=%s idx=%s last_update=%s counts=%s backups=%s",
+        "Replaced per-cluster inventory cluster=%s idx=%s last_update=%s "
+        "counts=%s backups=%s pruned=%s",
         cluster_name,
         cluster_id,
         last_update,
         counts,
         backups,
+        pruned,
     )
     return {
         **counts,
         "last_update": last_update,
         "backup_tables": backups,
+        "pruned_backup_tables": pruned,
     }

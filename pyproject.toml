@@ -5,6 +5,7 @@ description = "LangGraph multi-agent platform for K8s, KubeVirt, and vCenter"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "croniter>=6.2.4",
     "fastapi>=0.139.0",
     "httpx>=0.28.1",
     "jaydebeapi>=1.2.3",

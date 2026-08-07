@@ -79,12 +79,16 @@ mynotes:
   flush_interval_seconds: 300
   initial_delay_seconds: 0
 
-# K8S 인프라 scrape (관리자 UI 수동 수집)
+# K8S 인프라 scrape (관리자 UI 수동 수집 + cron 스케줄)
 # http 모드: /etc/k8s/kubeconfig 마운트 필요
 # mock/local: 파일 없으면 KUBECONFIG/~/.kube/config 사용
+# 클러스터별 on/off 는 k8s_cluster.cron / cron_expr
 k8s_collector:
   kubeconfig: /etc/k8s/kubeconfig
   fallback_to_current_context: true
+  schedule_enabled: true
+  schedule_poll_interval_seconds: 30
+  schedule_initial_delay_seconds: 5
   # contexts:
   #   dtest-k8s: orbstack
 

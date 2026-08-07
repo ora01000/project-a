@@ -114,27 +114,9 @@ def _safe_list(dyn: DynamicClient, api_version: str, kind: str) -> list[Any]:
         resource = dyn.resources.get(api_version=api_version, kind=kind)
         result = resource.get(_request_timeout=_K8S_REQUEST_TIMEOUT)
         items = _attr(result, "items", default=[]) or []
-        listed = list(items)
-        if api_version in (
-            "k8s.ovn.org/v1",
-            "network.openshift.io/v1",
-        ) or kind in ("EgressIP", "NetNamespace", "Namespace"):
-            logger.info(
-                "[k8s-egress] API ok api=%s kind=%s count=%s item0_type=%s",
-                api_version,
-                kind,
-                len(listed),
-                type(listed[0]).__name__ if listed else "-",
-            )
-        return listed
+        return list(items)
     except Exception as exc:
-        logger.info(
-            "[k8s-egress] Skip API api=%s kind=%s exc_type=%s err=%s",
-            api_version,
-            kind,
-            type(exc).__name__,
-            exc,
-        )
+        logger.info("Skip API %s kind=%s (%s)", api_version, kind, exc)
         return []
 
 
@@ -346,17 +328,13 @@ def _as_mapping(value: Any) -> dict[str, Any]:
             converted = to_dict()
             if isinstance(converted, dict):
                 return dict(converted)
-        except Exception as exc:
-            logger.info("[k8s-egress] to_dict() failed type=%s err=%s", type(value).__name__, exc)
+        except Exception:
+            pass
     try:
         return {str(key): item for key, item in dict(value).items()}
     except Exception:
         pass
     return {}
-
-
-def _object_name(item: Any) -> str:
-    return str(_attr(item, "metadata", "name", default="") or "") or "<unnamed>"
 
 
 def _spec_egress_ips(item: Any) -> list[str]:
@@ -370,41 +348,20 @@ def _spec_egress_ips(item: Any) -> list[str]:
 
 def _egress_ip_selector_value(item: Any) -> str | None:
     """Read EgressIP.spec.namespaceSelector.matchLabels.egressIPSelector."""
-    name = _object_name(item)
     selector = _attr(item, "spec", "namespaceSelector", default=None)
     if selector is None:
-        logger.info("[k8s-egress] EgressIP name=%s missing spec.namespaceSelector", name)
         return None
     match_labels_raw = _attr(selector, "matchLabels", default=None)
     if match_labels_raw is None and isinstance(selector, dict):
         match_labels_raw = selector.get("matchLabels")
     match_labels = _as_mapping(match_labels_raw)
     if not match_labels:
-        logger.info(
-            "[k8s-egress] EgressIP name=%s empty matchLabels raw_type=%s raw=%r",
-            name,
-            type(match_labels_raw).__name__,
-            match_labels_raw,
-        )
         return None
     raw = match_labels.get(_EGRESS_IP_SELECTOR_KEY)
     if raw is None:
-        logger.info(
-            "[k8s-egress] EgressIP name=%s matchLabels has no %s keys=%s",
-            name,
-            _EGRESS_IP_SELECTOR_KEY,
-            sorted(str(key) for key in match_labels.keys()),
-        )
         return None
     text = str(raw).strip()
-    if not text:
-        logger.info(
-            "[k8s-egress] EgressIP name=%s %s is empty",
-            name,
-            _EGRESS_IP_SELECTOR_KEY,
-        )
-        return None
-    return text
+    return text or None
 
 
 def _status_egress_assignment(item: Any) -> tuple[str | None, str | None]:
@@ -461,16 +418,8 @@ def _collect_egress_ips(
         for name, labels in namespace_labels.items()
         if str(labels.get(_EGRESS_IP_SELECTOR_KEY) or "").strip()
     }
-    logger.info(
-        "[k8s-egress] start namespaces=%s with_egressIPSelector=%s sample=%s",
-        len(namespace_labels),
-        len(ns_with_selector),
-        list(ns_with_selector.items())[:10],
-    )
 
-    netns_items = _safe_list(dyn, "network.openshift.io/v1", "NetNamespace")
-    logger.info("[k8s-egress] NetNamespace count=%s", len(netns_items))
-    for item in netns_items:
+    for item in _safe_list(dyn, "network.openshift.io/v1", "NetNamespace"):
         name = str(_attr(item, "netName") or _attr(item, "metadata", "name") or "")
         if not name:
             continue
@@ -478,85 +427,26 @@ def _collect_egress_ips(
         ips = [str(ip).strip() for ip in egress if ip is not None and str(ip).strip()]
         if ips:
             by_namespace[name] = _merge_egress_info(by_namespace.get(name), ips=ips)
-            logger.info(
-                "[k8s-egress] NetNamespace ns=%s ips=%s",
-                name,
-                ips[:2],
-            )
 
-    eip_items = _safe_list(dyn, "k8s.ovn.org/v1", "EgressIP")
-    logger.info("[k8s-egress] EgressIP count=%s", len(eip_items))
-    ovn_matched = 0
-    ovn_skipped_no_selector = 0
-    ovn_skipped_no_ips = 0
-    ovn_unmatched = 0
-
-    for item in eip_items:
-        eip_name = _object_name(item)
+    for item in _safe_list(dyn, "k8s.ovn.org/v1", "EgressIP"):
         selector_value = _egress_ip_selector_value(item)
         if not selector_value:
-            ovn_skipped_no_selector += 1
             continue
         ips = _spec_egress_ips(item)
         if not ips:
-            ovn_skipped_no_ips += 1
-            logger.info("[k8s-egress] EgressIP name=%s has empty spec.egressIPs", eip_name)
             continue
         # Inventory columns hold at most two IPs.
         ips = ips[:2]
         using_ip, assigned_node = _status_egress_assignment(item)
-        matched_namespaces = [
-            ns_name
-            for ns_name, ns_selector in ns_with_selector.items()
-            if ns_selector == selector_value
-        ]
-        logger.info(
-            "[k8s-egress] EgressIP name=%s selector=%s spec_ips=%s "
-            "using=%s node=%s matched_ns_count=%s matched_ns=%s",
-            eip_name,
-            selector_value,
-            ips,
-            using_ip,
-            assigned_node,
-            len(matched_namespaces),
-            matched_namespaces[:20],
-        )
-        if not matched_namespaces:
-            ovn_unmatched += 1
-            continue
-        for ns_name in matched_namespaces:
+        for ns_name, ns_selector in ns_with_selector.items():
+            if ns_selector != selector_value:
+                continue
             by_namespace[ns_name] = _merge_egress_info(
                 by_namespace.get(ns_name),
                 ips=ips,
                 using_egressip=using_ip,
                 egressip_assigned_node=assigned_node,
             )
-            ovn_matched += 1
-
-    logger.info(
-        "[k8s-egress] summary netns_filled=%s ovn_matched_links=%s "
-        "ovn_skip_no_selector=%s ovn_skip_no_ips=%s ovn_unmatched=%s "
-        "namespaces_with_egress=%s",
-        sum(1 for info in by_namespace.values() if info.ips),
-        ovn_matched,
-        ovn_skipped_no_selector,
-        ovn_skipped_no_ips,
-        ovn_unmatched,
-        len(by_namespace),
-    )
-    for ns_name, info in sorted(by_namespace.items())[:30]:
-        logger.info(
-            "[k8s-egress] result ns=%s ips=%s using=%s node=%s",
-            ns_name,
-            info.ips,
-            info.using_egressip,
-            info.egressip_assigned_node,
-        )
-    if len(by_namespace) > 30:
-        logger.info(
-            "[k8s-egress] result truncated remaining=%s",
-            len(by_namespace) - 30,
-        )
 
     return by_namespace
 
@@ -565,24 +455,15 @@ def _collect_namespaces(dyn: DynamicClient) -> list[K8sNamespaceRow]:
     quotas = _collect_quotas_by_namespace(dyn)
     namespace_items = _safe_list(dyn, "v1", "Namespace")
     namespace_labels: dict[str, dict[str, str]] = {}
-    labels_non_dict = 0
     for item in namespace_items:
         name = str(_attr(item, "metadata", "name", default="") or "")
         if not name:
             continue
         raw_labels = _attr(item, "metadata", "labels", default={}) or {}
         mapped = _as_mapping(raw_labels)
-        if raw_labels and not isinstance(raw_labels, dict) and not mapped:
-            labels_non_dict += 1
         namespace_labels[name] = {
             str(key): str(value) for key, value in mapped.items()
         }
-
-    logger.info(
-        "[k8s-egress] namespaces listed=%s label_parse_empty_non_dict=%s",
-        len(namespace_labels),
-        labels_non_dict,
-    )
 
     egress_map = _collect_egress_ips(dyn, namespace_labels)
     rows: list[K8sNamespaceRow] = []

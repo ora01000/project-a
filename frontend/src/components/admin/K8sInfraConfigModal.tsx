@@ -2,10 +2,15 @@ import { useCallback, useEffect, useState } from "react";
 
 import { hasAdminAccess } from "../../types/user";
 
+/** Default: every Saturday 23:00 (Asia/Seoul minute cron). */
+const DEFAULT_CRON_EXPR = "0 23 * * 6";
+
 interface K8sClusterRow {
   idx: number | null;
   cluster_name: string;
   last_update: string | null;
+  cron: boolean;
+  cron_expr: string;
   /** true when row was added with "+" and not yet saved */
   isDraft?: boolean;
   /** local key for React list (drafts without idx) */
@@ -39,6 +44,26 @@ function nextDraftKey(): string {
   return `draft-${draftSeq}`;
 }
 
+type ApiCluster = {
+  idx: number;
+  cluster_name: string;
+  last_update: string | null;
+  cron?: boolean;
+  cron_expr?: string;
+};
+
+function mapApiRows(data: ApiCluster[]): K8sClusterRow[] {
+  return data.map((item) => ({
+    idx: item.idx,
+    cluster_name: item.cluster_name,
+    last_update: item.last_update,
+    cron: Boolean(item.cron),
+    cron_expr: (item.cron_expr || DEFAULT_CRON_EXPR).slice(0, 20),
+    isDraft: false,
+    localKey: `idx-${item.idx}`,
+  }));
+}
+
 export function K8sInfraConfigModal({ viewerRole, onClose }: K8sInfraConfigModalProps) {
   const [rows, setRows] = useState<K8sClusterRow[]>([]);
   const [isEditMode, setIsEditMode] = useState(false);
@@ -56,20 +81,8 @@ export function K8sInfraConfigModal({ viewerRole, onClose }: K8sInfraConfigModal
       if (!response.ok) {
         throw new Error(await parseError(response, "클러스터 목록을 불러오지 못했습니다."));
       }
-      const data = (await response.json()) as Array<{
-        idx: number;
-        cluster_name: string;
-        last_update: string | null;
-      }>;
-      setRows(
-        data.map((item) => ({
-          idx: item.idx,
-          cluster_name: item.cluster_name,
-          last_update: item.last_update,
-          isDraft: false,
-          localKey: `idx-${item.idx}`,
-        })),
-      );
+      const data = (await response.json()) as ApiCluster[];
+      setRows(mapApiRows(data));
     } catch (err) {
       setError(err instanceof Error ? err.message : "클러스터 목록을 불러오지 못했습니다.");
     } finally {
@@ -88,6 +101,8 @@ export function K8sInfraConfigModal({ viewerRole, onClose }: K8sInfraConfigModal
         idx: null,
         cluster_name: "",
         last_update: null,
+        cron: false,
+        cron_expr: DEFAULT_CRON_EXPR,
         isDraft: true,
         localKey: nextDraftKey(),
       },
@@ -111,6 +126,12 @@ export function K8sInfraConfigModal({ viewerRole, onClose }: K8sInfraConfigModal
     setRows((current) => current.filter((row) => row.localKey !== localKey));
   };
 
+  const updateRow = (localKey: string, patch: Partial<K8sClusterRow>) => {
+    setRows((current) =>
+      current.map((item) => (item.localKey === localKey ? { ...item, ...patch } : item)),
+    );
+  };
+
   const handleSave = async () => {
     if (!hasAdminAccess(viewerRole)) {
       setError("관리자만 저장할 수 있습니다.");
@@ -119,6 +140,8 @@ export function K8sInfraConfigModal({ viewerRole, onClose }: K8sInfraConfigModal
     const payload = rows.map((row) => ({
       idx: row.idx,
       cluster_name: row.cluster_name.trim(),
+      cron: row.cron,
+      cron_expr: (row.cron_expr.trim() || DEFAULT_CRON_EXPR).slice(0, 20),
     }));
     if (payload.some((item) => !item.cluster_name)) {
       setError("클러스터 이름을 입력해 주세요.");
@@ -136,20 +159,8 @@ export function K8sInfraConfigModal({ viewerRole, onClose }: K8sInfraConfigModal
       if (!response.ok) {
         throw new Error(await parseError(response, "저장에 실패했습니다."));
       }
-      const data = (await response.json()) as Array<{
-        idx: number;
-        cluster_name: string;
-        last_update: string | null;
-      }>;
-      setRows(
-        data.map((item) => ({
-          idx: item.idx,
-          cluster_name: item.cluster_name,
-          last_update: item.last_update,
-          isDraft: false,
-          localKey: `idx-${item.idx}`,
-        })),
-      );
+      const data = (await response.json()) as ApiCluster[];
+      setRows(mapApiRows(data));
       setIsEditMode(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : "저장에 실패했습니다.");
@@ -221,7 +232,7 @@ export function K8sInfraConfigModal({ viewerRole, onClose }: K8sInfraConfigModal
         role="dialog"
         aria-modal="true"
         aria-labelledby="k8s-infra-config-title"
-        className="flex max-h-[85vh] w-full max-w-4xl flex-col overflow-hidden rounded-xl border border-slate-700 bg-slate-900 shadow-xl"
+        className="flex max-h-[85vh] w-full max-w-6xl flex-col overflow-hidden rounded-xl border border-slate-700 bg-slate-900 shadow-xl"
       >
         <header className="flex items-center justify-between border-b border-slate-700 px-4 py-3">
           <div>
@@ -229,7 +240,7 @@ export function K8sInfraConfigModal({ viewerRole, onClose }: K8sInfraConfigModal
               K8S 인프라 구성
             </h2>
             <p className="mt-0.5 text-xs text-slate-500">
-              클러스터 목록을 관리하고 수동으로 인프라 정보를 수집합니다.
+              클러스터 목록·스케줄을 관리하고 수동으로 인프라 정보를 수집합니다.
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -284,6 +295,8 @@ export function K8sInfraConfigModal({ viewerRole, onClose }: K8sInfraConfigModal
                   <th className="px-3 py-2">last_update</th>
                   <th className="px-3 py-2">상태</th>
                   <th className="px-3 py-2 text-right">{isEditMode ? "삭제" : "수집"}</th>
+                  <th className="px-3 py-2">스케줄</th>
+                  <th className="px-3 py-2">Cron</th>
                 </tr>
               </thead>
               <tbody>
@@ -301,14 +314,7 @@ export function K8sInfraConfigModal({ viewerRole, onClose }: K8sInfraConfigModal
                             value={row.cluster_name}
                             maxLength={50}
                             onChange={(event) => {
-                              const value = event.target.value;
-                              setRows((current) =>
-                                current.map((item) =>
-                                  item.localKey === row.localKey
-                                    ? { ...item, cluster_name: value }
-                                    : item,
-                                ),
-                              );
+                              updateRow(row.localKey, { cluster_name: event.target.value });
                             }}
                             className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-sm text-slate-100 focus:border-sky-600 focus:outline-none"
                           />
@@ -342,6 +348,57 @@ export function K8sInfraConfigModal({ viewerRole, onClose }: K8sInfraConfigModal
                           >
                             {isCollecting ? "수집 중..." : "수집"}
                           </button>
+                        )}
+                      </td>
+                      <td className="px-3 py-2">
+                        {isEditMode ? (
+                          <button
+                            type="button"
+                            role="switch"
+                            aria-checked={row.cron}
+                            onClick={() => updateRow(row.localKey, { cron: !row.cron })}
+                            className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full border transition-colors ${
+                              row.cron
+                                ? "border-sky-500 bg-sky-600"
+                                : "border-slate-600 bg-slate-800"
+                            }`}
+                            title={row.cron ? "스케줄 ON" : "스케줄 OFF"}
+                          >
+                            <span
+                              className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                                row.cron ? "translate-x-5" : "translate-x-1"
+                              }`}
+                            />
+                          </button>
+                        ) : (
+                          <span
+                            className={`text-xs font-medium ${
+                              row.cron ? "text-sky-300" : "text-slate-500"
+                            }`}
+                          >
+                            {row.cron ? "ON" : "OFF"}
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2">
+                        {isEditMode ? (
+                          <input
+                            type="text"
+                            value={row.cron_expr}
+                            maxLength={20}
+                            placeholder={DEFAULT_CRON_EXPR}
+                            title="예: 매주 토요일 23:00 → 0 23 * * 6"
+                            onChange={(event) => {
+                              updateRow(row.localKey, {
+                                cron_expr: event.target.value.slice(0, 20),
+                              });
+                            }}
+                            className="w-36 rounded-md border border-slate-700 bg-slate-950 px-2 py-1 font-mono text-xs text-slate-100 focus:border-sky-600 focus:outline-none"
+                          />
+                        ) : (
+                          <span className="font-mono text-xs text-slate-400">
+                            {row.cron_expr || DEFAULT_CRON_EXPR}
+                          </span>
                         )}
                       </td>
                     </tr>

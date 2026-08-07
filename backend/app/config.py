@@ -114,6 +114,10 @@ class K8sCollectorSettings(BaseModel):
     contexts: dict[str, str] = Field(default_factory=dict)
     # Injected from agent runtime mode at load time
     runtime_mode: str = "mock"
+    # Background cron scrape loop (per-cluster enable lives in k8s_cluster.cron)
+    schedule_enabled: bool = True
+    schedule_poll_interval_seconds: int = 30
+    schedule_initial_delay_seconds: int = 5
 
 
 class AppSettings(BaseSettings):
@@ -219,6 +223,18 @@ class AppSettings(BaseSettings):
     k8s_collector_fallback_current_context: bool | None = Field(
         default=None,
         alias="K8S_COLLECTOR_FALLBACK_CURRENT_CONTEXT",
+    )
+    k8s_collector_schedule_enabled: bool | None = Field(
+        default=None,
+        alias="K8S_COLLECTOR_SCHEDULE_ENABLED",
+    )
+    k8s_collector_schedule_poll_interval_seconds: int | None = Field(
+        default=None,
+        alias="K8S_COLLECTOR_SCHEDULE_POLL_INTERVAL_SECONDS",
+    )
+    k8s_collector_schedule_initial_delay_seconds: int | None = Field(
+        default=None,
+        alias="K8S_COLLECTOR_SCHEDULE_INITIAL_DELAY_SECONDS",
     )
 
     auth_provider_type: str = Field(default="db", alias="AUTH_PROVIDER_TYPE")
@@ -732,11 +748,36 @@ def load_k8s_collector_settings() -> K8sCollectorSettings:
         server_yaml=server_yaml,
     )
 
+    if env_settings.k8s_collector_schedule_enabled is not None:
+        schedule_enabled = env_settings.k8s_collector_schedule_enabled
+    else:
+        schedule_enabled = _as_bool(collector_yaml.get("schedule_enabled"), True)
+
+    poll_interval = (
+        env_settings.k8s_collector_schedule_poll_interval_seconds
+        if env_settings.k8s_collector_schedule_poll_interval_seconds is not None
+        else int(
+            collector_yaml.get("schedule_poll_interval_seconds")
+            or K8sCollectorSettings.model_fields["schedule_poll_interval_seconds"].default
+        )
+    )
+    initial_delay = (
+        env_settings.k8s_collector_schedule_initial_delay_seconds
+        if env_settings.k8s_collector_schedule_initial_delay_seconds is not None
+        else int(
+            collector_yaml.get("schedule_initial_delay_seconds")
+            or K8sCollectorSettings.model_fields["schedule_initial_delay_seconds"].default
+        )
+    )
+
     return K8sCollectorSettings(
         kubeconfig=kubeconfig,
         fallback_to_current_context=fallback,
         contexts=contexts,
         runtime_mode=runtime_mode,
+        schedule_enabled=schedule_enabled,
+        schedule_poll_interval_seconds=max(5, poll_interval),
+        schedule_initial_delay_seconds=max(0, initial_delay),
     )
 
 

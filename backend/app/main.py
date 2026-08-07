@@ -38,6 +38,7 @@ from backend.app.api.k8s_infra import router as k8s_infra_router
 from backend.app.config import (
     load_auth_session_settings,
     load_job_processor_settings,
+    load_k8s_collector_settings,
     load_mynotes_settings,
     load_redis_settings,
     load_settings,
@@ -56,6 +57,7 @@ from backend.app.logging.prompt_debug import bind_token_tracker
 from backend.app.logging.agent_logger import ensure_agent_logs_dir, log_agent_error
 from backend.app.logging.user_comm_logger import initialize_user_comm_logs
 from backend.app.services.job_processor_loop import run_job_processor_loop
+from backend.app.services.k8s_scrape_scheduler import run_k8s_scrape_scheduler_loop
 from backend.app.services.mynote_flush_loop import run_mynote_flush_loop
 from backend.app.usage.token_tracker import TokenTracker
 
@@ -452,6 +454,16 @@ async def lifespan(app: FastAPI):
                 mynotes_settings,
             )
         )
+    k8s_collector_settings = load_k8s_collector_settings()
+    k8s_scrape_task: asyncio.Task | None = None
+    if k8s_collector_settings.schedule_enabled:
+        k8s_scrape_task = asyncio.create_task(
+            run_k8s_scrape_scheduler_loop(
+                Path(app.state.database_path),
+                runtime_mode=runtime_mode,
+                settings=k8s_collector_settings,
+            )
+        )
     try:
         yield
     finally:
@@ -466,6 +478,10 @@ async def lifespan(app: FastAPI):
             mynote_flush_task.cancel()
             with suppress(asyncio.CancelledError):
                 await mynote_flush_task
+        if k8s_scrape_task is not None:
+            k8s_scrape_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await k8s_scrape_task
         await close_redis()
 
 

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import type { AuthUser } from "../types/auth";
+import { InfraShapeTab } from "./jobs/InfraShapeTab";
 import { JobReviewTab } from "./jobs/JobReviewTab";
 import { MyJobResultsTab } from "./jobs/MyJobResultsTab";
 import { MyJobReviewTab } from "./jobs/MyJobReviewTab";
@@ -10,7 +11,14 @@ import { RejectedJobsTab } from "./jobs/RejectedJobsTab";
 import { WhatapEventReportTab } from "./jobs/WhatapEventReportTab";
 import { useMyNotes } from "./jobs/useMyNotes";
 
-type JobNotesTab = "review" | "my-review" | "my-results" | "whatap-report" | "rejected-jobs" | "my-notes";
+type JobNotesTab =
+  | "review"
+  | "my-review"
+  | "my-results"
+  | "whatap-report"
+  | "rejected-jobs"
+  | "my-notes"
+  | "infra-shape";
 
 const TABS: { id: JobNotesTab; label: string }[] = [
   { id: "review", label: "작업 검토" },
@@ -19,6 +27,7 @@ const TABS: { id: JobNotesTab; label: string }[] = [
   { id: "whatap-report", label: "Whatap 이벤트 리포트" },
   { id: "rejected-jobs", label: "반려된 작업" },
   { id: "my-notes", label: "나의 노트" },
+  { id: "infra-shape", label: "인프라 형상" },
 ];
 
 interface JobNotesPanelProps {
@@ -46,6 +55,8 @@ function renderActiveTab(
       return <RejectedJobsTab active />;
     case "my-notes":
       return <MyNotesTab myNotes={myNotes} />;
+    case "infra-shape":
+      return <InfraShapeTab active />;
   }
 }
 
