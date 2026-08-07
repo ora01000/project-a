@@ -10,7 +10,9 @@ from backend.app.db.database import get_connection
 
 router = APIRouter(tags=["debug"])
 
-_SAFE_IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+# Per-cluster k8s inventory tables use hyphens (e.g. dprv6-k8s_k8s_nodes).
+# Quoted identifiers make these safe for SQLite as long as quotes/control chars are rejected.
+_SAFE_IDENT = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9._-]*$")
 
 
 class TableSnapshot(BaseModel):

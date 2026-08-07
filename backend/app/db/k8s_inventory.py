@@ -66,6 +66,8 @@ class K8sNamespaceRow:
     resource_quota_pod_limit: int | None = None
     okd_egressip1: str | None = None
     okd_egressip2: str | None = None
+    using_egressip: str | None = None
+    egressip_assigned_node: str | None = None
 
 
 @dataclass
@@ -206,6 +208,28 @@ def drop_legacy_shared_inventory_tables(connection) -> list[str]:
     return dropped
 
 
+def _ensure_namespace_egress_columns(connection, namespace_table: str) -> None:
+    """Add using_egressip / egressip_assigned_node to existing namespace tables."""
+    columns = {
+        str(row["name"])
+        for row in connection.execute(
+            f"PRAGMA table_info({_quote_ident(namespace_table)})"
+        ).fetchall()
+    }
+    if "using_egressip" not in columns:
+        connection.execute(
+            f"ALTER TABLE {_quote_ident(namespace_table)} "
+            "ADD COLUMN using_egressip VARCHAR(20)"
+        )
+        logger.info("Added %s.using_egressip", namespace_table)
+    if "egressip_assigned_node" not in columns:
+        connection.execute(
+            f"ALTER TABLE {_quote_ident(namespace_table)} "
+            "ADD COLUMN egressip_assigned_node VARCHAR(50)"
+        )
+        logger.info("Added %s.egressip_assigned_node", namespace_table)
+
+
 def ensure_cluster_inventory_tables(connection, cluster_name: str) -> tuple[str, str, str, str]:
     """Create per-cluster inventory tables if missing. Returns table names."""
     nodes_t, ns_t, dep_t, pvc_t = cluster_inventory_tables(cluster_name)
@@ -235,10 +259,14 @@ def ensure_cluster_inventory_tables(connection, cluster_name: str) -> tuple[str,
                 resource_quota_mem_limit INTEGER,
                 resource_quota_pod_limit INTEGER,
                 okd_egressip1 VARCHAR(20),
-                okd_egressip2 VARCHAR(20)
+                okd_egressip2 VARCHAR(20),
+                using_egressip VARCHAR(20),
+                egressip_assigned_node VARCHAR(50)
             )
             """
         )
+    else:
+        _ensure_namespace_egress_columns(connection, ns_t)
     if dep_t not in tables:
         connection.execute(
             f"""
@@ -581,8 +609,9 @@ def replace_cluster_snapshot(
                 INSERT INTO {_quote_ident(ns_t)} (
                     namespace, okd_display_name,
                     resource_quota_cpu_limit, resource_quota_mem_limit, resource_quota_pod_limit,
-                    okd_egressip1, okd_egressip2
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    okd_egressip1, okd_egressip2,
+                    using_egressip, egressip_assigned_node
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     namespace.namespace[:50],
@@ -592,6 +621,9 @@ def replace_cluster_snapshot(
                     namespace.resource_quota_pod_limit,
                     (namespace.okd_egressip1 or None) and namespace.okd_egressip1[:20],
                     (namespace.okd_egressip2 or None) and namespace.okd_egressip2[:20],
+                    (namespace.using_egressip or None) and namespace.using_egressip[:20],
+                    (namespace.egressip_assigned_node or None)
+                    and namespace.egressip_assigned_node[:50],
                 ),
             )
             namespace_ids[namespace.namespace] = int(cursor.lastrowid)

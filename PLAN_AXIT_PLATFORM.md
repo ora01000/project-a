@@ -813,10 +813,90 @@ Whatap 이벤트 수신을 통해 받은 이벤트를 자동으로 jobs 에 제�
     - {테이블명}_{k8s_cluster.last_date : format(YYYYMMDD_HHMMSS)}
      
     
-
+## 260806 에서 수정필요
     
+인프라 정보 scrape 백엔드 - 수정
+- 260806 개발 코드에서 테이블 구조/백엔드/프론트 수정이 필요하다.
+- k8s_nodes, k8s_namespaces, k8s_deployments, k8s_pvcs 와 업데이트 이후 백업된 테이블 {테이블명}_YYYYMMDD_HHMMSS 는 모두 drop 한다.
+- k8s_cluster 는 유지한다.
+  - 사용자가 k8s_cluster 에 클러스터 정보를 추가하고 수집을 하면 각 클러스터 별로 테이블을 동적 생성한다.
+  - 저장 테이블
+    - 테이블#2 명 : {cluster_name}_k8s_nodes
+      - 컬럼
+        - idx : int, auto increment, pk
+        - node_name : varchar(50)
+        - node_cpu : int
+        - node_mem : int
+        - node_os : varchar(50)
+        - node_k8s_ver : varchar(50)
+    - 테이블#3 명 : {cluster_name}_k8s_namespaces
+      - 컬럼
+        - idx : int, auto increment, pk
+        - namespace : varchar(50)
+        - okd_display_name : varchar(100)
+        - resource_quota_cpu_limit : float, 개 단위로 환산
+        - resource_quota_mem_limit : int, Gi 단위로 환산
+        - resource_quota_pod_limit : int
+        - okd_egressip1 : varchar(20)
+        - okd_egressip2 : varchar(20)
+        - using_egressip : varchar(20)
+        - egressip_assigned_node : varchar(50)
+    - 테이블#4 명 : {cluster_name}_k8s_deployments
+      - 컬럼
+        - idx : int, auto increment, pk
+        - namespace_id : int, k8s_namespaces.idx
+        - name : varchar(50)
+        - type : varchar(20), deployment | statusfulset | deploymentconfig | daemonset 중 1
+        - replicas : int
+        - resource_cpu_request : float, 개 단위로 환산
+        - resource_mem_request : int, Gi 단위로 환산
+        - resource_cpu_limit : float, 개 단위로 환산
+        - resource_mem_limit : int, Gi 단위로 환산
+        - containers_cnt : int
+        - containers_name : varchar(300) -> json list 
+        - containers_image : varchar(500) -> json list
+    - 테이블#5 명 : {cluster_name}_k8s_pvcs
+      - 컬럼
+        - idx : int, auto increment, pk
+        - namespace_id : int, k8s_namespaces.idx
+        - deployment_id : int, k8s_deployments.idx
+        - name : varchar(50)
+        - storage_class : varchar(20)
+        - capacity : int. Gi 단위로 환산
+        - used : int, Gi 단위로 환산
+        - access_mode : varchar(20)
+
+- 인프라 정보 scrape 백엔드 동작
+  - openshift 라이브러리 사용
+  - 목업(로컬) 테스트의 경우 ocp/okd 가 아닌 일반 kubernetes(orbstack)으로 ocp/okd 용 커스텀api(ex. DeployemtnConfig, egressIPs 등) 수집하고자 하는 object가 없으므로, 값이 없는 경우 이를 무시하고 동작하도록 구성
+    - http 모드에서 kubeconfig가 필요하다.
+      - kubeconfig는 configmap 으로 마운트하며 마운트경로는 /etc/k8s/kubeconfig 이다.
+    - 목업은 로컬이므로 kubeconfig가 필요하지 않다.
+
+- 인프라 정보 scrape 프론트엔드
+  - 환경설정 > 관리자 작업 > "K8S 인프라 구성" 메뉴 생성, 클릭시 팝업창 생성
+  - 팝업창에서는 클러스터 정보(k8s_cluster 테이블)를 테이블로 출력(조회 모드)
+    - 조회 모드
+      - 오른쪽 상단에 편집 버튼 배치, 오른쪽 하단에 닫기 버튼 배치
+      - 각 클러스터의 row 마지막 컬럼에 수집 버튼 배치
+      - 편집 버튼을 클릭하면 다음과 같이 편집 모드로 변경된다.
+    - 편집 모드
+      - 테이블의 오른쪽 상단에 + / - 버튼을 추가 
+        - "+" 버튼은 테이블 레코드를 입력하는 row 가 추가되고, "-" 버튼을 누르면 입력을 위해 생성된 row 가 삭제된다.
+        - 각 레코드의 마지막 컬럼에 삭제 버튼 배치, 삭제시 해당 row 삭제
+      - 테이블의 오른쪽 하단에 저장, 닫기 버튼 배치
+        - 저장 버튼을 누르면 테이블을 업데이트 하고 편집모드로 돌아간다
+    - last_update 컬럼은 입력받지 않고 표시만 한다. last_upate는 백엔드가 정보 수집을 할때 자동으로 입력되는 시각이다.
+  - 수집 버튼을 누르면 해당 row의 클러스터 정보를 앞서 정의한 테이블에 맞춰 수집, 업데이트한다.
+  - 업데이트 하기 전에 대상 테이블을 다음과 같이 복사한다.
+    - {테이블명}_{k8s_cluster.last_date : format(YYYYMMDD_HHMMSS)}
 
 
+방안문의) 
+OKD 버전이 클러스터마다 달라서 ovn-kubernetes 를 사용하는 버전은 egressIPs 를 별도 오브젝트로 관리하고, 레거시 ovs를 사용하는 경우 egressIPs 가 없고 netnamespace 로 관리한다. 현재 개발된 코드는 netnamespace 의 정보는 잘 반영하나 ovn-kubernetes의 egressIPs 는 namespace 와 매칭을 하지 못한다. 현재 ocp client 에서 버전별로 egressIP를 namespace와 매칭할 수 있는 방안이 있는가?
 
+using_egressip 는 다음 정보에서 가져옴
+- namespace 와 매칭된 EgressIP 의 .status.items[0].egressIP
 
-
+egressip_assigned_node 는 다음 정보에서 가져옴
+- namespace 와 매칭된 EgressIP 의 .status.items[0].node

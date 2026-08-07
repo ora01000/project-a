@@ -144,7 +144,7 @@ export function TableDebugModal({ onClose }: TableDebugModalProps) {
         role="dialog"
         aria-modal="true"
         aria-labelledby="table-debug-dialog-title"
-        className="flex max-h-[90vh] w-full max-w-6xl flex-col rounded-xl border border-slate-700 bg-slate-900 p-5 shadow-xl"
+        className="flex max-h-[90vh] w-full max-w-[min(100%,108rem)] flex-col rounded-xl border border-slate-700 bg-slate-900 p-5 shadow-xl"
       >
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 id="table-debug-dialog-title" className="text-lg font-semibold text-slate-100">
@@ -185,12 +185,13 @@ export function TableDebugModal({ onClose }: TableDebugModalProps) {
           <p className="mt-4 text-sm text-slate-400">조회할 테이블이 없습니다.</p>
         ) : (
           <div className="mt-4 flex min-h-0 flex-1 flex-col gap-3 md:flex-row">
-            <aside className="max-h-40 shrink-0 overflow-y-auto rounded-md border border-slate-700 md:max-h-none md:w-52">
+            <aside className="max-h-40 shrink-0 overflow-y-auto rounded-md border border-slate-700 md:max-h-none md:w-[19.5rem]">
               <ul className="py-1 text-sm">
                 {tables.map((table) => (
                   <li key={table.name}>
                     <button
                       type="button"
+                      title={table.name}
                       onClick={() => selectTable(table.name)}
                       className={`flex w-full items-center justify-between gap-2 px-3 py-2 text-left ${
                         selectedName === table.name
@@ -198,7 +199,9 @@ export function TableDebugModal({ onClose }: TableDebugModalProps) {
                           : "text-slate-200 hover:bg-slate-800"
                       }`}
                     >
-                      <span className="truncate font-mono">{table.name}</span>
+                      <span className="truncate font-mono" title={table.name}>
+                        {table.name}
+                      </span>
                       <span className="shrink-0 text-xs text-slate-400">{table.row_count}</span>
                     </button>
                   </li>
