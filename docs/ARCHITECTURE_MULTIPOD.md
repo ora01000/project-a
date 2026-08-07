@@ -56,6 +56,29 @@ Redis       ← 세션·노트 버퍼·입력 히스토리·(선택) 분산 락
 
 전체 쿼리 일괄 치환은 단계적 PR로 진행한다. 엔진·스키마·락이 선행 인프라다.
 
+### SQLite → PG 데이터 이관 (검토용)
+
+일회성 스크립트: [`scripts/migrate_sqlite_to_postgres.py`](../scripts/migrate_sqlite_to_postgres.py)
+
+- **기본은 dry-run** (계획·건수만 출력). 실제 쓰기는 `--execute` 필요.
+- 코어 테이블 FK 순서 이관, `k8s_cluster` → `infra_cluster` 매핑.
+- 동적 inventory 테이블은 컬럼 introspect 후 PG에 CREATE·INSERT (백업 세대 포함).
+- 선택: `--import-mynote-files`로 `data/mynotes` 파일을 `mynote_contents`에 적재.
+- 권장 순서: dry-run 검토 → 대상 PG에 `--apply-schema` 또는 앱 `init_database` → `--execute` (필요 시 `--truncate-target`).
+
+```bash
+uv run scripts/migrate_sqlite_to_postgres.py \
+  --sqlite data/app.db \
+  --database-url 'postgresql://user:pass@host:5432/db'
+
+uv run scripts/migrate_sqlite_to_postgres.py \
+  --sqlite data/app.db \
+  --database-url 'postgresql://...' \
+  --apply-schema --truncate-target --import-mynote-files --execute
+```
+
+PostgreSQL 버전은 별도 고정하지 않으나 운영은 **14/15+** 권장.
+
 ## Phase 2 — Worker 분리
 
 - `BACKEND_ROLE=api`: job processor / mynote flush / k8s scrape **미기동**
