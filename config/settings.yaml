@@ -79,6 +79,15 @@ mynotes:
   flush_interval_seconds: 300
   initial_delay_seconds: 0
 
+# K8S 인프라 scrape (관리자 UI 수동 수집)
+# http 모드: /etc/k8s/kubeconfig 마운트 필요
+# mock/local: 파일 없으면 KUBECONFIG/~/.kube/config 사용
+k8s_collector:
+  kubeconfig: /etc/k8s/kubeconfig
+  fallback_to_current_context: true
+  # contexts:
+  #   dtest-k8s: orbstack
+
 # 인증 프로바이더 (환경변수 AUTH_PROVIDER_TYPE / OAUTH_* 로 오버라이드)
 auth:
   provider_type: "db"   # db | madang

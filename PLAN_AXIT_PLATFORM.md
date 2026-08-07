@@ -659,8 +659,9 @@ axit runtime 에 추가할 에이전트의 loca_agent_id 는 JOB_AUDITOR_AGENT �
 - 이모지 입력 관련
 - 대화형 터미널에서 작업 접수를 받을 수 있도록 하면 좋겠다.(완료)
   - 작업 요청서 작성 도우미가 있으면 좋겠다
-  
 - 세션 타임아웃 시간 표시(완료)
+- Whatap 이벤트 수신 자동 분석/리포팅(완료)
+- 
 
 ## 의견에 대한 구현
 현재 작업의 흐름을 파악할 수 있는 워크플로우
@@ -700,6 +701,122 @@ about 메뉴에서 표시 내용 변경
   - 릴리즈 버전 : 260806
 
 변경이력을 최근순으로 변경
+
+jobs.job_type 별 용도 추가
+- jobs.job_type = 2 : Whatap 이벤트 수신을 통해 받은 이벤트를 자동으로 job 제출
+
+Whatap 이벤트 수신을 통해 받은 이벤트를 자동으로 jobs 에 제출한다.
+- job_type = 2
+- job_title = "[Whatap 이벤트]" + {전송받은 json의 .projectName} + "에서 발생한 이벤트 분석(자동)"
+- job_content = "The following JSON represents an event generated in WhaTap. Please identify the infrastructure involved (Kubernetes, KubeVirt, or VMware), analyze the event details, and examine the current status of the problematic resource using the appropriate agent" + {nextline} + {전송받은 json 원문}
+
+- job_type = 2는 제출되면 status_code = 2로 넣는다 (승인없이 자동 실행).
+- approver_registered_date = 제출된 시각
+- requester_name = "Whatap"
+- requester_email = "whatap@admin.io"
+- requester_depart = "Whatap"
+- request_date = {전송받은 json의 .time 값은 타임스탬프 값으로 이를 datetime으로 변경}
+
+작업 노트 패널에 "Whatap 이벤트 리포트" 탭 추가
+- Whatap 이벤트 리포트 탭은 "나의 작업결과" 와 동일한 형태이나 job_type=2 에 대해서만 출력한다.
+- 모든 사용자가 볼수 있다.
+
+관리자용 Whatap 이벤트 테스트 전송을 넣는다. 환경설정 > 관리자 작업 > Whatap 이벤트 테스트
+- users.role = 0 or 100 만 사용 가능
+- json 포맷을 입력받는 폼을 popup 한다.
+- 전송을 누르면 Whatap 이벤트를 제출한다.
+
+에이전트 할당
+- 오른쪽 패널의 할당된 에이전트 컬럼 옆에 모두 할당 버튼을 생성, 클릭시 왼쪽 패널에 나열된 모든 에이전트를 할당한다.
+- 버튼 배치 이동 : 테이블 row 에 컬럼을 마지막에 추가하고 버튼을 마지막 컬럼에 배치한다
+
+인프라 정보 scrape 백엔드
+- 기존 에이전트에 포함된 인프라 정보 수집을 대신하여 백엔드 기능으로 새로 개발한다.
+- 인프라 정보 scrape 백엔드는 Kubernetes 인프라를 대상으로 한다.
+- 기존 테이블과 비교하여 아래 정의로 재정의한다.
+  - 저장 테이블
+    - 테이블#1 명 : k8s_cluster
+      - 컬럼
+        - idx : int, auto increment, pk
+        - cluster_name : varchar(50)
+        - last_update : date
+    - 테이블#2 명 : k8s_nodes
+      - 컬럼
+        - idx : int, auto increment, pk
+        - cluster_id : int, k8s_cluster.idx
+        - node_name : varchar(50)
+        - node_cpu : int
+        - node_mem : int
+        - node_os : varchar(50)
+        - node_k8s_ver : varchar(50)
+    - 테이블#3 명 : k8s_namespaces
+      - 컬럼
+        - idx : int, auto increment, pk
+        - cluster_id : int, k8s_cluster.idx
+        - namespace : varchar(50)
+        - okd_display_name : varchar(100)
+        - resource_quota_cpu_limit : float, 개 단위로 환산
+        - resource_quota_mem_limit : int, Gi 단위로 환산
+        - resource_quota_pod_limit : int
+        - okd_egressip1 : varchar(20)
+        - okd_egressip2 : varchar(20)
+    - 테이블#4 명 : k8s_deployments
+      - 컬럼
+        - idx : int, auto increment, pk
+        - cluster_id : int, k8s_cluster.idx
+        - namespace_id : int, k8s_namespaces.idx
+        - name : varchar(50)
+        - type : varchar(20), deployment | statusfulset | deploymentconfig | daemonset 중 1
+        - replicas : int
+        - resource_cpu_request : float, 개 단위로 환산
+        - resource_mem_request : int, Gi 단위로 환산
+        - resource_cpu_limit : float, 개 단위로 환산
+        - resource_mem_limit : int, Gi 단위로 환산
+        - containers_cnt : int
+        - containers_name : varchar(300) -> json list 
+        - containers_image : varchar(500) -> json list
+    - 테이블#5 명 : k8s_pvcs
+      - 컬럼
+        - idx : int, auto increment, pk
+        - cluster_id : int, k8s_cluster.idx
+        - namespace_id : int, k8s_namespaces.idx
+        - deployment_id : int, k8s_deployments.idx
+        - name : varchar(50)
+        - storage_class : varchar(20)
+        - capacity : int. Gi 단위로 환산
+        - used : int, Gi 단위로 환산
+        - access_mode : varchar(20)
+
+- 인프라 정보 scrape 백엔드 동작
+  - openshift 라이브러리 사용
+  - 목업(로컬) 테스트의 경우 ocp/okd 가 아닌 일반 kubernetes(orbstack)으로 ocp/okd 용 커스텀api(ex. DeployemtnConfig, egressIPs 등) 수집하고자 하는 object가 없으므로, 값이 없는 경우 이를 무시하고 동작하도록 구성
+    - http 모드에서 kubeconfig가 필요하다.
+      - kubeconfig는 configmap 으로 마운트하며 마운트경로는 /etc/k8s/kubeconfig 이다.
+    - 목업은 로컬이므로 kubeconfig가 필요하지 않다.
+
+- 인프라 정보 scrape 프론트엔드
+  - 환경설정 > 관리자 작업 > "K8S 인프라 구성" 메뉴 생성, 클릭시 팝업창 생성
+  - 팝업창에서는 클러스터 정보(k8s_cluster 테이블)를 테이블로 출력(조회 모드)
+    - 조회 모드
+      - 오른쪽 상단에 편집 버튼 배치, 오른쪽 하단에 닫기 버튼 배치
+      - 각 클러스터의 row 마지막 컬럼에 수집 버튼 배치
+      - 편집 버튼을 클릭하면 다음과 같이 편집 모드로 변경된다.
+    - 편집 모드
+      - 테이블의 오른쪽 상단에 + / - 버튼을 추가 
+        - "+" 버튼은 테이블 레코드를 입력하는 row 가 추가되고, "-" 버튼을 누르면 입력을 위해 생성된 row 가 삭제된다.
+        - 각 레코드의 마지막 컬럼에 삭제 버튼 배치, 삭제시 해당 row 삭제
+      - 테이블의 오른쪽 하단에 저장, 닫기 버튼 배치
+        - 저장 버튼을 누르면 테이블을 업데이트 하고 편집모드로 돌아간다
+    - last_update 컬럼은 입력받지 않고 표시만 한다. last_upate는 백엔드가 정보 수집을 할때 자동으로 입력되는 시각이다.
+  - 수집 버튼을 누르면 해당 row의 클러스터 정보를 앞서 정의한 테이블에 맞춰 수집, 업데이트한다.
+  - 업데이트 하기 전에 대상 테이블을 다음과 같이 복사한다.
+    - {테이블명}_{k8s_cluster.last_date : format(YYYYMMDD_HHMMSS)}
+     
+    
+
+    
+
+
 
 
 

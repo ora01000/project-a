@@ -83,3 +83,10 @@ CREATE TABLE IF NOT EXISTS mynotes (
     origin_file VARCHAR(200) NOT NULL,
     last_update TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS k8s_cluster (
+    idx INTEGER PRIMARY KEY AUTOINCREMENT,
+    cluster_name VARCHAR(50) NOT NULL UNIQUE,
+    last_update TEXT
+);
+

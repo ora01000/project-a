@@ -1,0 +1,687 @@
+"""Persist Kubernetes inventory into per-cluster dynamic SQLite tables.
+
+Layout:
+  k8s_cluster (shared registry)
+  {cluster_name}_k8s_nodes
+  {cluster_name}_k8s_namespaces
+  {cluster_name}_k8s_deployments
+  {cluster_name}_k8s_pvcs
+
+Backups before replace: {table}_{YYYYMMDD_HHMMSS}
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import re
+from dataclasses import dataclass, field
+from datetime import datetime
+from pathlib import Path
+from typing import Any
+
+from backend.app.db.database import get_connection
+from backend.app.timezone import format_display_datetime, now_display_datetime
+
+logger = logging.getLogger(__name__)
+
+INVENTORY_SUFFIXES = (
+    "k8s_nodes",
+    "k8s_namespaces",
+    "k8s_deployments",
+    "k8s_pvcs",
+)
+
+# Shared (pre-260806-fix) tables to drop on migrate.
+LEGACY_SHARED_INVENTORY_TABLES = (
+    "k8s_pods",
+    "k8s_pvcs",
+    "k8s_deployments",
+    "k8s_namespaces",
+    "k8s_nodes",
+)
+
+_BACKUP_STAMP_RE = re.compile(r"[^0-9]")
+_CLUSTER_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,49}$")
+_LEGACY_SHARED_BACKUP_RE = re.compile(
+    r"^k8s_(?:pods|pvcs|deployments|namespaces|nodes)_\d{8}_\d{6}$"
+)
+
+
+@dataclass
+class K8sNodeRow:
+    node_name: str
+    node_cpu: int | None = None
+    node_mem: int | None = None
+    node_os: str | None = None
+    node_k8s_ver: str | None = None
+
+
+@dataclass
+class K8sNamespaceRow:
+    namespace: str
+    okd_display_name: str | None = None
+    resource_quota_cpu_limit: float | None = None
+    resource_quota_mem_limit: int | None = None
+    resource_quota_pod_limit: int | None = None
+    okd_egressip1: str | None = None
+    okd_egressip2: str | None = None
+
+
+@dataclass
+class K8sDeploymentRow:
+    namespace: str
+    name: str
+    type: str
+    replicas: int | None = None
+    resource_cpu_request: float | None = None
+    resource_mem_request: int | None = None
+    resource_cpu_limit: float | None = None
+    resource_mem_limit: int | None = None
+    containers_cnt: int | None = None
+    containers_name: list[str] = field(default_factory=list)
+    containers_image: list[str] = field(default_factory=list)
+
+
+@dataclass
+class K8sPvcRow:
+    namespace: str
+    name: str
+    deployment_name: str | None = None
+    deployment_type: str | None = None
+    storage_class: str | None = None
+    capacity: int | None = None
+    used: int | None = None
+    access_mode: str | None = None
+
+
+@dataclass
+class K8sPodRow:
+    """In-memory only — used to map PVCs to workloads. Not persisted."""
+
+    namespace: str
+    name: str
+    deployment_name: str | None = None
+    deployment_type: str | None = None
+    scheduled_node_name: str | None = None
+
+
+@dataclass
+class K8sClusterSnapshot:
+    cluster_name: str
+    nodes: list[K8sNodeRow] = field(default_factory=list)
+    namespaces: list[K8sNamespaceRow] = field(default_factory=list)
+    deployments: list[K8sDeploymentRow] = field(default_factory=list)
+    pvcs: list[K8sPvcRow] = field(default_factory=list)
+    pods: list[K8sPodRow] = field(default_factory=list)
+
+
+@dataclass
+class K8sClusterRecord:
+    idx: int
+    cluster_name: str
+    last_update: str | None = None
+
+
+def validate_cluster_name(cluster_name: str) -> str:
+    name = (cluster_name or "").strip()
+    if not name:
+        raise ValueError("cluster_name은 필수입니다.")
+    if len(name) > 50:
+        raise ValueError("cluster_name은 50자를 초과할 수 없습니다.")
+    if not _CLUSTER_NAME_RE.match(name):
+        raise ValueError(
+            "cluster_name은 영문/숫자/._- 만 사용할 수 있으며 테이블명으로 안전해야 합니다."
+        )
+    return name
+
+
+def cluster_inventory_table(cluster_name: str, suffix: str) -> str:
+    name = validate_cluster_name(cluster_name)
+    if suffix not in INVENTORY_SUFFIXES:
+        raise ValueError(f"unknown inventory suffix: {suffix}")
+    return f"{name}_{suffix}"
+
+
+def cluster_inventory_tables(cluster_name: str) -> tuple[str, str, str, str]:
+    return (
+        cluster_inventory_table(cluster_name, "k8s_nodes"),
+        cluster_inventory_table(cluster_name, "k8s_namespaces"),
+        cluster_inventory_table(cluster_name, "k8s_deployments"),
+        cluster_inventory_table(cluster_name, "k8s_pvcs"),
+    )
+
+
+def _quote_ident(name: str) -> str:
+    return '"' + name.replace('"', '""') + '"'
+
+
+def _json_list(values: list[str], max_len: int) -> str | None:
+    if not values:
+        return "[]"
+    payload = json.dumps(values, ensure_ascii=False)
+    if len(payload) <= max_len:
+        return payload
+    truncated: list[str] = []
+    for value in values:
+        candidate = truncated + [value]
+        encoded = json.dumps(candidate, ensure_ascii=False)
+        if len(encoded) > max_len:
+            break
+        truncated = candidate
+    return json.dumps(truncated, ensure_ascii=False)
+
+
+def format_backup_stamp(last_update: str | None) -> str:
+    """Build YYYYMMDD_HHMMSS from last_update, or now if empty."""
+    raw = (last_update or "").strip()
+    digits = _BACKUP_STAMP_RE.sub("", raw)
+    if len(digits) >= 14:
+        return f"{digits[:8]}_{digits[8:14]}"
+    now = now_display_datetime()
+    return now.strftime("%Y%m%d_%H%M%S")
+
+
+def _list_user_tables(connection) -> set[str]:
+    rows = connection.execute(
+        "SELECT name FROM sqlite_master WHERE type='table'"
+    ).fetchall()
+    return {str(row[0] if not hasattr(row, "keys") else row["name"]) for row in rows}
+
+
+def drop_legacy_shared_inventory_tables(connection) -> list[str]:
+    """Drop shared k8s_* inventory tables and their YYYYMMDD_HHMMSS backups."""
+    dropped: list[str] = []
+    tables = _list_user_tables(connection)
+    for table_name in LEGACY_SHARED_INVENTORY_TABLES:
+        if table_name in tables:
+            connection.execute(f"DROP TABLE IF EXISTS {_quote_ident(table_name)}")
+            dropped.append(table_name)
+    for table_name in sorted(tables):
+        if _LEGACY_SHARED_BACKUP_RE.match(table_name):
+            connection.execute(f"DROP TABLE IF EXISTS {_quote_ident(table_name)}")
+            dropped.append(table_name)
+    if dropped:
+        logger.info("Dropped legacy shared k8s inventory tables: %s", dropped)
+    return dropped
+
+
+def ensure_cluster_inventory_tables(connection, cluster_name: str) -> tuple[str, str, str, str]:
+    """Create per-cluster inventory tables if missing. Returns table names."""
+    nodes_t, ns_t, dep_t, pvc_t = cluster_inventory_tables(cluster_name)
+    tables = _list_user_tables(connection)
+
+    if nodes_t not in tables:
+        connection.execute(
+            f"""
+            CREATE TABLE {_quote_ident(nodes_t)} (
+                idx INTEGER PRIMARY KEY AUTOINCREMENT,
+                node_name VARCHAR(50) NOT NULL,
+                node_cpu INTEGER,
+                node_mem INTEGER,
+                node_os VARCHAR(50),
+                node_k8s_ver VARCHAR(50)
+            )
+            """
+        )
+    if ns_t not in tables:
+        connection.execute(
+            f"""
+            CREATE TABLE {_quote_ident(ns_t)} (
+                idx INTEGER PRIMARY KEY AUTOINCREMENT,
+                namespace VARCHAR(50) NOT NULL,
+                okd_display_name VARCHAR(100),
+                resource_quota_cpu_limit REAL,
+                resource_quota_mem_limit INTEGER,
+                resource_quota_pod_limit INTEGER,
+                okd_egressip1 VARCHAR(20),
+                okd_egressip2 VARCHAR(20)
+            )
+            """
+        )
+    if dep_t not in tables:
+        connection.execute(
+            f"""
+            CREATE TABLE {_quote_ident(dep_t)} (
+                idx INTEGER PRIMARY KEY AUTOINCREMENT,
+                namespace_id INTEGER NOT NULL,
+                name VARCHAR(50) NOT NULL,
+                type VARCHAR(20) NOT NULL,
+                replicas INTEGER,
+                resource_cpu_request REAL,
+                resource_mem_request INTEGER,
+                resource_cpu_limit REAL,
+                resource_mem_limit INTEGER,
+                containers_cnt INTEGER,
+                containers_name VARCHAR(300),
+                containers_image VARCHAR(500),
+                FOREIGN KEY (namespace_id) REFERENCES {_quote_ident(ns_t)}(idx)
+            )
+            """
+        )
+    if pvc_t not in tables:
+        connection.execute(
+            f"""
+            CREATE TABLE {_quote_ident(pvc_t)} (
+                idx INTEGER PRIMARY KEY AUTOINCREMENT,
+                namespace_id INTEGER NOT NULL,
+                deployment_id INTEGER,
+                name VARCHAR(50) NOT NULL,
+                storage_class VARCHAR(20),
+                capacity INTEGER,
+                used INTEGER,
+                access_mode VARCHAR(20),
+                FOREIGN KEY (namespace_id) REFERENCES {_quote_ident(ns_t)}(idx),
+                FOREIGN KEY (deployment_id) REFERENCES {_quote_ident(dep_t)}(idx)
+            )
+            """
+        )
+    return nodes_t, ns_t, dep_t, pvc_t
+
+
+def backup_cluster_inventory_tables(
+    connection,
+    cluster_name: str,
+    *,
+    stamp: str,
+) -> list[str]:
+    """Copy existing per-cluster tables to {table}_{YYYYMMDD_HHMMSS}."""
+    created: list[str] = []
+    safe_stamp = re.sub(r"[^0-9_]", "", stamp) or format_backup_stamp(None)
+    tables = _list_user_tables(connection)
+    for table_name in cluster_inventory_tables(cluster_name):
+        if table_name not in tables:
+            continue
+        backup_name = f"{table_name}_{safe_stamp}"
+        connection.execute(f"DROP TABLE IF EXISTS {_quote_ident(backup_name)}")
+        connection.execute(
+            f"CREATE TABLE {_quote_ident(backup_name)} AS "
+            f"SELECT * FROM {_quote_ident(table_name)}"
+        )
+        created.append(backup_name)
+    if created:
+        logger.info("Backed up cluster=%s inventory -> %s", cluster_name, created)
+    return created
+
+
+def drop_cluster_inventory_tables(connection, cluster_name: str) -> list[str]:
+    """Drop per-cluster inventory tables and their timestamped backups."""
+    dropped: list[str] = []
+    try:
+        prefixes = [f"{validate_cluster_name(cluster_name)}_{suffix}" for suffix in INVENTORY_SUFFIXES]
+    except ValueError:
+        return dropped
+
+    tables = _list_user_tables(connection)
+    # Drop backups first, then live tables (pvcs/deps before namespaces for FK safety).
+    for table_name in sorted(tables, reverse=True):
+        for prefix in prefixes:
+            if table_name == prefix or table_name.startswith(f"{prefix}_"):
+                connection.execute(f"DROP TABLE IF EXISTS {_quote_ident(table_name)}")
+                dropped.append(table_name)
+                break
+    if dropped:
+        logger.info("Dropped cluster=%s inventory tables: %s", cluster_name, dropped)
+    return dropped
+
+
+def rename_cluster_inventory_tables(
+    connection,
+    old_name: str,
+    new_name: str,
+) -> list[tuple[str, str]]:
+    """Rename live per-cluster tables when cluster_name changes."""
+    if old_name == new_name:
+        return []
+    renamed: list[tuple[str, str]] = []
+    tables = _list_user_tables(connection)
+    for suffix in INVENTORY_SUFFIXES:
+        old_table = f"{old_name}_{suffix}"
+        new_table = f"{new_name}_{suffix}"
+        if old_table not in tables:
+            continue
+        if new_table in tables:
+            connection.execute(f"DROP TABLE IF EXISTS {_quote_ident(new_table)}")
+        connection.execute(
+            f"ALTER TABLE {_quote_ident(old_table)} RENAME TO {_quote_ident(new_table)}"
+        )
+        renamed.append((old_table, new_table))
+    if renamed:
+        logger.info("Renamed inventory tables %s -> %s: %s", old_name, new_name, renamed)
+    return renamed
+
+
+def list_k8s_clusters(database_path: str | Path) -> list[K8sClusterRecord]:
+    with get_connection(database_path) as connection:
+        rows = connection.execute(
+            """
+            SELECT idx, cluster_name, last_update
+            FROM k8s_cluster
+            ORDER BY cluster_name
+            """
+        ).fetchall()
+    return [
+        K8sClusterRecord(
+            idx=int(row["idx"]),
+            cluster_name=str(row["cluster_name"]),
+            last_update=str(row["last_update"]) if row["last_update"] else None,
+        )
+        for row in rows
+    ]
+
+
+def get_k8s_cluster(
+    database_path: str | Path,
+    cluster_idx: int,
+) -> K8sClusterRecord | None:
+    with get_connection(database_path) as connection:
+        row = connection.execute(
+            """
+            SELECT idx, cluster_name, last_update
+            FROM k8s_cluster
+            WHERE idx = ?
+            """,
+            (cluster_idx,),
+        ).fetchone()
+    if row is None:
+        return None
+    return K8sClusterRecord(
+        idx=int(row["idx"]),
+        cluster_name=str(row["cluster_name"]),
+        last_update=str(row["last_update"]) if row["last_update"] else None,
+    )
+
+
+def delete_k8s_cluster(database_path: str | Path, cluster_idx: int) -> bool:
+    with get_connection(database_path) as connection:
+        row = connection.execute(
+            "SELECT idx, cluster_name FROM k8s_cluster WHERE idx = ?",
+            (cluster_idx,),
+        ).fetchone()
+        if row is None:
+            return False
+        drop_cluster_inventory_tables(connection, str(row["cluster_name"]))
+        connection.execute("DELETE FROM k8s_cluster WHERE idx = ?", (cluster_idx,))
+        connection.commit()
+    return True
+
+
+def save_k8s_clusters(
+    database_path: str | Path,
+    clusters: list[dict[str, Any]],
+) -> list[K8sClusterRecord]:
+    """Replace k8s_cluster rows with the provided list (name-only upsert).
+
+    - Existing idx kept when present
+    - Names must be unique and non-empty
+    - Clusters removed from the list are deleted (with per-cluster table drop)
+    - Renamed clusters rename their inventory tables
+    """
+    normalized: list[tuple[int | None, str]] = []
+    seen_names: set[str] = set()
+    for item in clusters:
+        name = validate_cluster_name(str(item.get("cluster_name") or ""))
+        if name in seen_names:
+            raise ValueError(f"중복된 cluster_name 입니다: {name}")
+        seen_names.add(name)
+        raw_idx = item.get("idx")
+        idx: int | None
+        if raw_idx is None or raw_idx == "":
+            idx = None
+        else:
+            idx = int(raw_idx)
+            if idx < 1:
+                raise ValueError(f"잘못된 idx 입니다: {raw_idx}")
+        normalized.append((idx, name))
+
+    with get_connection(database_path) as connection:
+        existing_rows = connection.execute(
+            "SELECT idx, cluster_name, last_update FROM k8s_cluster"
+        ).fetchall()
+        existing_by_idx = {int(row["idx"]): row for row in existing_rows}
+        keep_ids: set[int] = set()
+
+        for idx, name in normalized:
+            if idx is not None:
+                if idx not in existing_by_idx:
+                    raise ValueError(f"존재하지 않는 클러스터 idx 입니다: {idx}")
+                old_name = str(existing_by_idx[idx]["cluster_name"])
+                if old_name != name:
+                    rename_cluster_inventory_tables(connection, old_name, name)
+                connection.execute(
+                    "UPDATE k8s_cluster SET cluster_name = ? WHERE idx = ?",
+                    (name, idx),
+                )
+                keep_ids.add(idx)
+            else:
+                cursor = connection.execute(
+                    """
+                    INSERT INTO k8s_cluster (cluster_name, last_update)
+                    VALUES (?, NULL)
+                    """,
+                    (name,),
+                )
+                keep_ids.add(int(cursor.lastrowid))
+
+        for row in existing_rows:
+            cluster_id = int(row["idx"])
+            if cluster_id in keep_ids:
+                continue
+            drop_cluster_inventory_tables(connection, str(row["cluster_name"]))
+            connection.execute("DELETE FROM k8s_cluster WHERE idx = ?", (cluster_id,))
+
+        connection.commit()
+
+    return list_k8s_clusters(database_path)
+
+
+def get_or_create_k8s_cluster(connection, cluster_name: str) -> int:
+    name = validate_cluster_name(cluster_name)
+
+    row = connection.execute(
+        "SELECT idx FROM k8s_cluster WHERE cluster_name = ?",
+        (name,),
+    ).fetchone()
+    if row is not None:
+        return int(row["idx"])
+
+    cursor = connection.execute(
+        """
+        INSERT INTO k8s_cluster (cluster_name, last_update)
+        VALUES (?, NULL)
+        """,
+        (name,),
+    )
+    return int(cursor.lastrowid)
+
+
+def touch_k8s_cluster_last_update(
+    connection,
+    cluster_id: int,
+    *,
+    when: datetime | None = None,
+) -> str:
+    stamp = format_display_datetime(when) if when is not None else format_display_datetime()
+    connection.execute(
+        """
+        UPDATE k8s_cluster
+        SET last_update = ?
+        WHERE idx = ?
+        """,
+        (stamp, cluster_id),
+    )
+    return stamp
+
+
+def replace_cluster_snapshot(
+    database_path: str | Path,
+    snapshot: K8sClusterSnapshot,
+    *,
+    cluster_idx: int | None = None,
+) -> dict[str, Any]:
+    cluster_name = validate_cluster_name(snapshot.cluster_name)
+
+    with get_connection(database_path) as connection:
+        if cluster_idx is not None:
+            row = connection.execute(
+                "SELECT idx, cluster_name, last_update FROM k8s_cluster WHERE idx = ?",
+                (cluster_idx,),
+            ).fetchone()
+            if row is None:
+                raise ValueError(f"cluster idx not found: {cluster_idx}")
+            cluster_id = int(row["idx"])
+            cluster_name = validate_cluster_name(str(row["cluster_name"]))
+            previous_last_update = (
+                str(row["last_update"]) if row["last_update"] else None
+            )
+        else:
+            cluster_id = get_or_create_k8s_cluster(connection, cluster_name)
+            row = connection.execute(
+                "SELECT last_update FROM k8s_cluster WHERE idx = ?",
+                (cluster_id,),
+            ).fetchone()
+            previous_last_update = (
+                str(row["last_update"]) if row and row["last_update"] else None
+            )
+
+        stamp = format_backup_stamp(previous_last_update)
+        backups = backup_cluster_inventory_tables(
+            connection, cluster_name, stamp=stamp
+        )
+        nodes_t, ns_t, dep_t, pvc_t = ensure_cluster_inventory_tables(
+            connection, cluster_name
+        )
+
+        # Clear in FK-safe order
+        connection.execute(f"DELETE FROM {_quote_ident(pvc_t)}")
+        connection.execute(f"DELETE FROM {_quote_ident(dep_t)}")
+        connection.execute(f"DELETE FROM {_quote_ident(ns_t)}")
+        connection.execute(f"DELETE FROM {_quote_ident(nodes_t)}")
+
+        for node in snapshot.nodes:
+            connection.execute(
+                f"""
+                INSERT INTO {_quote_ident(nodes_t)} (
+                    node_name, node_cpu, node_mem, node_os, node_k8s_ver
+                ) VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    node.node_name[:50],
+                    node.node_cpu,
+                    node.node_mem,
+                    (node.node_os or None) and node.node_os[:50],
+                    (node.node_k8s_ver or None) and node.node_k8s_ver[:50],
+                ),
+            )
+
+        namespace_ids: dict[str, int] = {}
+        for namespace in snapshot.namespaces:
+            cursor = connection.execute(
+                f"""
+                INSERT INTO {_quote_ident(ns_t)} (
+                    namespace, okd_display_name,
+                    resource_quota_cpu_limit, resource_quota_mem_limit, resource_quota_pod_limit,
+                    okd_egressip1, okd_egressip2
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    namespace.namespace[:50],
+                    (namespace.okd_display_name or None) and namespace.okd_display_name[:100],
+                    namespace.resource_quota_cpu_limit,
+                    namespace.resource_quota_mem_limit,
+                    namespace.resource_quota_pod_limit,
+                    (namespace.okd_egressip1 or None) and namespace.okd_egressip1[:20],
+                    (namespace.okd_egressip2 or None) and namespace.okd_egressip2[:20],
+                ),
+            )
+            namespace_ids[namespace.namespace] = int(cursor.lastrowid)
+
+        deployment_ids: dict[tuple[str, str, str], int] = {}
+        for deployment in snapshot.deployments:
+            namespace_id = namespace_ids.get(deployment.namespace)
+            if namespace_id is None:
+                continue
+            cursor = connection.execute(
+                f"""
+                INSERT INTO {_quote_ident(dep_t)} (
+                    namespace_id, name, type, replicas,
+                    resource_cpu_request, resource_mem_request,
+                    resource_cpu_limit, resource_mem_limit,
+                    containers_cnt, containers_name, containers_image
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    namespace_id,
+                    deployment.name[:50],
+                    deployment.type[:20],
+                    deployment.replicas,
+                    deployment.resource_cpu_request,
+                    deployment.resource_mem_request,
+                    deployment.resource_cpu_limit,
+                    deployment.resource_mem_limit,
+                    deployment.containers_cnt,
+                    _json_list(deployment.containers_name, 300),
+                    _json_list(deployment.containers_image, 500),
+                ),
+            )
+            deployment_ids[(deployment.namespace, deployment.name, deployment.type)] = int(
+                cursor.lastrowid
+            )
+
+        for pvc in snapshot.pvcs:
+            namespace_id = namespace_ids.get(pvc.namespace)
+            if namespace_id is None:
+                continue
+            deployment_id = None
+            if pvc.deployment_name and pvc.deployment_type:
+                deployment_id = deployment_ids.get(
+                    (pvc.namespace, pvc.deployment_name, pvc.deployment_type)
+                )
+            connection.execute(
+                f"""
+                INSERT INTO {_quote_ident(pvc_t)} (
+                    namespace_id, deployment_id, name, storage_class,
+                    capacity, used, access_mode
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    namespace_id,
+                    deployment_id,
+                    pvc.name[:50],
+                    (pvc.storage_class or None) and pvc.storage_class[:20],
+                    pvc.capacity,
+                    pvc.used,
+                    (pvc.access_mode or None) and pvc.access_mode[:20],
+                ),
+            )
+
+        last_update = touch_k8s_cluster_last_update(connection, cluster_id)
+        connection.commit()
+
+    counts = {
+        "cluster_id": cluster_id,
+        "cluster_name": cluster_name,
+        "tables": {
+            "nodes": nodes_t,
+            "namespaces": ns_t,
+            "deployments": dep_t,
+            "pvcs": pvc_t,
+        },
+        "nodes": len(snapshot.nodes),
+        "namespaces": len(snapshot.namespaces),
+        "deployments": len(snapshot.deployments),
+        "pvcs": len(snapshot.pvcs),
+    }
+    logger.info(
+        "Replaced per-cluster inventory cluster=%s idx=%s last_update=%s counts=%s backups=%s",
+        cluster_name,
+        cluster_id,
+        last_update,
+        counts,
+        backups,
+    )
+    return {
+        **counts,
+        "last_update": last_update,
+        "backup_tables": backups,
+    }

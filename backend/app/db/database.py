@@ -123,6 +123,7 @@ def _apply_migrations(connection: sqlite3.Connection) -> None:
     _migrate_jobs_ai_audit_meta_columns(connection)
     _ensure_jobs_result_table(connection)
     _ensure_mynotes_table(connection)
+    _ensure_k8s_inventory_tables(connection)
     _migrate_root_user(connection)
 
 
@@ -729,14 +730,47 @@ def _drop_legacy_product_tables(connection: sqlite3.Connection) -> None:
         "job_notifications",
         "inventory",
         "agents",
-        "k8s_pods",
-        "k8s_pvcs",
-        "k8s_deployments",
-        "k8s_namespaces",
-        "k8s_nodes",
-        "k8s_cluster",
     ):
         connection.execute(f"DROP TABLE IF EXISTS {table_name}")
+
+
+def _ensure_k8s_inventory_tables(connection: sqlite3.Connection) -> None:
+    """Keep only k8s_cluster; inventory lives in per-cluster dynamic tables."""
+    from backend.app.db.k8s_inventory import drop_legacy_shared_inventory_tables
+
+    tables = {
+        str(row[0])
+        for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+    }
+
+    if "k8s_cluster" not in tables:
+        connection.execute(
+            """
+            CREATE TABLE k8s_cluster (
+                idx INTEGER PRIMARY KEY AUTOINCREMENT,
+                cluster_name VARCHAR(50) NOT NULL UNIQUE,
+                last_update TEXT
+            )
+            """
+        )
+        logger.info("Created k8s_cluster table")
+
+    drop_legacy_shared_inventory_tables(connection)
+    _sync_k8s_cluster_rows(connection)
+
+
+def _sync_k8s_cluster_rows(connection: sqlite3.Connection) -> None:
+    from backend.app.agents.k8s_agent import K8S_CLUSTER_SPECS
+
+    for cluster_name, _display_name in K8S_CLUSTER_SPECS:
+        connection.execute(
+            """
+            INSERT INTO k8s_cluster (cluster_name, last_update)
+            VALUES (?, NULL)
+            ON CONFLICT(cluster_name) DO NOTHING
+            """,
+            (cluster_name,),
+        )
 
 
 def seed_initial_users(connection: sqlite3.Connection) -> int:

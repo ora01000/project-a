@@ -106,6 +106,16 @@ class MyNotesSettings(BaseModel):
     initial_delay_seconds: int = 0
 
 
+class K8sCollectorSettings(BaseModel):
+    # Deployed (http) mount path; mock/local may omit and use ~/.kube/config
+    kubeconfig: str = "/etc/k8s/kubeconfig"
+    fallback_to_current_context: bool = True
+    # Optional map: cluster_name -> kubeconfig context name
+    contexts: dict[str, str] = Field(default_factory=dict)
+    # Injected from agent runtime mode at load time
+    runtime_mode: str = "mock"
+
+
 class AppSettings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=ENV_FILE,
@@ -203,6 +213,12 @@ class AppSettings(BaseSettings):
     mynotes_flush_initial_delay_seconds: int | None = Field(
         default=None,
         alias="MY_NOTES_FLUSH_INITIAL_DELAY_SECONDS",
+    )
+
+    k8s_collector_kubeconfig: str | None = Field(default=None, alias="K8S_COLLECTOR_KUBECONFIG")
+    k8s_collector_fallback_current_context: bool | None = Field(
+        default=None,
+        alias="K8S_COLLECTOR_FALLBACK_CURRENT_CONTEXT",
     )
 
     auth_provider_type: str = Field(default="db", alias="AUTH_PROVIDER_TYPE")
@@ -682,6 +698,45 @@ def load_auth_provider_settings() -> AuthProviderSettings:
         oauth_scope=oauth_scope,
         oauth_auth_type=oauth_auth_type,
         oauth_verify_ssl=oauth_verify_ssl,
+    )
+
+
+def load_k8s_collector_settings() -> K8sCollectorSettings:
+    yaml_settings = _load_yaml(CONFIG_DIR / "settings.yaml")
+    collector_yaml = yaml_settings.get("k8s_collector", {})
+    server_yaml = yaml_settings.get("server", {})
+    env_settings = AppSettings()
+
+    if env_settings.k8s_collector_fallback_current_context is not None:
+        fallback = env_settings.k8s_collector_fallback_current_context
+    else:
+        fallback = _as_bool(collector_yaml.get("fallback_to_current_context"), True)
+
+    kubeconfig = (
+        env_settings.k8s_collector_kubeconfig
+        if env_settings.k8s_collector_kubeconfig is not None
+        else str(collector_yaml.get("kubeconfig") or "/etc/k8s/kubeconfig")
+    ).strip()
+
+    raw_contexts = collector_yaml.get("contexts") or {}
+    contexts: dict[str, str] = {}
+    if isinstance(raw_contexts, dict):
+        for key, value in raw_contexts.items():
+            cluster_name = str(key).strip()
+            context_name = str(value).strip()
+            if cluster_name and context_name:
+                contexts[cluster_name] = context_name
+
+    runtime_mode = resolve_agent_runtime_mode(
+        env_settings=env_settings,
+        server_yaml=server_yaml,
+    )
+
+    return K8sCollectorSettings(
+        kubeconfig=kubeconfig,
+        fallback_to_current_context=fallback,
+        contexts=contexts,
+        runtime_mode=runtime_mode,
     )
 
 
