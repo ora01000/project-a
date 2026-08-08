@@ -22,6 +22,12 @@ from pathlib import Path
 from typing import Any
 
 from backend.app.db.database import get_connection
+from backend.app.db.introspection import (
+    ensure_table_idx_serial,
+    list_table_columns,
+    list_user_tables,
+    pk_autoincrement_sql,
+)
 from backend.app.timezone import format_display_datetime, now_display_datetime
 
 logger = logging.getLogger(__name__)
@@ -468,10 +474,7 @@ def format_backup_stamp(last_update: str | None) -> str:
 
 
 def _list_user_tables(connection) -> set[str]:
-    rows = connection.execute(
-        "SELECT name FROM sqlite_master WHERE type='table'"
-    ).fetchall()
-    return {str(row[0] if not hasattr(row, "keys") else row["name"]) for row in rows}
+    return list_user_tables(connection)
 
 
 def drop_legacy_shared_inventory_tables(connection) -> list[str]:
@@ -493,12 +496,7 @@ def drop_legacy_shared_inventory_tables(connection) -> list[str]:
 
 def _ensure_namespace_egress_columns(connection, namespace_table: str) -> None:
     """Add using_egressip / egressip_assigned_node to existing namespace tables."""
-    columns = {
-        str(row["name"])
-        for row in connection.execute(
-            f"PRAGMA table_info({_quote_ident(namespace_table)})"
-        ).fetchall()
-    }
+    columns = list_table_columns(connection, namespace_table)
     if "using_egressip" not in columns:
         connection.execute(
             f"ALTER TABLE {_quote_ident(namespace_table)} "
@@ -522,7 +520,7 @@ def ensure_cluster_inventory_tables(connection, cluster_name: str) -> tuple[str,
         connection.execute(
             f"""
             CREATE TABLE {_quote_ident(nodes_t)} (
-                idx INTEGER PRIMARY KEY AUTOINCREMENT,
+                {pk_autoincrement_sql(connection)},
                 node_name VARCHAR(50) NOT NULL,
                 node_cpu INTEGER,
                 node_mem INTEGER,
@@ -535,7 +533,7 @@ def ensure_cluster_inventory_tables(connection, cluster_name: str) -> tuple[str,
         connection.execute(
             f"""
             CREATE TABLE {_quote_ident(ns_t)} (
-                idx INTEGER PRIMARY KEY AUTOINCREMENT,
+                {pk_autoincrement_sql(connection)},
                 namespace VARCHAR(50) NOT NULL,
                 okd_display_name VARCHAR(100),
                 resource_quota_cpu_limit REAL,
@@ -554,7 +552,7 @@ def ensure_cluster_inventory_tables(connection, cluster_name: str) -> tuple[str,
         connection.execute(
             f"""
             CREATE TABLE {_quote_ident(dep_t)} (
-                idx INTEGER PRIMARY KEY AUTOINCREMENT,
+                {pk_autoincrement_sql(connection)},
                 namespace_id INTEGER NOT NULL,
                 name VARCHAR(50) NOT NULL,
                 type VARCHAR(20) NOT NULL,
@@ -574,7 +572,7 @@ def ensure_cluster_inventory_tables(connection, cluster_name: str) -> tuple[str,
         connection.execute(
             f"""
             CREATE TABLE {_quote_ident(pvc_t)} (
-                idx INTEGER PRIMARY KEY AUTOINCREMENT,
+                {pk_autoincrement_sql(connection)},
                 namespace_id INTEGER NOT NULL,
                 deployment_id INTEGER,
                 name VARCHAR(50) NOT NULL,
@@ -587,6 +585,8 @@ def ensure_cluster_inventory_tables(connection, cluster_name: str) -> tuple[str,
             )
             """
         )
+    for table_name in (nodes_t, ns_t, dep_t, pvc_t):
+        ensure_table_idx_serial(connection, table_name)
     return nodes_t, ns_t, dep_t, pvc_t
 
 

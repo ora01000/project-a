@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from backend.app.db.database import get_connection
+from backend.app.db.introspection import ci_order_clause
 from backend.app.db.k8s_inventory import (
     DEFAULT_INFRA_TYPE,
     KNOWN_INFRA_TYPES,
@@ -116,7 +117,7 @@ def list_shape_namespaces(
             f"""
             SELECT idx, namespace, okd_display_name
             FROM {_quote_ident(ns_t)}
-            ORDER BY namespace COLLATE NOCASE ASC, idx ASC
+            ORDER BY {ci_order_clause(connection, "namespace")}, idx ASC
             """
         ).fetchall()
     return [
@@ -161,7 +162,7 @@ def get_shape_namespace_detail(
                 f"""
                 SELECT * FROM {_quote_ident(dep_t)}
                 WHERE namespace_id = ?
-                ORDER BY name COLLATE NOCASE ASC, idx ASC
+                ORDER BY {ci_order_clause(connection, "name")}, idx ASC
                 """,
                 (ns_idx,),
             ).fetchall()
@@ -173,7 +174,7 @@ def get_shape_namespace_detail(
                 f"""
                 SELECT * FROM {_quote_ident(pvc_t)}
                 WHERE namespace_id = ?
-                ORDER BY name COLLATE NOCASE ASC, idx ASC
+                ORDER BY {ci_order_clause(connection, "name")}, idx ASC
                 """,
                 (ns_idx,),
             ).fetchall()
@@ -203,7 +204,7 @@ def list_shape_nodes(
             f"""
             SELECT idx, node_name, node_cpu, node_mem, node_os, node_k8s_ver
             FROM {_quote_ident(nodes_t)}
-            ORDER BY node_name COLLATE NOCASE ASC, idx ASC
+            ORDER BY {ci_order_clause(connection, "node_name")}, idx ASC
             """
         ).fetchall()
     return [
@@ -271,7 +272,7 @@ def list_shape_vms(
                     v.node_name AS node_name
                 FROM {_quote_ident(vms_t)} AS v
                 LEFT JOIN {_quote_ident(ns_t)} AS n ON n.idx = v.namespace_id
-                ORDER BY n.namespace COLLATE NOCASE ASC, v.name COLLATE NOCASE ASC, v.idx ASC
+                ORDER BY {ci_order_clause(connection, "n.namespace", "v.name")}, v.idx ASC
                 """
             ).fetchall()
         else:
@@ -285,7 +286,7 @@ def list_shape_vms(
                     ready,
                     node_name
                 FROM {_quote_ident(vms_t)}
-                ORDER BY name COLLATE NOCASE ASC, idx ASC
+                ORDER BY {ci_order_clause(connection, "name")}, idx ASC
                 """
             ).fetchall()
     return [
@@ -347,7 +348,7 @@ def get_shape_vm_detail(
                 f"""
                 SELECT * FROM {_quote_ident(vol_t)}
                 WHERE vm_id = ?
-                ORDER BY volume_name COLLATE NOCASE ASC, idx ASC
+                ORDER BY {ci_order_clause(connection, "volume_name")}, idx ASC
                 """,
                 (int(vm_idx),),
             ).fetchall()

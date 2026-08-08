@@ -1089,3 +1089,12 @@ k8s_cluster 를 infra_cluster 로 변경하고 컬럼을 추가한다. 향후 k8
 4. OKD Deployment/HPA/프로브/Secret 매니페스트
 
 상세: `docs/ARCHITECTURE_MULTIPOD.md`, 매니페스트: `deploy/okd/`
+
+
+# 아키텍처 개선관련
+방안문의) 
+http 모드로 구성되는 서버환경은 okd 상에 배포하는데 backend/frontend replica 를 늘려서 부하에 대비하고 싶다. 현재 sqlite가 embeded 되어 있는데 이를 multi pod 로 구성하기 위한 구조 개선 방안을 제시
+
+멀티 pod 아키텍처 빌드 후 문의)
+변경된 아키텍처에서 RWO PersistentVolume 을 쓸 경우 문제가 되는 부분은? user_comm 쪽 파일 저징시 문제가 있을 것 같다
+

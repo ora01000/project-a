@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from backend.app.db.database import get_connection
+from backend.app.db.introspection import ensure_table_idx_serial, pk_autoincrement_sql
 from backend.app.db.k8s_inventory import (
     K8sDeploymentRow,
     K8sNamespaceRow,
@@ -118,7 +119,7 @@ def ensure_kubevirt_inventory_tables(
         connection.execute(
             f"""
             CREATE TABLE {_quote_ident(nodes_t)} (
-                idx INTEGER PRIMARY KEY AUTOINCREMENT,
+                {pk_autoincrement_sql(connection)},
                 node_name VARCHAR(50) NOT NULL,
                 node_cpu INTEGER,
                 node_mem INTEGER,
@@ -131,7 +132,7 @@ def ensure_kubevirt_inventory_tables(
         connection.execute(
             f"""
             CREATE TABLE {_quote_ident(ns_t)} (
-                idx INTEGER PRIMARY KEY AUTOINCREMENT,
+                {pk_autoincrement_sql(connection)},
                 namespace VARCHAR(50) NOT NULL,
                 okd_display_name VARCHAR(100),
                 resource_quota_cpu_limit REAL,
@@ -148,7 +149,7 @@ def ensure_kubevirt_inventory_tables(
         connection.execute(
             f"""
             CREATE TABLE {_quote_ident(dep_t)} (
-                idx INTEGER PRIMARY KEY AUTOINCREMENT,
+                {pk_autoincrement_sql(connection)},
                 namespace_id INTEGER NOT NULL,
                 name VARCHAR(50) NOT NULL,
                 type VARCHAR(20) NOT NULL,
@@ -168,7 +169,7 @@ def ensure_kubevirt_inventory_tables(
         connection.execute(
             f"""
             CREATE TABLE {_quote_ident(pvc_t)} (
-                idx INTEGER PRIMARY KEY AUTOINCREMENT,
+                {pk_autoincrement_sql(connection)},
                 namespace_id INTEGER NOT NULL,
                 deployment_id INTEGER,
                 name VARCHAR(50) NOT NULL,
@@ -185,7 +186,7 @@ def ensure_kubevirt_inventory_tables(
         connection.execute(
             f"""
             CREATE TABLE {_quote_ident(vms_t)} (
-                idx INTEGER PRIMARY KEY AUTOINCREMENT,
+                {pk_autoincrement_sql(connection)},
                 namespace_id INTEGER NOT NULL,
                 name VARCHAR(50) NOT NULL,
                 run_strategy VARCHAR(20),
@@ -209,7 +210,7 @@ def ensure_kubevirt_inventory_tables(
         connection.execute(
             f"""
             CREATE TABLE {_quote_ident(vol_t)} (
-                idx INTEGER PRIMARY KEY AUTOINCREMENT,
+                {pk_autoincrement_sql(connection)},
                 vm_id INTEGER NOT NULL,
                 volume_name VARCHAR(50),
                 pvc_name VARCHAR(50),
@@ -218,6 +219,8 @@ def ensure_kubevirt_inventory_tables(
             )
             """
         )
+    for table_name in (nodes_t, ns_t, dep_t, pvc_t, vms_t, vol_t):
+        ensure_table_idx_serial(connection, table_name)
     return {
         "nodes": nodes_t,
         "namespaces": ns_t,

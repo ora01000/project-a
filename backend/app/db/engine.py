@@ -64,8 +64,30 @@ def load_database_config(
 
 
 def qmark_to_pyformat(sql: str) -> str:
-    """Convert SQLite ``?`` placeholders to psycopg ``%s``."""
-    return re.sub(r"\?", "%s", sql)
+    """Convert SQLite ``?`` placeholders to psycopg ``%s``.
+
+    Literal ``%`` (e.g. ``LIKE 'sqlite_%'``) must be doubled for psycopg,
+    otherwise it is treated as a placeholder marker.
+    """
+    escaped = sql.replace("%", "%%")
+    return re.sub(r"\?", "%s", escaped)
+
+
+class PostgresCursor:
+    """sqlite3-like cursor wrapper (exposes ``lastrowid`` after INSERT)."""
+
+    def __init__(self, cursor: Any, *, lastrowid: int | None = None) -> None:
+        self._cursor = cursor
+        self.lastrowid = lastrowid
+
+    def fetchone(self):
+        return self._cursor.fetchone()
+
+    def fetchall(self):
+        return self._cursor.fetchall()
+
+    def __getattr__(self, name: str):
+        return getattr(self._cursor, name)
 
 
 class PostgresConnection:
@@ -79,7 +101,18 @@ class PostgresConnection:
         converted = qmark_to_pyformat(sql)
         cursor = self._raw.cursor()
         cursor.execute(converted, parameters or ())
-        return cursor
+        lastrowid: int | None = None
+        if re.match(r"^\s*INSERT\b", converted, flags=re.IGNORECASE):
+            try:
+                probe = self._raw.cursor()
+                probe.execute("SELECT LASTVAL()")
+                row = probe.fetchone()
+                if row is not None:
+                    value = row[0] if not hasattr(row, "keys") else next(iter(row.values()))
+                    lastrowid = int(value)
+            except Exception:
+                lastrowid = None
+        return PostgresCursor(cursor, lastrowid=lastrowid)
 
     def executemany(self, sql: str, seq_of_parameters) -> None:
         converted = qmark_to_pyformat(sql)
@@ -129,11 +162,11 @@ def connect_postgres(database_url: str) -> PostgresConnection:
 @contextmanager
 def advisory_lock(connection: PostgresConnection, lock_key: int = 26080701) -> Iterator[None]:
     """Serialize schema init across pods (PostgreSQL only)."""
-    connection.execute("SELECT pg_advisory_lock(%s)", (lock_key,))
+    connection.execute("SELECT pg_advisory_lock(?)", (lock_key,))
     try:
         yield
     finally:
-        connection.execute("SELECT pg_advisory_unlock(%s)", (lock_key,))
+        connection.execute("SELECT pg_advisory_unlock(?)", (lock_key,))
 
 
 def ping_database(config: DatabaseConfig) -> bool:

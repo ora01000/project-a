@@ -37,7 +37,7 @@ Redis       ← 세션·노트 버퍼·입력 히스토리·(선택) 분산 락
 
 ### 마이그레이션 원칙
 
-1. 로컬/mock은 기본 SQLite 유지 (회귀 비용 최소화).
+1. 로컬/mock 기본은 SQLite. Postgres 전환 시 `DATABASE_URL` 설정 + (최초 1회) `scripts/migrate_sqlite_to_postgres.py`.
 2. http(OKD)는 `DATABASE_URL` 필수.
 3. `init_database`는 **idempotent**. 멀티 파드 동시 기동 시 Postgres `pg_advisory_lock`로 직렬화.
 4. 동적 inventory (`{cluster}_k8s_*` / `{cluster}_kubevirt_*`):
