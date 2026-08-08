@@ -17,6 +17,7 @@ import { MockLlmSelectModal } from "./admin/MockLlmSelectModal";
 import { PostmanDebugModal } from "./admin/PostmanDebugModal";
 import { WhatapEventTestModal } from "./admin/WhatapEventTestModal";
 import { K8sInfraConfigModal } from "./admin/K8sInfraConfigModal";
+import { SqlitePgMigrateModal } from "./admin/SqlitePgMigrateModal";
 import { ProfileEditModal } from "./ProfileEditModal";
 import { ReleaseNotesModal } from "./ReleaseNotesModal";
 import { TableDebugModal } from "./TableDebugModal";
@@ -52,6 +53,7 @@ export function MenuBar({ activeView, user, onNavigate, onLogout, onUserUpdated 
   const [showMockLlmSelect, setShowMockLlmSelect] = useState(false);
   const [showWhatapEventTest, setShowWhatapEventTest] = useState(false);
   const [showK8sInfraConfig, setShowK8sInfraConfig] = useState(false);
+  const [showSqlitePgMigrate, setShowSqlitePgMigrate] = useState(false);
   const [runtimeMode, setRuntimeMode] = useState<string>("mock");
   const [showProfileEdit, setShowProfileEdit] = useState(false);
   const [showSaveSuccess, setShowSaveSuccess] = useState(false);
@@ -250,6 +252,7 @@ export function MenuBar({ activeView, user, onNavigate, onLogout, onUserUpdated 
                         showMockLlmSelect ||
                         showWhatapEventTest ||
                         showK8sInfraConfig ||
+                        showSqlitePgMigrate ||
                   showThemeSettings,
               )}
             >
@@ -268,7 +271,8 @@ export function MenuBar({ activeView, user, onNavigate, onLogout, onUserUpdated 
                         showPostmanDebug ||
                         showMockLlmSelect ||
                         showWhatapEventTest ||
-                        showK8sInfraConfig
+                        showK8sInfraConfig ||
+                        showSqlitePgMigrate
                           ? "bg-slate-800 text-sky-200"
                           : "text-slate-200 hover:bg-slate-800"
                       }`}
@@ -334,6 +338,17 @@ export function MenuBar({ activeView, user, onNavigate, onLogout, onUserUpdated 
                           className="block w-full px-3 py-2 text-left text-sm text-slate-200 hover:bg-slate-800"
                         >
                           테이블 조회(디버깅)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowSettingsMenu(false);
+                            setShowAdminWorkMenu(false);
+                            setShowSqlitePgMigrate(true);
+                          }}
+                          className="block w-full px-3 py-2 text-left text-sm text-slate-200 hover:bg-slate-800"
+                        >
+                          SQLite → PostgreSQL 마이그레이션
                         </button>
                       </div>
                     ) : null}
@@ -467,6 +482,9 @@ export function MenuBar({ activeView, user, onNavigate, onLogout, onUserUpdated 
       ) : null}
       {showK8sInfraConfig && isAdmin ? (
         <K8sInfraConfigModal viewerRole={user.role} onClose={() => setShowK8sInfraConfig(false)} />
+      ) : null}
+      {showSqlitePgMigrate && isAdmin ? (
+        <SqlitePgMigrateModal viewerRole={user.role} onClose={() => setShowSqlitePgMigrate(false)} />
       ) : null}
       {showProfileEdit ? (
         <ProfileEditModal
