@@ -342,6 +342,7 @@
 | 백엔드 이미지 | `ora01000/project-a-backend:<tag>` |
 | 프론트 이미지 | `ora01000/project-a-frontend:<tag>` |
 | 최근 태그 예 | `260805`, `260806`, `260807` |
+| multi-pod(Postgres) 태그 | `pgYYMMDD` (예: `pg260809`) — `dev-axplatform-multi-pod` 배포용 |
 
 ---
 
