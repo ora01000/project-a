@@ -11,8 +11,13 @@ from backend.app.db.introspection import ci_order_clause
 from backend.app.db.k8s_inventory import (
     DEFAULT_INFRA_TYPE,
     KNOWN_INFRA_TYPES,
+    _drop_namespace_readyreplicas_column,
+    _ensure_deployment_readyreplicas_column,
+    _ensure_namespace_egress_columns,
+    _ensure_node_role_column,
     _list_user_tables,
     _quote_ident,
+    cluster_inventory_table,
     cluster_inventory_tables,
     validate_cluster_name,
 )
@@ -31,6 +36,13 @@ class ShapeNamespaceListItem:
     idx: int
     namespace: str
     okd_display_name: str | None = None
+    resource_quota_cpu_limit: float | None = None
+    resource_quota_mem_limit: int | None = None
+    resource_quota_pod_limit: int | None = None
+    okd_egressip1: str | None = None
+    okd_egressip2: str | None = None
+    using_egressip: str | None = None
+    egressip_assigned_node: str | None = None
 
 
 @dataclass
@@ -41,6 +53,7 @@ class ShapeNodeListItem:
     node_mem: int | None = None
     node_os: str | None = None
     node_k8s_ver: str | None = None
+    node_role: str | None = None
 
 
 @dataclass
@@ -58,6 +71,12 @@ class ShapeNamespaceDetail:
     namespace: dict[str, Any]
     deployments: list[dict[str, Any]] = field(default_factory=list)
     pvcs: list[dict[str, Any]] = field(default_factory=list)
+
+
+@dataclass
+class ShapeNodeDetail:
+    node: dict[str, Any]
+    pods: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass
@@ -81,6 +100,14 @@ def _lookup_infra_type(connection, cluster_name: str) -> str | None:
     return infra_type
 
 
+def _pods_on_nodes_table(cluster_name: str, infra_type: str) -> str:
+    if infra_type == "kubevirt":
+        from backend.app.db.kubevirt_inventory import kubevirt_inventory_table
+
+        return kubevirt_inventory_table(cluster_name, "kubevirt_pods_on_nodes")
+    return cluster_inventory_table(cluster_name, "k8s_pods_on_nodes")
+
+
 def _inventory_core_tables(
     cluster_name: str,
     infra_type: str,
@@ -88,15 +115,16 @@ def _inventory_core_tables(
     if infra_type == "kubevirt":
         from backend.app.db.kubevirt_inventory import kubevirt_inventory_tables
 
-        nodes_t, ns_t, dep_t, pvc_t, _, _ = kubevirt_inventory_tables(cluster_name)
+        nodes_t, ns_t, dep_t, pvc_t, _, _, _ = kubevirt_inventory_tables(cluster_name)
         return nodes_t, ns_t, dep_t, pvc_t
-    return cluster_inventory_tables(cluster_name)
+    nodes_t, ns_t, dep_t, pvc_t, _ = cluster_inventory_tables(cluster_name)
+    return nodes_t, ns_t, dep_t, pvc_t
 
 
 def _kubevirt_vm_tables(cluster_name: str) -> tuple[str, str, str]:
     from backend.app.db.kubevirt_inventory import kubevirt_inventory_tables
 
-    _, ns_t, _, _, vms_t, vol_t = kubevirt_inventory_tables(cluster_name)
+    _, ns_t, _, _, vms_t, vol_t, _ = kubevirt_inventory_tables(cluster_name)
     return ns_t, vms_t, vol_t
 
 
@@ -113,9 +141,21 @@ def list_shape_namespaces(
         tables = _list_user_tables(connection)
         if ns_t not in tables:
             return []
+        _ensure_namespace_egress_columns(connection, ns_t)
+        _drop_namespace_readyreplicas_column(connection, ns_t)
         rows = connection.execute(
             f"""
-            SELECT idx, namespace, okd_display_name
+            SELECT
+                idx,
+                namespace,
+                okd_display_name,
+                resource_quota_cpu_limit,
+                resource_quota_mem_limit,
+                resource_quota_pod_limit,
+                okd_egressip1,
+                okd_egressip2,
+                using_egressip,
+                egressip_assigned_node
             FROM {_quote_ident(ns_t)}
             ORDER BY {ci_order_clause(connection, "namespace")}, idx ASC
             """
@@ -126,6 +166,31 @@ def list_shape_namespaces(
             namespace=str(row["namespace"] or ""),
             okd_display_name=(
                 str(row["okd_display_name"]) if row["okd_display_name"] else None
+            ),
+            resource_quota_cpu_limit=(
+                float(row["resource_quota_cpu_limit"])
+                if row["resource_quota_cpu_limit"] is not None
+                else None
+            ),
+            resource_quota_mem_limit=(
+                int(row["resource_quota_mem_limit"])
+                if row["resource_quota_mem_limit"] is not None
+                else None
+            ),
+            resource_quota_pod_limit=(
+                int(row["resource_quota_pod_limit"])
+                if row["resource_quota_pod_limit"] is not None
+                else None
+            ),
+            okd_egressip1=str(row["okd_egressip1"]) if row["okd_egressip1"] else None,
+            okd_egressip2=str(row["okd_egressip2"]) if row["okd_egressip2"] else None,
+            using_egressip=(
+                str(row["using_egressip"]) if row["using_egressip"] else None
+            ),
+            egressip_assigned_node=(
+                str(row["egressip_assigned_node"])
+                if row["egressip_assigned_node"]
+                else None
             ),
         )
         for row in rows
@@ -158,6 +223,7 @@ def get_shape_namespace_detail(
 
         deployments: list[dict[str, Any]] = []
         if dep_t in tables:
+            _ensure_deployment_readyreplicas_column(connection, dep_t)
             dep_rows = connection.execute(
                 f"""
                 SELECT * FROM {_quote_ident(dep_t)}
@@ -200,9 +266,10 @@ def list_shape_nodes(
         tables = _list_user_tables(connection)
         if nodes_t not in tables:
             return []
+        _ensure_node_role_column(connection, nodes_t)
         rows = connection.execute(
             f"""
-            SELECT idx, node_name, node_cpu, node_mem, node_os, node_k8s_ver
+            SELECT idx, node_name, node_cpu, node_mem, node_os, node_k8s_ver, node_role
             FROM {_quote_ident(nodes_t)}
             ORDER BY {ci_order_clause(connection, "node_name")}, idx ASC
             """
@@ -215,6 +282,7 @@ def list_shape_nodes(
             node_mem=int(row["node_mem"]) if row["node_mem"] is not None else None,
             node_os=str(row["node_os"]) if row["node_os"] else None,
             node_k8s_ver=str(row["node_k8s_ver"]) if row["node_k8s_ver"] else None,
+            node_role=str(row["node_role"]) if row["node_role"] else None,
         )
         for row in rows
     ]
@@ -224,7 +292,7 @@ def get_shape_node_detail(
     database_path: str | Path,
     cluster_name: str,
     node_idx: int,
-) -> dict[str, Any] | None:
+) -> ShapeNodeDetail | None:
     name = validate_cluster_name(cluster_name)
     with get_connection(database_path) as connection:
         infra_type = _lookup_infra_type(connection, name)
@@ -242,7 +310,25 @@ def get_shape_node_detail(
         ).fetchone()
         if row is None:
             return None
-        return _row_to_dict(row)
+        node = _row_to_dict(row)
+        node_name = str(node.get("node_name") or "")
+        pods: list[dict[str, Any]] = []
+        pods_t = _pods_on_nodes_table(name, infra_type)
+        if node_name and pods_t in tables:
+            pod_rows = connection.execute(
+                f"""
+                SELECT
+                    idx, node_name, namespace, pod_name,
+                    cpu_request, cpu_limit, mem_request, mem_limit, age
+                FROM {_quote_ident(pods_t)}
+                WHERE node_name = ?
+                ORDER BY {ci_order_clause(connection, "namespace")},
+                         {ci_order_clause(connection, "pod_name")}, idx ASC
+                """,
+                (node_name,),
+            ).fetchall()
+            pods = [_row_to_dict(pod_row) for pod_row in pod_rows]
+        return ShapeNodeDetail(node=node, pods=pods)
 
 
 def list_shape_vms(

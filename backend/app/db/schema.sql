@@ -26,16 +26,6 @@ CREATE TABLE IF NOT EXISTS agentruntime (
     UNIQUE(type, agent_id)
 );
 
-CREATE TABLE IF NOT EXISTS signup_notifications (
-    idx INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_idx INTEGER NOT NULL,
-    target_user VARCHAR(50) NOT NULL,
-    title VARCHAR(200) NOT NULL,
-    message TEXT NOT NULL,
-    created_at TEXT NOT NULL,
-    FOREIGN KEY (user_idx) REFERENCES users(idx)
-);
-
 CREATE TABLE IF NOT EXISTS notice_board (
     idx INTEGER PRIMARY KEY AUTOINCREMENT,
     writer VARCHAR(50) NOT NULL,

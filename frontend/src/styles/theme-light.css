@@ -63,6 +63,9 @@
 [data-theme="light"] .bg-slate-800\/80 {
   background-color: rgb(241 245 249 / 0.8);
 }
+[data-theme="light"] .bg-slate-800\/90 {
+  background-color: rgb(226 232 240 / 0.95);
+}
 
 [data-theme="light"] .bg-slate-700 {
   background-color: rgb(226 232 240);

@@ -280,6 +280,13 @@ class ShapeNamespaceListItemModel(BaseModel):
     idx: int
     namespace: str
     okd_display_name: str | None = None
+    resource_quota_cpu_limit: float | None = None
+    resource_quota_mem_limit: int | None = None
+    resource_quota_pod_limit: int | None = None
+    okd_egressip1: str | None = None
+    okd_egressip2: str | None = None
+    using_egressip: str | None = None
+    egressip_assigned_node: str | None = None
 
 
 class ShapeNodeListItemModel(BaseModel):
@@ -289,6 +296,7 @@ class ShapeNodeListItemModel(BaseModel):
     node_mem: int | None = None
     node_os: str | None = None
     node_k8s_ver: str | None = None
+    node_role: str | None = None
 
 
 class ShapeVmListItemModel(BaseModel):
@@ -308,6 +316,7 @@ class ShapeNamespaceDetailResponse(BaseModel):
 
 class ShapeNodeDetailResponse(BaseModel):
     node: dict[str, Any] = Field(default_factory=dict)
+    pods: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class ShapeVmDetailResponse(BaseModel):
@@ -335,6 +344,13 @@ async def shape_list_namespaces(
             idx=item.idx,
             namespace=item.namespace,
             okd_display_name=item.okd_display_name,
+            resource_quota_cpu_limit=item.resource_quota_cpu_limit,
+            resource_quota_mem_limit=item.resource_quota_mem_limit,
+            resource_quota_pod_limit=item.resource_quota_pod_limit,
+            okd_egressip1=item.okd_egressip1,
+            okd_egressip2=item.okd_egressip2,
+            using_egressip=item.using_egressip,
+            egressip_assigned_node=item.egressip_assigned_node,
         )
         for item in items
     ]
@@ -406,16 +422,16 @@ async def shape_get_node(
 ) -> ShapeNodeDetailResponse:
     _require_user(request)
     try:
-        node = get_shape_node_detail(
+        detail = get_shape_node_detail(
             request.app.state.database_path,
             cluster_name,
             node_idx,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    if node is None:
+    if detail is None:
         raise HTTPException(status_code=404, detail="노드를 찾을 수 없습니다.")
-    return ShapeNodeDetailResponse(node=node)
+    return ShapeNodeDetailResponse(node=detail.node, pods=detail.pods)
 
 
 @router.get(

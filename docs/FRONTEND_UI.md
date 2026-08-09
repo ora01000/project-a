@@ -230,7 +230,7 @@ flowchart LR
 | 영역 | 주기 | API |
 |---|---|---|
 | 대시보드 에이전트/헬스 | 15초 | `/api/agents`, `/api/health` |
-| 작업/가입 알림 | 10초 | `/api/jobs/notifications`, `/api/signup/notifications` |
+| 작업 알림 | 10초 | `/api/jobs/notifications` |
 | 세션 유효성 | 15초 | `localStorage` 세션 체크 |
 
 ---

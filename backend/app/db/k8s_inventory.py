@@ -37,6 +37,7 @@ INVENTORY_SUFFIXES = (
     "k8s_namespaces",
     "k8s_deployments",
     "k8s_pvcs",
+    "k8s_pods_on_nodes",
 )
 
 # Keep this many timestamped backup generations per cluster (by YYYYMMDD_HHMMSS).
@@ -66,6 +67,7 @@ class K8sNodeRow:
     node_mem: int | None = None
     node_os: str | None = None
     node_k8s_ver: str | None = None
+    node_role: str | None = None
 
 
 @dataclass
@@ -87,6 +89,7 @@ class K8sDeploymentRow:
     name: str
     type: str
     replicas: int | None = None
+    readyreplicas: int | None = None
     resource_cpu_request: float | None = None
     resource_mem_request: int | None = None
     resource_cpu_limit: float | None = None
@@ -120,6 +123,18 @@ class K8sPodRow:
 
 
 @dataclass
+class K8sPodOnNodeRow:
+    node_name: str
+    namespace: str
+    pod_name: str
+    cpu_request: float | None = None
+    cpu_limit: float | None = None
+    mem_request: float | None = None
+    mem_limit: float | None = None
+    age: str | None = None
+
+
+@dataclass
 class K8sClusterSnapshot:
     cluster_name: str
     nodes: list[K8sNodeRow] = field(default_factory=list)
@@ -127,6 +142,7 @@ class K8sClusterSnapshot:
     deployments: list[K8sDeploymentRow] = field(default_factory=list)
     pvcs: list[K8sPvcRow] = field(default_factory=list)
     pods: list[K8sPodRow] = field(default_factory=list)
+    pods_on_nodes: list[K8sPodOnNodeRow] = field(default_factory=list)
 
 
 @dataclass
@@ -194,7 +210,7 @@ def _counts_for_suffix_tables(
     stamp: str | None,
     tables: set[str],
 ) -> K8sShapeCounts:
-    nodes_t, ns_t, dep_t, pvc_t = cluster_inventory_tables(cluster_name)
+    nodes_t, ns_t, dep_t, pvc_t, _pods_on_nodes_t = cluster_inventory_tables(cluster_name)
     if stamp:
         nodes_t = f"{nodes_t}_{stamp}"
         ns_t = f"{ns_t}_{stamp}"
@@ -217,7 +233,9 @@ def _counts_for_kubevirt_tables(
 ) -> K8sShapeCounts:
     from backend.app.db.kubevirt_inventory import kubevirt_inventory_tables
 
-    nodes_t, ns_t, dep_t, pvc_t, vms_t, vol_t = kubevirt_inventory_tables(cluster_name)
+    nodes_t, ns_t, dep_t, pvc_t, vms_t, vol_t, _pods_on_nodes_t = kubevirt_inventory_tables(
+        cluster_name
+    )
     if stamp:
         nodes_t = f"{nodes_t}_{stamp}"
         ns_t = f"{ns_t}_{stamp}"
@@ -298,11 +316,11 @@ def get_cluster_shape_analysis(
                 list_kubevirt_inventory_backup_stamps,
             )
 
-            nodes_t, _, _, _, _, _ = kubevirt_inventory_tables(name)
+            nodes_t, _, _, _, _, _, _ = kubevirt_inventory_tables(name)
             count_fn = _counts_for_kubevirt_tables
             stamps = list_kubevirt_inventory_backup_stamps(connection, name)
         else:
-            nodes_t, _, _, _ = cluster_inventory_tables(name)
+            nodes_t, _, _, _, _ = cluster_inventory_tables(name)
             count_fn = _counts_for_suffix_tables
             stamps = list_cluster_inventory_backup_stamps(connection, name)
 
@@ -434,12 +452,15 @@ def cluster_inventory_table(cluster_name: str, suffix: str) -> str:
     return f"{name}_{suffix}"
 
 
-def cluster_inventory_tables(cluster_name: str) -> tuple[str, str, str, str]:
+def cluster_inventory_tables(
+    cluster_name: str,
+) -> tuple[str, str, str, str, str]:
     return (
         cluster_inventory_table(cluster_name, "k8s_nodes"),
         cluster_inventory_table(cluster_name, "k8s_namespaces"),
         cluster_inventory_table(cluster_name, "k8s_deployments"),
         cluster_inventory_table(cluster_name, "k8s_pvcs"),
+        cluster_inventory_table(cluster_name, "k8s_pods_on_nodes"),
     )
 
 
@@ -511,9 +532,49 @@ def _ensure_namespace_egress_columns(connection, namespace_table: str) -> None:
         logger.info("Added %s.egressip_assigned_node", namespace_table)
 
 
-def ensure_cluster_inventory_tables(connection, cluster_name: str) -> tuple[str, str, str, str]:
+def _drop_namespace_readyreplicas_column(connection, namespace_table: str) -> None:
+    """Remove mistakenly added readyreplicas from namespace inventory tables."""
+    columns = list_table_columns(connection, namespace_table)
+    if "readyreplicas" not in columns:
+        return
+    try:
+        connection.execute(
+            f"ALTER TABLE {_quote_ident(namespace_table)} DROP COLUMN readyreplicas"
+        )
+        logger.info("Dropped %s.readyreplicas", namespace_table)
+    except Exception as exc:
+        logger.warning(
+            "Could not drop %s.readyreplicas (%s)", namespace_table, exc
+        )
+
+
+def _ensure_deployment_readyreplicas_column(connection, deployment_table: str) -> None:
+    """Add readyreplicas to existing deployment inventory tables."""
+    columns = list_table_columns(connection, deployment_table)
+    if "readyreplicas" not in columns:
+        connection.execute(
+            f"ALTER TABLE {_quote_ident(deployment_table)} "
+            "ADD COLUMN readyreplicas INTEGER"
+        )
+        logger.info("Added %s.readyreplicas", deployment_table)
+
+
+def _ensure_node_role_column(connection, nodes_table: str) -> None:
+    """Add node_role to existing node inventory tables."""
+    columns = list_table_columns(connection, nodes_table)
+    if "node_role" not in columns:
+        connection.execute(
+            f"ALTER TABLE {_quote_ident(nodes_table)} "
+            "ADD COLUMN node_role VARCHAR(30)"
+        )
+        logger.info("Added %s.node_role", nodes_table)
+
+
+def ensure_cluster_inventory_tables(
+    connection, cluster_name: str
+) -> tuple[str, str, str, str, str]:
     """Create per-cluster inventory tables if missing. Returns table names."""
-    nodes_t, ns_t, dep_t, pvc_t = cluster_inventory_tables(cluster_name)
+    nodes_t, ns_t, dep_t, pvc_t, pods_on_nodes_t = cluster_inventory_tables(cluster_name)
     tables = _list_user_tables(connection)
 
     if nodes_t not in tables:
@@ -525,10 +586,13 @@ def ensure_cluster_inventory_tables(connection, cluster_name: str) -> tuple[str,
                 node_cpu INTEGER,
                 node_mem INTEGER,
                 node_os VARCHAR(50),
-                node_k8s_ver VARCHAR(50)
+                node_k8s_ver VARCHAR(50),
+                node_role VARCHAR(30)
             )
             """
         )
+    else:
+        _ensure_node_role_column(connection, nodes_t)
     if ns_t not in tables:
         connection.execute(
             f"""
@@ -548,6 +612,7 @@ def ensure_cluster_inventory_tables(connection, cluster_name: str) -> tuple[str,
         )
     else:
         _ensure_namespace_egress_columns(connection, ns_t)
+        _drop_namespace_readyreplicas_column(connection, ns_t)
     if dep_t not in tables:
         connection.execute(
             f"""
@@ -557,6 +622,7 @@ def ensure_cluster_inventory_tables(connection, cluster_name: str) -> tuple[str,
                 name VARCHAR(50) NOT NULL,
                 type VARCHAR(20) NOT NULL,
                 replicas INTEGER,
+                readyreplicas INTEGER,
                 resource_cpu_request REAL,
                 resource_mem_request INTEGER,
                 resource_cpu_limit REAL,
@@ -568,6 +634,8 @@ def ensure_cluster_inventory_tables(connection, cluster_name: str) -> tuple[str,
             )
             """
         )
+    else:
+        _ensure_deployment_readyreplicas_column(connection, dep_t)
     if pvc_t not in tables:
         connection.execute(
             f"""
@@ -585,9 +653,25 @@ def ensure_cluster_inventory_tables(connection, cluster_name: str) -> tuple[str,
             )
             """
         )
-    for table_name in (nodes_t, ns_t, dep_t, pvc_t):
+    if pods_on_nodes_t not in tables:
+        connection.execute(
+            f"""
+            CREATE TABLE {_quote_ident(pods_on_nodes_t)} (
+                {pk_autoincrement_sql(connection)},
+                node_name VARCHAR(50) NOT NULL,
+                namespace VARCHAR(50) NOT NULL,
+                pod_name VARCHAR(50) NOT NULL,
+                cpu_request REAL,
+                cpu_limit REAL,
+                mem_request REAL,
+                mem_limit REAL,
+                age VARCHAR(20)
+            )
+            """
+        )
+    for table_name in (nodes_t, ns_t, dep_t, pvc_t, pods_on_nodes_t):
         ensure_table_idx_serial(connection, table_name)
-    return nodes_t, ns_t, dep_t, pvc_t
+    return nodes_t, ns_t, dep_t, pvc_t, pods_on_nodes_t
 
 
 def backup_cluster_inventory_tables(
@@ -983,11 +1067,12 @@ def replace_cluster_snapshot(
             connection, cluster_name, stamp=stamp
         )
         pruned = prune_cluster_inventory_backups(connection, cluster_name)
-        nodes_t, ns_t, dep_t, pvc_t = ensure_cluster_inventory_tables(
+        nodes_t, ns_t, dep_t, pvc_t, pods_on_nodes_t = ensure_cluster_inventory_tables(
             connection, cluster_name
         )
 
         # Clear in FK-safe order
+        connection.execute(f"DELETE FROM {_quote_ident(pods_on_nodes_t)}")
         connection.execute(f"DELETE FROM {_quote_ident(pvc_t)}")
         connection.execute(f"DELETE FROM {_quote_ident(dep_t)}")
         connection.execute(f"DELETE FROM {_quote_ident(ns_t)}")
@@ -997,8 +1082,8 @@ def replace_cluster_snapshot(
             connection.execute(
                 f"""
                 INSERT INTO {_quote_ident(nodes_t)} (
-                    node_name, node_cpu, node_mem, node_os, node_k8s_ver
-                ) VALUES (?, ?, ?, ?, ?)
+                    node_name, node_cpu, node_mem, node_os, node_k8s_ver, node_role
+                ) VALUES (?, ?, ?, ?, ?, ?)
                 """,
                 (
                     node.node_name[:50],
@@ -1006,6 +1091,7 @@ def replace_cluster_snapshot(
                     node.node_mem,
                     (node.node_os or None) and node.node_os[:50],
                     (node.node_k8s_ver or None) and node.node_k8s_ver[:50],
+                    (node.node_role or None) and node.node_role[:30],
                 ),
             )
 
@@ -1043,17 +1129,18 @@ def replace_cluster_snapshot(
             cursor = connection.execute(
                 f"""
                 INSERT INTO {_quote_ident(dep_t)} (
-                    namespace_id, name, type, replicas,
+                    namespace_id, name, type, replicas, readyreplicas,
                     resource_cpu_request, resource_mem_request,
                     resource_cpu_limit, resource_mem_limit,
                     containers_cnt, containers_name, containers_image
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     namespace_id,
                     deployment.name[:50],
                     deployment.type[:20],
                     deployment.replicas,
+                    deployment.readyreplicas,
                     deployment.resource_cpu_request,
                     deployment.resource_mem_request,
                     deployment.resource_cpu_limit,
@@ -1094,6 +1181,28 @@ def replace_cluster_snapshot(
                 ),
             )
 
+        for pod in snapshot.pods_on_nodes:
+            if not pod.node_name or not pod.namespace or not pod.pod_name:
+                continue
+            connection.execute(
+                f"""
+                INSERT INTO {_quote_ident(pods_on_nodes_t)} (
+                    node_name, namespace, pod_name,
+                    cpu_request, cpu_limit, mem_request, mem_limit, age
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    pod.node_name[:50],
+                    pod.namespace[:50],
+                    pod.pod_name[:50],
+                    pod.cpu_request,
+                    pod.cpu_limit,
+                    pod.mem_request,
+                    pod.mem_limit,
+                    (pod.age or None) and pod.age[:20],
+                ),
+            )
+
         last_update = touch_k8s_cluster_last_update(connection, cluster_id)
         connection.commit()
 
@@ -1105,11 +1214,13 @@ def replace_cluster_snapshot(
             "namespaces": ns_t,
             "deployments": dep_t,
             "pvcs": pvc_t,
+            "pods_on_nodes": pods_on_nodes_t,
         },
         "nodes": len(snapshot.nodes),
         "namespaces": len(snapshot.namespaces),
         "deployments": len(snapshot.deployments),
         "pvcs": len(snapshot.pvcs),
+        "pods_on_nodes": len(snapshot.pods_on_nodes),
     }
     logger.info(
         "Replaced per-cluster inventory cluster=%s idx=%s last_update=%s "

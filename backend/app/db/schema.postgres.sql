@@ -29,15 +29,6 @@ CREATE TABLE IF NOT EXISTS agentruntime (
     UNIQUE(type, agent_id)
 );
 
-CREATE TABLE IF NOT EXISTS signup_notifications (
-    idx BIGSERIAL PRIMARY KEY,
-    user_idx BIGINT NOT NULL REFERENCES users(idx),
-    target_user VARCHAR(50) NOT NULL,
-    title VARCHAR(200) NOT NULL,
-    message TEXT NOT NULL,
-    created_at TEXT NOT NULL
-);
-
 CREATE TABLE IF NOT EXISTS notice_board (
     idx BIGSERIAL PRIMARY KEY,
     writer VARCHAR(50) NOT NULL,

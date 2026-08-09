@@ -19,6 +19,7 @@ from backend.app.db.k8s_inventory import (
     K8sDeploymentRow,
     K8sNamespaceRow,
     K8sNodeRow,
+    K8sPodOnNodeRow,
     K8sPodRow,
     K8sPvcRow,
 )
@@ -79,6 +80,14 @@ def parse_cpu_cores(raw: str | None) -> float | None:
 
 
 def parse_mem_gi(raw: str | None) -> int | None:
+    value = parse_mem_gi_float(raw)
+    if value is None:
+        return None
+    return int(round(value))
+
+
+def parse_mem_gi_float(raw: str | None) -> float | None:
+    """Parse Kubernetes memory quantity to Gi as float (keeps Mi-level precision)."""
     if raw is None:
         return None
     text = str(raw).strip()
@@ -87,7 +96,7 @@ def parse_mem_gi(raw: str | None) -> int | None:
     match = _MEM_RE.match(text)
     if not match:
         try:
-            return int(round(int(text) / (1024**3)))
+            return int(text) / (1024**3)
         except ValueError:
             return None
     value = float(match.group(1))
@@ -110,7 +119,7 @@ def parse_mem_gi(raw: str | None) -> int | None:
     factor = multipliers.get(unit)
     if factor is None:
         return None
-    return int(round(value * factor))
+    return value * factor
 
 
 def _attr(obj: Any, *path: str, default: Any = None) -> Any:
@@ -258,6 +267,31 @@ def _sum_container_resources(containers: list[Any]) -> tuple[
     )
 
 
+def _node_role_from_labels(labels: Any) -> str | None:
+    """Derive a short role string from kubernetes node labels.
+
+    DynamicClient returns metadata.labels as ResourceField (not dict);
+    normalize via _as_mapping before reading role keys.
+    """
+    mapped = _as_mapping(labels)
+    if not mapped:
+        return None
+    roles: set[str] = set()
+    for key, value in mapped.items():
+        key_text = str(key or "")
+        if key_text.startswith("node-role.kubernetes.io/"):
+            role = key_text.split("/", 1)[-1].strip()
+            if role:
+                roles.add(role)
+        elif key_text in {"kubernetes.io/role", "node.kubernetes.io/role"}:
+            role = str(value or "").strip()
+            if role:
+                roles.add(role)
+    if not roles:
+        return None
+    return ",".join(sorted(roles))[:30]
+
+
 def _collect_nodes(dyn: DynamicClient) -> list[K8sNodeRow]:
     rows: list[K8sNodeRow] = []
     for item in _safe_list(dyn, "v1", "Node"):
@@ -266,6 +300,7 @@ def _collect_nodes(dyn: DynamicClient) -> list[K8sNodeRow]:
             continue
         capacity = _attr(item, "status", "capacity", default={}) or {}
         node_info = _attr(item, "status", "nodeInfo", default={}) or {}
+        labels = _attr(item, "metadata", "labels", default=None)
         cpu = parse_cpu_cores(_attr(capacity, "cpu"))
         rows.append(
             K8sNodeRow(
@@ -279,6 +314,7 @@ def _collect_nodes(dyn: DynamicClient) -> list[K8sNodeRow]:
                 )
                 or None,
                 node_k8s_ver=str(_attr(node_info, "kubeletVersion") or "") or None,
+                node_role=_node_role_from_labels(labels),
             )
         )
     return rows
@@ -513,6 +549,21 @@ def _collect_namespaces(dyn: DynamicClient) -> list[K8sNamespaceRow]:
     return rows
 
 
+def _parse_int(raw: Any) -> int | None:
+    if raw is None:
+        return None
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def _status_ready_replicas(item: Any, kind: str) -> int | None:
+    if kind == "DaemonSet":
+        return _parse_int(_attr(item, "status", "numberReady"))
+    return _parse_int(_attr(item, "status", "readyReplicas"))
+
+
 def _workload_rows(
     dyn: DynamicClient, api_version: str, kind: str, type_name: str
 ) -> list[K8sDeploymentRow]:
@@ -523,17 +574,10 @@ def _workload_rows(
         if not namespace or not name or is_excluded_system_namespace(namespace):
             continue
         if kind == "DaemonSet":
-            replicas = _attr(item, "status", "desiredNumberScheduled")
-            try:
-                replicas_int = int(replicas) if replicas is not None else None
-            except (TypeError, ValueError):
-                replicas_int = None
+            replicas_int = _parse_int(_attr(item, "status", "desiredNumberScheduled"))
         else:
-            replicas = _attr(item, "spec", "replicas")
-            try:
-                replicas_int = int(replicas) if replicas is not None else None
-            except (TypeError, ValueError):
-                replicas_int = None
+            replicas_int = _parse_int(_attr(item, "spec", "replicas"))
+        readyreplicas_int = _status_ready_replicas(item, kind)
         containers = (
             _attr(item, "spec", "template", "spec", "containers", default=[]) or []
         )
@@ -546,6 +590,7 @@ def _workload_rows(
                 name=name,
                 type=type_name,
                 replicas=replicas_int,
+                readyreplicas=readyreplicas_int,
                 resource_cpu_request=cpu_req,
                 resource_mem_request=mem_req,
                 resource_cpu_limit=cpu_lim,
@@ -603,6 +648,120 @@ def _owner_workload(
         if type_name:
             return name, type_name
     return None, None
+
+
+def _format_pod_age(creation_timestamp: Any) -> str | None:
+    """Format creationTimestamp as a short kubectl-like age string."""
+    if creation_timestamp is None:
+        return None
+    text = str(creation_timestamp).strip()
+    if not text:
+        return None
+    try:
+        from datetime import datetime, timezone
+
+        normalized = text.replace("Z", "+00:00")
+        created = datetime.fromisoformat(normalized)
+        if created.tzinfo is None:
+            created = created.replace(tzinfo=timezone.utc)
+        now = datetime.now(timezone.utc)
+        seconds = max(0, int((now - created).total_seconds()))
+    except Exception:
+        return text[:20]
+
+    if seconds < 60:
+        return f"{seconds}s"
+    minutes = seconds // 60
+    if minutes < 60:
+        return f"{minutes}m"
+    hours = minutes // 60
+    if hours < 24:
+        return f"{hours}h"
+    days = hours // 24
+    if days < 365:
+        return f"{days}d"
+    years = days // 365
+    return f"{years}y"
+
+
+def _sum_pod_container_resources(
+    containers: list[Any],
+) -> tuple[float | None, float | None, float | None, float | None]:
+    cpu_req = 0.0
+    mem_req = 0.0
+    cpu_lim = 0.0
+    mem_lim = 0.0
+    has_cpu_req = False
+    has_mem_req = False
+    has_cpu_lim = False
+    has_mem_lim = False
+
+    for container in containers:
+        resources = _attr(container, "resources", default={}) or {}
+        requests = _attr(resources, "requests", default={}) or {}
+        limits = _attr(resources, "limits", default={}) or {}
+        cpu_r = parse_cpu_cores(_attr(requests, "cpu"))
+        mem_r = parse_mem_gi_float(_attr(requests, "memory"))
+        cpu_l = parse_cpu_cores(_attr(limits, "cpu"))
+        mem_l = parse_mem_gi_float(_attr(limits, "memory"))
+        if cpu_r is not None:
+            cpu_req += cpu_r
+            has_cpu_req = True
+        if mem_r is not None:
+            mem_req += mem_r
+            has_mem_req = True
+        if cpu_l is not None:
+            cpu_lim += cpu_l
+            has_cpu_lim = True
+        if mem_l is not None:
+            mem_lim += mem_l
+            has_mem_lim = True
+
+    return (
+        cpu_req if has_cpu_req else None,
+        cpu_lim if has_cpu_lim else None,
+        mem_req if has_mem_req else None,
+        mem_lim if has_mem_lim else None,
+    )
+
+
+def _collect_pods_on_nodes(dyn: DynamicClient) -> list[K8sPodOnNodeRow]:
+    """Collect non-terminated pods per node (excludes system namespaces)."""
+    rows: list[K8sPodOnNodeRow] = []
+    for item in _safe_list(dyn, "v1", "Pod"):
+        namespace = str(_attr(item, "metadata", "namespace", default="") or "")
+        name = str(_attr(item, "metadata", "name", default="") or "")
+        node_name = str(_attr(item, "spec", "nodeName", default="") or "")
+        if (
+            not namespace
+            or not name
+            or not node_name
+            or is_excluded_system_namespace(namespace)
+        ):
+            continue
+        phase = str(_attr(item, "status", "phase", default="") or "").strip()
+        if phase in {"Succeeded", "Failed"}:
+            continue
+        containers = (
+            _attr(item, "spec", "containers", default=[]) or []
+        )
+        cpu_req, cpu_lim, mem_req, mem_lim = _sum_pod_container_resources(
+            list(containers)
+        )
+        age = _format_pod_age(_attr(item, "metadata", "creationTimestamp"))
+        rows.append(
+            K8sPodOnNodeRow(
+                node_name=node_name,
+                namespace=namespace,
+                pod_name=name,
+                cpu_request=cpu_req,
+                cpu_limit=cpu_lim,
+                mem_request=mem_req,
+                mem_limit=mem_lim,
+                age=age,
+            )
+        )
+    return rows
 
 
 def _collect_pods(
@@ -730,6 +889,7 @@ def collect_cluster_snapshot(
     rs_map = _index_replicaset_owners(dyn)
     pods = _collect_pods(dyn, rs_map)
     pvcs = _collect_pvcs(dyn, pods)
+    pods_on_nodes = _collect_pods_on_nodes(dyn)
 
     return K8sClusterSnapshot(
         cluster_name=cluster_name,
@@ -738,6 +898,7 @@ def collect_cluster_snapshot(
         deployments=deployments,
         pvcs=pvcs,
         pods=pods,
+        pods_on_nodes=pods_on_nodes,
     )
 
 

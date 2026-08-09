@@ -7,6 +7,7 @@ Layout (infra_type=kubevirt):
   {cluster_name}_kubevirt_pvcs
   {cluster_name}_kubevirt_vms
   {cluster_name}_kubevirt_vm_volumes
+  {cluster_name}_kubevirt_pods_on_nodes
 
 Backups: {table}_{YYYYMMDD_HHMMSS} (keep newest 4 stamp sets).
 """
@@ -25,9 +26,14 @@ from backend.app.db.k8s_inventory import (
     K8sDeploymentRow,
     K8sNamespaceRow,
     K8sNodeRow,
+    K8sPodOnNodeRow,
     K8sPvcRow,
     MAX_INVENTORY_BACKUP_GENERATIONS,
     _BACKUP_STAMP_SUFFIX_RE,
+    _drop_namespace_readyreplicas_column,
+    _ensure_deployment_readyreplicas_column,
+    _ensure_namespace_egress_columns,
+    _ensure_node_role_column,
     _json_list,
     _list_user_tables,
     _quote_ident,
@@ -45,6 +51,7 @@ KUBEVIRT_INVENTORY_SUFFIXES = (
     "kubevirt_pvcs",
     "kubevirt_vms",
     "kubevirt_vm_volumes",
+    "kubevirt_pods_on_nodes",
 )
 
 
@@ -85,6 +92,7 @@ class KubevirtClusterSnapshot:
     pvcs: list[K8sPvcRow] = field(default_factory=list)
     vms: list[KubevirtVmRow] = field(default_factory=list)
     vm_volumes: list[KubevirtVmVolumeRow] = field(default_factory=list)
+    pods_on_nodes: list[K8sPodOnNodeRow] = field(default_factory=list)
 
 
 def kubevirt_inventory_table(cluster_name: str, suffix: str) -> str:
@@ -114,6 +122,7 @@ def ensure_kubevirt_inventory_tables(
     pvc_t = kubevirt_inventory_table(name, "kubevirt_pvcs")
     vms_t = kubevirt_inventory_table(name, "kubevirt_vms")
     vol_t = kubevirt_inventory_table(name, "kubevirt_vm_volumes")
+    pods_on_nodes_t = kubevirt_inventory_table(name, "kubevirt_pods_on_nodes")
 
     if nodes_t not in tables:
         connection.execute(
@@ -124,10 +133,13 @@ def ensure_kubevirt_inventory_tables(
                 node_cpu INTEGER,
                 node_mem INTEGER,
                 node_os VARCHAR(50),
-                node_k8s_ver VARCHAR(50)
+                node_k8s_ver VARCHAR(50),
+                node_role VARCHAR(30)
             )
             """
         )
+    else:
+        _ensure_node_role_column(connection, nodes_t)
     if ns_t not in tables:
         connection.execute(
             f"""
@@ -145,6 +157,9 @@ def ensure_kubevirt_inventory_tables(
             )
             """
         )
+    else:
+        _ensure_namespace_egress_columns(connection, ns_t)
+        _drop_namespace_readyreplicas_column(connection, ns_t)
     if dep_t not in tables:
         connection.execute(
             f"""
@@ -154,6 +169,7 @@ def ensure_kubevirt_inventory_tables(
                 name VARCHAR(50) NOT NULL,
                 type VARCHAR(20) NOT NULL,
                 replicas INTEGER,
+                readyreplicas INTEGER,
                 resource_cpu_request REAL,
                 resource_mem_request INTEGER,
                 resource_cpu_limit REAL,
@@ -165,6 +181,8 @@ def ensure_kubevirt_inventory_tables(
             )
             """
         )
+    else:
+        _ensure_deployment_readyreplicas_column(connection, dep_t)
     if pvc_t not in tables:
         connection.execute(
             f"""
@@ -219,7 +237,23 @@ def ensure_kubevirt_inventory_tables(
             )
             """
         )
-    for table_name in (nodes_t, ns_t, dep_t, pvc_t, vms_t, vol_t):
+    if pods_on_nodes_t not in tables:
+        connection.execute(
+            f"""
+            CREATE TABLE {_quote_ident(pods_on_nodes_t)} (
+                {pk_autoincrement_sql(connection)},
+                node_name VARCHAR(50) NOT NULL,
+                namespace VARCHAR(50) NOT NULL,
+                pod_name VARCHAR(50) NOT NULL,
+                cpu_request REAL,
+                cpu_limit REAL,
+                mem_request REAL,
+                mem_limit REAL,
+                age VARCHAR(20)
+            )
+            """
+        )
+    for table_name in (nodes_t, ns_t, dep_t, pvc_t, vms_t, vol_t, pods_on_nodes_t):
         ensure_table_idx_serial(connection, table_name)
     return {
         "nodes": nodes_t,
@@ -228,6 +262,7 @@ def ensure_kubevirt_inventory_tables(
         "pvcs": pvc_t,
         "vms": vms_t,
         "vm_volumes": vol_t,
+        "pods_on_nodes": pods_on_nodes_t,
     }
 
 
@@ -390,7 +425,9 @@ def replace_kubevirt_snapshot(
         pvc_t = table_map["pvcs"]
         vms_t = table_map["vms"]
         vol_t = table_map["vm_volumes"]
+        pods_on_nodes_t = table_map["pods_on_nodes"]
 
+        connection.execute(f"DELETE FROM {_quote_ident(pods_on_nodes_t)}")
         connection.execute(f"DELETE FROM {_quote_ident(vol_t)}")
         connection.execute(f"DELETE FROM {_quote_ident(vms_t)}")
         connection.execute(f"DELETE FROM {_quote_ident(pvc_t)}")
@@ -402,8 +439,8 @@ def replace_kubevirt_snapshot(
             connection.execute(
                 f"""
                 INSERT INTO {_quote_ident(nodes_t)} (
-                    node_name, node_cpu, node_mem, node_os, node_k8s_ver
-                ) VALUES (?, ?, ?, ?, ?)
+                    node_name, node_cpu, node_mem, node_os, node_k8s_ver, node_role
+                ) VALUES (?, ?, ?, ?, ?, ?)
                 """,
                 (
                     node.node_name[:50],
@@ -411,6 +448,7 @@ def replace_kubevirt_snapshot(
                     node.node_mem,
                     (node.node_os or None) and node.node_os[:50],
                     (node.node_k8s_ver or None) and node.node_k8s_ver[:50],
+                    (node.node_role or None) and node.node_role[:30],
                 ),
             )
 
@@ -450,17 +488,18 @@ def replace_kubevirt_snapshot(
             cursor = connection.execute(
                 f"""
                 INSERT INTO {_quote_ident(dep_t)} (
-                    namespace_id, name, type, replicas,
+                    namespace_id, name, type, replicas, readyreplicas,
                     resource_cpu_request, resource_mem_request,
                     resource_cpu_limit, resource_mem_limit,
                     containers_cnt, containers_name, containers_image
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     namespace_id,
                     deployment.name[:50],
                     deployment.type[:20],
                     deployment.replicas,
+                    deployment.readyreplicas,
                     deployment.resource_cpu_request,
                     deployment.resource_mem_request,
                     deployment.resource_cpu_limit,
@@ -552,6 +591,28 @@ def replace_kubevirt_snapshot(
                 ),
             )
 
+        for pod in snapshot.pods_on_nodes:
+            if not pod.node_name or not pod.namespace or not pod.pod_name:
+                continue
+            connection.execute(
+                f"""
+                INSERT INTO {_quote_ident(pods_on_nodes_t)} (
+                    node_name, namespace, pod_name,
+                    cpu_request, cpu_limit, mem_request, mem_limit, age
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    pod.node_name[:50],
+                    pod.namespace[:50],
+                    pod.pod_name[:50],
+                    pod.cpu_request,
+                    pod.cpu_limit,
+                    pod.mem_request,
+                    pod.mem_limit,
+                    (pod.age or None) and pod.age[:20],
+                ),
+            )
+
         last_update = touch_k8s_cluster_last_update(connection, cluster_id)
         connection.commit()
 
@@ -566,6 +627,7 @@ def replace_kubevirt_snapshot(
         "pvcs": len(snapshot.pvcs),
         "vms": len(snapshot.vms),
         "vm_volumes": len(snapshot.vm_volumes),
+        "pods_on_nodes": len(snapshot.pods_on_nodes),
     }
     logger.info(
         "Replaced kubevirt inventory cluster=%s idx=%s last_update=%s "

@@ -60,20 +60,8 @@ def _apply_migrations(connection: sqlite3.Connection) -> None:
         str(row[0])
         for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
     }
-    if "signup_notifications" not in tables:
-        connection.execute(
-            """
-            CREATE TABLE signup_notifications (
-                idx INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_idx INTEGER NOT NULL,
-                target_user VARCHAR(50) NOT NULL,
-                title VARCHAR(200) NOT NULL,
-                message TEXT NOT NULL,
-                created_at TEXT NOT NULL,
-                FOREIGN KEY (user_idx) REFERENCES users(idx)
-            )
-            """
-        )
+    if "signup_notifications" in tables:
+        connection.execute("DROP TABLE IF EXISTS signup_notifications")
     if "notice_board" not in tables:
         connection.execute(
             """
@@ -880,6 +868,8 @@ def init_database(database_path: str | Path | None = None) -> Path:
         with connect_postgres(config.database_url) as connection:
             with advisory_lock(connection):
                 connection.executescript(schema_sql)
+                # Legacy chat-notification table; signup now uses jobs (job_type=10).
+                connection.execute("DROP TABLE IF EXISTS signup_notifications")
                 seed_initial_users(connection)
         logger.info("PostgreSQL database initialized via DATABASE_URL")
         return POSTGRES_STATE_TOKEN

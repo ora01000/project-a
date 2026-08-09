@@ -1,11 +1,9 @@
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from backend.app.db.signup_notifications import list_signup_notifications_for_user
 from backend.app.services.auth_provider import MADANG_EMAIL_DOMAINS
 from backend.app.services.user_signup import (
     approve_signup,
-    dismiss_signup_notification,
     register_pending_user,
     reject_signup,
 )
@@ -26,14 +24,6 @@ class RegisterUserRequest(BaseModel):
 
 class RegisterUserResponse(BaseModel):
     message: str
-
-
-class SignupNotificationResponse(BaseModel):
-    idx: int
-    user_idx: int
-    title: str
-    message: str
-    created_at: str
 
 
 class RejectSignupRequest(BaseModel):
@@ -71,31 +61,6 @@ async def register_user(payload: RegisterUserRequest, request: Request) -> Regis
     return RegisterUserResponse(
         message="가입 신청이 접수되었습니다. 관리자 승인 후 로그인할 수 있습니다.",
     )
-
-
-@router.get("/signup/notifications/{target_user}", response_model=list[SignupNotificationResponse])
-async def get_signup_notifications(target_user: str, request: Request) -> list[SignupNotificationResponse]:
-    database_path = request.app.state.database_path
-    notifications = list_signup_notifications_for_user(database_path, target_user)
-    return [
-        SignupNotificationResponse(
-            idx=notification.idx,
-            user_idx=notification.user_idx,
-            title=notification.title,
-            message=notification.message,
-            created_at=notification.created_at,
-        )
-        for notification in notifications
-    ]
-
-
-@router.post("/signup/notifications/{notification_idx}/dismiss")
-async def dismiss_notification(notification_idx: int, request: Request) -> dict[str, bool]:
-    database_path = request.app.state.database_path
-    deleted = dismiss_signup_notification(database_path, notification_idx)
-    if not deleted:
-        raise HTTPException(status_code=404, detail="알림을 찾을 수 없습니다.")
-    return {"deleted": True}
 
 
 @router.post("/signup/users/{user_idx}/approve")

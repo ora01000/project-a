@@ -19,6 +19,7 @@ from backend.app.services.k8s_collector import (
     _collect_namespaces,
     _collect_nodes,
     _collect_pods,
+    _collect_pods_on_nodes,
     _collect_pvcs,
     _index_replicaset_owners,
     _safe_list,
@@ -218,6 +219,7 @@ def collect_kubevirt_snapshot(
     rs_map = _index_replicaset_owners(dyn)
     pods = _collect_pods(dyn, rs_map)
     pvcs = _collect_pvcs(dyn, pods)
+    pods_on_nodes = _collect_pods_on_nodes(dyn)
     pvc_capacity = {
         (pvc.namespace, pvc.name): pvc.capacity for pvc in pvcs
     }
@@ -231,6 +233,7 @@ def collect_kubevirt_snapshot(
         pvcs=pvcs,
         vms=vms,
         vm_volumes=vm_volumes,
+        pods_on_nodes=pods_on_nodes,
     )
 
 

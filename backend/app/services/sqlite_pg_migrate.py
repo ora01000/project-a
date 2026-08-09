@@ -21,7 +21,6 @@ from urllib.parse import urlparse
 CORE_TABLE_MAP: list[tuple[str, str]] = [
     ("users", "users"),
     ("agentruntime", "agentruntime"),
-    ("signup_notifications", "signup_notifications"),
     ("notice_board", "notice_board"),
     ("jobs", "jobs"),
     ("jobs_result", "jobs_result"),

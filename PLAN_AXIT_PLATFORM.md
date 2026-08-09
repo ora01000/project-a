@@ -829,6 +829,7 @@ Whatap 이벤트 수신을 통해 받은 이벤트를 자동으로 jobs 에 제�
         - node_mem : int
         - node_os : varchar(50)
         - node_k8s_ver : varchar(50)
+        - node_role : varchar(30)
     - 테이블#3 명 : {cluster_name}_k8s_namespaces
       - 컬럼
         - idx : int, auto increment, pk
@@ -848,6 +849,7 @@ Whatap 이벤트 수신을 통해 받은 이벤트를 자동으로 jobs 에 제�
         - name : varchar(50)
         - type : varchar(20), deployment | statusfulset | deploymentconfig | daemonset 중 1
         - replicas : int
+        - readyreplicas : int
         - resource_cpu_request : float, 개 단위로 환산
         - resource_mem_request : int, Gi 단위로 환산
         - resource_cpu_limit : float, 개 단위로 환산
@@ -865,6 +867,18 @@ Whatap 이벤트 수신을 통해 받은 이벤트를 자동으로 jobs 에 제�
         - capacity : int. Gi 단위로 환산
         - used : int, Gi 단위로 환산
         - access_mode : varchar(20)
+    - 테이블#6 명 : {cluster_name}_k8s_pods_on_nodes
+      - 컬럼
+        - idx : int, auto increment, pk
+        - node_name : varchar(50)
+        - namespace : varchar(50)
+        - pod_name : varchar(50)
+        - cpu_request : float, 개 단위로 환산
+        - cpu_limit : float, 개 단위로 환산
+        - mem_request : float, Gi 단위로 환산
+        - mem_limit : float, Gi 단위로 환산
+        - age : varchar(20)
+         
 
 - 인프라 정보 scrape 백엔드 동작
   - openshift 라이브러리 사용
@@ -872,6 +886,7 @@ Whatap 이벤트 수신을 통해 받은 이벤트를 자동으로 jobs 에 제�
     - http 모드에서 kubeconfig가 필요하다.
       - kubeconfig는 configmap 으로 마운트하며 마운트경로는 /etc/k8s/kubeconfig 이다.
     - 목업은 로컬이므로 kubeconfig가 필요하지 않다.
+
 
 - 인프라 정보 scrape 프론트엔드
   - 환경설정 > 관리자 작업 > "K8S 인프라 구성" 메뉴 생성, 클릭시 팝업창 생성
@@ -963,6 +978,7 @@ k8s_cluster 를 infra_cluster 로 변경하고 컬럼을 추가한다. 향후 k8
         - node_mem : int
         - node_os : varchar(50)
         - node_k8s_ver : varchar(50)
+        - node_role : varchar(30)
     - 테이블#3 명 : {cluster_name}_kubevirt_namespaces
       - 컬럼
         - idx : int, auto increment, pk
@@ -982,6 +998,7 @@ k8s_cluster 를 infra_cluster 로 변경하고 컬럼을 추가한다. 향후 k8
         - name : varchar(50)
         - type : varchar(20), deployment | statusfulset | deploymentconfig | daemonset 중 1
         - replicas : int
+        - readyreplicas : int
         - resource_cpu_request : float, 개 단위로 환산
         - resource_mem_request : int, Gi 단위로 환산
         - resource_cpu_limit : float, 개 단위로 환산
@@ -1028,6 +1045,18 @@ k8s_cluster 를 infra_cluster 로 변경하고 컬럼을 추가한다. 향후 k8
         - capacity_gi INTEGER
         - FOREIGN KEY (vm_id) REFERENCES "{cluster}_kubevirt_vms"(idx)
 
+    - 테이블#8 명 : {cluster_name}_kubevirt_pods_on_nodes
+      - 컬럼
+        - idx : int, auto increment, pk
+        - node_name : varchar(50)
+        - namespace : varchar(50)
+        - pod_name : varchar(50)
+        - cpu_request : float, 개 단위로 환산
+        - cpu_limit : float, 개 단위로 환산
+        - mem_request : float, Gi 단위로 환산
+        - mem_limit : float, Gi 단위로 환산
+        - age : varchar(20)
+
 
 - 인프라 정보 scrape 백엔드 동작
   - openshift 라이브러리 사용
@@ -1049,6 +1078,10 @@ k8s_cluster 를 infra_cluster 로 변경하고 컬럼을 추가한다. 향후 k8
     - 네임스페이스 선택하면 네임스페이스 목록이 텍스트 레이블 버튼으로 출력되고 중단/하단 패널이 생성된다.
       - 중단 패널에는 네임스페이스의 상세정보 표시
       - 하단 패널에는 네임스페이스 내 deployment, pvc 정보 출력
+        - deployment의 resource limit (cpu/mem) 추가
+        - deployment 정보 테이블 마지막에 summary row 추가
+          replicas, resource requests(cpu/mem), resource limits(cpu/mem) 를 합산한다. resources 는 replica 개수만큼 곱해야 한다.
+        - pvc 정보 테이블 마지막에 summary row 추가
     - 노드 선택하면 노드 목록이 텍스트 레이블 버튼으로 출력되고 하단 패널이 생성된다.
       - 하단 패널에 노드 상세정보 출력
 - 상세정보 패널 : kubevirt 인 경우
@@ -1060,6 +1093,42 @@ k8s_cluster 를 infra_cluster 로 변경하고 컬럼을 추가한다. 향후 k8
       - 하단 패널에 노드 상세정보 출력
     - VM 선택하면 VM 목록이 텍스트 레이블 버튼으로 출력되고 하단 패널이 생성된다.
       - VM을 선택하면 하단 패널에 VM 상제정보와 연결된 볼륨 정보가 출력된다.
+
+
+인프라 형상 탭의 상세정보 패널 표시 방식 변경
+- k8s, kubevirt 공통
+  - 네임스페이스 버튼 탭 클릭시
+    - 네임스페이스가 레이블 버튼으로 표시되는 방식 -> 네임스페이스가 표로 출력 중단 패널은 삭제
+    - 표로 출력된 네임스페이스 목록에서 row를 선택하면 하단 패널에서 기존 방식과 동일하게 deployment, pvc 정보 출력 
+    - 테이블 마지막 행에 네임스페이스 전채 summary row 추가
+    - 출력 테이블에서 using egressip 컬럼은 삭제한다. 대신, egressip1, egressip2 중 using egressip 가 있다면 표시 방식을 변경(ex. 레이블 버튼 등)해서 using egressip 를 표시한다.
+  - 노드 탭 클릭시
+    - 노드가 레이블 버튼으로 표시되는 방식 -> 노드가 표로 출력, 증단 채널은 삭제
+    - 테이블 마지막 행에 노드의 전체 summary row 추가
+  - 테이블 추가
+    - 다음은 노드를 oc(kubectl) describe {nodename} 시 출력되는 정보이다. 이 정보를 테이블로 변환해서 기존 {cluster_name}_k8s_pods_on_nodes, {cluster_name}_kubevirt_pods_on_nodes 로 생성, 저장하려 한다.
+  ex)
+  Namespace                   Name                                           CPU Requests  CPU Limits  Memory Requests  Memory Limits  Age
+  ---------                   ----                                           ------------  ----------  ---------------  -------------  ---
+  axit-console                axitdb-6fff48f655-zlvhv                        0 (0%)        0 (0%)      0 (0%)           0 (0%)         25h
+  bifrost                     bifrost-6ddb87874c-45ffs                       0 (0%)        0 (0%)      0 (0%)           0 (0%)         53d
+  haproxy-controller          haproxy-kubernetes-ingress-7554985c57-27fz8    250m (2%)     0 (0%)      400Mi (3%)       0 (0%)         187d
+  haproxy-controller          haproxy-kubernetes-ingress-7554985c57-nwxn8    250m (2%)     0 (0%)      400Mi (3%)       0 (0%)         187d
+  jenkins                     jenkins-master-866f95765d-4wq9h                0 (0%)        0 (0%)      0 (0%)           0 (0%)         198d
+  kube-system                 coredns-64d64f99dd-f9jwd                       100m (1%)     0 (0%)      70Mi (0%)        340Mi (2%)     25h
+  kube-system                 local-path-provisioner-5db9d5cbbb-l447p        0 (0%)        0 (0%)      0 (0%)           0 (0%)         62d
+  kubernetes-mcp-server       kubectl-ai-86c64d4d5-bstq2                     0 (0%)        0 (0%)      0 (0%)           0 (0%)         32d
+  kubernetes-mcp-server       kubernetes-mcp-server-6d7b58b898-58cz5         100m (1%)     100m (1%)   128Mi (1%)       128Mi (1%)     148d
+  kubernetes-mcp-server       vsphere-mcp-pro-687c69d64b-9fgh5               0 (0%)        0 (0%)      0 (0%)           0 (0%)         17d
+  ollama-webui                ollama-webui-7b48dff65c-295ld                  0 (0%)        0 (0%)      0 (0%)           0 (0%)         134d
+  ora01000                    testngix-b9b4f5477-w7xpt                       0 (0%)        0 (0%)      0 (0%)           0 (0%)         166d
+  ora01000                    testngix-b9b4f5477-xgrtx                       0 (0%)        0 (0%)      0 (0%)           0 (0%)         166d
+  testmcp                     nginx-deployment-96b9d695-d6l72                0 (0%)        0 (0%)      0 (0%)           0 (0%)         170d
+  testmcp                     nginx-deployment-96b9d695-f4bqp                0 (0%)        0 (0%)      0 (0%)           0 (0%)         170d
+
+    
+
+
 
 
 - infra_type = k8s | kubevirt 에 대해 시스템 네임스페이스는 수집 제외한다.
@@ -1097,4 +1166,17 @@ http 모드로 구성되는 서버환경은 okd 상에 배포하는데 backend/f
 
 멀티 pod 아키텍처 빌드 후 문의)
 변경된 아키텍처에서 RWO PersistentVolume 을 쓸 경우 문제가 되는 부분은? user_comm 쪽 파일 저징시 문제가 있을 것 같다
+
+
+
+# 260808 이후 브랜치 변경
+dev-axplatform 은 sqlite3 를 사용하는 브랜치이며 마지막 커밋은 sqlite -> postgres 마이그레이션 메뉴 적용 후 브랜치에 코드 변경을 종료함
+dev-axplatform-multi-pod 는 목업(로컬)/http(서버) 환경 모두 postgres를 사용하는 코드로 변경함, 빌드 태그는 pg{"YYMMDD"} 형식으로 배포함
+
+
+
+
+
+
+
 
