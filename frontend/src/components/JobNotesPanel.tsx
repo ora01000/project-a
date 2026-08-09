@@ -26,8 +26,8 @@ const TABS: { id: JobNotesTab; label: string }[] = [
   { id: "my-results", label: "나의 작업결과" },
   { id: "whatap-report", label: "Whatap 이벤트 리포트" },
   { id: "rejected-jobs", label: "반려된 작업" },
-  { id: "my-notes", label: "나의 노트" },
   { id: "infra-shape", label: "인프라 형상" },
+  { id: "my-notes", label: "나의 노트" },
 ];
 
 interface JobNotesPanelProps {

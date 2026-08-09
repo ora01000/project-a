@@ -29,9 +29,14 @@ interface VmListItem {
   idx: number;
   name: string;
   namespace: string | null;
+  run_strategy: string | null;
   printable_status: string | null;
   ready: boolean | null;
+  vmi_phase: string | null;
   node_name: string | null;
+  ip_address: string | null;
+  cpu_cores: number | null;
+  memory_gi: number | null;
 }
 
 interface NamespaceDetail {
@@ -89,13 +94,6 @@ function categoryButtonClass(isSelected: boolean): string {
   return "border-b border-transparent text-slate-400 hover:text-slate-200";
 }
 
-function itemButtonClass(isSelected: boolean): string {
-  if (isSelected) {
-    return "bg-slate-800 text-sky-100";
-  }
-  return "text-slate-400 hover:bg-slate-800 hover:text-slate-200";
-}
-
 function tableRowClass(isSelected: boolean): string {
   if (isSelected) {
     return "bg-sky-950/60 text-sky-100";
@@ -109,10 +107,8 @@ function buildNamespaceSummary(rows: NamespaceListItem[]): Record<string, unknow
   }
   let cpuTotal = 0;
   let memTotal = 0;
-  let podTotal = 0;
   let hasCpu = false;
   let hasMem = false;
-  let hasPod = false;
 
   for (const row of rows) {
     const cpu = toNumber(row.resource_quota_cpu_limit);
@@ -125,11 +121,6 @@ function buildNamespaceSummary(rows: NamespaceListItem[]): Record<string, unknow
       memTotal += mem;
       hasMem = true;
     }
-    const pods = toNumber(row.resource_quota_pod_limit);
-    if (pods !== null) {
-      podTotal += pods;
-      hasPod = true;
-    }
   }
 
   return {
@@ -137,7 +128,6 @@ function buildNamespaceSummary(rows: NamespaceListItem[]): Record<string, unknow
     okd_display_name: "",
     resource_quota_cpu_limit: hasCpu ? cpuTotal : null,
     resource_quota_mem_limit: hasMem ? memTotal : null,
-    resource_quota_pod_limit: hasPod ? podTotal : null,
     okd_egressip1: "",
     okd_egressip2: "",
     egressip_assigned_node: "",
@@ -191,8 +181,7 @@ function SelectableNamespaceTable({
   const renderCell = (row: Record<string, unknown>, key: string) => {
     if (
       key === "resource_quota_cpu_limit" ||
-      key === "resource_quota_mem_limit" ||
-      key === "resource_quota_pod_limit"
+      key === "resource_quota_mem_limit"
     ) {
       return formatMetric(toNumber(row[key]));
     }
@@ -487,6 +476,68 @@ function PodsOnNodeTable({ rows }: { rows: Record<string, unknown>[] }) {
               })}
             </tr>
           ) : null}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function SelectableVmTable({
+  rows,
+  selectedIdx,
+  onSelect,
+}: {
+  rows: VmListItem[];
+  selectedIdx: number | null;
+  onSelect: (idx: number) => void;
+}) {
+  if (rows.length === 0) {
+    return <p className="text-[11px] text-slate-500">항목이 없습니다.</p>;
+  }
+
+  const renderCell = (row: Record<string, unknown>, key: string) => {
+    if (key === "cpu_cores" || key === "memory_gi") {
+      return formatMetric(toNumber(row[key]));
+    }
+    return displayValue(row[key]);
+  };
+
+  return (
+    <div className="overflow-auto">
+      <table className="w-full min-w-[560px] border-collapse text-left text-[11px]">
+        <thead>
+          <tr className="border-b border-slate-700 text-slate-500">
+            {VM_TABLE_COLUMNS.map((column) => (
+              <th key={column.key} className="px-1.5 py-1 font-medium">
+                {column.label}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr
+              key={row.idx}
+              className={`cursor-pointer border-b border-slate-800/80 transition-colors ${tableRowClass(selectedIdx === row.idx)}`}
+              onClick={() => onSelect(row.idx)}
+            >
+              {VM_TABLE_COLUMNS.map((column) => {
+                const text = renderCell(
+                  row as unknown as Record<string, unknown>,
+                  column.key,
+                );
+                return (
+                  <td
+                    key={column.key}
+                    className="max-w-[140px] truncate px-1.5 py-1 font-mono"
+                    title={text}
+                  >
+                    {text}
+                  </td>
+                );
+              })}
+            </tr>
+          ))}
         </tbody>
       </table>
     </div>
@@ -807,7 +858,6 @@ const NAMESPACE_TABLE_COLUMNS = [
   { key: "okd_display_name", label: "display name" },
   { key: "resource_quota_cpu_limit", label: "CPU quota" },
   { key: "resource_quota_mem_limit", label: "Mem quota (Gi)" },
-  { key: "resource_quota_pod_limit", label: "Pod quota" },
   { key: "okd_egressip1", label: "egressIP1" },
   { key: "okd_egressip2", label: "egressIP2" },
   { key: "egressip_assigned_node", label: "egressIP node" },
@@ -830,6 +880,19 @@ const PODS_ON_NODE_COLUMNS = [
   { key: "mem_request", label: "mem req (Gi)" },
   { key: "mem_limit", label: "mem lim (Gi)" },
   { key: "age", label: "age" },
+];
+
+const VM_TABLE_COLUMNS = [
+  { key: "namespace", label: "namespace" },
+  { key: "name", label: "name" },
+  { key: "printable_status", label: "status" },
+  { key: "ready", label: "ready" },
+  { key: "node_name", label: "node" },
+  { key: "ip_address", label: "IP" },
+  { key: "cpu_cores", label: "CPU" },
+  { key: "memory_gi", label: "Mem (Gi)" },
+  { key: "run_strategy", label: "run strategy" },
+  { key: "vmi_phase", label: "VMI phase" },
 ];
 
 const VM_KEYS = [
@@ -1041,16 +1104,6 @@ export function ShapeDetailPanel({
     return () => controller.abort();
   }, [active, clusterName, category, selectedIdx]);
 
-  const listItems = useMemo(() => {
-    if (category === "vms") {
-      return vms.map((item) => ({
-        idx: item.idx,
-        label: item.namespace ? `${item.namespace}/${item.name}` : item.name,
-      }));
-    }
-    return [];
-  }, [category, vms]);
-
   if (!clusterName) {
     return (
       <section className="flex h-full min-h-0 flex-col rounded-lg border border-slate-700/80 bg-slate-950/40 p-3">
@@ -1153,31 +1206,20 @@ export function ShapeDetailPanel({
                 <p className="text-[11px] text-slate-500">표에서 노드를 선택하세요.</p>
               ) : null}
             </>
-          ) : (
+          ) : category === "vms" ? (
             <>
-              <div className="max-h-[28%] shrink-0 overflow-y-auto overscroll-contain border-b border-slate-800 pb-2">
+              <div className="max-h-[45%] shrink-0 overflow-y-auto overscroll-contain border-b border-slate-800 pb-2">
                 {isLoadingList ? (
                   <p className="text-[11px] text-slate-500">목록 불러오는 중...</p>
-                ) : listItems.length === 0 ? (
-                  <p className="text-[11px] text-slate-500">항목이 없습니다.</p>
                 ) : (
-                  <div className="flex flex-wrap gap-1.5">
-                    {listItems.map((item) => (
-                      <button
-                        key={item.idx}
-                        type="button"
-                        onClick={() => setSelectedIdx(item.idx)}
-                        className={`rounded px-1.5 py-0.5 text-left text-[11px] transition-colors ${itemButtonClass(selectedIdx === item.idx)}`}
-                        title={item.label}
-                      >
-                        {item.label}
-                      </button>
-                    ))}
-                  </div>
+                  <SelectableVmTable
+                    rows={vms}
+                    selectedIdx={selectedIdx}
+                    onSelect={setSelectedIdx}
+                  />
                 )}
               </div>
-
-              {category === "vms" && selectedIdx != null ? (
+              {selectedIdx != null ? (
                 <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
                   <div className="mb-2 border-b border-slate-800 pb-2">
                     <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
@@ -1202,13 +1244,11 @@ export function ShapeDetailPanel({
                     />
                   </div>
                 </div>
-              ) : null}
-
-              {category === "vms" && selectedIdx == null && !isLoadingList ? (
-                <p className="text-[11px] text-slate-500">목록에서 항목을 선택하세요.</p>
+              ) : !isLoadingList ? (
+                <p className="text-[11px] text-slate-500">표에서 VM을 선택하세요.</p>
               ) : null}
             </>
-          )}
+          ) : null}
         </div>
       )}
     </section>

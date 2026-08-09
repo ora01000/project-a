@@ -61,9 +61,14 @@ class ShapeVmListItem:
     idx: int
     name: str
     namespace: str | None = None
+    run_strategy: str | None = None
     printable_status: str | None = None
     ready: bool | None = None
+    vmi_phase: str | None = None
     node_name: str | None = None
+    ip_address: str | None = None
+    cpu_cores: float | None = None
+    memory_gi: int | None = None
 
 
 @dataclass
@@ -353,9 +358,14 @@ def list_shape_vms(
                     v.idx AS idx,
                     v.name AS name,
                     n.namespace AS namespace,
+                    v.run_strategy AS run_strategy,
                     v.printable_status AS printable_status,
                     v.ready AS ready,
-                    v.node_name AS node_name
+                    v.vmi_phase AS vmi_phase,
+                    v.node_name AS node_name,
+                    v.ip_address AS ip_address,
+                    v.cpu_cores AS cpu_cores,
+                    v.memory_gi AS memory_gi
                 FROM {_quote_ident(vms_t)} AS v
                 LEFT JOIN {_quote_ident(ns_t)} AS n ON n.idx = v.namespace_id
                 ORDER BY {ci_order_clause(connection, "n.namespace", "v.name")}, v.idx ASC
@@ -368,9 +378,14 @@ def list_shape_vms(
                     idx,
                     name,
                     NULL AS namespace,
+                    run_strategy,
                     printable_status,
                     ready,
-                    node_name
+                    vmi_phase,
+                    node_name,
+                    ip_address,
+                    cpu_cores,
+                    memory_gi
                 FROM {_quote_ident(vms_t)}
                 ORDER BY {ci_order_clause(connection, "name")}, idx ASC
                 """
@@ -380,11 +395,22 @@ def list_shape_vms(
             idx=int(row["idx"]),
             name=str(row["name"] or ""),
             namespace=str(row["namespace"]) if row["namespace"] else None,
+            run_strategy=(
+                str(row["run_strategy"]) if row["run_strategy"] else None
+            ),
             printable_status=(
                 str(row["printable_status"]) if row["printable_status"] else None
             ),
             ready=bool(row["ready"]) if row["ready"] is not None else None,
+            vmi_phase=str(row["vmi_phase"]) if row["vmi_phase"] else None,
             node_name=str(row["node_name"]) if row["node_name"] else None,
+            ip_address=str(row["ip_address"]) if row["ip_address"] else None,
+            cpu_cores=(
+                float(row["cpu_cores"]) if row["cpu_cores"] is not None else None
+            ),
+            memory_gi=(
+                int(row["memory_gi"]) if row["memory_gi"] is not None else None
+            ),
         )
         for row in rows
     ]

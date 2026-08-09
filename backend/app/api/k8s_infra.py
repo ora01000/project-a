@@ -303,9 +303,14 @@ class ShapeVmListItemModel(BaseModel):
     idx: int
     name: str
     namespace: str | None = None
+    run_strategy: str | None = None
     printable_status: str | None = None
     ready: bool | None = None
+    vmi_phase: str | None = None
     node_name: str | None = None
+    ip_address: str | None = None
+    cpu_cores: float | None = None
+    memory_gi: int | None = None
 
 
 class ShapeNamespaceDetailResponse(BaseModel):
@@ -454,9 +459,14 @@ async def shape_list_vms(
             idx=item.idx,
             name=item.name,
             namespace=item.namespace,
+            run_strategy=item.run_strategy,
             printable_status=item.printable_status,
             ready=item.ready,
+            vmi_phase=item.vmi_phase,
             node_name=item.node_name,
+            ip_address=item.ip_address,
+            cpu_cores=item.cpu_cores,
+            memory_gi=item.memory_gi,
         )
         for item in items
     ]
