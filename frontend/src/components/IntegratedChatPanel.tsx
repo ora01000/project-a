@@ -310,6 +310,22 @@ export function IntegratedChatPanel({
     setInput(inputHistory[nextIndex] ?? "");
   };
 
+  const handleNextMessage = () => {
+    if (inputHistory.length === 0 || historyIndex === -1) {
+      return;
+    }
+
+    if (historyIndex >= inputHistory.length - 1) {
+      setHistoryIndex(-1);
+      setInput("");
+      return;
+    }
+
+    const nextIndex = historyIndex + 1;
+    setHistoryIndex(nextIndex);
+    setInput(inputHistory[nextIndex] ?? "");
+  };
+
   const handleInputChange = (value: string) => {
     setInput(value);
     if (historyIndex !== -1) {
@@ -360,6 +376,9 @@ export function IntegratedChatPanel({
     const abortController = new AbortController();
     abortControllerRef.current = abortController;
 
+    let assistantText = "";
+    let toolsUsed: ToolUsage[] = [];
+
     try {
       const response = await fetch(`/api/agents/${selectedAgent.id}/chat`, {
         method: "POST",
@@ -383,8 +402,6 @@ export function IntegratedChatPanel({
 
       const decoder = new TextDecoder();
       let buffer = "";
-      let assistantText = "";
-      let toolsUsed: ToolUsage[] = [];
 
       const applyEvents = (events: ReturnType<typeof parseSseChunk>["events"]) => {
         for (const event of events) {
@@ -431,6 +448,7 @@ export function IntegratedChatPanel({
       }
     } catch (err) {
       if (isAbortError(err)) {
+        updateLastResponse("요청이 취소되었습니다.", toolsUsed);
         return;
       }
       const message = err instanceof Error ? err.message : "Unknown error";
@@ -479,6 +497,7 @@ export function IntegratedChatPanel({
   };
 
   const canShowPrevious = inputHistory.length > 0;
+  const canShowNext = historyIndex !== -1;
 
   const handleCopyResponseToNote = async (response: IntegratedChatResponse) => {
     if (!onCopyToNote || !response.assistantContent.trim()) {
@@ -676,6 +695,15 @@ export function IntegratedChatPanel({
             >
               ↑
             </button>
+            <button
+              type="button"
+              onClick={handleNextMessage}
+              disabled={isDisabled || isLoading || !canShowNext}
+              title="다음 메시지"
+              className="rounded-md border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-200 disabled:cursor-not-allowed disabled:text-slate-500"
+            >
+              ↓
+            </button>
             <textarea
               value={input}
               onChange={(event) => handleInputChange(event.target.value)}
@@ -688,6 +716,14 @@ export function IntegratedChatPanel({
                 if (event.key === "ArrowUp" && !event.shiftKey) {
                   event.preventDefault();
                   handlePreviousMessage();
+                  return;
+                }
+                if (event.key === "ArrowDown" && !event.shiftKey) {
+                  if (historyIndex === -1) {
+                    return;
+                  }
+                  event.preventDefault();
+                  handleNextMessage();
                 }
               }}
               placeholder={

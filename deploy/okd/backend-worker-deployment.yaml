@@ -21,7 +21,7 @@ spec:
     spec:
       containers:
         - name: worker
-          image: ora01000/project-a-backend:pg260809
+          image: ora01000/project-a-backend:pg260810
           imagePullPolicy: Always
           ports:
             - name: http

@@ -3,7 +3,34 @@
 프로젝트 최초 개발일(2026-07-08) 이후 변경 이력을 **최근순**으로 요약합니다.  
 출처: git 커밋, `ADDITIONAL_PLAN.md`, 워킹 트리 반영분(2026-07-15~18).
 
-**현재 버전:** 1.3B / 릴리즈 `260807`
+**현재 버전:** 1.4 / 릴리즈 `260810`
+
+---
+
+## 2026-08-10 — Postgres 전용 multipod·형상/채팅 UX (`260810` / `pg260810`)
+
+### PostgreSQL 전용 (dev-axplatform-multi-pod)
+- 목업(로컬)·http(서버) 모두 **`DATABASE_URL`(PostgreSQL) 필수** — SQLite 폴백 제거
+- 관리자 **SQLite → PostgreSQL 마이그레이션** 메뉴·API·CLI 스크립트 삭제
+- Docker 이미지 태그 규칙 **`pgYYMMDD`** (`scripts/docker-build-push.sh` 기본값)
+- OKD 매니페스트 이미지 참조를 Postgres 태그 체계에 맞춤
+
+### 인프라 형상
+- 네임스페이스·노드·VM 상세를 **표 중심** UI로 정리, 탭 순서에서 **인프라 형상을 나의 노트 앞**으로 배치
+- `node_role`, deployments **`readyreplicas`**, 노드별 **`pods_on_nodes`**(요청/제한 CPU·Mem) 반영
+- 인프라 목록 버튼을 pill → **둥근 모서리 사각형**으로 변경
+
+### 관리 화면 팝업
+- **에이전트 연결 / 사용자 조회 / 공지사항**을 대시보드 위 모달로 전환(에이전트 할당과 동일 패턴)
+- 에이전트 연결 팝업 가로 폭 확대
+
+### 대화형 터미널
+- 응답 중지 시 `응답 생성 중...` 대신 **「요청이 취소되었습니다.」** 표시
+- 입력창 **↓ 키/버튼**으로 명령 히스토리 다음 항목 이동(최신에서 한 번 더 누르면 빈 입력)
+
+### 릴리즈
+- About: 버전 **1.4**, 릴리즈 **260810**
+- Docker 이미지 태그: `pg260810` (`linux/amd64`)
 
 ---
 
@@ -337,12 +364,12 @@
 | 항목 | 내용 |
 |------|------|
 | 제품명 | AX 인프라 운영 콘솔 |
-| 버전 | 1.3B |
-| 릴리즈 | 260807 |
+| 버전 | 1.4 |
+| 릴리즈 | 260810 |
 | 백엔드 이미지 | `ora01000/project-a-backend:<tag>` |
 | 프론트 이미지 | `ora01000/project-a-frontend:<tag>` |
 | 최근 태그 예 | `260805`, `260806`, `260807` |
-| multi-pod(Postgres) 태그 | `pgYYMMDD` (예: `pg260809`) — `dev-axplatform-multi-pod` 배포용 |
+| multi-pod(Postgres) 태그 | `pgYYMMDD` (예: `pg260810`) — `dev-axplatform-multi-pod` 배포용 |
 
 ---
 

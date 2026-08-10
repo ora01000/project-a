@@ -351,7 +351,7 @@ export function InfraShapeTab({ active }: InfraShapeTabProps) {
                 key={cluster.idx}
                 type="button"
                 onClick={() => setSelectedName(cluster.cluster_name)}
-                className={`block w-full rounded-full border px-2.5 py-1 text-left text-[11px] font-medium transition-colors ${clusterButtonClass(isSelected)}`}
+                className={`block w-full rounded-md border px-2.5 py-1.5 text-left text-[11px] font-medium transition-colors ${clusterButtonClass(isSelected)}`}
                 title={
                   cluster.last_update
                     ? `${infraType} · last_update: ${cluster.last_update}`
