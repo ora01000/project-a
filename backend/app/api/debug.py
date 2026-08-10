@@ -7,6 +7,8 @@ from pydantic import BaseModel, Field
 
 from backend.app.db.database import get_connection
 from backend.app.db.engine import is_integrity_error
+from backend.app.db.roles import is_admin_role
+from backend.app.middleware.session_auth import get_request_auth_user
 
 router = APIRouter(tags=["debug"])
 
@@ -36,6 +38,14 @@ class DeleteTableRowsResponse(BaseModel):
     deleted: int
 
 
+class DropTableRequest(BaseModel):
+    confirm_name: str = Field(min_length=1)
+
+
+class DropTableResponse(BaseModel):
+    dropped: str
+
+
 class UpdateTableRowRequest(BaseModel):
     idx: int
     values: dict[str, Any]
@@ -43,6 +53,12 @@ class UpdateTableRowRequest(BaseModel):
 
 class UpdateTableRowResponse(BaseModel):
     updated: int
+
+
+def _require_admin(request: Request) -> None:
+    viewer = get_request_auth_user(request)
+    if not is_admin_role(viewer.role):
+        raise HTTPException(status_code=403, detail="관리자만 수행할 수 있습니다.")
 
 
 def _quote_ident(name: str) -> str:
@@ -207,6 +223,41 @@ async def delete_table_rows(
             ) from exc
 
     return DeleteTableRowsResponse(deleted=int(cursor.rowcount))
+
+
+@router.post("/debug/tables/{table_name}/drop", response_model=DropTableResponse)
+async def drop_table(
+    table_name: str,
+    payload: DropTableRequest,
+    request: Request,
+) -> DropTableResponse:
+    """DROP TABLE — requires typing the exact table name in confirm_name."""
+    _require_admin(request)
+    confirm = (payload.confirm_name or "").strip()
+    if confirm != table_name:
+        raise HTTPException(
+            status_code=400,
+            detail="확인용 테이블 이름이 일치하지 않습니다.",
+        )
+    try:
+        quoted_table = _quote_ident(table_name)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    database_path = request.app.state.database_path
+    with get_connection(database_path) as connection:
+        if table_name not in _list_user_tables(connection):
+            raise HTTPException(status_code=404, detail=f"테이블을 찾을 수 없습니다: {table_name}")
+        try:
+            connection.execute(f"DROP TABLE IF EXISTS {quoted_table} CASCADE")
+            connection.commit()
+        except Exception as exc:
+            raise HTTPException(
+                status_code=500,
+                detail=f"테이블 삭제에 실패했습니다: {exc}",
+            ) from exc
+
+    return DropTableResponse(dropped=table_name)
 
 
 @router.post("/debug/tables/{table_name}/update", response_model=UpdateTableRowResponse)

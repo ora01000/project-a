@@ -41,7 +41,10 @@ export function TableDebugModal({ onClose }: TableDebugModalProps) {
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isDropping, setIsDropping] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showDropConfirm, setShowDropConfirm] = useState(false);
+  const [dropConfirmName, setDropConfirmName] = useState("");
 
   const loadTables = useCallback(async () => {
     setIsLoading(true);
@@ -82,11 +85,16 @@ export function TableDebugModal({ onClose }: TableDebugModalProps) {
       .filter((value): value is number => value !== null);
   }, [selected]);
 
+  const dropNameMatches =
+    selected != null && dropConfirmName.trim() === selected.name;
+
   const selectTable = (name: string) => {
     setSelectedName(name);
     setSelectedIdxSet(new Set());
     setEditingRow(null);
     setError(null);
+    setShowDropConfirm(false);
+    setDropConfirmName("");
   };
 
   const toggleRow = (idx: number) => {
@@ -138,6 +146,43 @@ export function TableDebugModal({ onClose }: TableDebugModalProps) {
     }
   };
 
+  const openDropConfirm = () => {
+    if (!selected) {
+      return;
+    }
+    setDropConfirmName("");
+    setShowDropConfirm(true);
+    setError(null);
+  };
+
+  const handleDropTable = async () => {
+    if (!selected || !dropNameMatches) {
+      return;
+    }
+
+    setIsDropping(true);
+    setError(null);
+    const droppedName = selected.name;
+    try {
+      const response = await fetch(`/api/debug/tables/${encodeURIComponent(droppedName)}/drop`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ confirm_name: dropConfirmName.trim() }),
+      });
+      if (!response.ok) {
+        throw new Error(await parseError(response, "테이블 삭제에 실패했습니다."));
+      }
+      setShowDropConfirm(false);
+      setDropConfirmName("");
+      setSelectedName(null);
+      await loadTables();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "테이블 삭제에 실패했습니다.");
+    } finally {
+      setIsDropping(false);
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 px-4">
       <div
@@ -153,8 +198,16 @@ export function TableDebugModal({ onClose }: TableDebugModalProps) {
           <div className="flex items-center gap-2">
             <button
               type="button"
+              onClick={openDropConfirm}
+              disabled={!selected || isDropping || isLoading || isDeleting}
+              className="rounded-md border border-rose-800 bg-rose-950/30 px-3 py-1.5 text-sm font-medium text-rose-100 hover:bg-rose-950/60 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              테이블 삭제
+            </button>
+            <button
+              type="button"
               onClick={() => setShowDeleteConfirm(true)}
-              disabled={selectedIdxSet.size === 0 || isDeleting || isLoading}
+              disabled={selectedIdxSet.size === 0 || isDeleting || isLoading || isDropping}
               className="rounded-md border border-rose-800 px-3 py-1.5 text-sm text-rose-200 hover:bg-rose-950/40 disabled:cursor-not-allowed disabled:opacity-50"
             >
               삭제{selectedIdxSet.size > 0 ? ` (${selectedIdxSet.size})` : ""}
@@ -162,7 +215,7 @@ export function TableDebugModal({ onClose }: TableDebugModalProps) {
             <button
               type="button"
               onClick={() => void loadTables()}
-              disabled={isLoading || isDeleting}
+              disabled={isLoading || isDeleting || isDropping}
               className="rounded-md border border-slate-700 px-3 py-1.5 text-sm text-slate-200 hover:bg-slate-800 disabled:opacity-50"
             >
               새로고침
@@ -304,6 +357,68 @@ export function TableDebugModal({ onClose }: TableDebugModalProps) {
             }
           }}
         />
+      ) : null}
+
+      {showDropConfirm && selected ? (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/70 px-4">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="drop-table-dialog-title"
+            className="w-full max-w-md rounded-xl border border-rose-900/60 bg-slate-900 p-5 shadow-xl"
+          >
+            <h2 id="drop-table-dialog-title" className="text-base font-semibold text-rose-100">
+              테이블 삭제
+            </h2>
+            <p className="mt-2 text-sm text-slate-300">
+              선택한 테이블을 영구 삭제합니다. 확인을 위해 아래 테이블 이름을 정확히 입력하세요.
+            </p>
+            <p className="mt-3 rounded-md border border-slate-700 bg-slate-950 px-3 py-2 font-mono text-sm text-sky-200">
+              {selected.name}
+            </p>
+            <label className="mt-3 block text-xs text-slate-400">
+              테이블 이름 입력
+              <input
+                type="text"
+                value={dropConfirmName}
+                autoComplete="off"
+                spellCheck={false}
+                disabled={isDropping}
+                placeholder={selected.name}
+                onChange={(event) => setDropConfirmName(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && dropNameMatches && !isDropping) {
+                    void handleDropTable();
+                  }
+                }}
+                className="mt-1 w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 font-mono text-sm text-slate-100 focus:border-rose-600 focus:outline-none disabled:opacity-50"
+              />
+            </label>
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                disabled={isDropping}
+                onClick={() => {
+                  if (!isDropping) {
+                    setShowDropConfirm(false);
+                    setDropConfirmName("");
+                  }
+                }}
+                className="rounded-md border border-slate-700 px-3 py-1.5 text-sm text-slate-200 hover:bg-slate-800 disabled:opacity-50"
+              >
+                취소
+              </button>
+              <button
+                type="button"
+                disabled={!dropNameMatches || isDropping}
+                onClick={() => void handleDropTable()}
+                className="rounded-md bg-rose-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-rose-600 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {isDropping ? "삭제 중…" : "테이블 삭제"}
+              </button>
+            </div>
+          </div>
+        </div>
       ) : null}
 
       {selected && editingRow ? (

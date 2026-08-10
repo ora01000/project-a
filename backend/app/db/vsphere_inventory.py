@@ -1,8 +1,14 @@
 """Persist vSphere inventory into per-cluster dynamic tables.
 
 Layout (infra_type=vSphere):
-  {cluster_name}_vsphere_hosts
+  {cluster_name}_vsphere_cluster
+  {cluster_name}_vsphere_hosts          (cluster_id → vsphere_cluster.cluster_id)
   {cluster_name}_vsphere_vms_on_host
+
+vCenter mapping source:
+  - Clusters: GET /api/vcenter/cluster (cluster, name, ha_enabled, drs_enabled)
+  - Host↔cluster: GET /api/vcenter/host?clusters=<cluster_id>
+    (standalone ESXi hosts have NULL cluster_id)
 
 Backups: {table}_{YYYYMMDD_HHMMSS} (keep newest 4 stamp sets).
 """
@@ -16,7 +22,11 @@ from pathlib import Path
 from typing import Any
 
 from backend.app.db.database import get_connection
-from backend.app.db.introspection import ensure_table_idx_serial, pk_autoincrement_sql
+from backend.app.db.introspection import (
+    ensure_table_idx_serial,
+    list_table_columns,
+    pk_autoincrement_sql,
+)
 from backend.app.db.k8s_inventory import (
     MAX_INVENTORY_BACKUP_GENERATIONS,
     _BACKUP_STAMP_SUFFIX_RE,
@@ -30,9 +40,20 @@ from backend.app.db.k8s_inventory import (
 logger = logging.getLogger(__name__)
 
 VSPHERE_INVENTORY_SUFFIXES = (
+    "vsphere_cluster",
     "vsphere_hosts",
     "vsphere_vms_on_host",
 )
+
+
+@dataclass
+class VsphereComputeClusterRow:
+    """One vCenter ClusterComputeResource (not infra_cluster registry)."""
+
+    cluster_id: str
+    cluster_name: str | None = None
+    ha_enabled: bool | None = None
+    drs_enabled: bool | None = None
 
 
 @dataclass
@@ -41,6 +62,7 @@ class VsphereHostRow:
     host_name: str | None = None
     connection_state: str | None = None
     power_state: str | None = None
+    cluster_id: str | None = None
 
 
 @dataclass
@@ -56,6 +78,7 @@ class VsphereVmOnHostRow:
 @dataclass
 class VsphereClusterSnapshot:
     cluster_name: str
+    compute_clusters: list[VsphereComputeClusterRow] = field(default_factory=list)
     hosts: list[VsphereHostRow] = field(default_factory=list)
     vms_on_host: list[VsphereVmOnHostRow] = field(default_factory=list)
 
@@ -74,15 +97,38 @@ def vsphere_inventory_tables(cluster_name: str) -> tuple[str, ...]:
     )
 
 
+def _ensure_hosts_cluster_id_column(connection, hosts_table: str) -> None:
+    columns = list_table_columns(connection, hosts_table)
+    if "cluster_id" not in columns:
+        connection.execute(
+            f"ALTER TABLE {_quote_ident(hosts_table)} "
+            "ADD COLUMN cluster_id VARCHAR(30)"
+        )
+        logger.info("Added %s.cluster_id", hosts_table)
+
+
 def ensure_vsphere_inventory_tables(
     connection,
     cluster_name: str,
 ) -> dict[str, str]:
     name = validate_cluster_name(cluster_name)
     tables = _list_user_tables(connection)
+    clusters_t = vsphere_inventory_table(name, "vsphere_cluster")
     hosts_t = vsphere_inventory_table(name, "vsphere_hosts")
     vms_t = vsphere_inventory_table(name, "vsphere_vms_on_host")
 
+    if clusters_t not in tables:
+        connection.execute(
+            f"""
+            CREATE TABLE {_quote_ident(clusters_t)} (
+                {pk_autoincrement_sql(connection)},
+                cluster_id VARCHAR(30) NOT NULL,
+                cluster_name VARCHAR(100),
+                ha_enabled INTEGER,
+                drs_enabled INTEGER
+            )
+            """
+        )
     if hosts_t not in tables:
         connection.execute(
             f"""
@@ -91,10 +137,13 @@ def ensure_vsphere_inventory_tables(
                 host_id VARCHAR(30) NOT NULL,
                 host_name VARCHAR(100),
                 connection_state VARCHAR(30),
-                power_state VARCHAR(30)
+                power_state VARCHAR(30),
+                cluster_id VARCHAR(30)
             )
             """
         )
+    else:
+        _ensure_hosts_cluster_id_column(connection, hosts_t)
     if vms_t not in tables:
         connection.execute(
             f"""
@@ -109,9 +158,13 @@ def ensure_vsphere_inventory_tables(
             )
             """
         )
-    for table_name in (hosts_t, vms_t):
+    for table_name in (clusters_t, hosts_t, vms_t):
         ensure_table_idx_serial(connection, table_name)
-    return {"hosts": hosts_t, "vms_on_host": vms_t}
+    return {
+        "clusters": clusters_t,
+        "hosts": hosts_t,
+        "vms_on_host": vms_t,
+    }
 
 
 def drop_vsphere_inventory_tables(connection, cluster_name: str) -> list[str]:
@@ -237,6 +290,12 @@ def prune_vsphere_inventory_backups(
     return dropped
 
 
+def _as_int_flag(value: bool | None) -> int | None:
+    if value is None:
+        return None
+    return 1 if value else 0
+
+
 def replace_vsphere_snapshot(
     database_path: str | Path,
     snapshot: VsphereClusterSnapshot,
@@ -267,24 +326,42 @@ def replace_vsphere_snapshot(
         )
         pruned = prune_vsphere_inventory_backups(connection, cluster_name)
         table_map = ensure_vsphere_inventory_tables(connection, cluster_name)
+        clusters_t = table_map["clusters"]
         hosts_t = table_map["hosts"]
         vms_t = table_map["vms_on_host"]
 
         connection.execute(f"DELETE FROM {_quote_ident(vms_t)}")
         connection.execute(f"DELETE FROM {_quote_ident(hosts_t)}")
+        connection.execute(f"DELETE FROM {_quote_ident(clusters_t)}")
+
+        for compute in snapshot.compute_clusters:
+            connection.execute(
+                f"""
+                INSERT INTO {_quote_ident(clusters_t)} (
+                    cluster_id, cluster_name, ha_enabled, drs_enabled
+                ) VALUES (?, ?, ?, ?)
+                """,
+                (
+                    compute.cluster_id[:30],
+                    (compute.cluster_name or None) and compute.cluster_name[:100],
+                    _as_int_flag(compute.ha_enabled),
+                    _as_int_flag(compute.drs_enabled),
+                ),
+            )
 
         for host in snapshot.hosts:
             connection.execute(
                 f"""
                 INSERT INTO {_quote_ident(hosts_t)} (
-                    host_id, host_name, connection_state, power_state
-                ) VALUES (?, ?, ?, ?)
+                    host_id, host_name, connection_state, power_state, cluster_id
+                ) VALUES (?, ?, ?, ?, ?)
                 """,
                 (
                     host.host_id[:30],
                     (host.host_name or None) and host.host_name[:100],
                     (host.connection_state or None) and host.connection_state[:30],
                     (host.power_state or None) and host.power_state[:30],
+                    (host.cluster_id or None) and host.cluster_id[:30],
                 ),
             )
 
@@ -310,6 +387,7 @@ def replace_vsphere_snapshot(
 
     return {
         "last_update": last_update,
+        "clusters": len(snapshot.compute_clusters),
         "hosts": len(snapshot.hosts),
         "vms": len(snapshot.vms_on_host),
         "backup_tables": backups,

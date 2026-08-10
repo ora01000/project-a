@@ -67,10 +67,12 @@ class SessionAuthMiddleware(BaseHTTPMiddleware):
         if request.method.upper() == "OPTIONS":
             return await call_next(request)
 
-        if is_public_request(request.method, request.url.path):
+        token = extract_bearer_token(request)
+        is_public = is_public_request(request.method, request.url.path)
+
+        if is_public and not token:
             return await call_next(request)
 
-        token = extract_bearer_token(request)
         if not token:
             return JSONResponse(status_code=401, content={"detail": "인증이 필요합니다."})
 
@@ -81,12 +83,17 @@ class SessionAuthMiddleware(BaseHTTPMiddleware):
             absolute_max_seconds=settings.absolute_max_seconds,
         )
         if session is None:
+            # Public endpoints may still be called with a stale token; ignore it.
+            if is_public:
+                return await call_next(request)
             return JSONResponse(status_code=401, content={"detail": "세션이 만료되었습니다."})
 
         database_path = request.app.state.database_path
         user = get_user_by_idx(database_path, session.user_idx)
         if user is None:
             logger.warning("Session user not found: idx=%s", session.user_idx)
+            if is_public:
+                return await call_next(request)
             return JSONResponse(status_code=401, content={"detail": "사용자를 찾을 수 없습니다."})
 
         if user.role == ROLE_PENDING:

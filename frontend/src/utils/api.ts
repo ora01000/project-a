@@ -64,21 +64,22 @@ export function installAuthFetchInterceptor(): void {
   }
 
   const originalFetch = window.fetch.bind(window);
-  window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const url = resolveRequestUrl(input);
     const method = resolveRequestMethod(input, init);
     const headers = new Headers(init?.headers);
+    const isPublic = isPublicApiRequest(url, method);
 
-    if (!isPublicApiRequest(url, method)) {
-      const token = getAccessToken();
-      if (token && !headers.has("Authorization")) {
-        headers.set("Authorization", `Bearer ${token}`);
-      }
+    // Attach session token whenever available, including public /api/debug/*
+    // routes that optionally enforce admin checks (e.g. table drop).
+    const token = getAccessToken();
+    if (token && !headers.has("Authorization")) {
+      headers.set("Authorization", `Bearer ${token}`);
     }
 
     const response = await originalFetch(input, { ...init, headers });
 
-    if (response.status === 401 && !isPublicApiRequest(url, method)) {
+    if (response.status === 401 && !isPublic) {
       clearAuthUser();
       onUnauthorized?.();
       return response;

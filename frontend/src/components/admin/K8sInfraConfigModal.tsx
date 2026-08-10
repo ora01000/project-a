@@ -247,6 +247,7 @@ export function K8sInfraConfigModal({ viewerRole, onClose }: K8sInfraConfigModal
         backup_tables: string[];
       };
       const summary = [
+        result.counts.clusters != null ? `clusters=${result.counts.clusters}` : null,
         result.counts.nodes != null ? `nodes=${result.counts.nodes}` : null,
         result.counts.hosts != null ? `hosts=${result.counts.hosts}` : null,
         result.counts.namespaces != null ? `ns=${result.counts.namespaces}` : null,

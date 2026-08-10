@@ -10,6 +10,7 @@ from typing import Any
 from backend.app.db.k8s_inventory import get_vsphere_credentials
 from backend.app.db.vsphere_inventory import (
     VsphereClusterSnapshot,
+    VsphereComputeClusterRow,
     VsphereHostRow,
     VsphereVmOnHostRow,
     replace_vsphere_snapshot,
@@ -44,6 +45,21 @@ def _as_optional_int(value: Any) -> int | None:
         return None
 
 
+def _as_optional_bool(value: Any) -> bool | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "on"}:
+        return True
+    if text in {"0", "false", "no", "off"}:
+        return False
+    return None
+
+
 def _build_client(
     *,
     url: str,
@@ -61,6 +77,35 @@ def _build_client(
             api_mode=os.getenv("VSPHERE_API_MODE", "api").strip() or "api",
         )
     )
+
+
+def _build_host_cluster_map(client: VsphereRestClient) -> dict[str, str]:
+    """Map host MoID → cluster MoID via REST hosts-by-cluster filter."""
+    mapping: dict[str, str] = {}
+    try:
+        clusters_raw = client.list_clusters()
+    except VsphereApiError as exc:
+        logger.warning("list_clusters failed: %s", exc)
+        return mapping
+
+    for entry in clusters_raw:
+        cluster_id = str(entry.get("cluster") or "").strip()
+        if not cluster_id:
+            continue
+        try:
+            hosts_in_cluster = client.list_hosts_by_cluster(cluster_id)
+        except VsphereApiError as exc:
+            logger.warning(
+                "list_hosts_by_cluster failed cluster=%s: %s",
+                cluster_id,
+                exc,
+            )
+            continue
+        for host_entry in hosts_in_cluster:
+            host_id = str(host_entry.get("host") or "").strip()
+            if host_id:
+                mapping[host_id] = cluster_id
+    return mapping
 
 
 def collect_vsphere_snapshot(
@@ -87,6 +132,25 @@ def collect_vsphere_snapshot(
                 f"(base={client.base_url}). AGENT_RUNTIME_MODE=http 에서 수집하세요."
             )
 
+        compute_clusters: list[VsphereComputeClusterRow] = []
+        try:
+            for entry in client.list_clusters():
+                cluster_id = str(entry.get("cluster") or "").strip()
+                if not cluster_id:
+                    continue
+                compute_clusters.append(
+                    VsphereComputeClusterRow(
+                        cluster_id=cluster_id,
+                        cluster_name=str(entry.get("name") or "") or None,
+                        ha_enabled=_as_optional_bool(entry.get("ha_enabled")),
+                        drs_enabled=_as_optional_bool(entry.get("drs_enabled")),
+                    )
+                )
+        except VsphereApiError as exc:
+            logger.warning("list_clusters failed cluster=%s: %s", cluster_name, exc)
+
+        host_to_cluster = _build_host_cluster_map(client)
+
         hosts_raw = client.list_hosts()
         hosts: list[VsphereHostRow] = []
         vms_on_host: list[VsphereVmOnHostRow] = []
@@ -100,6 +164,7 @@ def collect_vsphere_snapshot(
                     host_name=str(entry.get("name") or "") or None,
                     connection_state=str(entry.get("connection_state") or "") or None,
                     power_state=str(entry.get("power_state") or "") or None,
+                    cluster_id=host_to_cluster.get(host_id),
                 )
             )
             try:
@@ -128,13 +193,15 @@ def collect_vsphere_snapshot(
                 )
 
         logger.info(
-            "Collected vsphere snapshot cluster=%s hosts=%s vms=%s",
+            "Collected vsphere snapshot cluster=%s compute_clusters=%s hosts=%s vms=%s",
             cluster_name,
+            len(compute_clusters),
             len(hosts),
             len(vms_on_host),
         )
         return VsphereClusterSnapshot(
             cluster_name=cluster_name,
+            compute_clusters=compute_clusters,
             hosts=hosts,
             vms_on_host=vms_on_host,
         )

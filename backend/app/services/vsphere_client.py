@@ -242,6 +242,42 @@ class VsphereRestClient:
             return []
         return [item for item in data if isinstance(item, dict)]
 
+    def list_clusters(self) -> list[dict[str, Any]]:
+        """GET /api/vcenter/cluster — cluster MoID, name, ha_enabled, drs_enabled."""
+        path = self._path("/rest/vcenter/cluster", "/api/vcenter/cluster")
+        response = self._request("GET", path)
+        self._check(response, path, "list clusters")
+        data = self._extract_value(response)
+        if not isinstance(data, list):
+            return []
+        return [item for item in data if isinstance(item, dict)]
+
+    def list_hosts_by_cluster(self, cluster_id: str) -> list[dict[str, Any]]:
+        """Hosts belonging to a ClusterComputeResource (REST filter.clusters / clusters)."""
+        cluster_id = (cluster_id or "").strip()
+        if not cluster_id:
+            raise ValueError("cluster_id is required")
+        path = self._path("/rest/vcenter/host", "/api/vcenter/host")
+        params = (
+            {"clusters": cluster_id}
+            if self._api_mode == "api"
+            else {"filter.clusters.1": cluster_id}
+        )
+        response = self._request("GET", path, params=params)
+        if (
+            not response.is_success
+            and self._api_mode == "rest"
+            and response.status_code == 400
+        ):
+            response = self._request(
+                "GET", path, params={"filter.clusters": cluster_id}
+            )
+        self._check(response, path, f"list hosts in cluster '{cluster_id}'")
+        data = self._extract_value(response)
+        if not isinstance(data, list):
+            return []
+        return [item for item in data if isinstance(item, dict)]
+
     def list_vms_by_host(self, host_id: str) -> list[dict[str, Any]]:
         host_id = (host_id or "").strip()
         if not host_id:

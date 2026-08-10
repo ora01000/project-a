@@ -1212,10 +1212,20 @@ dev-axplatform-multi-pod 는 목업(로컬)/http(서버) 환경 모두 postgres�
     - {infra_cluster.cluster_name}_vsphere_hosts 테이블
       - host_id varchar(30)
       - host_name / connection_state / power_state
+      - cluster_id varchar(30)  — vsphere_cluster.cluster_id (standalone이면 NULL)
     - {infra_cluster.cluster_name}_vsphere_vms_on_host 테이블
       - vm_id varchar(30)
       - host_id varchar(30)
       - vm_name / power_state / cpu_count / memory_mib
+    - {infra_cluster.cluster_name}_vsphere_cluster 테이블 (완료)
+      - cluster_id varchar(30)  — vCenter MoID (예: domain-c26)
+      - cluster_name varchar(100)
+      - ha_enabled / drs_enabled
+    클러스터↔호스트 맵핑 (완료):
+      - vCenter REST `GET /api/vcenter/cluster` 로 클러스터 목록
+      - `GET /api/vcenter/host?clusters=<cluster_id>` 로 소속 호스트 조회 후 hosts.cluster_id 에 저장
+      - 클러스터 미소속(standalone) 호스트는 cluster_id NULL
+ 
   - 매 수집후 k8s_cluster 수집과 동일하게 4개의 복제본 테이블을 백업한다.
 
     

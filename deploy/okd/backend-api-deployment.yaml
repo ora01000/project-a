@@ -19,7 +19,7 @@ spec:
     spec:
       containers:
         - name: backend
-          image: ora01000/project-a-backend:pg260810
+          image: ora01000/project-a-backend:pg260811
           imagePullPolicy: Always
           ports:
             - name: http
