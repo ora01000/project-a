@@ -10,12 +10,17 @@ from pathlib import Path
 from croniter import croniter
 
 from backend.app.config import K8sCollectorSettings, load_k8s_collector_settings
-from backend.app.db.k8s_inventory import list_scheduled_k8s_clusters
+from backend.app.db.k8s_inventory import INFRA_TYPE_VSPHERE, list_scheduled_k8s_clusters
 from backend.app.services.k8s_collector import (
     KubeconfigRequiredError,
     collect_and_persist_cluster,
 )
 from backend.app.services.kubevirt_collector import collect_and_persist_kubevirt
+from backend.app.services.vsphere_collector import (
+    VsphereConnectTimeoutError,
+    VsphereMockScrapeSkippedError,
+    collect_and_persist_vsphere,
+)
 from backend.app.timezone import DISPLAY_TIMEZONE, now_display_datetime
 
 logger = logging.getLogger(__name__)
@@ -86,6 +91,14 @@ async def run_due_k8s_scrapes(
                     settings=collector,
                     runtime_mode=runtime_mode,
                 )
+            elif record.infra_type == INFRA_TYPE_VSPHERE:
+                await asyncio.to_thread(
+                    collect_and_persist_vsphere,
+                    database_path,
+                    cluster_idx=record.idx,
+                    cluster_name=record.cluster_name,
+                    runtime_mode=runtime_mode,
+                )
             else:
                 await asyncio.to_thread(
                     collect_and_persist_cluster,
@@ -97,6 +110,12 @@ async def run_due_k8s_scrapes(
                 )
             collected.append(record.idx)
         except KubeconfigRequiredError as exc:
+            logger.warning(
+                "infra scrape schedule skipped cluster=%s: %s",
+                record.cluster_name,
+                exc,
+            )
+        except (VsphereConnectTimeoutError, VsphereMockScrapeSkippedError) as exc:
             logger.warning(
                 "infra scrape schedule skipped cluster=%s: %s",
                 record.cluster_name,

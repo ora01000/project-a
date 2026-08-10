@@ -77,7 +77,6 @@ class AgentManager:
         self.agent_operation_tasks: dict[str, dict[str, str]] = {}
         self.agent_active_counts: dict[str, int] = {}
         self.agent_health_status: dict[str, str] = {}
-        self._agent_invoke_failures: set[str] = set()
         self.mcp_manager = None
         self.token_tracker: TokenTracker | None = None
         self.max_context_tokens: int = 32768
@@ -228,10 +227,6 @@ class AgentManager:
                 self.agent_operation_errors.pop(agent_id, None)
                 self.agent_active_counts.pop(agent_id, None)
                 self.agent_operation_tasks.pop(agent_id, None)
-        self._agent_invoke_failures = {
-            agent_id for agent_id in self._agent_invoke_failures if agent_id in next_agent_ids
-        }
-
         self._register_db_agents()
         self._register_system_agents()
         self._refresh_agent_health_status()
@@ -252,9 +247,6 @@ class AgentManager:
                 self.agent_operation_errors.pop(agent_id, None)
                 self.agent_active_counts.pop(agent_id, None)
                 self.agent_operation_tasks.pop(agent_id, None)
-        self._agent_invoke_failures = {
-            agent_id for agent_id in self._agent_invoke_failures if agent_id in next_agent_ids
-        }
 
         self._register_db_agents()
         self._register_system_agents()
@@ -350,17 +342,17 @@ class AgentManager:
         self._sync_operation_state(agent_id)
 
     def get_axit_agent_connection_status(self, agent_id: str) -> str:
-        """AXIT lambda agents are assumed alive unless invoke has ever failed."""
-        if agent_id in self._agent_invoke_failures:
-            return "degraded"
+        """Connection badge: reachable catalog agents stay connected.
+
+        Invoke/runtime errors are reflected in ``operation_status`` (error),
+        not as a degraded connection state.
+        """
+        del agent_id
         return "connected"
 
     def mark_agent_invoke_failure(self, agent_id: str, reason: str) -> None:
-        if agent_id not in self._agent_invoke_failures:
-            logger.warning("Agent %s invoke failure latched (degraded): %s", agent_id, reason)
-        self._agent_invoke_failures.add(agent_id)
-        if self.uses_remote_runtime() and agent_id in self.agents:
-            self.agent_health_status[agent_id] = "degraded"
+        """Log invoke failures without changing connection status."""
+        logger.warning("Agent %s invoke failure (connection stays connected): %s", agent_id, reason)
 
     def mark_agent_error(
         self,

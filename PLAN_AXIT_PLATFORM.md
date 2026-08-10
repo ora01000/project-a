@@ -1180,7 +1180,45 @@ dev-axplatform-multi-pod 는 목업(로컬)/http(서버) 환경 모두 postgres�
 - 사용자 조회
 - 공지사항
 
+# 서버 테스트에서 수정사항
+- 대화형 터미널 > User Message 입력창에서 중지 버튼을 누르면 대화창에 "응답 생성 중" 메시지를 삭제하고 "요청이 취소" 되었다는 의미의 메시지로 변경
+- 대화형 터미널 > User Message 입력창에서 위 키를 누르면 이전 명령 캐시를 보여주는 것처럼 아래 키를 누르면 현재 보여주는 명령 캐시의 다음 명령을 보여주도록 보완
+- 에이전트 노드 목록에서 연결상태에 대한 표시 방식 변경 (완료)
+  - 현재 방식 : 에이전트에서 5xx 등 오류 발생시 degraded 
+  - 개선 방식 : 에이전트 경로로 통신 응답이 가능한 상태면 무조건 연결
 
+
+# 인프라 정보 scrape 확장 : vSphere (등록 UI·vsphere_infra_info·scrape 완료)
+- infra_cluster 테이블에 vsphere 정보를 입력받는다. 입력 폼(편집모드)에서 infra_type = "vSphere" 를 추가한다.
+- cluster_name 컬럼에 vCenter 식별 이름을 입력받는다(기존 IP입력, IP 체크를 수정)
+  - vSphere 를 선택하면 입력 row 하단에 추가정보를 입력하는 폼을 만든다.
+  - 추가 입력 정보
+    - vSphere 서버 URL
+    - 계정/패스워드
+    - 패스워드는 마스킹 처리, visible 버튼을 배치
+  
+# vSphere 정보 테이블 추가 (완료: vsphere_infra_info)
+- VSPHERE_INFRA_INFO
+  - vsphere_idx int -> infra_cluster.infra_type = "vSphere" 인 레코드의 idx
+  - vsphere_url
+  - vsphere_id
+  - vsphere_pw
+
+# vSphere 정보테이블 scrape (완료: mock은 연결 시도 후 중단 / http만 수집·백업4세대)
+로컬에서는 테스트가 불가하다. 따라서 목업은 연결이 불가하므로 vsphere_url 값으로 연결은 시도하나 타임아웃이 발생하므로 이후 scrape 동작을 수행하지 않는다.
+- http 모드(서버)
+  - ~/vsphere-mcp-pro 프로젝트의 코드를 참조한다.
+  - 수집 테이블은 다음과 같다.
+    - {infra_cluster.cluster_name}_vsphere_hosts 테이블
+      - host_id varchar(30)
+      - host_name / connection_state / power_state
+    - {infra_cluster.cluster_name}_vsphere_vms_on_host 테이블
+      - vm_id varchar(30)
+      - host_id varchar(30)
+      - vm_name / power_state / cpu_count / memory_mib
+  - 매 수집후 k8s_cluster 수집과 동일하게 4개의 복제본 테이블을 백업한다.
+
+    
 
 
 

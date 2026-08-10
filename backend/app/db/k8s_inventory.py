@@ -153,14 +153,25 @@ class K8sClusterRecord:
     cron: bool = False
     cron_expr: str = "0 23 * * 6"
     infra_type: str = "k8s"
+    vsphere_url: str | None = None
+    vsphere_id: str | None = None
+    vsphere_has_password: bool = False
 
 
 DEFAULT_CRON_EXPR = "0 23 * * 6"  # every Saturday 23:00
 DEFAULT_INFRA_TYPE = "k8s"
-KNOWN_INFRA_TYPES = frozenset({"k8s", "kubevirt"})
+INFRA_TYPE_VSPHERE = "vSphere"
+KNOWN_INFRA_TYPES = frozenset({"k8s", "kubevirt", INFRA_TYPE_VSPHERE})
+# Shape UI / k8s·kubevirt inventory detail.
+SCRAPEABLE_INFRA_TYPES = frozenset({"k8s", "kubevirt"})
+# Manual + cron collect (includes vSphere inventory scrape).
+COLLECTABLE_INFRA_TYPES = frozenset({"k8s", "kubevirt", INFRA_TYPE_VSPHERE})
 _CRON_EXPR_MAX_LEN = 20
 _INFRA_TYPE_MAX_LEN = 20
 _INFRA_TYPE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,19}$")
+_VSPHERE_URL_MAX_LEN = 500
+_VSPHERE_ID_MAX_LEN = 200
+_VSPHERE_PW_MAX_LEN = 500
 MAX_SHAPE_HISTORY_POINTS = 5
 
 
@@ -305,7 +316,7 @@ def get_cluster_shape_analysis(
         if row is None:
             return None
         infra_type = str(row["infra_type"] or DEFAULT_INFRA_TYPE).strip() or DEFAULT_INFRA_TYPE
-        if infra_type not in KNOWN_INFRA_TYPES:
+        if infra_type not in SCRAPEABLE_INFRA_TYPES:
             return None
 
         tables = _list_user_tables(connection)
@@ -412,6 +423,163 @@ def validate_infra_type(infra_type: str | None) -> str:
         allowed = ", ".join(sorted(KNOWN_INFRA_TYPES))
         raise ValueError(f"지원하지 않는 infra_type 입니다: {text} (허용: {allowed})")
     return text
+
+
+def validate_vsphere_url(url: str | None) -> str:
+    text = (url or "").strip()
+    if not text:
+        raise ValueError("vSphere 서버 URL은 필수입니다.")
+    if len(text) > _VSPHERE_URL_MAX_LEN:
+        raise ValueError(
+            f"vSphere 서버 URL은 {_VSPHERE_URL_MAX_LEN}자를 초과할 수 없습니다."
+        )
+    lowered = text.lower()
+    if not (lowered.startswith("https://") or lowered.startswith("http://")):
+        raise ValueError("vSphere 서버 URL은 http:// 또는 https:// 로 시작해야 합니다.")
+    return text
+
+
+def validate_vsphere_id(account_id: str | None) -> str:
+    text = (account_id or "").strip()
+    if not text:
+        raise ValueError("vSphere 계정은 필수입니다.")
+    if len(text) > _VSPHERE_ID_MAX_LEN:
+        raise ValueError(
+            f"vSphere 계정은 {_VSPHERE_ID_MAX_LEN}자를 초과할 수 없습니다."
+        )
+    return text
+
+
+def validate_vsphere_pw(password: str | None, *, required: bool) -> str:
+    text = "" if password is None else str(password)
+    if required and not text:
+        raise ValueError("vSphere 패스워드는 필수입니다.")
+    if len(text) > _VSPHERE_PW_MAX_LEN:
+        raise ValueError(
+            f"vSphere 패스워드는 {_VSPHERE_PW_MAX_LEN}자를 초과할 수 없습니다."
+        )
+    return text
+
+
+def ensure_vsphere_infra_info_table(connection) -> None:
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS vsphere_infra_info (
+            vsphere_idx BIGINT PRIMARY KEY REFERENCES infra_cluster(idx) ON DELETE CASCADE,
+            vsphere_url TEXT NOT NULL DEFAULT '',
+            vsphere_id VARCHAR(200) NOT NULL DEFAULT '',
+            vsphere_pw TEXT NOT NULL DEFAULT ''
+        )
+        """
+    )
+
+
+def _load_vsphere_info_map(
+    connection, cluster_ids: list[int]
+) -> dict[int, tuple[str, str, bool]]:
+    """Return vsphere_idx -> (url, id, has_password)."""
+    if not cluster_ids:
+        return {}
+    ensure_vsphere_infra_info_table(connection)
+    placeholders = ", ".join("?" for _ in cluster_ids)
+    rows = connection.execute(
+        f"""
+        SELECT vsphere_idx, vsphere_url, vsphere_id, vsphere_pw
+        FROM vsphere_infra_info
+        WHERE vsphere_idx IN ({placeholders})
+        """,
+        tuple(cluster_ids),
+    ).fetchall()
+    result: dict[int, tuple[str, str, bool]] = {}
+    for row in rows:
+        pw = str(row["vsphere_pw"] or "")
+        result[int(row["vsphere_idx"])] = (
+            str(row["vsphere_url"] or ""),
+            str(row["vsphere_id"] or ""),
+            bool(pw),
+        )
+    return result
+
+
+def _upsert_vsphere_infra_info(
+    connection,
+    *,
+    vsphere_idx: int,
+    vsphere_url: str,
+    vsphere_id: str,
+    vsphere_pw: str | None,
+) -> None:
+    """Insert or update credentials. ``vsphere_pw=None`` keeps the existing password."""
+    ensure_vsphere_infra_info_table(connection)
+    existing = connection.execute(
+        """
+        SELECT vsphere_pw FROM vsphere_infra_info WHERE vsphere_idx = ?
+        """,
+        (vsphere_idx,),
+    ).fetchone()
+    if existing is None:
+        password = validate_vsphere_pw(vsphere_pw, required=True)
+        connection.execute(
+            """
+            INSERT INTO vsphere_infra_info (
+                vsphere_idx, vsphere_url, vsphere_id, vsphere_pw
+            ) VALUES (?, ?, ?, ?)
+            """,
+            (vsphere_idx, vsphere_url, vsphere_id, password),
+        )
+        return
+
+    if vsphere_pw is None or str(vsphere_pw) == "":
+        password = str(existing["vsphere_pw"] or "")
+        if not password:
+            raise ValueError("vSphere 패스워드는 필수입니다.")
+    else:
+        password = validate_vsphere_pw(vsphere_pw, required=True)
+    connection.execute(
+        """
+        UPDATE vsphere_infra_info
+        SET vsphere_url = ?, vsphere_id = ?, vsphere_pw = ?
+        WHERE vsphere_idx = ?
+        """,
+        (vsphere_url, vsphere_id, password, vsphere_idx),
+    )
+
+
+def _delete_vsphere_infra_info(connection, vsphere_idx: int) -> None:
+    ensure_vsphere_infra_info_table(connection)
+    connection.execute(
+        "DELETE FROM vsphere_infra_info WHERE vsphere_idx = ?",
+        (vsphere_idx,),
+    )
+
+
+def get_vsphere_credentials(
+    database_path: str | Path,
+    cluster_idx: int,
+) -> tuple[str, str, str] | None:
+    """Return (url, account_id, password) for a vSphere infra_cluster idx."""
+    with get_connection(database_path) as connection:
+        ensure_vsphere_infra_info_table(connection)
+        row = connection.execute(
+            """
+            SELECT v.vsphere_url, v.vsphere_id, v.vsphere_pw, c.infra_type
+            FROM vsphere_infra_info v
+            JOIN infra_cluster c ON c.idx = v.vsphere_idx
+            WHERE v.vsphere_idx = ?
+            """,
+            (cluster_idx,),
+        ).fetchone()
+    if row is None:
+        return None
+    infra_type = str(row["infra_type"] or "").strip()
+    if infra_type != INFRA_TYPE_VSPHERE:
+        return None
+    url = str(row["vsphere_url"] or "").strip()
+    account_id = str(row["vsphere_id"] or "").strip()
+    password = str(row["vsphere_pw"] or "")
+    if not url or not account_id or not password:
+        return None
+    return url, account_id, password
 
 
 def _as_bool(value: Any, *, default: bool = False) -> bool:
@@ -822,6 +990,7 @@ def list_infra_clusters(
         return []
     placeholders = ", ".join("?" for _ in types)
     with get_connection(database_path) as connection:
+        ensure_vsphere_infra_info_table(connection)
         rows = connection.execute(
             f"""
             SELECT idx, cluster_name, last_update, cron, cron_expr, infra_type
@@ -831,7 +1000,24 @@ def list_infra_clusters(
             """,
             types,
         ).fetchall()
-    return [_cluster_record_from_row(row) for row in rows]
+        records = [_cluster_record_from_row(row) for row in rows]
+        vsphere_ids = [
+            record.idx
+            for record in records
+            if record.infra_type == INFRA_TYPE_VSPHERE
+        ]
+        info_map = _load_vsphere_info_map(connection, vsphere_ids)
+        for record in records:
+            if record.infra_type != INFRA_TYPE_VSPHERE:
+                continue
+            info = info_map.get(record.idx)
+            if info is None:
+                continue
+            url, account_id, has_password = info
+            record.vsphere_url = url
+            record.vsphere_id = account_id
+            record.vsphere_has_password = has_password
+    return records
 
 
 def list_k8s_clusters(database_path: str | Path) -> list[K8sClusterRecord]:
@@ -840,8 +1026,8 @@ def list_k8s_clusters(database_path: str | Path) -> list[K8sClusterRecord]:
 
 
 def list_scheduled_k8s_clusters(database_path: str | Path) -> list[K8sClusterRecord]:
-    """Cron-enabled clusters for scrapeable infra types (k8s + kubevirt)."""
-    managed = tuple(sorted(KNOWN_INFRA_TYPES))
+    """Cron-enabled clusters for collectable infra types (k8s + kubevirt + vSphere)."""
+    managed = tuple(sorted(COLLECTABLE_INFRA_TYPES))
     placeholders = ", ".join("?" for _ in managed)
     with get_connection(database_path) as connection:
         rows = connection.execute(
@@ -889,8 +1075,15 @@ def delete_k8s_cluster(database_path: str | Path, cluster_idx: int) -> bool:
         infra_type = validate_infra_type(
             str(row["infra_type"] or DEFAULT_INFRA_TYPE)
         )
+        cluster_name = str(row["cluster_name"])
         # K8S inventory tables share cluster_name prefix; safe no-op for other types.
-        drop_cluster_inventory_tables(connection, str(row["cluster_name"]))
+        if infra_type in SCRAPEABLE_INFRA_TYPES:
+            drop_cluster_inventory_tables(connection, cluster_name)
+        if infra_type == INFRA_TYPE_VSPHERE:
+            from backend.app.db.vsphere_inventory import drop_vsphere_inventory_tables
+
+            drop_vsphere_inventory_tables(connection, cluster_name)
+        _delete_vsphere_infra_info(connection, cluster_idx)
         connection.execute("DELETE FROM infra_cluster WHERE idx = ?", (cluster_idx,))
         connection.commit()
     return True
@@ -907,8 +1100,9 @@ def save_k8s_clusters(
     - Clusters removed from the list are deleted (with per-cluster table drop)
     - Renamed clusters rename their inventory tables
     - Persists cron / cron_expr / infra_type when provided
+    - vSphere rows also upsert vsphere_infra_info (password omitted => keep)
     """
-    normalized: list[tuple[int | None, str, bool, str, str]] = []
+    normalized: list[tuple[int | None, str, bool, str, str, dict[str, Any] | None]] = []
     seen_names: set[str] = set()
     for item in clusters:
         name = validate_cluster_name(str(item.get("cluster_name") or ""))
@@ -926,12 +1120,22 @@ def save_k8s_clusters(
         cron_enabled = _as_bool(item.get("cron"), default=False)
         cron_expr = validate_cron_expr(item.get("cron_expr"))
         infra_type = validate_infra_type(item.get("infra_type") or DEFAULT_INFRA_TYPE)
-        normalized.append((idx, name, cron_enabled, cron_expr, infra_type))
+        vsphere_payload: dict[str, Any] | None = None
+        if infra_type == INFRA_TYPE_VSPHERE:
+            vsphere_payload = {
+                "vsphere_url": validate_vsphere_url(item.get("vsphere_url")),
+                "vsphere_id": validate_vsphere_id(item.get("vsphere_id")),
+                "vsphere_pw": item.get("vsphere_pw"),
+            }
+        normalized.append(
+            (idx, name, cron_enabled, cron_expr, infra_type, vsphere_payload)
+        )
 
     managed_types = tuple(sorted(KNOWN_INFRA_TYPES))
     placeholders = ", ".join("?" for _ in managed_types)
 
     with get_connection(database_path) as connection:
+        ensure_vsphere_infra_info_table(connection)
         existing_rows = connection.execute(
             f"""
             SELECT idx, cluster_name, last_update, cron, cron_expr, infra_type
@@ -943,13 +1147,22 @@ def save_k8s_clusters(
         existing_by_idx = {int(row["idx"]): row for row in existing_rows}
         keep_ids: set[int] = set()
 
-        for idx, name, cron_enabled, cron_expr, infra_type in normalized:
+        for idx, name, cron_enabled, cron_expr, infra_type, vsphere_payload in normalized:
             if idx is not None:
                 if idx not in existing_by_idx:
                     raise ValueError(f"존재하지 않는 클러스터 idx 입니다: {idx}")
                 old_name = str(existing_by_idx[idx]["cluster_name"])
-                if old_name != name:
+                old_type = str(
+                    existing_by_idx[idx]["infra_type"] or DEFAULT_INFRA_TYPE
+                ).strip() or DEFAULT_INFRA_TYPE
+                if old_name != name and old_type in SCRAPEABLE_INFRA_TYPES:
                     rename_cluster_inventory_tables(connection, old_name, name)
+                if old_name != name and old_type == INFRA_TYPE_VSPHERE:
+                    from backend.app.db.vsphere_inventory import (
+                        rename_vsphere_inventory_tables,
+                    )
+
+                    rename_vsphere_inventory_tables(connection, old_name, name)
                 connection.execute(
                     """
                     UPDATE infra_cluster
@@ -958,7 +1171,15 @@ def save_k8s_clusters(
                     """,
                     (name, 1 if cron_enabled else 0, cron_expr, infra_type, idx),
                 )
+                cluster_id = idx
                 keep_ids.add(idx)
+                if old_type == INFRA_TYPE_VSPHERE and infra_type != INFRA_TYPE_VSPHERE:
+                    from backend.app.db.vsphere_inventory import (
+                        drop_vsphere_inventory_tables,
+                    )
+
+                    drop_vsphere_inventory_tables(connection, old_name)
+                    _delete_vsphere_infra_info(connection, cluster_id)
             else:
                 cursor = connection.execute(
                     """
@@ -969,13 +1190,31 @@ def save_k8s_clusters(
                     """,
                     (name, 1 if cron_enabled else 0, cron_expr, infra_type),
                 )
-                keep_ids.add(int(cursor.lastrowid))
+                cluster_id = int(cursor.lastrowid)
+                keep_ids.add(cluster_id)
+
+            if vsphere_payload is not None:
+                _upsert_vsphere_infra_info(
+                    connection,
+                    vsphere_idx=cluster_id,
+                    vsphere_url=str(vsphere_payload["vsphere_url"]),
+                    vsphere_id=str(vsphere_payload["vsphere_id"]),
+                    vsphere_pw=vsphere_payload.get("vsphere_pw"),
+                )
 
         for row in existing_rows:
             cluster_id = int(row["idx"])
             if cluster_id in keep_ids:
                 continue
-            drop_cluster_inventory_tables(connection, str(row["cluster_name"]))
+            old_type = str(row["infra_type"] or DEFAULT_INFRA_TYPE).strip() or DEFAULT_INFRA_TYPE
+            old_name = str(row["cluster_name"])
+            if old_type in SCRAPEABLE_INFRA_TYPES:
+                drop_cluster_inventory_tables(connection, old_name)
+            if old_type == INFRA_TYPE_VSPHERE:
+                from backend.app.db.vsphere_inventory import drop_vsphere_inventory_tables
+
+                drop_vsphere_inventory_tables(connection, old_name)
+            _delete_vsphere_infra_info(connection, cluster_id)
             connection.execute("DELETE FROM infra_cluster WHERE idx = ?", (cluster_id,))
 
         connection.commit()

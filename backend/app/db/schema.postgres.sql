@@ -94,3 +94,11 @@ CREATE TABLE IF NOT EXISTS infra_cluster (
     cron_expr VARCHAR(20) NOT NULL DEFAULT '0 23 * * 6',
     infra_type VARCHAR(20) NOT NULL DEFAULT 'k8s'
 );
+
+-- vSphere credentials linked to infra_cluster.idx (infra_type = 'vSphere')
+CREATE TABLE IF NOT EXISTS vsphere_infra_info (
+    vsphere_idx BIGINT PRIMARY KEY REFERENCES infra_cluster(idx) ON DELETE CASCADE,
+    vsphere_url TEXT NOT NULL DEFAULT '',
+    vsphere_id VARCHAR(200) NOT NULL DEFAULT '',
+    vsphere_pw TEXT NOT NULL DEFAULT ''
+);

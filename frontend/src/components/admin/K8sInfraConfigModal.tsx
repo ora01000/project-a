@@ -1,11 +1,13 @@
-import { useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useState } from "react";
 
 import { hasAdminAccess } from "../../types/user";
 
 /** Default: every Saturday 23:00 (Asia/Seoul minute cron). */
 const DEFAULT_CRON_EXPR = "0 23 * * 6";
 const DEFAULT_INFRA_TYPE = "k8s";
-const INFRA_TYPE_OPTIONS = ["k8s", "kubevirt"] as const;
+const INFRA_TYPE_VSPHERE = "vSphere";
+const INFRA_TYPE_OPTIONS = ["k8s", "kubevirt", INFRA_TYPE_VSPHERE] as const;
+const COLLECTABLE_INFRA_TYPES = new Set(["k8s", "kubevirt", INFRA_TYPE_VSPHERE]);
 
 interface K8sClusterRow {
   idx: number | null;
@@ -14,6 +16,12 @@ interface K8sClusterRow {
   last_update: string | null;
   cron: boolean;
   cron_expr: string;
+  vsphere_url: string;
+  vsphere_id: string;
+  /** Edit-only; empty means keep existing password when updating. */
+  vsphere_pw: string;
+  vsphere_has_password: boolean;
+  show_vsphere_pw: boolean;
   /** true when row was added with "+" and not yet saved */
   isDraft?: boolean;
   /** local key for React list (drafts without idx) */
@@ -54,6 +62,9 @@ type ApiCluster = {
   cron?: boolean;
   cron_expr?: string;
   infra_type?: string;
+  vsphere_url?: string | null;
+  vsphere_id?: string | null;
+  vsphere_has_password?: boolean;
 };
 
 function mapApiRows(data: ApiCluster[]): K8sClusterRow[] {
@@ -64,9 +75,32 @@ function mapApiRows(data: ApiCluster[]): K8sClusterRow[] {
     last_update: item.last_update,
     cron: Boolean(item.cron),
     cron_expr: (item.cron_expr || DEFAULT_CRON_EXPR).slice(0, 20),
+    vsphere_url: item.vsphere_url ?? "",
+    vsphere_id: item.vsphere_id ?? "",
+    vsphere_pw: "",
+    vsphere_has_password: Boolean(item.vsphere_has_password),
+    show_vsphere_pw: false,
     isDraft: false,
     localKey: `idx-${item.idx}`,
   }));
+}
+
+function emptyDraftRow(): K8sClusterRow {
+  return {
+    idx: null,
+    cluster_name: "",
+    infra_type: DEFAULT_INFRA_TYPE,
+    last_update: null,
+    cron: false,
+    cron_expr: DEFAULT_CRON_EXPR,
+    vsphere_url: "",
+    vsphere_id: "",
+    vsphere_pw: "",
+    vsphere_has_password: false,
+    show_vsphere_pw: false,
+    isDraft: true,
+    localKey: nextDraftKey(),
+  };
 }
 
 export function K8sInfraConfigModal({ viewerRole, onClose }: K8sInfraConfigModalProps) {
@@ -100,19 +134,7 @@ export function K8sInfraConfigModal({ viewerRole, onClose }: K8sInfraConfigModal
   }, [loadClusters]);
 
   const handleAddDraftRow = () => {
-    setRows((current) => [
-      ...current,
-      {
-        idx: null,
-        cluster_name: "",
-        infra_type: DEFAULT_INFRA_TYPE,
-        last_update: null,
-        cron: false,
-        cron_expr: DEFAULT_CRON_EXPR,
-        isDraft: true,
-        localKey: nextDraftKey(),
-      },
-    ]);
+    setRows((current) => [...current, emptyDraftRow()]);
   };
 
   const handleRemoveLastDraft = () => {
@@ -143,17 +165,45 @@ export function K8sInfraConfigModal({ viewerRole, onClose }: K8sInfraConfigModal
       setError("관리자만 저장할 수 있습니다.");
       return;
     }
-    const payload = rows.map((row) => ({
-      idx: row.idx,
-      cluster_name: row.cluster_name.trim(),
-      infra_type: (row.infra_type.trim() || DEFAULT_INFRA_TYPE).slice(0, 20),
-      cron: row.cron,
-      cron_expr: (row.cron_expr.trim() || DEFAULT_CRON_EXPR).slice(0, 20),
-    }));
-    if (payload.some((item) => !item.cluster_name)) {
-      setError("클러스터 이름을 입력해 주세요.");
-      return;
+    for (const row of rows) {
+      if (!row.cluster_name.trim()) {
+        setError("클러스터 이름(식별 이름)을 입력해 주세요.");
+        return;
+      }
+      if (row.infra_type === INFRA_TYPE_VSPHERE) {
+        if (!row.vsphere_url.trim()) {
+          setError("vSphere 서버 URL을 입력해 주세요.");
+          return;
+        }
+        if (!row.vsphere_id.trim()) {
+          setError("vSphere 계정을 입력해 주세요.");
+          return;
+        }
+        if (!row.vsphere_pw && !row.vsphere_has_password) {
+          setError("vSphere 패스워드를 입력해 주세요.");
+          return;
+        }
+      }
     }
+
+    const payload = rows.map((row) => {
+      const base = {
+        idx: row.idx,
+        cluster_name: row.cluster_name.trim(),
+        infra_type: (row.infra_type.trim() || DEFAULT_INFRA_TYPE).slice(0, 20),
+        cron: row.cron,
+        cron_expr: (row.cron_expr.trim() || DEFAULT_CRON_EXPR).slice(0, 20),
+      };
+      if (row.infra_type !== INFRA_TYPE_VSPHERE) {
+        return base;
+      }
+      return {
+        ...base,
+        vsphere_url: row.vsphere_url.trim(),
+        vsphere_id: row.vsphere_id.trim(),
+        vsphere_pw: row.vsphere_pw || null,
+      };
+    });
 
     setIsSaving(true);
     setError(null);
@@ -198,6 +248,7 @@ export function K8sInfraConfigModal({ viewerRole, onClose }: K8sInfraConfigModal
       };
       const summary = [
         result.counts.nodes != null ? `nodes=${result.counts.nodes}` : null,
+        result.counts.hosts != null ? `hosts=${result.counts.hosts}` : null,
         result.counts.namespaces != null ? `ns=${result.counts.namespaces}` : null,
         result.counts.deployments != null ? `deploy=${result.counts.deployments}` : null,
         result.counts.pvcs != null ? `pvc=${result.counts.pvcs}` : null,
@@ -248,7 +299,8 @@ export function K8sInfraConfigModal({ viewerRole, onClose }: K8sInfraConfigModal
               인프라 구성
             </h2>
             <p className="mt-0.5 text-xs text-slate-500">
-              인프라 목록·스케줄을 관리하고 k8s/kubevirt 클러스터를 수집합니다.
+              인프라 목록·스케줄을 관리하고 k8s/kubevirt/vSphere 클러스터를 수집합니다. 로컬
+              mock에서는 vSphere 연결만 시도하고 scrape는 건너뜁니다.
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -311,127 +363,213 @@ export function K8sInfraConfigModal({ viewerRole, onClose }: K8sInfraConfigModal
               <tbody>
                 {rows.map((row) => {
                   const isCollecting = row.idx != null && collectingIds.has(row.idx);
+                  const isVsphere = row.infra_type === INFRA_TYPE_VSPHERE;
+                  const canCollect = COLLECTABLE_INFRA_TYPES.has(
+                    row.infra_type || DEFAULT_INFRA_TYPE,
+                  );
                   return (
-                    <tr key={row.localKey} className="border-b border-slate-800 text-slate-200">
-                      <td className="px-3 py-2 font-mono text-xs text-slate-400">
-                        {row.idx ?? "-"}
-                      </td>
-                      <td className="px-3 py-2">
-                        {isEditMode ? (
-                          <input
-                            type="text"
-                            value={row.cluster_name}
-                            maxLength={50}
-                            onChange={(event) => {
-                              updateRow(row.localKey, { cluster_name: event.target.value });
-                            }}
-                            className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-sm text-slate-100 focus:border-sky-600 focus:outline-none"
-                          />
-                        ) : (
-                          <span className="font-mono text-xs">{row.cluster_name}</span>
-                        )}
-                      </td>
-                      <td className="px-3 py-2">
-                        {isEditMode ? (
-                          <select
-                            value={row.infra_type || DEFAULT_INFRA_TYPE}
-                            onChange={(event) => {
-                              updateRow(row.localKey, { infra_type: event.target.value });
-                            }}
-                            className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1 font-mono text-xs text-slate-100 focus:border-sky-600 focus:outline-none"
-                          >
-                            {INFRA_TYPE_OPTIONS.map((type) => (
-                              <option key={type} value={type}>
-                                {type}
-                              </option>
-                            ))}
-                          </select>
-                        ) : (
-                          <span className="font-mono text-xs text-slate-400">
-                            {row.infra_type || DEFAULT_INFRA_TYPE}
-                          </span>
-                        )}
-                      </td>
-                      <td className="px-3 py-2 text-slate-400">{row.last_update ?? "-"}</td>
-                      <td className="px-3 py-2 text-xs text-slate-400">
-                        {rowMessages[row.localKey] ?? "-"}
-                      </td>
-                      <td className="px-3 py-2 text-right">
-                        {isEditMode ? (
-                          <button
-                            type="button"
-                            onClick={() => handleDeleteRow(row.localKey)}
-                            className="rounded-md border border-rose-800 px-3 py-1.5 text-sm text-rose-200 hover:bg-rose-950/40"
-                          >
-                            삭제
-                          </button>
-                        ) : (
-                          <button
-                            type="button"
-                            disabled={row.idx == null || isCollecting}
-                            onClick={() => {
-                              if (row.idx != null) {
-                                void handleCollect(row.idx, row.localKey);
+                    <Fragment key={row.localKey}>
+                      <tr className="border-b border-slate-800 text-slate-200">
+                        <td className="px-3 py-2 font-mono text-xs text-slate-400">
+                          {row.idx ?? "-"}
+                        </td>
+                        <td className="px-3 py-2">
+                          {isEditMode ? (
+                            <input
+                              type="text"
+                              value={row.cluster_name}
+                              maxLength={50}
+                              placeholder={
+                                isVsphere ? "vCenter 식별 이름" : "클러스터 이름"
                               }
-                            }}
-                            className="rounded-md bg-sky-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-sky-500 disabled:cursor-not-allowed disabled:bg-slate-700"
-                          >
-                            {isCollecting ? "수집 중..." : "수집"}
-                          </button>
-                        )}
-                      </td>
-                      <td className="px-3 py-2">
-                        {isEditMode ? (
-                          <button
-                            type="button"
-                            role="switch"
-                            aria-checked={row.cron}
-                            onClick={() => updateRow(row.localKey, { cron: !row.cron })}
-                            className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full border transition-colors ${
-                              row.cron
-                                ? "border-sky-500 bg-sky-600"
-                                : "border-slate-600 bg-slate-800"
-                            }`}
-                            title={row.cron ? "스케줄 ON" : "스케줄 OFF"}
-                          >
-                            <span
-                              className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                                row.cron ? "translate-x-5" : "translate-x-1"
-                              }`}
+                              onChange={(event) => {
+                                updateRow(row.localKey, { cluster_name: event.target.value });
+                              }}
+                              className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-sm text-slate-100 focus:border-sky-600 focus:outline-none"
                             />
-                          </button>
-                        ) : (
-                          <span
-                            className={`text-xs font-medium ${
-                              row.cron ? "text-sky-300" : "text-slate-500"
-                            }`}
-                          >
-                            {row.cron ? "ON" : "OFF"}
-                          </span>
-                        )}
-                      </td>
-                      <td className="px-3 py-2">
-                        {isEditMode ? (
-                          <input
-                            type="text"
-                            value={row.cron_expr}
-                            maxLength={20}
-                            placeholder={DEFAULT_CRON_EXPR}
-                            title="예: 매주 토요일 23:00 → 0 23 * * 6"
-                            onChange={(event) => {
-                              updateRow(row.localKey, {
-                                cron_expr: event.target.value.slice(0, 20),
-                              });
-                            }}
-                            className="w-36 rounded-md border border-slate-700 bg-slate-950 px-2 py-1 font-mono text-xs text-slate-100 focus:border-sky-600 focus:outline-none"
-                          />
-                        ) : (
-                          <span className="font-mono text-xs text-slate-400">
-                            {row.cron_expr || DEFAULT_CRON_EXPR}
-                          </span>
-                        )}
-                      </td>
-                    </tr>
+                          ) : (
+                            <span className="font-mono text-xs">{row.cluster_name}</span>
+                          )}
+                        </td>
+                        <td className="px-3 py-2">
+                          {isEditMode ? (
+                            <select
+                              value={row.infra_type || DEFAULT_INFRA_TYPE}
+                              onChange={(event) => {
+                                updateRow(row.localKey, { infra_type: event.target.value });
+                              }}
+                              className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1 font-mono text-xs text-slate-100 focus:border-sky-600 focus:outline-none"
+                            >
+                              {INFRA_TYPE_OPTIONS.map((type) => (
+                                <option key={type} value={type}>
+                                  {type}
+                                </option>
+                              ))}
+                            </select>
+                          ) : (
+                            <span className="font-mono text-xs text-slate-400">
+                              {row.infra_type || DEFAULT_INFRA_TYPE}
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-3 py-2 text-slate-400">{row.last_update ?? "-"}</td>
+                        <td className="px-3 py-2 text-xs text-slate-400">
+                          {rowMessages[row.localKey] ?? "-"}
+                        </td>
+                        <td className="px-3 py-2 text-right">
+                          {isEditMode ? (
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteRow(row.localKey)}
+                              className="rounded-md border border-rose-800 px-3 py-1.5 text-sm text-rose-200 hover:bg-rose-950/40"
+                            >
+                              삭제
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              disabled={row.idx == null || isCollecting || !canCollect}
+                              title={
+                                canCollect
+                                  ? undefined
+                                  : "이 infra_type 은 수집을 지원하지 않습니다."
+                              }
+                              onClick={() => {
+                                if (row.idx != null) {
+                                  void handleCollect(row.idx, row.localKey);
+                                }
+                              }}
+                              className="rounded-md bg-sky-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-sky-500 disabled:cursor-not-allowed disabled:bg-slate-700"
+                            >
+                              {isCollecting ? "수집 중..." : "수집"}
+                            </button>
+                          )}
+                        </td>
+                        <td className="px-3 py-2">
+                          {isEditMode ? (
+                            <button
+                              type="button"
+                              role="switch"
+                              aria-checked={row.cron}
+                              onClick={() => updateRow(row.localKey, { cron: !row.cron })}
+                              className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full border transition-colors ${
+                                row.cron
+                                  ? "border-sky-500 bg-sky-600"
+                                  : "border-slate-600 bg-slate-800"
+                              }`}
+                              title={row.cron ? "스케줄 ON" : "스케줄 OFF"}
+                            >
+                              <span
+                                className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                                  row.cron ? "translate-x-5" : "translate-x-1"
+                                }`}
+                              />
+                            </button>
+                          ) : (
+                            <span
+                              className={`text-xs font-medium ${
+                                row.cron ? "text-sky-300" : "text-slate-500"
+                              }`}
+                            >
+                              {row.cron ? "ON" : "OFF"}
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-3 py-2">
+                          {isEditMode ? (
+                            <input
+                              type="text"
+                              value={row.cron_expr}
+                              maxLength={20}
+                              placeholder={DEFAULT_CRON_EXPR}
+                              title="예: 매주 토요일 23:00 → 0 23 * * 6"
+                              onChange={(event) => {
+                                updateRow(row.localKey, {
+                                  cron_expr: event.target.value.slice(0, 20),
+                                });
+                              }}
+                              className="w-36 rounded-md border border-slate-700 bg-slate-950 px-2 py-1 font-mono text-xs text-slate-100 focus:border-sky-600 focus:outline-none"
+                            />
+                          ) : (
+                            <span className="font-mono text-xs text-slate-400">
+                              {row.cron_expr || DEFAULT_CRON_EXPR}
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                      {isEditMode && isVsphere ? (
+                        <tr className="border-b border-slate-800 bg-slate-950/50">
+                          <td colSpan={8} className="px-3 py-3">
+                            <div className="grid gap-3 sm:grid-cols-3">
+                              <label className="flex flex-col gap-1 text-xs text-slate-400">
+                                vSphere 서버 URL
+                                <input
+                                  type="text"
+                                  value={row.vsphere_url}
+                                  maxLength={500}
+                                  placeholder="https://vcenter.example.com"
+                                  onChange={(event) => {
+                                    updateRow(row.localKey, {
+                                      vsphere_url: event.target.value,
+                                    });
+                                  }}
+                                  className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1.5 text-sm text-slate-100 focus:border-sky-600 focus:outline-none"
+                                />
+                              </label>
+                              <label className="flex flex-col gap-1 text-xs text-slate-400">
+                                계정
+                                <input
+                                  type="text"
+                                  value={row.vsphere_id}
+                                  maxLength={200}
+                                  placeholder="administrator@vsphere.local"
+                                  autoComplete="off"
+                                  onChange={(event) => {
+                                    updateRow(row.localKey, {
+                                      vsphere_id: event.target.value,
+                                    });
+                                  }}
+                                  className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1.5 text-sm text-slate-100 focus:border-sky-600 focus:outline-none"
+                                />
+                              </label>
+                              <label className="flex flex-col gap-1 text-xs text-slate-400">
+                                패스워드
+                                <div className="flex gap-2">
+                                  <input
+                                    type={row.show_vsphere_pw ? "text" : "password"}
+                                    value={row.vsphere_pw}
+                                    maxLength={500}
+                                    placeholder={
+                                      row.vsphere_has_password
+                                        ? "변경 시에만 입력"
+                                        : "패스워드"
+                                    }
+                                    autoComplete="new-password"
+                                    onChange={(event) => {
+                                      updateRow(row.localKey, {
+                                        vsphere_pw: event.target.value,
+                                      });
+                                    }}
+                                    className="min-w-0 flex-1 rounded-md border border-slate-700 bg-slate-950 px-2 py-1.5 text-sm text-slate-100 focus:border-sky-600 focus:outline-none"
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      updateRow(row.localKey, {
+                                        show_vsphere_pw: !row.show_vsphere_pw,
+                                      });
+                                    }}
+                                    className="shrink-0 rounded-md border border-slate-600 px-2 py-1 text-xs text-slate-300 hover:bg-slate-800"
+                                  >
+                                    {row.show_vsphere_pw ? "숨김" : "표시"}
+                                  </button>
+                                </div>
+                              </label>
+                            </div>
+                          </td>
+                        </tr>
+                      ) : null}
+                    </Fragment>
                   );
                 })}
               </tbody>

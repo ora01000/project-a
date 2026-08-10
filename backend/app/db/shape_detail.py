@@ -10,7 +10,7 @@ from backend.app.db.database import get_connection
 from backend.app.db.introspection import ci_order_clause
 from backend.app.db.k8s_inventory import (
     DEFAULT_INFRA_TYPE,
-    KNOWN_INFRA_TYPES,
+    SCRAPEABLE_INFRA_TYPES,
     _drop_namespace_readyreplicas_column,
     _ensure_deployment_readyreplicas_column,
     _ensure_namespace_egress_columns,
@@ -100,7 +100,7 @@ def _lookup_infra_type(connection, cluster_name: str) -> str | None:
     if row is None:
         return None
     infra_type = str(row["infra_type"] or DEFAULT_INFRA_TYPE).strip() or DEFAULT_INFRA_TYPE
-    if infra_type not in KNOWN_INFRA_TYPES:
+    if infra_type not in SCRAPEABLE_INFRA_TYPES:
         return None
     return infra_type
 

@@ -10,8 +10,11 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from backend.app.db.k8s_inventory import (
+    COLLECTABLE_INFRA_TYPES,
     DEFAULT_CRON_EXPR,
     DEFAULT_INFRA_TYPE,
+    INFRA_TYPE_VSPHERE,
+    SCRAPEABLE_INFRA_TYPES,
     delete_k8s_cluster,
     get_cluster_shape_analysis,
     get_k8s_cluster,
@@ -33,6 +36,11 @@ from backend.app.services.k8s_collector import (
     collect_and_persist_cluster,
 )
 from backend.app.services.kubevirt_collector import collect_and_persist_kubevirt
+from backend.app.services.vsphere_collector import (
+    VsphereConnectTimeoutError,
+    VsphereMockScrapeSkippedError,
+    collect_and_persist_vsphere,
+)
 
 router = APIRouter(tags=["k8s-infra"])
 
@@ -44,6 +52,9 @@ class K8sClusterItem(BaseModel):
     cron: bool = False
     cron_expr: str = DEFAULT_CRON_EXPR
     infra_type: str = DEFAULT_INFRA_TYPE
+    vsphere_url: str | None = None
+    vsphere_id: str | None = None
+    vsphere_has_password: bool = False
 
 
 class K8sClusterSaveItem(BaseModel):
@@ -52,6 +63,9 @@ class K8sClusterSaveItem(BaseModel):
     cron: bool = False
     cron_expr: str = DEFAULT_CRON_EXPR
     infra_type: str = DEFAULT_INFRA_TYPE
+    vsphere_url: str | None = None
+    vsphere_id: str | None = None
+    vsphere_pw: str | None = None
 
 
 class K8sClusterSaveRequest(BaseModel):
@@ -116,6 +130,9 @@ def _to_item(record) -> K8sClusterItem:
         cron=bool(record.cron),
         cron_expr=record.cron_expr or DEFAULT_CRON_EXPR,
         infra_type=record.infra_type or DEFAULT_INFRA_TYPE,
+        vsphere_url=getattr(record, "vsphere_url", None),
+        vsphere_id=getattr(record, "vsphere_id", None),
+        vsphere_has_password=bool(getattr(record, "vsphere_has_password", False)),
     )
 
 
@@ -164,10 +181,13 @@ async def collect_cluster(cluster_idx: int, request: Request) -> ManualCollectRe
     record = get_k8s_cluster(database_path, cluster_idx)
     if record is None:
         raise HTTPException(status_code=404, detail="클러스터를 찾을 수 없습니다.")
-    if record.infra_type not in {DEFAULT_INFRA_TYPE, "kubevirt"}:
+    if record.infra_type not in COLLECTABLE_INFRA_TYPES:
         raise HTTPException(
             status_code=400,
-            detail=f"수집은 infra_type k8s|kubevirt 만 지원합니다 (got {record.infra_type}).",
+            detail=(
+                "수집은 infra_type k8s|kubevirt|vSphere 만 지원합니다 "
+                f"(got {record.infra_type})."
+            ),
         )
 
     runtime_mode = getattr(request.app.state, "agent_runtime_mode", None) or "mock"
@@ -175,6 +195,14 @@ async def collect_cluster(cluster_idx: int, request: Request) -> ManualCollectRe
         if record.infra_type == "kubevirt":
             result = await asyncio.to_thread(
                 collect_and_persist_kubevirt,
+                database_path,
+                cluster_idx=record.idx,
+                cluster_name=record.cluster_name,
+                runtime_mode=runtime_mode,
+            )
+        elif record.infra_type == INFRA_TYPE_VSPHERE:
+            result = await asyncio.to_thread(
+                collect_and_persist_vsphere,
                 database_path,
                 cluster_idx=record.idx,
                 cluster_name=record.cluster_name,
@@ -189,6 +217,8 @@ async def collect_cluster(cluster_idx: int, request: Request) -> ManualCollectRe
                 runtime_mode=runtime_mode,
             )
     except KubeconfigRequiredError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except (VsphereConnectTimeoutError, VsphereMockScrapeSkippedError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"수집 실패: {exc}") from exc
@@ -225,7 +255,10 @@ def _shape_counts_model(counts) -> K8sShapeCountsModel:
 async def list_shape_clusters(request: Request) -> list[K8sShapeClusterItem]:
     """Authenticated users: cluster labels for infra shape analysis."""
     _require_user(request)
-    records = list_infra_clusters(request.app.state.database_path)
+    records = list_infra_clusters(
+        request.app.state.database_path,
+        infra_types=tuple(sorted(SCRAPEABLE_INFRA_TYPES)),
+    )
     return [
         K8sShapeClusterItem(
             idx=record.idx,
