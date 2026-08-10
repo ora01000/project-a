@@ -8,6 +8,7 @@ import { hasAdminAccess, bandLabel, roleLabel } from "../../types/user";
 interface UserListPageProps {
   currentUserIdx: number;
   currentUserRole: number;
+  onClose: () => void;
 }
 
 async function parseError(response: Response, fallback: string): Promise<string> {
@@ -15,7 +16,7 @@ async function parseError(response: Response, fallback: string): Promise<string>
   return payload?.detail ?? fallback;
 }
 
-export function UserListPage({ currentUserIdx, currentUserRole }: UserListPageProps) {
+export function UserListPage({ currentUserIdx, currentUserRole, onClose }: UserListPageProps) {
   const canManageUsers = hasAdminAccess(currentUserRole);
   const [users, setUsers] = useState<UserRecord[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -123,101 +124,119 @@ export function UserListPage({ currentUserIdx, currentUserRole }: UserListPagePr
   };
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-slate-700 bg-slate-900/90">
-      <header className="flex shrink-0 items-center justify-between border-b border-slate-700 px-4 py-3">
-        <div>
-          <h2 className="text-sm font-semibold text-slate-200">사용자 조회</h2>
-          <p className="mt-0.5 text-xs text-slate-500">
-            {canManageUsers
-              ? "users 테이블 데이터를 조회하고 관리합니다."
-              : "users 테이블 데이터를 조회합니다."}
-          </p>
-        </div>
-        {canManageUsers ? (
-          <button
-            type="button"
-            onClick={() => {
-              setError(null);
-              setEditingUser(null);
-              setFormMode("create");
-            }}
-            className="rounded-md bg-sky-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-sky-500"
-          >
-            추가
-          </button>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 px-4">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="user-list-title"
+        className="flex max-h-[90vh] w-full max-w-6xl flex-col overflow-hidden rounded-xl border border-slate-700 bg-slate-900 shadow-xl"
+      >
+        <header className="flex shrink-0 items-center justify-between border-b border-slate-700 px-4 py-3">
+          <div>
+            <h2 id="user-list-title" className="text-lg font-semibold text-slate-100">
+              사용자 조회
+            </h2>
+            <p className="mt-0.5 text-xs text-slate-500">
+              {canManageUsers
+                ? "users 테이블 데이터를 조회하고 관리합니다."
+                : "users 테이블 데이터를 조회합니다."}
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            {canManageUsers ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setError(null);
+                  setEditingUser(null);
+                  setFormMode("create");
+                }}
+                className="rounded-md bg-sky-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-sky-500"
+              >
+                추가
+              </button>
+            ) : null}
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-md border border-slate-700 px-3 py-1.5 text-sm text-slate-200 hover:bg-slate-800"
+            >
+              닫기
+            </button>
+          </div>
+        </header>
+
+        {error ? (
+          <div className="mx-4 mt-4 rounded-md border border-rose-800 bg-rose-950/40 px-3 py-2 text-sm text-rose-200">
+            {error}
+          </div>
         ) : null}
-      </header>
 
-      {error ? (
-        <div className="mx-4 mt-4 rounded-md border border-rose-800 bg-rose-950/40 px-3 py-2 text-sm text-rose-200">
-          {error}
-        </div>
-      ) : null}
-
-      <div className="min-h-0 flex-1 overflow-auto p-4">
-        {isLoading ? (
-          <p className="text-sm text-slate-500">사용자 목록을 불러오는 중...</p>
-        ) : (
-          <table className="min-w-full border-collapse text-sm">
-            <thead>
-              <tr className="border-b border-slate-700 text-left text-slate-400">
-                <th className="px-3 py-2">아이디</th>
-                <th className="px-3 py-2">이메일</th>
-                <th className="px-3 py-2">이름</th>
-                <th className="px-3 py-2">직책</th>
-                <th className="px-3 py-2">조직</th>
-                <th className="px-3 py-2">역할</th>
-                <th className="px-3 py-2">최근 로그인 시각</th>
-                {canManageUsers ? <th className="px-3 py-2">작업</th> : null}
-              </tr>
-            </thead>
-            <tbody>
-              {users.map((user) => (
-                <tr key={user.idx} className="border-b border-slate-800 text-slate-200">
-                  <td className="px-3 py-2">{user.userid}</td>
-                  <td className="px-3 py-2">{user.email}</td>
-                  <td className="px-3 py-2">{user.username}</td>
-                  <td className="px-3 py-2">{bandLabel(user.band)}</td>
-                  <td className="px-3 py-2">{user.depart}</td>
-                  <td className="px-3 py-2">
-                    {user.role}: {roleLabel(user.role)}
-                  </td>
-                  <td className="px-3 py-2 font-mono text-xs text-slate-300">
-                    {user.last_login?.trim() || "-"}
-                  </td>
-                  {canManageUsers ? (
-                    <td className="px-3 py-2">
-                      <div className="flex flex-wrap gap-1.5">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setError(null);
-                            setEditingUser(user);
-                            setFormMode("edit");
-                          }}
-                          className="rounded-md border border-slate-600 px-2 py-1 text-xs text-slate-200 hover:bg-slate-800"
-                        >
-                          수정
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setError(null);
-                            setDeletingUser(user);
-                          }}
-                          disabled={user.idx === currentUserIdx}
-                          className="rounded-md border border-rose-800 px-2 py-1 text-xs text-rose-200 hover:bg-rose-950/40 disabled:cursor-not-allowed disabled:border-slate-700 disabled:text-slate-500"
-                        >
-                          삭제
-                        </button>
-                      </div>
-                    </td>
-                  ) : null}
+        <div className="min-h-0 flex-1 overflow-auto p-4">
+          {isLoading ? (
+            <p className="text-sm text-slate-500">사용자 목록을 불러오는 중...</p>
+          ) : (
+            <table className="min-w-full border-collapse text-sm">
+              <thead>
+                <tr className="border-b border-slate-700 text-left text-slate-400">
+                  <th className="px-3 py-2">아이디</th>
+                  <th className="px-3 py-2">이메일</th>
+                  <th className="px-3 py-2">이름</th>
+                  <th className="px-3 py-2">직책</th>
+                  <th className="px-3 py-2">조직</th>
+                  <th className="px-3 py-2">역할</th>
+                  <th className="px-3 py-2">최근 로그인 시각</th>
+                  {canManageUsers ? <th className="px-3 py-2">작업</th> : null}
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
+              </thead>
+              <tbody>
+                {users.map((user) => (
+                  <tr key={user.idx} className="border-b border-slate-800 text-slate-200">
+                    <td className="px-3 py-2">{user.userid}</td>
+                    <td className="px-3 py-2">{user.email}</td>
+                    <td className="px-3 py-2">{user.username}</td>
+                    <td className="px-3 py-2">{bandLabel(user.band)}</td>
+                    <td className="px-3 py-2">{user.depart}</td>
+                    <td className="px-3 py-2">
+                      {user.role}: {roleLabel(user.role)}
+                    </td>
+                    <td className="px-3 py-2 font-mono text-xs text-slate-300">
+                      {user.last_login?.trim() || "-"}
+                    </td>
+                    {canManageUsers ? (
+                      <td className="px-3 py-2">
+                        <div className="flex flex-wrap gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setError(null);
+                              setEditingUser(user);
+                              setFormMode("edit");
+                            }}
+                            className="rounded-md border border-slate-600 px-2 py-1 text-xs text-slate-200 hover:bg-slate-800"
+                          >
+                            수정
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setError(null);
+                              setDeletingUser(user);
+                            }}
+                            disabled={user.idx === currentUserIdx}
+                            className="rounded-md border border-rose-800 px-2 py-1 text-xs text-rose-200 hover:bg-rose-950/40 disabled:cursor-not-allowed disabled:border-slate-700 disabled:text-slate-500"
+                          >
+                            삭제
+                          </button>
+                        </div>
+                      </td>
+                    ) : null}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
       </div>
 
       {canManageUsers && formMode ? (

@@ -204,14 +204,14 @@ export default function App() {
   }, [userIdx, userRole]);
 
   useEffect(() => {
-    if (!user || activeView !== "dashboard") {
+    if (!user) {
       return;
     }
 
     loadDashboardData();
     const interval = window.setInterval(loadDashboardData, 15000);
     return () => window.clearInterval(interval);
-  }, [activeView, loadDashboardData, user]);
+  }, [loadDashboardData, user]);
 
   useEffect(() => {
     if (activeView !== "dashboard") {
@@ -241,6 +241,8 @@ export default function App() {
     return <LoginPage onLoginSuccess={handleLoginSuccess} />;
   }
 
+  const closeOverlay = () => setActiveView("dashboard");
+
   return (
     <>
       <div className="flex h-screen flex-col overflow-hidden bg-slate-950 px-6 py-6">
@@ -259,30 +261,38 @@ export default function App() {
           onUserUpdated={handleUserUpdated}
         />
 
-        {activeView === "dashboard" ? (
-          <DashboardPage
-            agents={agents}
-            error={error}
-            user={user}
-            integratedChatFullscreen={integratedChatFullscreen}
-            onToggleIntegratedChatFullscreen={toggleIntegratedChatFullscreen}
-            onChatComplete={loadDashboardData}
+        <DashboardPage
+          agents={agents}
+          error={error}
+          user={user}
+          integratedChatFullscreen={integratedChatFullscreen}
+          onToggleIntegratedChatFullscreen={toggleIntegratedChatFullscreen}
+          onChatComplete={loadDashboardData}
+        />
+
+        {activeView === "user-list" ? (
+          <UserListPage
+            currentUserIdx={user.idx}
+            currentUserRole={user.role}
+            onClose={closeOverlay}
           />
         ) : null}
 
-        {activeView === "user-list" ? (
-          <UserListPage currentUserIdx={user.idx} currentUserRole={user.role} />
-        ) : null}
-
         {activeView === "agent-assignment" && hasAdminAccess(user.role) ? (
-          <AgentAssignmentPage onClose={() => setActiveView("dashboard")} />
+          <AgentAssignmentPage onClose={closeOverlay} />
         ) : null}
 
         {activeView === "agent-connections" && hasAdminAccess(user.role) ? (
-          <AgentConnectionListPage user={user} onAgentRuntimeChanged={loadDashboardData} />
+          <AgentConnectionListPage
+            user={user}
+            onClose={closeOverlay}
+            onAgentRuntimeChanged={loadDashboardData}
+          />
         ) : null}
 
-        {activeView === "notice-board" ? <NoticeBoardPage user={user} /> : null}
+        {activeView === "notice-board" ? (
+          <NoticeBoardPage user={user} onClose={closeOverlay} />
+        ) : null}
       </div>
       <TeamsInboundDebugWatcher />
     </>

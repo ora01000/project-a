@@ -9,6 +9,7 @@ import { NoticeFormModal } from "./NoticeFormModal";
 
 interface NoticeBoardPageProps {
   user: AuthUser;
+  onClose: () => void;
 }
 
 async function parseError(response: Response, fallback: string): Promise<string> {
@@ -16,7 +17,7 @@ async function parseError(response: Response, fallback: string): Promise<string>
   return payload?.detail ?? fallback;
 }
 
-export function NoticeBoardPage({ user }: NoticeBoardPageProps) {
+export function NoticeBoardPage({ user, onClose }: NoticeBoardPageProps) {
   const isAdmin = hasAdminAccess(user.role);
   const [notices, setNotices] = useState<NoticeRecord[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -140,135 +141,153 @@ export function NoticeBoardPage({ user }: NoticeBoardPageProps) {
   };
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-slate-700 bg-slate-900/90">
-      <header className="flex shrink-0 items-center justify-between border-b border-slate-700 px-4 py-3">
-        <div>
-          <h2 className="text-sm font-semibold text-slate-200">공지사항</h2>
-          <p className="mt-0.5 text-xs text-slate-500">notice_board 테이블 공지 목록입니다.</p>
-        </div>
-        {isAdmin ? (
-          <button
-            type="button"
-            onClick={() => {
-              setError(null);
-              setEditingNotice(null);
-              setFormMode("create");
-            }}
-            className="rounded-md bg-sky-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-sky-500"
-          >
-            추가
-          </button>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 px-4">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="notice-board-title"
+        className="flex max-h-[90vh] w-full max-w-6xl flex-col overflow-hidden rounded-xl border border-slate-700 bg-slate-900 shadow-xl"
+      >
+        <header className="flex shrink-0 items-center justify-between border-b border-slate-700 px-4 py-3">
+          <div>
+            <h2 id="notice-board-title" className="text-lg font-semibold text-slate-100">
+              공지사항
+            </h2>
+            <p className="mt-0.5 text-xs text-slate-500">notice_board 테이블 공지 목록입니다.</p>
+          </div>
+          <div className="flex items-center gap-2">
+            {isAdmin ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setError(null);
+                  setEditingNotice(null);
+                  setFormMode("create");
+                }}
+                className="rounded-md bg-sky-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-sky-500"
+              >
+                추가
+              </button>
+            ) : null}
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-md border border-slate-700 px-3 py-1.5 text-sm text-slate-200 hover:bg-slate-800"
+            >
+              닫기
+            </button>
+          </div>
+        </header>
+
+        {error ? (
+          <div className="mx-4 mt-4 rounded-md border border-rose-800 bg-rose-950/40 px-3 py-2 text-sm text-rose-200">
+            {error}
+          </div>
         ) : null}
-      </header>
 
-      {error ? (
-        <div className="mx-4 mt-4 rounded-md border border-rose-800 bg-rose-950/40 px-3 py-2 text-sm text-rose-200">
-          {error}
-        </div>
-      ) : null}
-
-      <div className="min-h-0 flex-1 overflow-auto p-4">
-        {isLoading ? (
-          <p className="text-sm text-slate-500">공지사항을 불러오는 중...</p>
-        ) : notices.length === 0 ? (
-          <p className="text-sm text-slate-500">등록된 공지사항이 없습니다.</p>
-        ) : (
-          <table className="min-w-full border-collapse text-sm">
-            <thead>
-              <tr className="border-b border-slate-700 text-left text-slate-400">
-                <th className="px-3 py-2">글번호</th>
-                <th className="px-3 py-2">제목</th>
-                <th className="px-3 py-2">작성자</th>
-                <th className="px-3 py-2">작성일시</th>
-                <th className="px-3 py-2">공지시작</th>
-                <th className="px-3 py-2">공지기한</th>
-                <th className="px-3 py-2">웰컴백 팝업 표시여부</th>
-                {isAdmin ? <th className="px-3 py-2">작업</th> : null}
-              </tr>
-            </thead>
-            <tbody>
-              {notices.map((notice) => {
-                const scheduleStatus = noticeScheduleStatus(notice);
-                return (
-                <tr key={notice.idx} className="border-b border-slate-800 text-slate-200">
-                  <td className="px-3 py-2">{notice.idx}</td>
-                  <td className="px-3 py-2">{notice.title}</td>
-                  <td className="px-3 py-2">{notice.writer_name?.trim() || notice.writer}</td>
-                  <td className="px-3 py-2 whitespace-nowrap font-mono text-xs">
-                    {notice.write_date}
-                  </td>
-                  <td className="px-3 py-2 whitespace-nowrap">{notice.from_date}</td>
-                  <td className="px-3 py-2 whitespace-nowrap">{notice.until_date}</td>
-                  <td className="px-3 py-2">
-                    <button
-                      type="button"
-                      role="switch"
-                      aria-checked={notice.welcome_popup}
-                      aria-label={`${notice.title} 웰컴백 팝업`}
-                      disabled={!isAdmin || togglingIdx === notice.idx}
-                      onClick={() => void handleToggleWelcomePopup(notice)}
-                      className={`relative h-6 w-11 rounded-full transition ${
-                        notice.welcome_popup ? "bg-sky-500" : "bg-slate-700"
-                      } ${!isAdmin ? "cursor-default opacity-80" : ""}`}
-                    >
-                      <span
-                        className={`absolute top-0.5 left-0.5 h-5 w-5 rounded-full bg-white transition ${
-                          notice.welcome_popup ? "translate-x-5" : "translate-x-0"
-                        }`}
-                      />
-                    </button>
-                  </td>
-                  {isAdmin ? (
-                    <td className="px-3 py-2">
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setError(null);
-                            setEditingNotice(notice);
-                            setFormMode("edit");
-                          }}
-                          className="rounded-md border border-slate-600 px-2 py-1 text-xs text-slate-200 hover:bg-slate-800"
-                        >
-                          수정
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setError(null);
-                            setDeletingNotice(notice);
-                          }}
-                          className="rounded-md border border-rose-800 px-2 py-1 text-xs text-rose-200 hover:bg-rose-950/40"
-                        >
-                          삭제
-                        </button>
-                        {scheduleStatus === "scheduled" ? (
-                          <button
-                            type="button"
-                            tabIndex={-1}
-                            className="cursor-default rounded-md border border-amber-700/70 bg-amber-950/40 px-2 py-1 text-xs font-medium text-amber-200"
-                          >
-                            공지예정
-                          </button>
-                        ) : null}
-                        {scheduleStatus === "expired" ? (
-                          <button
-                            type="button"
-                            tabIndex={-1}
-                            className="cursor-default rounded-md border border-slate-600 bg-slate-800 px-2 py-1 text-xs font-medium text-slate-400"
-                          >
-                            만료
-                          </button>
-                        ) : null}
-                      </div>
-                    </td>
-                  ) : null}
+        <div className="min-h-0 flex-1 overflow-auto p-4">
+          {isLoading ? (
+            <p className="text-sm text-slate-500">공지사항을 불러오는 중...</p>
+          ) : notices.length === 0 ? (
+            <p className="text-sm text-slate-500">등록된 공지사항이 없습니다.</p>
+          ) : (
+            <table className="min-w-full border-collapse text-sm">
+              <thead>
+                <tr className="border-b border-slate-700 text-left text-slate-400">
+                  <th className="px-3 py-2">글번호</th>
+                  <th className="px-3 py-2">제목</th>
+                  <th className="px-3 py-2">작성자</th>
+                  <th className="px-3 py-2">작성일시</th>
+                  <th className="px-3 py-2">공지시작</th>
+                  <th className="px-3 py-2">공지기한</th>
+                  <th className="px-3 py-2">웰컴백 팝업 표시여부</th>
+                  {isAdmin ? <th className="px-3 py-2">작업</th> : null}
                 </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        )}
+              </thead>
+              <tbody>
+                {notices.map((notice) => {
+                  const scheduleStatus = noticeScheduleStatus(notice);
+                  return (
+                    <tr key={notice.idx} className="border-b border-slate-800 text-slate-200">
+                      <td className="px-3 py-2">{notice.idx}</td>
+                      <td className="px-3 py-2">{notice.title}</td>
+                      <td className="px-3 py-2">{notice.writer_name?.trim() || notice.writer}</td>
+                      <td className="px-3 py-2 whitespace-nowrap font-mono text-xs">
+                        {notice.write_date}
+                      </td>
+                      <td className="px-3 py-2 whitespace-nowrap">{notice.from_date}</td>
+                      <td className="px-3 py-2 whitespace-nowrap">{notice.until_date}</td>
+                      <td className="px-3 py-2">
+                        <button
+                          type="button"
+                          role="switch"
+                          aria-checked={notice.welcome_popup}
+                          aria-label={`${notice.title} 웰컴백 팝업`}
+                          disabled={!isAdmin || togglingIdx === notice.idx}
+                          onClick={() => void handleToggleWelcomePopup(notice)}
+                          className={`relative h-6 w-11 rounded-full transition ${
+                            notice.welcome_popup ? "bg-sky-500" : "bg-slate-700"
+                          } ${!isAdmin ? "cursor-default opacity-80" : ""}`}
+                        >
+                          <span
+                            className={`absolute top-0.5 left-0.5 h-5 w-5 rounded-full bg-white transition ${
+                              notice.welcome_popup ? "translate-x-5" : "translate-x-0"
+                            }`}
+                          />
+                        </button>
+                      </td>
+                      {isAdmin ? (
+                        <td className="px-3 py-2">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setError(null);
+                                setEditingNotice(notice);
+                                setFormMode("edit");
+                              }}
+                              className="rounded-md border border-slate-600 px-2 py-1 text-xs text-slate-200 hover:bg-slate-800"
+                            >
+                              수정
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setError(null);
+                                setDeletingNotice(notice);
+                              }}
+                              className="rounded-md border border-rose-800 px-2 py-1 text-xs text-rose-200 hover:bg-rose-950/40"
+                            >
+                              삭제
+                            </button>
+                            {scheduleStatus === "scheduled" ? (
+                              <button
+                                type="button"
+                                tabIndex={-1}
+                                className="cursor-default rounded-md border border-amber-700/70 bg-amber-950/40 px-2 py-1 text-xs font-medium text-amber-200"
+                              >
+                                공지예정
+                              </button>
+                            ) : null}
+                            {scheduleStatus === "expired" ? (
+                              <button
+                                type="button"
+                                tabIndex={-1}
+                                className="cursor-default rounded-md border border-slate-600 bg-slate-800 px-2 py-1 text-xs font-medium text-slate-400"
+                              >
+                                만료
+                              </button>
+                            ) : null}
+                          </div>
+                        </td>
+                      ) : null}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
       </div>
 
       {formMode && isAdmin ? (

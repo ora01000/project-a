@@ -65,7 +65,7 @@ export function UserFormModal({ mode, user, onClose, onSave }: UserFormModalProp
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 px-4">
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/70 px-4">
       <div
         role="dialog"
         aria-modal="true"
