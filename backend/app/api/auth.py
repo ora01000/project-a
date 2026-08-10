@@ -280,7 +280,7 @@ async def madang_admin_bypass_login(
 
 @router.post("/auth/madang/register", response_model=MadangRegisterResponse, status_code=201)
 async def register_madang_user(payload: MadangRegisterRequest, request: Request) -> MadangRegisterResponse:
-    import sqlite3
+    from backend.app.db.engine import is_integrity_error
 
     settings = load_auth_provider_settings()
     if settings.provider_type != "madang":
@@ -324,8 +324,10 @@ async def register_madang_user(payload: MadangRegisterRequest, request: Request)
             band=payload.band,
             request_reason=payload.request_reason.strip(),
         )
-    except sqlite3.IntegrityError as exc:
-        raise HTTPException(status_code=409, detail="이미 사용 중인 아이디입니다.") from exc
+    except Exception as exc:
+        if is_integrity_error(exc):
+            raise HTTPException(status_code=409, detail="이미 사용 중인 아이디입니다.") from exc
+        raise
 
     return MadangRegisterResponse(
         message="가입 신청이 접수되었습니다. 관리자 승인 후 로그인할 수 있습니다.",

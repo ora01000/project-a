@@ -1,18 +1,17 @@
 import json
 import re
-import sqlite3
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from backend.app.db.database import get_connection
-from backend.app.db.engine import PostgresConnection
+from backend.app.db.engine import is_integrity_error
 
 router = APIRouter(tags=["debug"])
 
 # Per-cluster k8s inventory tables use hyphens (e.g. dprv6-k8s_k8s_nodes).
-# Quoted identifiers make these safe for SQLite as long as quotes/control chars are rejected.
+# Quoted identifiers make hyphenated names safe as long as quotes/control chars are rejected.
 _SAFE_IDENT = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9._-]*$")
 
 
@@ -46,10 +45,6 @@ class UpdateTableRowResponse(BaseModel):
     updated: int
 
 
-def _is_postgres(connection: Any) -> bool:
-    return isinstance(connection, PostgresConnection)
-
-
 def _quote_ident(name: str) -> str:
     if not _SAFE_IDENT.match(name):
         raise ValueError(f"Unsafe table name: {name}")
@@ -57,24 +52,14 @@ def _quote_ident(name: str) -> str:
 
 
 def _list_user_tables(connection: Any) -> list[str]:
-    if _is_postgres(connection):
-        rows = connection.execute(
-            """
-            SELECT tablename AS name
-            FROM pg_tables
-            WHERE schemaname = 'public'
-            ORDER BY tablename
-            """
-        ).fetchall()
-    else:
-        rows = connection.execute(
-            """
-            SELECT name
-            FROM sqlite_master
-            WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
-            ORDER BY name
-            """
-        ).fetchall()
+    rows = connection.execute(
+        """
+        SELECT tablename AS name
+        FROM pg_tables
+        WHERE schemaname = 'public'
+        ORDER BY tablename
+        """
+    ).fetchall()
     return [str(row["name"]) for row in rows]
 
 
@@ -87,38 +72,34 @@ def _table_column_meta(
     notnull: dict[str, bool] = {}
     primary_key: str | None = None
 
-    if _is_postgres(connection):
-        # Resolve against public schema; inventory tables may contain hyphens.
-        column_info = connection.execute(
-            """
-            SELECT
-                a.attname AS name,
-                pg_catalog.format_type(a.atttypid, a.atttypmod) AS type,
-                CASE WHEN a.attnotnull THEN 1 ELSE 0 END AS notnull,
-                CASE
-                    WHEN EXISTS (
-                        SELECT 1
-                        FROM pg_constraint c
-                        WHERE c.conrelid = a.attrelid
-                          AND c.contype = 'p'
-                          AND a.attnum = ANY (c.conkey)
-                    ) THEN 1
-                    ELSE 0
-                END AS pk
-            FROM pg_attribute a
-            JOIN pg_class r ON a.attrelid = r.oid
-            JOIN pg_namespace n ON r.relnamespace = n.oid
-            WHERE n.nspname = 'public'
-              AND r.relname = ?
-              AND a.attnum > 0
-              AND NOT a.attisdropped
-            ORDER BY a.attnum
-            """,
-            (table_name,),
-        ).fetchall()
-    else:
-        quoted = _quote_ident(table_name)
-        column_info = connection.execute(f"PRAGMA table_info({quoted})").fetchall()
+    # Resolve against public schema; inventory tables may contain hyphens.
+    column_info = connection.execute(
+        """
+        SELECT
+            a.attname AS name,
+            pg_catalog.format_type(a.atttypid, a.atttypmod) AS type,
+            CASE WHEN a.attnotnull THEN 1 ELSE 0 END AS notnull,
+            CASE
+                WHEN EXISTS (
+                    SELECT 1
+                    FROM pg_constraint c
+                    WHERE c.conrelid = a.attrelid
+                      AND c.contype = 'p'
+                      AND a.attnum = ANY (c.conkey)
+                ) THEN 1
+                ELSE 0
+            END AS pk
+        FROM pg_attribute a
+        JOIN pg_class r ON a.attrelid = r.oid
+        JOIN pg_namespace n ON r.relnamespace = n.oid
+        WHERE n.nspname = 'public'
+          AND r.relname = ?
+          AND a.attnum > 0
+          AND NOT a.attisdropped
+        ORDER BY a.attnum
+        """,
+        (table_name,),
+    ).fetchall()
 
     for col in column_info:
         name = str(col["name"])
@@ -282,13 +263,12 @@ async def update_table_row(
             )
             connection.commit()
         except Exception as exc:
-            name = type(exc).__name__.lower()
-            if "integrity" in name:
+            if is_integrity_error(exc) or "integrity" in type(exc).__name__.lower():
                 raise HTTPException(
                     status_code=400,
                     detail=f"무결성 제약으로 수정할 수 없습니다: {exc}",
                 ) from exc
-            if isinstance(exc, sqlite3.Error) or name.startswith("error") or "psycopg" in type(exc).__module__:
+            if "psycopg" in type(exc).__module__ or type(exc).__name__.lower().startswith("error"):
                 raise HTTPException(status_code=400, detail=f"수정에 실패했습니다: {exc}") from exc
             raise
 

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import sqlite3
 from pathlib import Path
 
 from fastapi import APIRouter, Body, HTTPException, Request
@@ -19,6 +18,7 @@ from backend.app.db.agentruntime import (
     resolve_active_agentruntime_type,
     update_agentruntime_record,
 )
+from backend.app.db.engine import is_integrity_error
 from backend.app.db.roles import is_admin_role
 
 router = APIRouter(tags=["agentruntime"])
@@ -119,11 +119,13 @@ async def create_agentruntime(
             service_id=payload.service_id,
             registered_date=payload.registered_date or None,
         )
-    except sqlite3.IntegrityError as exc:
-        raise HTTPException(
-            status_code=409,
-            detail="동일한 type·agent_id 조합이 이미 존재합니다.",
-        ) from exc
+    except Exception as exc:
+        if is_integrity_error(exc):
+            raise HTTPException(
+                status_code=409,
+                detail="동일한 type·agent_id 조합이 이미 존재합니다.",
+            ) from exc
+        raise
     await _sync_agent_catalog(request)
     return AgentRuntimeRecordResponse.from_record(record)
 
@@ -155,11 +157,13 @@ async def update_agentruntime(
             service_id=payload.service_id,
             registered_date=payload.registered_date or existing.registered_date,
         )
-    except sqlite3.IntegrityError as exc:
-        raise HTTPException(
-            status_code=409,
-            detail="동일한 type·agent_id 조합이 이미 존재합니다.",
-        ) from exc
+    except Exception as exc:
+        if is_integrity_error(exc):
+            raise HTTPException(
+                status_code=409,
+                detail="동일한 type·agent_id 조합이 이미 존재합니다.",
+            ) from exc
+        raise
     if record is None:
         raise HTTPException(status_code=404, detail="에이전트 연결 정보를 찾을 수 없습니다.")
     await _sync_agent_catalog(request)

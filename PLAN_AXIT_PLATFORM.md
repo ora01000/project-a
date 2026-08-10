@@ -1172,6 +1172,7 @@ http 모드로 구성되는 서버환경은 okd 상에 배포하는데 backend/f
 # 260808 이후 브랜치 변경
 dev-axplatform 은 sqlite3 를 사용하는 브랜치이며 마지막 커밋은 sqlite -> postgres 마이그레이션 메뉴 적용 후 브랜치에 코드 변경을 종료함
 dev-axplatform-multi-pod 는 목업(로컬)/http(서버) 환경 모두 postgres를 사용하는 코드로 변경함, 빌드 태그는 pg{"YYMMDD"} 형식으로 배포함
+(완료) SQLite→PostgreSQL 마이그레이션 메뉴/API/스크립트 제거, DATABASE_URL 필수(SQLite 폴백 제거)
 
 
 다음 화면을 팝업으로 변경한다. (완료: 에이전트 할당과 동일 모달 오버레이, 대시보드 배경 유지)

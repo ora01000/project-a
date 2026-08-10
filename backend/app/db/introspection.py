@@ -1,4 +1,4 @@
-"""Dialect-aware table/column introspection (SQLite + PostgreSQL)."""
+"""PostgreSQL table/column introspection helpers."""
 
 from __future__ import annotations
 
@@ -21,18 +21,13 @@ def is_postgres_connection(connection: Any) -> bool:
 
 
 def list_user_tables(connection: Any) -> set[str]:
-    if is_postgres_connection(connection):
-        rows = connection.execute(
-            """
-            SELECT tablename AS name
-            FROM pg_tables
-            WHERE schemaname = 'public'
-            """
-        ).fetchall()
-    else:
-        rows = connection.execute(
-            "SELECT name FROM sqlite_master WHERE type='table'"
-        ).fetchall()
+    rows = connection.execute(
+        """
+        SELECT tablename AS name
+        FROM pg_tables
+        WHERE schemaname = 'public'
+        """
+    ).fetchall()
     return {
         str(row["name"] if hasattr(row, "keys") else row[0])
         for row in rows
@@ -40,24 +35,19 @@ def list_user_tables(connection: Any) -> set[str]:
 
 
 def list_table_columns(connection: Any, table_name: str) -> set[str]:
-    if is_postgres_connection(connection):
-        rows = connection.execute(
-            """
-            SELECT a.attname AS name
-            FROM pg_attribute a
-            JOIN pg_class r ON a.attrelid = r.oid
-            JOIN pg_namespace n ON r.relnamespace = n.oid
-            WHERE n.nspname = 'public'
-              AND r.relname = ?
-              AND a.attnum > 0
-              AND NOT a.attisdropped
-            """,
-            (table_name,),
-        ).fetchall()
-    else:
-        rows = connection.execute(
-            f"PRAGMA table_info({_quote_ident(table_name)})"
-        ).fetchall()
+    rows = connection.execute(
+        """
+        SELECT a.attname AS name
+        FROM pg_attribute a
+        JOIN pg_class r ON a.attrelid = r.oid
+        JOIN pg_namespace n ON r.relnamespace = n.oid
+        WHERE n.nspname = 'public'
+          AND r.relname = ?
+          AND a.attnum > 0
+          AND NOT a.attisdropped
+        """,
+        (table_name,),
+    ).fetchall()
     return {
         str(row["name"] if hasattr(row, "keys") else row[0])
         for row in rows
@@ -65,24 +55,22 @@ def list_table_columns(connection: Any, table_name: str) -> set[str]:
 
 
 def ci_order_clause(connection: Any, *columns: str) -> str:
-    """Case-insensitive ORDER BY fragment (SQLite NOCASE / Postgres LOWER)."""
+    """Case-insensitive ORDER BY fragment."""
+    del connection  # PostgreSQL only
     if not columns:
         return ""
-    if is_postgres_connection(connection):
-        return ", ".join(f"LOWER({column}) ASC" for column in columns)
-    return ", ".join(f"{column} COLLATE NOCASE ASC" for column in columns)
+    return ", ".join(f"LOWER({column}) ASC" for column in columns)
 
 
 def pk_autoincrement_sql(connection: Any, column: str = "idx") -> str:
     """Primary-key column DDL for dynamic inventory tables."""
+    del connection
     ident = _quote_ident(column)
-    if is_postgres_connection(connection):
-        return f"{ident} BIGSERIAL PRIMARY KEY"
-    return f"{ident} INTEGER PRIMARY KEY AUTOINCREMENT"
+    return f"{ident} BIGSERIAL PRIMARY KEY"
 
 
 def ensure_table_idx_serial(connection: Any, table_name: str) -> None:
-    """Attach a sequence default to ``idx`` when missing (PostgreSQL only).
+    """Attach a sequence default to ``idx`` when missing (PostgreSQL).
 
     Migrated inventory tables were created as ``BIGINT PRIMARY KEY`` without
     SERIAL, so INSERT without ``idx`` fails with NOT NULL.

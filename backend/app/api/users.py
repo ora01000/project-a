@@ -1,9 +1,8 @@
-import sqlite3
-
 from fastapi import APIRouter, Body, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from backend.app.db.assignable_agents import known_assignable_agent_ids
+from backend.app.db.engine import is_integrity_error
 from backend.app.db.roles import is_admin_role, is_hidden_system_user
 from backend.app.db.users import (
     User,
@@ -137,10 +136,12 @@ async def add_user(payload: CreateUserRequest, request: Request) -> UserResponse
             role=payload.role,
             band=payload.band,
         )
-    except sqlite3.IntegrityError as exc:
-        raise HTTPException(status_code=409, detail="이미 사용 중인 아이디입니다.") from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        if is_integrity_error(exc):
+            raise HTTPException(status_code=409, detail="이미 사용 중인 아이디입니다.") from exc
+        raise
 
     return UserResponse.from_user(user)
 

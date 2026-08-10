@@ -1,20 +1,18 @@
-"""Database engine: SQLite (default) or PostgreSQL via DATABASE_URL."""
+"""Database engine: PostgreSQL via DATABASE_URL (required)."""
 
 from __future__ import annotations
 
 import logging
 import os
 import re
-import sqlite3
 from contextlib import contextmanager
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any, Iterator, Literal
 from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
 
-Dialect = Literal["sqlite", "postgresql"]
+Dialect = Literal["postgresql"]
 
 _POSTGRES_SCHEMES = frozenset({"postgres", "postgresql"})
 
@@ -22,30 +20,25 @@ _POSTGRES_SCHEMES = frozenset({"postgres", "postgresql"})
 @dataclass(frozen=True)
 class DatabaseConfig:
     dialect: Dialect
-    sqlite_path: Path | None = None
-    database_url: str | None = None
+    database_url: str
 
 
-def parse_database_url(url: str | None) -> Dialect | None:
+def parse_database_url(url: str | None) -> Dialect:
     text = (url or "").strip()
     if not text:
-        return None
+        raise ValueError("DATABASE_URL is required (postgresql://...)")
     parsed = urlparse(text)
     scheme = (parsed.scheme or "").lower()
     if scheme in _POSTGRES_SCHEMES:
         return "postgresql"
-    if scheme in {"sqlite", "file"}:
-        return "sqlite"
-    raise ValueError(f"Unsupported DATABASE_URL scheme: {scheme or '(empty)'}")
+    raise ValueError(
+        f"Unsupported DATABASE_URL scheme: {scheme or '(empty)'} "
+        "(PostgreSQL only; use postgresql://...)"
+    )
 
 
-def load_database_config(
-    *,
-    database_path: str | Path | None = None,
-    database_url: str | None = None,
-) -> DatabaseConfig:
-    from backend.app.config import PROJECT_ROOT, AppSettings
-    from backend.app.db.database import resolve_database_path
+def load_database_config(*, database_url: str | None = None) -> DatabaseConfig:
+    from backend.app.config import AppSettings
 
     env = AppSettings()
     url = (
@@ -53,18 +46,12 @@ def load_database_config(
         if database_url is not None
         else (env.database_url or os.environ.get("DATABASE_URL", ""))
     ).strip()
-    dialect = parse_database_url(url) if url else None
-    if dialect == "postgresql":
-        return DatabaseConfig(dialect="postgresql", database_url=url)
-    path_raw = database_path if database_path is not None else env.database_path
-    path = resolve_database_path(path_raw)
-    if not path.is_absolute():
-        path = PROJECT_ROOT / path
-    return DatabaseConfig(dialect="sqlite", sqlite_path=path, database_url=url or None)
+    parse_database_url(url)
+    return DatabaseConfig(dialect="postgresql", database_url=url)
 
 
 def qmark_to_pyformat(sql: str) -> str:
-    """Convert SQLite ``?`` placeholders to psycopg ``%s``.
+    """Convert ``?`` placeholders to psycopg ``%s``.
 
     Literal ``%`` (e.g. ``LIKE 'sqlite_%'``) must be doubled for psycopg,
     otherwise it is treated as a placeholder marker.
@@ -74,7 +61,7 @@ def qmark_to_pyformat(sql: str) -> str:
 
 
 class PostgresCursor:
-    """sqlite3-like cursor wrapper (exposes ``lastrowid`` after INSERT)."""
+    """Cursor wrapper exposing ``lastrowid`` after INSERT."""
 
     def __init__(self, cursor: Any, *, lastrowid: int | None = None) -> None:
         self._cursor = cursor
@@ -91,7 +78,7 @@ class PostgresCursor:
 
 
 class PostgresConnection:
-    """Thin adapter so callers can use ``.execute(sql, params)`` like sqlite3."""
+    """Thin adapter so callers can use ``.execute(sql, params)`` with ``?`` placeholders."""
 
     def __init__(self, raw: Any) -> None:
         self._raw = raw
@@ -143,14 +130,6 @@ class PostgresConnection:
         self.close()
 
 
-def connect_sqlite(path: Path) -> sqlite3.Connection:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    connection = sqlite3.connect(path)
-    connection.row_factory = sqlite3.Row
-    connection.execute("PRAGMA foreign_keys = ON")
-    return connection
-
-
 def connect_postgres(database_url: str) -> PostgresConnection:
     import psycopg
     from psycopg.rows import dict_row
@@ -159,9 +138,15 @@ def connect_postgres(database_url: str) -> PostgresConnection:
     return PostgresConnection(raw)
 
 
+def is_integrity_error(exc: BaseException) -> bool:
+    from psycopg.errors import IntegrityError
+
+    return isinstance(exc, IntegrityError)
+
+
 @contextmanager
 def advisory_lock(connection: PostgresConnection, lock_key: int = 26080701) -> Iterator[None]:
-    """Serialize schema init across pods (PostgreSQL only)."""
+    """Serialize schema init across pods."""
     connection.execute("SELECT pg_advisory_lock(?)", (lock_key,))
     try:
         yield
@@ -170,12 +155,6 @@ def advisory_lock(connection: PostgresConnection, lock_key: int = 26080701) -> I
 
 
 def ping_database(config: DatabaseConfig) -> bool:
-    if config.dialect == "postgresql":
-        assert config.database_url
-        with connect_postgres(config.database_url) as conn:
-            conn.execute("SELECT 1")
-        return True
-    assert config.sqlite_path
-    with connect_sqlite(config.sqlite_path) as conn:
+    with connect_postgres(config.database_url) as conn:
         conn.execute("SELECT 1")
     return True

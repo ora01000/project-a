@@ -32,7 +32,7 @@ class RejectSignupRequest(BaseModel):
 
 @router.post("/auth/register", response_model=RegisterUserResponse, status_code=201)
 async def register_user(payload: RegisterUserRequest, request: Request) -> RegisterUserResponse:
-    import sqlite3
+    from backend.app.db.engine import is_integrity_error
 
     email_domain = payload.email_domain.strip()
     if email_domain not in MADANG_EMAIL_DOMAINS:
@@ -55,8 +55,10 @@ async def register_user(payload: RegisterUserRequest, request: Request) -> Regis
             band=payload.band,
             request_reason=payload.request_reason.strip(),
         )
-    except sqlite3.IntegrityError as exc:
-        raise HTTPException(status_code=409, detail="이미 사용 중인 아이디입니다.") from exc
+    except Exception as exc:
+        if is_integrity_error(exc):
+            raise HTTPException(status_code=409, detail="이미 사용 중인 아이디입니다.") from exc
+        raise
 
     return RegisterUserResponse(
         message="가입 신청이 접수되었습니다. 관리자 승인 후 로그인할 수 있습니다.",

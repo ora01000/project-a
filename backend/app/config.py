@@ -142,7 +142,6 @@ class AppSettings(BaseSettings):
     frontend_port: int = Field(default=9001, alias="FRONTEND_PORT")
     backend_api_host: str = Field(default="localhost", alias="BACKEND_API_HOST")
     backend_api_port: int | None = Field(default=None, alias="BACKEND_API_PORT")
-    database_path: str = Field(default="data/app.db", alias="DATABASE_PATH")
     database_url: str = Field(default="", alias="DATABASE_URL")
     backend_role: str = Field(default="all", alias="BACKEND_ROLE")
     health_check_interval_seconds: int = Field(default=30, alias="HEALTH_CHECK_INTERVAL_SECONDS")
@@ -897,7 +896,8 @@ def load_settings() -> tuple[LLMSettings, ServerSettings, dict[str, MCPServerCon
 
     mcp_servers = _apply_mcp_env_overrides(mcp_servers)
 
-    database_path = env_settings.database_path or server_yaml.get("database_path", "data/app.db")
+    # Opaque app-state token path (PostgreSQL uses DATABASE_URL; not an SQLite file).
+    database_path = server_yaml.get("database_path", "data/app.db")
 
     return llm, server, mcp_servers, database_path
 
