@@ -32,9 +32,9 @@ from backend.app.middleware.session_auth import get_request_auth_user
 from backend.app.notifications.email_recipients import (
     SendEmailRecipientsRequest,
     SendMarkdownEmailResponse,
-    resolve_recipient_emails,
+    resolve_email_recipients,
 )
-from backend.app.notifications.email_sender import send_job_report_emails
+from backend.app.notifications.email_sender import compose_report_markdown, send_job_report_emails
 from backend.app.services.agent_runtime_client import AgentInvokeRequest
 from backend.app.services.job_auditor import (
     build_job_review_message,
@@ -321,23 +321,31 @@ async def send_job_report_email(
         raise HTTPException(status_code=400, detail="이 작업 유형은 메일로 전송할 수 없습니다.")
 
     result = get_job_result_by_srnum(database_path, job.srnum)
-    markdown_body = _build_job_email_markdown(job, result)
-    if markdown_body is None:
+    report_body = _build_job_email_markdown(job, result)
+    if report_body is None:
         raise HTTPException(status_code=404, detail="메일로 전송할 작업 내용이 없습니다.")
 
     try:
-        recipient_emails = resolve_recipient_emails(
+        resolved = resolve_email_recipients(
             database_path,
             body,
             requester_email=job.requester_email,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    email_subject = (body.subject or "").strip() or job.job_title.strip()
+    markdown_body = compose_report_markdown(
+        forward_message=body.forward_message,
+        report_body=report_body,
+    )
     try:
         sent_count, failed = await send_job_report_emails(
             database_path=database_path,
-            recipient_emails=recipient_emails,
-            subject=job.job_title.strip(),
+            to_addresses=resolved.to_addresses,
+            cc_addresses=resolved.cc_addresses,
+            bcc_addresses=resolved.bcc_addresses,
+            subject=email_subject,
             markdown_body=markdown_body,
         )
     except ValueError as exc:
@@ -352,7 +360,14 @@ async def send_job_report_email(
             detail=f"메일 전송에 실패했습니다: {', '.join(failed)}",
         )
 
-    message = f"{sent_count}명에게 메일을 전송했습니다."
+    message = "메일을 전송했습니다."
+    if sent_count > 0:
+        parts = [f"수신 {len(resolved.to_addresses)}"]
+        if resolved.cc_addresses:
+            parts.append(f"참조 {len(resolved.cc_addresses)}")
+        if resolved.bcc_addresses:
+            parts.append(f"숨은참조 {len(resolved.bcc_addresses)}")
+        message = f"메일을 전송했습니다 ({', '.join(parts)})."
     if failed:
         message = f"{message} (실패: {', '.join(failed)})"
     return SendMarkdownEmailResponse(

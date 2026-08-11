@@ -97,18 +97,32 @@ def convert_markdown_to_html(markdown_text: str) -> str:
 def _send_email_sync(
     settings: EmailNotificationSettings,
     *,
-    to_address: str,
+    to_addresses: list[str],
     subject: str,
     body: str,
     html_body: str | None = None,
+    cc_addresses: list[str] | None = None,
+    bcc_addresses: list[str] | None = None,
 ) -> None:
+    if not to_addresses:
+        raise ValueError("수신자 이메일이 없습니다.")
+
+    cc_list = [address.strip() for address in (cc_addresses or []) if address.strip()]
+    bcc_list = [address.strip() for address in (bcc_addresses or []) if address.strip()]
+
     message = EmailMessage()
     message["From"] = settings.from_address
-    message["To"] = to_address
+    message["To"] = ", ".join(to_addresses)
+    if cc_list:
+        message["Cc"] = ", ".join(cc_list)
+    if bcc_list:
+        message["Bcc"] = ", ".join(bcc_list)
     message["Subject"] = subject
     message.set_content(body)
     if html_body:
         message.add_alternative(html_body, subtype="html")
+
+    delivery_targets = list(dict.fromkeys([*to_addresses, *cc_list, *bcc_list]))
 
     if settings.use_ssl:
         with smtplib.SMTP_SSL(
@@ -117,7 +131,7 @@ def _send_email_sync(
             timeout=settings.timeout_seconds,
         ) as smtp:
             _smtp_login_if_needed(smtp, settings)
-            smtp.send_message(message)
+            smtp.send_message(message, to_addrs=delivery_targets)
         return
 
     with smtplib.SMTP(
@@ -128,7 +142,7 @@ def _send_email_sync(
         if settings.use_tls:
             smtp.starttls()
         _smtp_login_if_needed(smtp, settings)
-        smtp.send_message(message)
+        smtp.send_message(message, to_addrs=delivery_targets)
 
 
 async def send_test_email(
@@ -149,7 +163,7 @@ async def send_test_email(
         await asyncio.to_thread(
             _send_email_sync,
             settings,
-            to_address=to_address,
+            to_addresses=[to_address],
             subject=subject,
             body=body,
         )
@@ -191,7 +205,7 @@ async def send_email_notification(
         await asyncio.to_thread(
             _send_email_sync,
             config,
-            to_address=recipient,
+            to_addresses=[recipient],
             subject=title,
             body=body,
         )
@@ -205,31 +219,47 @@ async def send_email_notification(
 async def send_markdown_email(
     *,
     settings: EmailNotificationSettings,
-    to_address: str,
+    to_addresses: list[str],
     subject: str,
     markdown_body: str,
+    cc_addresses: list[str] | None = None,
+    bcc_addresses: list[str] | None = None,
 ) -> None:
     plain_body, html_markdown = prepare_markdown_for_email(markdown_body.strip())
     html_body = convert_markdown_to_html(html_markdown)
     await asyncio.to_thread(
         _send_email_sync,
         settings,
-        to_address=to_address,
+        to_addresses=to_addresses,
+        cc_addresses=cc_addresses,
+        bcc_addresses=bcc_addresses,
         subject=subject,
         body=plain_body,
         html_body=html_body,
     )
 
 
+def compose_report_markdown(*, forward_message: str, report_body: str) -> str:
+    forward = forward_message.strip()
+    report = report_body.strip()
+    if forward and report:
+        return f"{forward}\n\n---\n\n{report}"
+    if forward:
+        return forward
+    return report
+
+
 async def send_job_report_emails(
     *,
     database_path: Path | str | None,
-    recipient_emails: list[str],
+    to_addresses: list[str],
     subject: str,
     markdown_body: str,
+    cc_addresses: list[str] | None = None,
+    bcc_addresses: list[str] | None = None,
     settings: EmailNotificationSettings | None = None,
 ) -> tuple[int, list[str]]:
-    """Send markdown report to multiple recipients. Returns (sent_count, failed_recipients)."""
+    """Send one markdown report email with To/Cc/Bcc. Returns (recipient_count, failed_recipients)."""
     config = settings or load_email_settings_from_db(database_path)
     if config is None:
         raise ValueError("메일 서버 설정이 없습니다.")
@@ -237,34 +267,34 @@ async def send_job_report_emails(
     if validation_error:
         raise ValueError(validation_error)
 
-    unique_recipients = []
-    seen: set[str] = set()
-    for address in recipient_emails:
-        normalized = address.strip()
-        if not normalized or normalized in seen:
-            continue
-        seen.add(normalized)
-        unique_recipients.append(normalized)
+    unique_to = list(dict.fromkeys(address.strip() for address in to_addresses if address.strip()))
+    unique_cc = list(dict.fromkeys(address.strip() for address in (cc_addresses or []) if address.strip()))
+    unique_bcc = list(dict.fromkeys(address.strip() for address in (bcc_addresses or []) if address.strip()))
 
-    if not unique_recipients:
+    if not unique_to:
         raise ValueError("수신자 이메일이 없습니다.")
 
-    sent_count = 0
-    failed: list[str] = []
-    for recipient in unique_recipients:
-        try:
-            await send_markdown_email(
-                settings=config,
-                to_address=recipient,
-                subject=subject,
-                markdown_body=markdown_body,
-            )
-            sent_count += 1
-            logger.info("Job report email sent to=%s subject=%s", recipient, subject)
-        except Exception as exc:
-            logger.exception("Job report email failed to=%s: %s", recipient, exc)
-            failed.append(recipient)
-    return sent_count, failed
+    recipient_count = len(set([*unique_to, *unique_cc, *unique_bcc]))
+    try:
+        await send_markdown_email(
+            settings=config,
+            to_addresses=unique_to,
+            cc_addresses=unique_cc,
+            bcc_addresses=unique_bcc,
+            subject=subject,
+            markdown_body=markdown_body,
+        )
+        logger.info(
+            "Job report email sent to=%s cc=%s bcc=%s subject=%s",
+            unique_to,
+            unique_cc,
+            unique_bcc,
+            subject,
+        )
+        return recipient_count, []
+    except Exception as exc:
+        logger.exception("Job report email failed: %s", exc)
+        return 0, unique_to
 
 
 async def send_signup_rejection_email(
@@ -294,7 +324,7 @@ async def send_signup_rejection_email(
         await asyncio.to_thread(
             _send_email_sync,
             config,
-            to_address=to_address,
+            to_addresses=[to_address],
             subject=subject,
             body=body,
         )

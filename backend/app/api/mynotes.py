@@ -21,9 +21,9 @@ from backend.app.middleware.session_auth import get_request_auth_user
 from backend.app.notifications.email_recipients import (
     SendEmailRecipientsRequest,
     SendMarkdownEmailResponse,
-    resolve_recipient_emails,
+    resolve_email_recipients,
 )
-from backend.app.notifications.email_sender import send_job_report_emails
+from backend.app.notifications.email_sender import compose_report_markdown, send_job_report_emails
 from backend.app.services.mynote_content_store import (
     delete_mynote_content_from_redis,
     hydrate_mynote_content,
@@ -226,16 +226,23 @@ async def send_my_note_email(
         raise HTTPException(status_code=400, detail="노트 내용이 비어 있습니다.")
 
     try:
-        recipient_emails = resolve_recipient_emails(database_path, body)
+        resolved = resolve_email_recipients(database_path, body)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    email_subject = (body.subject or "").strip() or record.note_name.strip()
+    markdown_body = compose_report_markdown(
+        forward_message=body.forward_message,
+        report_body=content,
+    )
     try:
         sent_count, failed = await send_job_report_emails(
             database_path=database_path,
-            recipient_emails=recipient_emails,
-            subject=record.note_name.strip(),
-            markdown_body=content,
+            to_addresses=resolved.to_addresses,
+            cc_addresses=resolved.cc_addresses,
+            bcc_addresses=resolved.bcc_addresses,
+            subject=email_subject,
+            markdown_body=markdown_body,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -249,7 +256,14 @@ async def send_my_note_email(
             detail=f"메일 전송에 실패했습니다: {', '.join(failed)}",
         )
 
-    message = f"{sent_count}명에게 메일을 전송했습니다."
+    message = "메일을 전송했습니다."
+    if sent_count > 0:
+        parts = [f"수신 {len(resolved.to_addresses)}"]
+        if resolved.cc_addresses:
+            parts.append(f"참조 {len(resolved.cc_addresses)}")
+        if resolved.bcc_addresses:
+            parts.append(f"숨은참조 {len(resolved.bcc_addresses)}")
+        message = f"메일을 전송했습니다 ({', '.join(parts)})."
     if failed:
         message = f"{message} (실패: {', '.join(failed)})"
     return SendMarkdownEmailResponse(
