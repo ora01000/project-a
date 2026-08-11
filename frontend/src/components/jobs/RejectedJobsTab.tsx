@@ -90,7 +90,7 @@ export function RejectedJobsTab({ active }: RejectedJobsTabProps) {
     setPageSize,
   } = useClientPagination(jobs);
 
-  const rejectionReason = selectedJob?.drop_reason?.trim() || selectedJob?.reject_reason?.trim() || "";
+  const rejectionReason = selectedJob?.reject_reason?.trim() || selectedJob?.drop_reason?.trim() || "";
 
   return (
     <>

@@ -405,6 +405,164 @@ async def send_whatap_event_subscriber_report(
         return 0, [user.userid for user in subscribers]
 
 
+AX_INFRA_COMPLETION_FORWARD_MESSAGE = (
+    "본 메일은 요청하신 작업 요청서의 처리 결과를 요청자에게 자동으로 발송하는 메일입니다."
+)
+AX_INFRA_REJECTION_FORWARD_MESSAGE = (
+    "본 메일은 요청하신 작업 요청서의 반려를 요청자에게 자동으로 발송하는 메일입니다."
+)
+AX_INFRA_CANCELLATION_FORWARD_MESSAGE = (
+    "본 메일은 요청하신 작업 요청서의 취소를 요청자에게 자동으로 발송하는 메일입니다."
+)
+
+
+def _resolve_ax_infra_mail_targets(
+    database_path: Path | str | None,
+    requester_email: str,
+    approver_userid: str | None,
+) -> tuple[str | None, list[str]]:
+    to_address = (requester_email or "").strip()
+    if not to_address or "@" not in to_address:
+        return None, []
+
+    cc_addresses: list[str] = []
+    if database_path is not None and (approver_userid or "").strip():
+        from backend.app.db.users import get_user_by_userid
+
+        approver = get_user_by_userid(database_path, approver_userid.strip())
+        if approver is not None:
+            approver_email = (approver.email or "").strip()
+            if "@" in approver_email and approver_email.lower() != to_address.lower():
+                cc_addresses = [approver_email]
+    return to_address, cc_addresses
+
+
+async def _send_ax_infra_requester_notice(
+    *,
+    database_path: Path | str | None,
+    subject_prefix: str,
+    job_title: str,
+    requester_email: str,
+    approver_userid: str | None,
+    forward_message: str,
+    report_body: str,
+    log_label: str,
+    settings: EmailNotificationSettings | None = None,
+) -> tuple[int, list[str]]:
+    to_address, cc_addresses = _resolve_ax_infra_mail_targets(
+        database_path, requester_email, approver_userid
+    )
+    if to_address is None:
+        logger.warning("%s skipped: invalid requester_email=%s", log_label, requester_email)
+        return 0, []
+
+    title = (job_title or "").strip() or "작업 요청서"
+    subject = f"{subject_prefix} {title}"
+    markdown_body = compose_report_markdown(
+        forward_message=forward_message,
+        report_body=report_body,
+    )
+
+    try:
+        sent_count, failed = await send_job_report_emails(
+            database_path=database_path,
+            to_addresses=[to_address],
+            cc_addresses=cc_addresses,
+            subject=subject,
+            markdown_body=markdown_body,
+            settings=settings,
+        )
+        if failed:
+            logger.warning(
+                "%s partially failed subject=%s failed=%s",
+                log_label,
+                subject,
+                failed,
+            )
+        else:
+            logger.info(
+                "%s sent subject=%s to=%s cc=%s recipients=%s",
+                log_label,
+                subject,
+                to_address,
+                cc_addresses,
+                sent_count,
+            )
+        return sent_count, failed
+    except Exception as exc:
+        logger.exception("%s failed subject=%s: %s", log_label, subject, exc)
+        return 0, [to_address, *cc_addresses]
+
+
+async def send_ax_infra_job_completion_email(
+    *,
+    database_path: Path | str | None,
+    job_title: str,
+    requester_email: str,
+    approver_userid: str | None,
+    report_body: str,
+    settings: EmailNotificationSettings | None = None,
+) -> tuple[int, list[str]]:
+    """Email job_type=1 completion result to requester, Cc approver."""
+    return await _send_ax_infra_requester_notice(
+        database_path=database_path,
+        subject_prefix="[작업처리결과]",
+        job_title=job_title,
+        requester_email=requester_email,
+        approver_userid=approver_userid,
+        forward_message=AX_INFRA_COMPLETION_FORWARD_MESSAGE,
+        report_body=report_body,
+        log_label="AX infra completion email",
+        settings=settings,
+    )
+
+
+async def send_ax_infra_job_rejection_email(
+    *,
+    database_path: Path | str | None,
+    job_title: str,
+    requester_email: str,
+    approver_userid: str | None,
+    reject_reason: str,
+    settings: EmailNotificationSettings | None = None,
+) -> tuple[int, list[str]]:
+    """Email job_type=1 rejection (status 12) to requester, Cc approver."""
+    return await _send_ax_infra_requester_notice(
+        database_path=database_path,
+        subject_prefix="[작업반려]",
+        job_title=job_title,
+        requester_email=requester_email,
+        approver_userid=approver_userid,
+        forward_message=AX_INFRA_REJECTION_FORWARD_MESSAGE,
+        report_body=(reject_reason or "").strip(),
+        log_label="AX infra rejection email",
+        settings=settings,
+    )
+
+
+async def send_ax_infra_job_cancellation_email(
+    *,
+    database_path: Path | str | None,
+    job_title: str,
+    requester_email: str,
+    approver_userid: str | None,
+    drop_reason: str,
+    settings: EmailNotificationSettings | None = None,
+) -> tuple[int, list[str]]:
+    """Email job_type=1 cancellation (status 13) to requester, Cc approver."""
+    return await _send_ax_infra_requester_notice(
+        database_path=database_path,
+        subject_prefix="[작업취소]",
+        job_title=job_title,
+        requester_email=requester_email,
+        approver_userid=approver_userid,
+        forward_message=AX_INFRA_CANCELLATION_FORWARD_MESSAGE,
+        report_body=(drop_reason or "").strip(),
+        log_label="AX infra cancellation email",
+        settings=settings,
+    )
+
+
 async def send_signup_request_admin_emails(
     *,
     database_path: Path | str | None,

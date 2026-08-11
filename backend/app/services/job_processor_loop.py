@@ -13,6 +13,7 @@ from backend.app.db.jobs import (
     JOB_STATUS_COMPLETED_FAILURE,
     JOB_STATUS_COMPLETED_SUCCESS,
     JOB_STATUS_DIRECT_APPROVED,
+    JOB_TYPE_AX_INFRA,
     JOB_TYPE_SIGNUP,
     JOB_TYPE_WHATAP,
     JobRecord,
@@ -21,7 +22,10 @@ from backend.app.db.jobs import (
 )
 from backend.app.db.agentruntime import StoredAgentRuntime, build_agent_chat_url, catalog_agent_id
 from backend.app.db.jobs_result import upsert_job_result
-from backend.app.notifications.email_sender import send_whatap_event_subscriber_report
+from backend.app.notifications.email_sender import (
+    send_ax_infra_job_completion_email,
+    send_whatap_event_subscriber_report,
+)
 from backend.app.services.agent_runtime_client import AgentInvokeRequest, AgentRuntimeClient, normalize_runtime_mode
 from backend.app.services.job_processor import (
     build_job_agent_message,
@@ -29,6 +33,25 @@ from backend.app.services.job_processor import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+async def _notify_ax_infra_job_completion(database_path: Path, job: JobRecord, report_body: str) -> None:
+    if int(job.job_type) != JOB_TYPE_AX_INFRA:
+        return
+    try:
+        await send_ax_infra_job_completion_email(
+            database_path=database_path,
+            job_title=job.job_title,
+            requester_email=job.requester_email,
+            approver_userid=job.approver,
+            report_body=report_body,
+        )
+    except Exception:
+        logger.exception(
+            "AX infra completion email notification failed for idx=%s srnum=%s",
+            job.idx,
+            job.srnum,
+        )
 
 
 class JobProcessorState:
@@ -106,6 +129,7 @@ async def process_approved_job(
             expected_status=JOB_STATUS_DIRECT_APPROVED,
         )
         logger.info("job processor completed job idx=%s srnum=%s", job.idx, job.srnum)
+        await _notify_ax_infra_job_completion(database_path, job, result.content)
         if int(job.job_type) == JOB_TYPE_WHATAP:
             try:
                 await send_whatap_event_subscriber_report(
@@ -122,10 +146,11 @@ async def process_approved_job(
     except Exception as exc:
         logger.exception("job processor failed job idx=%s srnum=%s: %s", job.idx, job.srnum, exc)
         try:
+            failure_result = f"작업 처리 실패: {exc}"
             upsert_job_result(
                 database_path,
                 srnum=job.srnum,
-                result=f"작업 처리 실패: {exc}",
+                result=failure_result,
                 complete_date=complete_date,
             )
             update_job_status(
@@ -134,6 +159,7 @@ async def process_approved_job(
                 JOB_STATUS_COMPLETED_FAILURE,
                 expected_status=JOB_STATUS_DIRECT_APPROVED,
             )
+            await _notify_ax_infra_job_completion(database_path, job, failure_result)
         except Exception:
             logger.exception(
                 "job processor failed to persist failure for idx=%s srnum=%s",

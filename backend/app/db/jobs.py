@@ -574,7 +574,7 @@ def reject_assigned_job(
             """
             UPDATE jobs
             SET status_code = ?,
-                drop_reason = ?
+                reject_reason = ?
             WHERE idx = ? AND status_code = ? AND approver = ?
             """,
             (
@@ -623,7 +623,7 @@ def reject_received_job(
             """
             UPDATE jobs
             SET status_code = ?,
-                drop_reason = ?
+                reject_reason = ?
             WHERE idx = ? AND status_code = ?
               AND (approver IS NULL OR TRIM(approver) = '')
             """,

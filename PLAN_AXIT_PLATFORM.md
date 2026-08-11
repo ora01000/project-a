@@ -1459,5 +1459,23 @@ dev-axplatform-multi-pod 는 목업(로컬)/http(서버) 환경 모두 postgres�
 - jobs.job_type = 10(신규가입신청) 인 job 의 status_code = 0 (접수) 로 업데이트 될 때 users.role = 0 인 사용자(관리자)에게 users.request_reason 의 내용을 메일로 전송한다. (완료)
   - 제목 : job_title 
   - 추가 내용 : [{jobs.srnum}]{jobs.requester_name} 님이 신규 사용자 접속 권한을 신청하셨습니다. 
-  
-    
+
+- jobs.job_type = 1(일반 작업 요청서) 인 job 의 status_code = 10(처리완료(성공)) | 11(처리완료(실패)) 로 업데이트 될 때 jobs.requester_email 수신자에게 jobs_result.result 의 내용을 메일로 전송한다. (완료)
+  - 제목 : [작업처리결과] {job_title}
+  - 추가 내용 : 본 메일은 요청하신 작업 요청서의 처리 결과를 요청자에게 자동으로 발송하는 메일입니다.
+  - 수신자 : jobs.requester_email
+  - 참조자 : jobs.approver = users.userid 인 users.email
+
+- jobs.job_type = 1(일반 작업 요청서) 인 job 의 status_code = 12(작업반려) | 13(작업취소) 로 업데이트 될 때 jobs.requester_email 수신자에게 jobs.reject_reason, jobs.drop_reason 의 내용을 메일로 전송한다. (완료)
+  - status_code = 12 인 경우
+    - 제목 : [작업반려] {job_title}
+    - 추가 내용 : 본 메일은 요청하신 작업 요청서의 반려를 요청자에게 자동으로 발송하는 메일입니다.
+    - 수신자 : jobs.requester_email
+    - 참조자 : jobs.approver = users.userid 인 users.email
+    - 내용 : jobs.reject_reason
+  - status_code = 13 인 경우
+    - 제목 : [작업취소] {job_title}
+    - 추가 내용 : 본 메일은 요청하신 작업 요청서의 취소를 요청자에게 자동으로 발송하는 메일입니다.
+    - 수신자 : jobs.requester_email
+    - 참조자 : jobs.approver = users.userid 인 users.email
+    - 내용 : jobs.drop_reason

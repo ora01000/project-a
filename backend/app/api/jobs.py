@@ -11,8 +11,10 @@ from pydantic import BaseModel, Field, model_validator
 
 from backend.app.db.jobs import (
     JOB_STATUS_APPROVER_ASSIGNED,
+    JOB_STATUS_CANCELLED,
     JOB_STATUS_RECEIVED,
     JOB_STATUS_REJECTED,
+    JOB_TYPE_AX_INFRA,
     JOB_TYPE_SIGNUP,
     JobRecord,
     approve_assigned_job,
@@ -34,7 +36,12 @@ from backend.app.notifications.email_recipients import (
     SendMarkdownEmailResponse,
     resolve_email_recipients,
 )
-from backend.app.notifications.email_sender import compose_report_markdown, send_job_report_emails
+from backend.app.notifications.email_sender import (
+    compose_report_markdown,
+    send_ax_infra_job_cancellation_email,
+    send_ax_infra_job_rejection_email,
+    send_job_report_emails,
+)
 from backend.app.services.agent_runtime_client import AgentInvokeRequest
 from backend.app.services.job_auditor import (
     build_job_review_message,
@@ -285,7 +292,7 @@ def _build_job_report_markdown(job: JobRecord, result: JobResultRecord) -> str:
 
 
 def _build_rejected_job_markdown(job: JobRecord) -> str:
-    reason = (job.drop_reason or job.reject_reason or "").strip() or "반려 사유가 등록되지 않았습니다."
+    reason = (job.reject_reason or job.drop_reason or "").strip() or "반려 사유가 등록되지 않았습니다."
     content = _strip_html(job.job_content)
     return (
         f"# {job.job_title}\n\n"
@@ -295,6 +302,36 @@ def _build_rejected_job_markdown(job: JobRecord) -> str:
         f"## 작업 내용\n\n{content}\n\n"
         f"## 반려 사유\n\n{reason}\n"
     )
+
+
+async def _notify_ax_infra_reject_or_cancel(database_path, job: JobRecord) -> None:
+    if int(job.job_type) != JOB_TYPE_AX_INFRA:
+        return
+    try:
+        if job.status_code == JOB_STATUS_REJECTED:
+            reason = (job.reject_reason or job.drop_reason or "").strip()
+            await send_ax_infra_job_rejection_email(
+                database_path=database_path,
+                job_title=job.job_title,
+                requester_email=job.requester_email,
+                approver_userid=job.approver,
+                reject_reason=reason,
+            )
+        elif job.status_code == JOB_STATUS_CANCELLED:
+            await send_ax_infra_job_cancellation_email(
+                database_path=database_path,
+                job_title=job.job_title,
+                requester_email=job.requester_email,
+                approver_userid=job.approver,
+                drop_reason=(job.drop_reason or "").strip(),
+            )
+    except Exception:
+        logger.exception(
+            "AX infra reject/cancel email notification failed for idx=%s srnum=%s status=%s",
+            job.idx,
+            job.srnum,
+            job.status_code,
+        )
 
 
 def _build_job_email_markdown(job: JobRecord, result: JobResultRecord | None) -> str | None:
@@ -483,6 +520,7 @@ async def reject_job_review(
     except Exception as exc:
         logger.exception("Job reject failed")
         raise HTTPException(status_code=500, detail="Failed to reject job") from exc
+    await _notify_ax_infra_reject_or_cancel(database_path, record)
     return JobRecordResponse.from_record(record)
 
 
@@ -621,4 +659,5 @@ async def cancel_job_endpoint(
     except Exception as exc:
         logger.exception("Job cancel failed")
         raise HTTPException(status_code=500, detail="Failed to cancel job") from exc
+    await _notify_ax_infra_reject_or_cancel(database_path, record)
     return JobRecordResponse.from_record(record)
