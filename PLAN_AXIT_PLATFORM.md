@@ -1482,4 +1482,56 @@ dev-axplatform-multi-pod 는 목업(로컬)/http(서버) 환경 모두 postgres�
     - 참조자 : jobs.approver = users.userid 인 users.email
     - 내용 : jobs.drop_reason
 
+# 인프라 형상 세대별 GAP 분석
+- 세대별 형상 GAP 분석 에이전트를 로컬에 구성한다. 이는 목업/http 모드 동일하다. 이 에이전트는 환경변수, 설정 등으로 변경하지 않고 오로지 코드 안에서 static설정 값으로만 동작하고, 기존 axit runtime(http), 목업 에이전트 구조에 영향을 주거나 의존하지 않는다. (완료)
+  - 에이전트명 : INFRA_GAP_ANALYSIS
+  - 사용 LLM
+    - 목업 : 기존 LLM 과 동일
+    - http 모드
+      - http://llm.apps.pkvgs-k8s.lguplus.co.kr/v1 (OpenAI 호환)
+      - 모델 : gpt-oss-120b
+  - 사용 MCP 도구명 : posgresql
+    - 목업
+      - url : http://localhost:30800/mcp
+    - http 모드
+      - url : http://pgdb-mcp.mcps.svc.cluster.local:8000/mcp
+
+  - INFRA_GAP_ANALYSIS 시스템프롬프트(영문으로 번역하여 적용하고 문맥상 보완이 필요하면 보완한다) : (완료) 
+// 시스템 프롬프트 시작
+당신은 postgres 도구를 사용하여 DB 에 저장된 인프라 아키텍처 정보를 세대별로 비교/분석/추이를 분석한다. 
+도구를 통해 스키마 전체를 읽고 이해할 수 있으며 질의에 적합한 컬럼을 찾는다. 
+인프라는 세가지 타입이며 각 타입 별로 비교할 테이블은 다음과  같다.
+0. 공통
+  infra_cluster : 관리 대상 인프라를 클러스터 레벨로 분리하여 저장
+1. k8s
+  {cluster_name}_k8s_namespaces : 네임스페이스 목록 정보
+  {cluster_name}_k8s_nodes : 노드 목록 정보
+  {cluster_name}_k8s_deployments : 배포 목록 정보
+  {cluster_name}_k8s_pvcs : persistent volume claim 목록 정보
+  {cluster_name}_k8s_pods_on_node : 노드 당 pod 배치 목록 정보
+2. kubevirt
+  {cluster_name}_kubevirt_namespaces : 네임스페이스 목록 정보
+  {cluster_name}_kubevirt_nodes : 노드 목록 정보
+  {cluster_name}_kubevirt_deployments : 배포 목록 정보
+  {cluster_name}_kubevirt_pvcs : persistent volume claim 목록 정보
+  {cluster_name}_kubevirt_pods_on_node : 노드 당 pod 배치 목록 정보
+  {cluster_name}_kubevirt_vms : VM 목록 정보
+  {cluster_name}_kubevirt_vm_volumes : VM에 할당되는 볼륨 목록 정보
+3. vsphere
+  {cluster_name}_vsphere_cluster : vSphere 데이터센터에 구성된 클러스터 목록 정보
+  {cluster_name}_vsphere_hosts : vSphere ESXi 호스트 목록 정보
+  {cluster_name}_vsphere_vms_on_host : ESXi 호스트에 배치된 VM 목록 정보
+
+형상은 세대별로 다음과 같이 만들어진다.
+{table_name} -> latest
+{table_name}_YYYYMMDD_HHMMSS -> 최대 4개 생성
+
+지난 형상은 latest 기준 테이블 스키마가 동일한게 원칙이나 컬럼 변경으로 지난 형상에서는 누락되거나 이름이 다를 수 있다.
+// 시스템 프롬프트 끝
+  
+  - 형상 변경 추이 -> 형상 추이 로 이름 변경 (완료)
+    - 형상 추이 패널 오른쪽 상단에 "AI갭분석" 버튼 배치, INFRA_GAP_ANALYSIS 에이전트로 다음 요청을 보낸다. (완료)
+      - User Message(영문으로 번역하여 적용) : {인프라 목록에서 선택된 인프라 ex. infra_cluster.cluster_name} 은 {infra_cluster.infra_type} 입니다. 세대별 형상 변화와 추이를 분석
+  - 갭분석 시 질의/응답 은 대화로그 탭에 기록한다 (완료)
+
 

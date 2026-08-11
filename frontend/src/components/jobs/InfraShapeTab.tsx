@@ -255,6 +255,8 @@ export function InfraShapeTab({ active }: InfraShapeTabProps) {
   const [error, setError] = useState<string | null>(null);
   const [isLoadingList, setIsLoadingList] = useState(false);
   const [isLoadingAnalysis, setIsLoadingAnalysis] = useState(false);
+  const [isGapAnalyzing, setIsGapAnalyzing] = useState(false);
+  const [gapAnalysisMessage, setGapAnalysisMessage] = useState<string | null>(null);
 
   const loadClusters = useCallback(async () => {
     setIsLoadingList(true);
@@ -352,6 +354,37 @@ export function InfraShapeTab({ active }: InfraShapeTabProps) {
     return analysis?.infra_type || fromList || "k8s";
   }, [analysis?.infra_type, clusters, selectedName]);
 
+  const runGapAnalysis = useCallback(async () => {
+    if (!selectedName) {
+      return;
+    }
+    const infraType = selectedInfraType;
+    const message =
+      `${selectedName} is ${infraType}. ` +
+      "Analyze generation-by-generation infrastructure shape changes and trends.";
+    setIsGapAnalyzing(true);
+    setGapAnalysisMessage(null);
+    try {
+      const response = await fetch("/api/infra-gap-analysis/invoke", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message,
+          cluster_name: selectedName,
+          infra_type: infraType,
+        }),
+      });
+      if (!response.ok) {
+        throw new Error(await parseError(response, "AI 갭분석 요청에 실패했습니다."));
+      }
+      setGapAnalysisMessage("갭분석이 완료되었습니다. 상세정보 > 대화로그에서 확인할 수 있습니다.");
+    } catch (err) {
+      setGapAnalysisMessage(err instanceof Error ? err.message : "AI 갭분석 요청에 실패했습니다.");
+    } finally {
+      setIsGapAnalyzing(false);
+    }
+  }, [selectedName, selectedInfraType]);
+
   return (
     <div className="flex min-h-0 flex-1 gap-3 p-3">
       <aside className="flex w-[178px] shrink-0 flex-col border-r border-slate-700/80 pr-3">
@@ -421,10 +454,36 @@ export function InfraShapeTab({ active }: InfraShapeTabProps) {
           </section>
 
           <section className="flex min-h-0 flex-1 flex-col rounded-lg border border-slate-700/80 bg-slate-950/40 p-3">
-            <h3 className="mb-1 text-xs font-semibold text-slate-300">형상 변경 추이</h3>
+            <div className="mb-1 flex shrink-0 items-center justify-between gap-2">
+              <h3 className="text-xs font-semibold text-slate-300">형상 추이</h3>
+              <button
+                type="button"
+                disabled={!selectedName || isGapAnalyzing}
+                onClick={() => void runGapAnalysis()}
+                className="rounded border border-sky-700 bg-sky-950/50 px-2 py-0.5 text-[11px] font-medium text-sky-200 hover:bg-sky-900/60 disabled:cursor-not-allowed disabled:opacity-40"
+                title={
+                  selectedName
+                    ? `${selectedName} (${selectedInfraType}) AI 갭분석`
+                    : "클러스터를 선택해 주세요"
+                }
+              >
+                {isGapAnalyzing ? "분석 중..." : "AI갭분석"}
+              </button>
+            </div>
             <p className="mb-2 text-[11px] text-slate-500">
               최신 테이블과 백업(최대 4세대) 기준 개수 변화
             </p>
+            {gapAnalysisMessage ? (
+              <p
+                className={`mb-2 shrink-0 rounded-md border px-2 py-1 text-[11px] ${
+                  gapAnalysisMessage.startsWith("갭분석 실패")
+                    ? "border-rose-800 bg-rose-950/40 text-rose-200"
+                    : "border-emerald-800 bg-emerald-950/30 text-emerald-200"
+                }`}
+              >
+                {gapAnalysisMessage}
+              </p>
+            ) : null}
             <div className="min-h-0 flex-1 overflow-hidden">
               {analysis ? (
                 <ShapeTrendChart

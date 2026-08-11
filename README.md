@@ -1,116 +1,128 @@
-# LangGraph Multi-Agent Platform
+# AX 인프라 운영 콘솔
 
-LangGraph 기반 멀티 에이전트 플랫폼입니다. Kubernetes, KubeVirt, vCenter 정보 조회 전용 에이전트를 타일 대시보드에서 독립적으로 사용할 수 있습니다.
+인프라 운영을 위한 웹 콘솔입니다. 작업 요청·검토, 인프라 형상 조회, 통합 채팅, 메일 알림을 한곳에서 다룹니다.
 
-## 아키텍처
+**현재 버전:** 1.5 / 릴리즈 `260811` — 상세 변경 이력은 [RELEASE.md](RELEASE.md)를 참고하세요.
 
-- **Backend (8080)**: FastAPI + LangGraph ReAct agents
-- **Frontend (9001)**: React + react-grid-layout 타일 대시보드
-- **LLM**: OpenAI 호환 API (`http://localhost:8001/v1`)
-- **MCP**: streamable HTTP transport
+## 아키텍처 요약
+
+| 구성 | 설명 |
+|------|------|
+| Frontend (`9001`) | React + Vite (개발) / nginx (이미지) |
+| Backend (`8080`) | FastAPI Control Plane |
+| PostgreSQL | **필수** (`DATABASE_URL`) — mock/http 공통, SQLite 폴백 없음 |
+| Redis | 세션·노트 버퍼·채팅 입력 히스토리 (`REDIS_URL`) |
+
+에이전트 실행 모드는 `AGENT_RUNTIME_MODE`로 전환합니다.
+
+| 모드 | 동작 |
+|------|------|
+| `mock` | Control Plane 내부 LangGraph 에이전트 (로컬 개발 기본) |
+| `http` | 외부 AXIT 런타임으로 위임 |
+
+로컬은 보통 `BACKEND_ROLE=all`(API + 백그라운드 워커 단일 프로세스)입니다. OKD에서 API/worker 분리·멀티 파드는 [docs/ARCHITECTURE_MULTIPOD.md](docs/ARCHITECTURE_MULTIPOD.md)를 참고하세요.
+
+```mermaid
+flowchart LR
+  FE[Frontend_9001] --> BE[Backend_8080]
+  BE --> PG[(PostgreSQL)]
+  BE --> RD[(Redis)]
+  BE -->|mock| LocalAgents[InProcess_LangGraph]
+  BE -->|http| Axit[External_AXIT_Runtime]
+```
 
 ## 사전 요구사항
 
-- conda 환경 `py3_axit` (Python 3.12)
-- [uv](https://docs.astral.sh/uv/)
-- Node.js 18+
-- 로컬 LLM 서버 (OpenAI 호환)
-- (선택) MCP 서버: kubernetes-mcp-server, kubectl-ai
+- Python **3.12** + [uv](https://docs.astral.sh/uv/)
+- Node.js **18+**
+- PostgreSQL (`DATABASE_URL`)
+- Docker (로컬 Redis 권장)
+- (선택) OpenAI 호환 LLM, MCP 서버 — mock 채팅·도구 연동용
 
 ## 설치
 
 ```bash
-conda activate py3_axit
-cd /Users/insu/project-A
+# 저장소 루트에서
 uv sync
 
 cd frontend
 npm install
+cd ..
 ```
 
-## 설정
+## 필수 설정
 
-### LLM / 서버 설정
-
-[`config/settings.yaml`](config/settings.yaml) 또는 `.env`:
-
-```yaml
-llm:
-  base_url: "http://localhost:8001/v1"
-  model: "./llm_model/qwen3-4b-4bit-mlx"   # 또는 ./llm_model/gpt-oss-20b
-```
-
-모델 경로 참조:
-
-- `./llm_model/gpt-oss-20b`
-- `./llm_model/qwen3-4b-4bit-mlx`
-
-### MCP 서버 설정
-
-[`config/mcp_servers.yaml`](config/mcp_servers.yaml):
-
-```yaml
-servers:
-  kubernetes:
-    url: "http://k8smcp.ora01000.pe.kr:32716/mcp"
-    enabled: true
-  kubectl_ai:
-    url: "http://kubectl-ai.ora01000.pe.kr:32716/mcp"
-    enabled: true
-  vcenter:
-    url: "http://localhost:9090/mcp"
-    enabled: false   # endpoint 추가 후 true로 변경
-```
-
-## 실행
+프로젝트 루트 `.env` (gitignored) 예시:
 
 ```bash
-# 1. 로컬 LLM (별도 터미널)
-# http://localhost:8001/v1
-
-# 2. MCP 서버 (원격 endpoint 사용 중)
-# kubernetes: http://k8smcp.ora01000.pe.kr:32716/mcp
-# kubectl-ai: http://kubectl-ai.ora01000.pe.kr:32716/mcp
-
-# 3. 백엔드
-conda activate py3_axit
-cd /Users/insu/project-A
-uv run uvicorn backend.app.main:app --host 0.0.0.0 --port 8080 --reload
-
-# 4. 프론트엔드
-cd /Users/insu/project-A/frontend
-npm run dev
+AGENT_RUNTIME_MODE=mock
+DATABASE_URL=postgresql://USER:PASSWORD@HOST:PORT/DBNAME
+REDIS_URL=redis://localhost:6379/0
+BACKEND_ROLE=all
+MY_NOTES_CONTENT_BACKEND=database
+USER_COMM_LOG_BACKEND=file
 ```
 
-브라우저: http://localhost:9001
+추가 설정 파일:
 
-## API
+| 파일 | 용도 |
+|------|------|
+| [config/settings.yaml](config/settings.yaml) | LLM, 서버 포트, 작업 프로세서, Redis 기본값 등 |
+| [config/mcp_servers.yaml](config/mcp_servers.yaml) | mock 모드 MCP 엔드포인트 |
 
-| Method | Path | 설명 |
-|--------|------|------|
-| GET | `/api/agents` | 에이전트 목록 |
-| GET | `/api/health` | LLM/MCP 연결 상태 |
-| POST | `/api/agents/{id}/chat` | 에이전트 채팅 (SSE) |
+환경변수는 yaml보다 우선합니다. SMTP는 DB 테이블 `mailserver_config`(관리자 UI)에서 관리합니다.
 
-에이전트 ID 예시: `dprv6-k8s`, `pcicd-k8s`, `dprv-k8s`, `dprsv-k8s`, `dprmn-k8s`, `dprrt-k8s`, `dpvs-k8s`, `dtest-k8s`, `kubevirt`, `vcenter`, `ansible`
+## 로컬 실행
 
-## 에이전트 역할
+```bash
+# 1) Redis
+docker rm -f project-a-redis 2>/dev/null || true
+docker run -d --name project-a-redis -p 6379:6379 redis:7-alpine
 
-| 에이전트 | MCP | 역할 |
-|---------|-----|------|
-| Kubernetes 클러스터 에이전트 (8종) | kubernetes-mcp-server, kubectl-ai | 클러스터별 K8s 리소스 조회 |
-| KubeVirt VM Agent | kubernetes-mcp-server | KubeVirt VM/VMI 조회 |
-| VMware Agent | vcenter (placeholder) | VMware vCenter 인벤토리 조회 |
+# 2) Backend
+uv run uvicorn backend.app.main:app --host 0.0.0.0 --port 8080 --reload
 
-VMware MCP가 비활성화(`enabled: false`)일 때는 안내 메시지를 반환합니다.
+# 3) Frontend
+cd frontend && npm run dev
+```
 
-## 프론트엔드 기능
+브라우저: [http://localhost:9001](http://localhost:9001)  
+헬스 체크: [http://localhost:8080/healthz](http://localhost:8080/healthz)
 
-- 에이전트 타일 드래그 이동 / 크기 조절
-- 타일 레이아웃 localStorage 저장
-- 타일별 독립 채팅
-- LLM/MCP 연결 상태 표시
+## 주요 기능
 
-## 모델 요구사항
+- **인증·사용자**: 로그인/세션, 가입 신청, 역할·에이전트 할당, 이벤트 리포트 구독
+- **작업 노트**: 작업 검토·나의 검토/결과, Whatap 이벤트 리포트, 반려 작업, 나의 노트 (목록 페이징)
+- **인프라 형상**: k8s / kubevirt / vSphere 수집·요약·세대 추이, **AI갭분석** (`INFRA_GAP_ANALYSIS`)
+- **통합 채팅·대화로그**: 에이전트 채팅(SSE), 상세정보 패널 로그
+- **메일**: 리포트 수동 전송(Markdown + D2 이미지), 작업 완료/반려/취소·가입·Whatap 구독 자동 알림
+- **관리자**: 에이전트 연결, 인프라 구성, 메일 서버, 공지사항 등
 
-ReAct agent는 tool calling을 지원하는 모델을 권장합니다. tool calling 미지원 모델은 제한적으로 동작할 수 있습니다.
+mock 모드에서 제한되는 런타임 API는 [docs/MOCK_RUNTIME.md](docs/MOCK_RUNTIME.md)를 참고하세요.
+
+## Docker 이미지
+
+Postgres multipod 배포용 태그는 **`pgYYMMDD`** 형식입니다 (예: `pg260811`).
+
+```bash
+IMAGE_TAG=pg260811 PUSH=true PLATFORMS=linux/amd64 bash scripts/docker-build-push.sh
+```
+
+| 이미지 | 예시 태그 |
+|--------|-----------|
+| `ora01000/project-a-backend` | `pg260811` |
+| `ora01000/project-a-frontend` | `pg260811` |
+
+OKD 매니페스트 예시는 [`deploy/okd/`](deploy/okd/)을 참고하세요.
+
+## 문서
+
+| 문서 | 내용 |
+|------|------|
+| [RELEASE.md](RELEASE.md) | 릴리즈 노트·현재 버전 |
+| [docs/ARCHITECTURE_MULTIPOD.md](docs/ARCHITECTURE_MULTIPOD.md) | Postgres + Redis + api/worker 멀티 파드 |
+| [docs/MOCK_RUNTIME.md](docs/MOCK_RUNTIME.md) | mock vs http 런타임 차이 |
+| [docs/BACKEND_AGENT_INTERFACE.md](docs/BACKEND_AGENT_INTERFACE.md) | 백엔드 에이전트 인터페이스 |
+| [docs/FRONTEND_UI.md](docs/FRONTEND_UI.md) | 프론트 UI 가이드 |
+| [docs/DISABLED_AGENTS.md](docs/DISABLED_AGENTS.md) | 비활성 에이전트 |
+| [PLAN_AXIT_PLATFORM.md](PLAN_AXIT_PLATFORM.md) | 요구사항·구현 계획 |

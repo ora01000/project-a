@@ -36,6 +36,8 @@ from backend.app.api.whatap_webhook import router as whatap_webhook_router
 from backend.app.api.axit_mock import router as axit_mock_router
 from backend.app.api.k8s_infra import router as k8s_infra_router
 from backend.app.api.mailserver import router as mailserver_router
+from backend.app.infra_gap_analysis.api import router as infra_gap_analysis_router
+from backend.app.infra_gap_analysis.agent import infra_gap_analysis_service
 from backend.app.config import (
     backend_role_runs_workers,
     load_auth_session_settings,
@@ -421,6 +423,13 @@ async def lifespan(app: FastAPI):
     )
     agent_manager.agent_runtime = app.state.agent_runtime
 
+    try:
+        await infra_gap_analysis_service.initialize(runtime_mode)
+        app.state.infra_gap_analysis = infra_gap_analysis_service
+    except Exception:
+        logger.exception("INFRA_GAP_ANALYSIS initialization failed (agent remains available for lazy init)")
+        app.state.infra_gap_analysis = infra_gap_analysis_service
+
     health_task = asyncio.create_task(
         _health_check_loop(
             agent_manager,
@@ -527,6 +536,7 @@ def create_app() -> FastAPI:
     app.include_router(whatap_test_router, prefix="/api")
     app.include_router(k8s_infra_router, prefix="/api")
     app.include_router(mailserver_router, prefix="/api")
+    app.include_router(infra_gap_analysis_router, prefix="/api")
     app.include_router(axit_mock_router)
     return app
 

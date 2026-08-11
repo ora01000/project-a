@@ -32,8 +32,20 @@
 
 ### 작업 노트·상세 패널 UX
 - 작업 노트·작업 진행 목록 **클라이언트 페이징**(기본 10, 10/20/30/50)
+- 페이징·표시개수를 **동일 행**에 배치 (왼쪽 페이징 / 오른쪽 표시개수)
 - 상세정보 패널 타이틀 제거·최소화 버튼 탭 행 배치, 관리자용 **작업 관리** 탭(TBD)
 - 사용자 관리 > **이벤트 리포트 구독** 팝업
+
+### 인프라 형상 GAP 분석
+- 독립 에이전트 **`INFRA_GAP_ANALYSIS`** (AXIT runtime·목업 카탈로그와 분리, 코드 static 설정)
+  - mock: 기존 LLM + MCP `http://localhost:30800/mcp`
+  - http: `gpt-oss-120b` + MCP `http://pgdb-mcp.mcps.svc.cluster.local:8000/mcp`
+- API: `GET/POST /api/infra-gap-analysis/{status,invoke}`
+- 인프라 형상 탭: **형상 변경 추이 → 형상 추이**, 우측 상단 **AI갭분석** 버튼
+- 갭분석 Q/A는 **대화로그**(`logs/agents/INFRA_GAP_ANALYSIS.log`)에 기록
+
+### 문서
+- [README.md](README.md)를 현재 구현(Postgres·Redis·mock/http·로컬 기동·주요 기능)에 맞춰 온보딩 중심으로 전면 개편
 
 ### 릴리즈
 - About: 버전 **1.5**, 릴리즈 **260811** (유지)
