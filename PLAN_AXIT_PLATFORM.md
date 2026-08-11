@@ -1228,7 +1228,117 @@ dev-axplatform-multi-pod 는 목업(로컬)/http(서버) 환경 모두 postgres�
  
   - 매 수집후 k8s_cluster 수집과 동일하게 4개의 복제본 테이블을 백업한다.
 
-    
+- 작업노트 > 인프라 형상 탭 > 인프라 목록 (완료: vSphere 표시·요약/추이·상세 패널)
+  - infra_type = vSphere 를 표시한다.
+  - 오른쪽 요약/형상 변경 추이 에서 _vsphere_hosts, _vsphere_vms_on_host, _vsphere_cluster 테이블 정보를 토대로 vSphere 용 화면 개발
+  - 상세정보 패널
+    - 클러스터 탭
+      클러스터 테이블 출력/마지막 줄 summary
+      row 선택시 해당 클러스터에 포함된 host 테이블 출력/마지막 줄 summary
+    - 노드 탭
+      노드 테이블 출력/마지막 줄 summary
+      노드 선택시 해당 노드에 포함된 vm 테이블 출력/마지막 줄 summary
 
+  - ha, drs, connection, power 컬럼에 대한 값 표시 (완료: 이모지)
+    - 각 성격에 맞는 이모지 표현으로 대체한다
+      - HA/DRS: ✅ enabled / ❌ disabled
+      - connection: 🟢 CONNECTED / 🔴 DISCONNECTED / 🟠 NOT_RESPONDING
+      - power: ⚡ POWERED_ON / ⏹ POWERED_OFF / 💤 STANDBY|SUSPENDED
 
+  - 노드 텝 -> ESXi호스트 탭으로 이름 변경 (완료)
 
+  - 테이블 컬럼 명을 한글화한다. (완료)
+    - 클러스터 탭
+      - 클러스터 테이블
+        - cluster_id : 클러스터ID
+        - name : 클러스터명
+        - HA : 이중화
+        - DRS : DRS
+      - 소속 호트스 테이블
+        - host_id : 호스트ID
+        - name : ESXi호스트명
+        - connection : 연결상태
+        - power : 전원
+        - cluster_id -> 테이블 렌더링시 컬럼 표시 안함
+    - ESXi호스트 탭
+      - ESXi호스트 테이블
+        - host_id : 호스트ID
+        - name : ESXi호스트명
+        - connection: 연결상태
+        - power : 전원
+        - cluster_id : 소속클러스터
+      - 호스트 VM 테이블 -> "{선택된 호스트} 에 배치된 VM" 으로 이름 변경
+        - vm_id : VMID
+        - name : VM명
+        - power : 전원
+        - cpu : CPU
+        - mem MiB : MEM(GB) -> 데이터도 GB로 변환해서 보여준다
+        - host_id -> 테이블 렌더링시 컬럼 표시 안함
+
+# k8s/kubevirt 인프라 scrape 상세정보 패널의 테이블 컬럼 명을 한글화 (완료)
+- 네임스페이스 탭
+  - 네임스페이스 테이블
+    - namespace : 네임스페이스
+    - display name : 디스플레이명
+    - CPU quota : CPU할당
+    - MEM quota(Gi) : MEM할당(Gi)
+    - egressIP1 : EgressIP#1
+    - egressIP2 : EgressIP#2
+    - egressIP node : EgressIP배치
+  - DEPLOYMENTS 테이블
+    - name : 이름
+    - type : 배포형태
+    - replicas : Replicas
+    - ready : Ready
+    - cpu req : CPU 필요
+    - mem req : MEM 필요
+    - cpu lim : CPU 최대
+    - mem lim : MEM 최대
+    - containers : 컨테이너개수
+  - PVCS 테이블 -> 영구저장소요청/할당(PersistentVolumeClaim) 으로 이름 변경
+    - name : 이름
+    - storage class : 스토리지 타입
+    - capacity : 용량(Gi)
+    - used : 사용량(Gi)
+    - access : Access모드
+- 노드 탭
+  - 노드 테이블
+    - node : 노드명
+    - role : 역할
+    - Mem(Gi) : MEM(Gi)
+    - K8s ver : K8S버전
+  - PODS ON NODE 테이블 -> "{선택된 노드명} 에 배치된 Pods" 로 이름 변경
+    - namespace : 네임스페이스
+    - cpu req : CPU 필요
+    - mem req (Gi) : MEM 필요(Gi)
+    - cpu lim : CPU 최대
+    - mem lim (Gi): MEM 최대(Gi)
+    - age : AGE
+- VM 탭
+  - VM 테이블
+    - namespace : 네임스페이스
+    - name : VM명
+    - status : 상태 -> 데이터 값은 적절한 이모지로 대체
+    - ready : READY -> 데이터 값은 적절한 이모지로 대체
+    - node : 배치된 노드
+    - Mem(Gi) : MEM(Gi)
+    - run strategy : 기동전략
+    - VMI phase : VMI단계 -> 데이터 값은 적절한 이모지로 대체
+  - VM 상세 패널
+    - 그냥 둔다.
+  - VOLUMES 테이블
+    - volume : 볼륨
+    - PVC : 영구저장소요청/할당
+    - capacity (Gi) : 용량(Gi)
+
+# Kubevirt 상세 정보 테이블 추가 (완료)
+- 노드 탭에서 노드 클릭시 하단에 다음 테이블 패널을 추가한다
+  - {노드명} 에 배치된 VM
+    - 선택된 노드에 배치된 VM 목록을 추가, 마지막 행은 summary
+  - VM 탭의 기본 테이블에 summary 행 추가 (완료)
+
+# summary 행 보완 (완료)
+- VM 관련 테이블에서 summary 행은 전원이 꺼진 VM을 제외하는 summary 행이 한줄 더 필요하다. VM 관련 테이블은 다음과 같다
+  - kubevirt > 상세정보 > VM 탭의 VM테이블(기본테이블)
+  - kubevirt > 상세정보 > 노드 탭의 {노드}에 배치된 VM 테이블
+  - vSphere > 상세정보 > ESX호스트 탭의 {호스트}에 배치된 VM 테이블

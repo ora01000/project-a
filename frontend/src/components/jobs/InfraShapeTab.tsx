@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { ShapeDetailPanel } from "./ShapeDetailPanel";
+import { VsphereShapeDetailPanel } from "./VsphereShapeDetailPanel";
 
 interface ShapeCluster {
   idx: number;
@@ -52,9 +53,18 @@ const KUBEVIRT_EXTRA_SERIES: { key: SeriesKey; label: string; color: string }[] 
   { key: "volumes", label: "Volumes", color: "#fb923c" },
 ];
 
+const VSPHERE_SERIES: { key: SeriesKey; label: string; color: string }[] = [
+  { key: "namespaces", label: "Clusters", color: "#34d399" },
+  { key: "nodes", label: "Hosts", color: "#38bdf8" },
+  { key: "vms", label: "VMs", color: "#a78bfa" },
+];
+
 function seriesForInfraType(infraType: string) {
   if (infraType === "kubevirt") {
     return [...BASE_SERIES, ...KUBEVIRT_EXTRA_SERIES];
+  }
+  if (infraType === "vSphere") {
+    return VSPHERE_SERIES;
   }
   return BASE_SERIES;
 }
@@ -309,6 +319,16 @@ export function InfraShapeTab({ active }: InfraShapeTabProps) {
     if (!analysis) {
       return [];
     }
+    if (analysis.infra_type === "vSphere") {
+      return [
+        { label: "등록 이름", value: analysis.cluster_name },
+        { label: "인프라 유형", value: analysis.infra_type },
+        { label: "마지막 수집", value: analysis.last_update ?? "-" },
+        { label: "클러스터 개수", value: String(analysis.summary.namespaces ?? 0) },
+        { label: "호스트 개수", value: String(analysis.summary.nodes ?? 0) },
+        { label: "VM 개수", value: String(analysis.summary.vms ?? 0) },
+      ];
+    }
     const items = [
       { label: "클러스터 이름", value: analysis.cluster_name },
       { label: "인프라 유형", value: analysis.infra_type || "k8s" },
@@ -419,11 +439,15 @@ export function InfraShapeTab({ active }: InfraShapeTabProps) {
         </div>
 
         <div className="flex min-h-0 min-w-0 flex-[2] flex-col">
-          <ShapeDetailPanel
-            active={active}
-            clusterName={selectedName}
-            infraType={selectedInfraType}
-          />
+          {selectedInfraType === "vSphere" && selectedName ? (
+            <VsphereShapeDetailPanel active={active} clusterName={selectedName} />
+          ) : (
+            <ShapeDetailPanel
+              active={active}
+              clusterName={selectedName}
+              infraType={selectedInfraType}
+            />
+          )}
         </div>
       </div>
     </div>

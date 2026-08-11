@@ -162,8 +162,10 @@ DEFAULT_CRON_EXPR = "0 23 * * 6"  # every Saturday 23:00
 DEFAULT_INFRA_TYPE = "k8s"
 INFRA_TYPE_VSPHERE = "vSphere"
 KNOWN_INFRA_TYPES = frozenset({"k8s", "kubevirt", INFRA_TYPE_VSPHERE})
-# Shape UI / k8s·kubevirt inventory detail.
+# Shape UI / k8s·kubevirt inventory detail (legacy name kept for k8s paths).
 SCRAPEABLE_INFRA_TYPES = frozenset({"k8s", "kubevirt"})
+# Infra shape list + analysis (includes vSphere inventory views).
+SHAPEABLE_INFRA_TYPES = frozenset({"k8s", "kubevirt", INFRA_TYPE_VSPHERE})
 # Manual + cron collect (includes vSphere inventory scrape).
 COLLECTABLE_INFRA_TYPES = frozenset({"k8s", "kubevirt", INFRA_TYPE_VSPHERE})
 _CRON_EXPR_MAX_LEN = 20
@@ -264,6 +266,34 @@ def _counts_for_kubevirt_tables(
     )
 
 
+def _counts_for_vsphere_tables(
+    connection,
+    *,
+    cluster_name: str,
+    stamp: str | None,
+    tables: set[str],
+) -> K8sShapeCounts:
+    """Map vSphere inventory → shape counts.
+
+    namespaces ← compute clusters, nodes ← ESXi hosts, vms ← VMs on hosts.
+    """
+    from backend.app.db.vsphere_inventory import vsphere_inventory_tables
+
+    clusters_t, hosts_t, vms_t = vsphere_inventory_tables(cluster_name)
+    if stamp:
+        clusters_t = f"{clusters_t}_{stamp}"
+        hosts_t = f"{hosts_t}_{stamp}"
+        vms_t = f"{vms_t}_{stamp}"
+    return K8sShapeCounts(
+        nodes=_table_row_count(connection, hosts_t, tables),
+        namespaces=_table_row_count(connection, clusters_t, tables),
+        deployments=0,
+        pvcs=0,
+        vms=_table_row_count(connection, vms_t, tables),
+        volumes=0,
+    )
+
+
 def _cluster_version_from_nodes(
     connection,
     nodes_table: str,
@@ -316,12 +346,17 @@ def get_cluster_shape_analysis(
         if row is None:
             return None
         infra_type = str(row["infra_type"] or DEFAULT_INFRA_TYPE).strip() or DEFAULT_INFRA_TYPE
-        if infra_type not in SCRAPEABLE_INFRA_TYPES:
+        if infra_type not in SHAPEABLE_INFRA_TYPES:
             return None
 
         tables = _list_user_tables(connection)
-        is_kubevirt = infra_type == "kubevirt"
-        if is_kubevirt:
+        if infra_type == INFRA_TYPE_VSPHERE:
+            from backend.app.db.vsphere_inventory import list_vsphere_inventory_backup_stamps
+
+            count_fn = _counts_for_vsphere_tables
+            stamps = list_vsphere_inventory_backup_stamps(connection, name)
+            nodes_t = None
+        elif infra_type == "kubevirt":
             from backend.app.db.kubevirt_inventory import (
                 kubevirt_inventory_tables,
                 list_kubevirt_inventory_backup_stamps,
@@ -338,7 +373,11 @@ def get_cluster_shape_analysis(
         summary = count_fn(
             connection, cluster_name=name, stamp=None, tables=tables
         )
-        version = _cluster_version_from_nodes(connection, nodes_t, tables)
+        version = (
+            None
+            if nodes_t is None
+            else _cluster_version_from_nodes(connection, nodes_t, tables)
+        )
         last_update = str(row["last_update"]) if row["last_update"] else None
 
         # Newest backups first; keep room for live "latest" point.

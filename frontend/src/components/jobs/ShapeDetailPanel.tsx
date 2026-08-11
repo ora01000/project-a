@@ -48,6 +48,7 @@ interface NamespaceDetail {
 interface NodeDetail {
   node: Record<string, unknown>;
   pods: Record<string, unknown>[];
+  vms?: Record<string, unknown>[];
 }
 
 interface VmDetail {
@@ -85,6 +86,86 @@ function displayValue(value: unknown): string {
     return value ? "true" : "false";
   }
   return String(value);
+}
+
+function EmojiCell({ text, title }: { text: string; title: string }) {
+  return (
+    <span className="inline-block text-sm leading-none" title={title} aria-label={title}>
+      {text}
+    </span>
+  );
+}
+
+/** KubeVirt printable_status → emoji (title keeps original). */
+function formatVmStatusEmoji(value: unknown): { text: string; title: string } {
+  const raw = displayValue(value);
+  const key = raw.toUpperCase();
+  if (raw === "-") {
+    return { text: "➖", title: "-" };
+  }
+  if (key === "RUNNING") {
+    return { text: "⚡", title: raw };
+  }
+  if (key === "STOPPED") {
+    return { text: "⏹", title: raw };
+  }
+  if (key === "PAUSED") {
+    return { text: "⏸", title: raw };
+  }
+  if (
+    key === "STARTING" ||
+    key === "STOPPING" ||
+    key === "MIGRATING" ||
+    key === "PROVISIONING" ||
+    key === "WAITINGFORVOLUMEBINDING" ||
+    key === "TERMINATING"
+  ) {
+    return { text: "🔄", title: raw };
+  }
+  if (key.includes("ERROR") || key.includes("CRASH") || key.includes("BACKOFF") || key.includes("FAIL")) {
+    return { text: "🔴", title: raw };
+  }
+  return { text: "⚪", title: raw };
+}
+
+/** VM ready flag → emoji. */
+function formatVmReadyEmoji(value: unknown): { text: string; title: string } {
+  if (value === null || value === undefined || value === "") {
+    return { text: "➖", title: "-" };
+  }
+  if (value === true || value === "true" || value === "True" || value === 1 || value === "1") {
+    return { text: "✅", title: "true" };
+  }
+  if (value === false || value === "false" || value === "False" || value === 0 || value === "0") {
+    return { text: "❌", title: "false" };
+  }
+  const raw = displayValue(value);
+  return { text: "⚪", title: raw };
+}
+
+/** VMI phase → emoji. */
+function formatVmiPhaseEmoji(value: unknown): { text: string; title: string } {
+  const raw = displayValue(value);
+  const key = raw.toUpperCase();
+  if (raw === "-") {
+    return { text: "➖", title: "-" };
+  }
+  if (key === "RUNNING") {
+    return { text: "⚡", title: raw };
+  }
+  if (key === "SUCCEEDED") {
+    return { text: "✅", title: raw };
+  }
+  if (key === "FAILED") {
+    return { text: "🔴", title: raw };
+  }
+  if (key === "PENDING" || key === "SCHEDULING" || key === "SCHEDULED") {
+    return { text: "⏳", title: raw };
+  }
+  if (key === "UNKNOWN") {
+    return { text: "⚪", title: raw };
+  }
+  return { text: "⚪", title: raw };
 }
 
 function categoryButtonClass(isSelected: boolean): string {
@@ -482,6 +563,180 @@ function PodsOnNodeTable({ rows }: { rows: Record<string, unknown>[] }) {
   );
 }
 
+function isKubevirtVmPoweredOff(row: Record<string, unknown>): boolean {
+  return displayValue(row.printable_status).toUpperCase() === "STOPPED";
+}
+
+function buildKubevirtVmSummary(
+  rows: Record<string, unknown>[],
+  label: string,
+): Record<string, unknown> {
+  let cpuTotal = 0;
+  let memTotal = 0;
+  let hasCpu = false;
+  let hasMem = false;
+  for (const row of rows) {
+    const cpu = toNumber(row.cpu_cores);
+    if (cpu !== null) {
+      cpuTotal += cpu;
+      hasCpu = true;
+    }
+    const mem = toNumber(row.memory_gi);
+    if (mem !== null) {
+      memTotal += mem;
+      hasMem = true;
+    }
+  }
+  return {
+    namespace: `${label} (${rows.length})`,
+    name: "",
+    printable_status: "",
+    ready: null,
+    node_name: "",
+    ip_address: "",
+    cpu_cores: hasCpu ? cpuTotal : null,
+    memory_gi: hasMem ? memTotal : null,
+    run_strategy: "",
+    vmi_phase: "",
+  };
+}
+
+/** Full summary + powered-on-only summary (excludes Stopped). */
+function buildKubevirtVmSummaries(
+  rows: Record<string, unknown>[],
+): Record<string, unknown>[] | null {
+  if (rows.length === 0) {
+    return null;
+  }
+  const poweredOn = rows.filter((row) => !isKubevirtVmPoweredOff(row));
+  return [
+    buildKubevirtVmSummary(rows, "Σ summary"),
+    buildKubevirtVmSummary(poweredOn, "Σ 전원ON"),
+  ];
+}
+
+function renderKubevirtVmSummaryCells(
+  summary: Record<string, unknown>,
+  columns: { key: string; label: string }[],
+  renderCell: (row: Record<string, unknown>, key: string) => string,
+) {
+  return columns.map((column) => {
+    if (
+      column.key === "printable_status" ||
+      column.key === "ready" ||
+      column.key === "vmi_phase"
+    ) {
+      return (
+        <td key={column.key} className="px-1.5 py-1.5 text-center">
+          -
+        </td>
+      );
+    }
+    const text = renderCell(summary, column.key);
+    return (
+      <td
+        key={column.key}
+        className="max-w-[140px] truncate px-1.5 py-1.5 font-mono"
+        title={text}
+      >
+        {text}
+      </td>
+    );
+  });
+}
+
+const VMS_ON_NODE_COLUMNS = [
+  { key: "namespace", label: "네임스페이스" },
+  { key: "name", label: "VM명" },
+  { key: "printable_status", label: "상태" },
+  { key: "ready", label: "READY" },
+  { key: "ip_address", label: "IP" },
+  { key: "cpu_cores", label: "CPU" },
+  { key: "memory_gi", label: "MEM(Gi)" },
+  { key: "run_strategy", label: "기동전략" },
+  { key: "vmi_phase", label: "VMI단계" },
+];
+
+function VmsOnNodeTable({ rows }: { rows: Record<string, unknown>[] }) {
+  const summaries = useMemo(() => buildKubevirtVmSummaries(rows), [rows]);
+  if (rows.length === 0) {
+    return <p className="text-[11px] text-slate-500">노드에 배치된 VM이 없습니다.</p>;
+  }
+
+  const renderCell = (row: Record<string, unknown>, key: string) => {
+    if (key === "cpu_cores" || key === "memory_gi") {
+      return formatMetric(toNumber(row[key]));
+    }
+    return displayValue(row[key]);
+  };
+
+  return (
+    <div className="overflow-auto">
+      <table className="w-full min-w-[560px] border-collapse text-left text-[11px]">
+        <thead>
+          <tr className="border-b border-slate-700 text-slate-500">
+            {VMS_ON_NODE_COLUMNS.map((column) => (
+              <th key={column.key} className="px-1.5 py-1 font-medium">
+                {column.label}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row, index) => (
+            <tr
+              key={typeof row.idx === "number" ? row.idx : index}
+              className="border-b border-slate-800/80 text-slate-200"
+            >
+              {VMS_ON_NODE_COLUMNS.map((column) => {
+                if (column.key === "printable_status") {
+                  return (
+                    <td key={column.key} className="px-1.5 py-1 text-center">
+                      <EmojiCell {...formatVmStatusEmoji(row[column.key])} />
+                    </td>
+                  );
+                }
+                if (column.key === "ready") {
+                  return (
+                    <td key={column.key} className="px-1.5 py-1 text-center">
+                      <EmojiCell {...formatVmReadyEmoji(row[column.key])} />
+                    </td>
+                  );
+                }
+                if (column.key === "vmi_phase") {
+                  return (
+                    <td key={column.key} className="px-1.5 py-1 text-center">
+                      <EmojiCell {...formatVmiPhaseEmoji(row[column.key])} />
+                    </td>
+                  );
+                }
+                const text = renderCell(row, column.key);
+                return (
+                  <td
+                    key={column.key}
+                    className="max-w-[140px] truncate px-1.5 py-1 font-mono"
+                    title={text}
+                  >
+                    {text}
+                  </td>
+                );
+              })}
+            </tr>
+          ))}
+          {summaries?.map((summary, index) => (
+            <tr
+              key={`summary-${index}`}
+              className="border-t border-slate-600 bg-slate-900/70 font-semibold text-sky-100"
+            >
+              {renderKubevirtVmSummaryCells(summary, VMS_ON_NODE_COLUMNS, renderCell)}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 function SelectableVmTable({
   rows,
   selectedIdx,
@@ -491,6 +746,10 @@ function SelectableVmTable({
   selectedIdx: number | null;
   onSelect: (idx: number) => void;
 }) {
+  const summaries = useMemo(
+    () => buildKubevirtVmSummaries(rows as unknown as Record<string, unknown>[]),
+    [rows],
+  );
   if (rows.length === 0) {
     return <p className="text-[11px] text-slate-500">항목이 없습니다.</p>;
   }
@@ -522,6 +781,30 @@ function SelectableVmTable({
               onClick={() => onSelect(row.idx)}
             >
               {VM_TABLE_COLUMNS.map((column) => {
+                if (column.key === "printable_status") {
+                  const emoji = formatVmStatusEmoji(row.printable_status);
+                  return (
+                    <td key={column.key} className="px-1.5 py-1 text-center">
+                      <EmojiCell {...emoji} />
+                    </td>
+                  );
+                }
+                if (column.key === "ready") {
+                  const emoji = formatVmReadyEmoji(row.ready);
+                  return (
+                    <td key={column.key} className="px-1.5 py-1 text-center">
+                      <EmojiCell {...emoji} />
+                    </td>
+                  );
+                }
+                if (column.key === "vmi_phase") {
+                  const emoji = formatVmiPhaseEmoji(row.vmi_phase);
+                  return (
+                    <td key={column.key} className="px-1.5 py-1 text-center">
+                      <EmojiCell {...emoji} />
+                    </td>
+                  );
+                }
                 const text = renderCell(
                   row as unknown as Record<string, unknown>,
                   column.key,
@@ -536,6 +819,14 @@ function SelectableVmTable({
                   </td>
                 );
               })}
+            </tr>
+          ))}
+          {summaries?.map((summary, index) => (
+            <tr
+              key={`summary-${index}`}
+              className="border-t border-slate-600 bg-slate-900/70 font-semibold text-sky-100"
+            >
+              {renderKubevirtVmSummaryCells(summary, VM_TABLE_COLUMNS, renderCell)}
             </tr>
           ))}
         </tbody>
@@ -854,45 +1145,45 @@ function PvcTable({ rows }: { rows: Record<string, unknown>[] }) {
 }
 
 const NAMESPACE_TABLE_COLUMNS = [
-  { key: "namespace", label: "namespace" },
-  { key: "okd_display_name", label: "display name" },
-  { key: "resource_quota_cpu_limit", label: "CPU quota" },
-  { key: "resource_quota_mem_limit", label: "Mem quota (Gi)" },
-  { key: "okd_egressip1", label: "egressIP1" },
-  { key: "okd_egressip2", label: "egressIP2" },
-  { key: "egressip_assigned_node", label: "egressIP node" },
+  { key: "namespace", label: "네임스페이스" },
+  { key: "okd_display_name", label: "디스플레이명" },
+  { key: "resource_quota_cpu_limit", label: "CPU할당" },
+  { key: "resource_quota_mem_limit", label: "MEM할당(Gi)" },
+  { key: "okd_egressip1", label: "EgressIP#1" },
+  { key: "okd_egressip2", label: "EgressIP#2" },
+  { key: "egressip_assigned_node", label: "EgressIP배치" },
 ];
 
 const NODE_TABLE_COLUMNS = [
-  { key: "node_name", label: "node" },
-  { key: "node_role", label: "role" },
+  { key: "node_name", label: "노드명" },
+  { key: "node_role", label: "역할" },
   { key: "node_cpu", label: "CPU" },
-  { key: "node_mem", label: "Mem (Gi)" },
+  { key: "node_mem", label: "MEM(Gi)" },
   { key: "node_os", label: "OS" },
-  { key: "node_k8s_ver", label: "K8s ver" },
+  { key: "node_k8s_ver", label: "K8S버전" },
 ];
 
 const PODS_ON_NODE_COLUMNS = [
-  { key: "namespace", label: "namespace" },
+  { key: "namespace", label: "네임스페이스" },
   { key: "pod_name", label: "pod" },
-  { key: "cpu_request", label: "cpu req" },
-  { key: "cpu_limit", label: "cpu lim" },
-  { key: "mem_request", label: "mem req (Gi)" },
-  { key: "mem_limit", label: "mem lim (Gi)" },
-  { key: "age", label: "age" },
+  { key: "cpu_request", label: "CPU 필요" },
+  { key: "mem_request", label: "MEM 필요(Gi)" },
+  { key: "cpu_limit", label: "CPU 최대" },
+  { key: "mem_limit", label: "MEM 최대(Gi)" },
+  { key: "age", label: "AGE" },
 ];
 
 const VM_TABLE_COLUMNS = [
-  { key: "namespace", label: "namespace" },
-  { key: "name", label: "name" },
-  { key: "printable_status", label: "status" },
-  { key: "ready", label: "ready" },
-  { key: "node_name", label: "node" },
+  { key: "namespace", label: "네임스페이스" },
+  { key: "name", label: "VM명" },
+  { key: "printable_status", label: "상태" },
+  { key: "ready", label: "READY" },
+  { key: "node_name", label: "배치된 노드" },
   { key: "ip_address", label: "IP" },
   { key: "cpu_cores", label: "CPU" },
-  { key: "memory_gi", label: "Mem (Gi)" },
-  { key: "run_strategy", label: "run strategy" },
-  { key: "vmi_phase", label: "VMI phase" },
+  { key: "memory_gi", label: "MEM(Gi)" },
+  { key: "run_strategy", label: "기동전략" },
+  { key: "vmi_phase", label: "VMI단계" },
 ];
 
 const VM_KEYS = [
@@ -913,29 +1204,29 @@ const VM_KEYS = [
 ];
 
 const DEP_COLUMNS = [
-  { key: "name", label: "name" },
-  { key: "type", label: "type" },
-  { key: "replicas", label: "replicas" },
-  { key: "readyreplicas", label: "ready" },
-  { key: "resource_cpu_request", label: "cpu req" },
-  { key: "resource_mem_request", label: "mem req" },
-  { key: "resource_cpu_limit", label: "cpu lim" },
-  { key: "resource_mem_limit", label: "mem lim" },
-  { key: "containers_cnt", label: "containers" },
+  { key: "name", label: "이름" },
+  { key: "type", label: "배포형태" },
+  { key: "replicas", label: "Replicas" },
+  { key: "readyreplicas", label: "Ready" },
+  { key: "resource_cpu_request", label: "CPU 필요" },
+  { key: "resource_mem_request", label: "MEM 필요" },
+  { key: "resource_cpu_limit", label: "CPU 최대" },
+  { key: "resource_mem_limit", label: "MEM 최대" },
+  { key: "containers_cnt", label: "컨테이너개수" },
 ];
 
 const PVC_COLUMNS = [
-  { key: "name", label: "name" },
-  { key: "storage_class", label: "storage class" },
-  { key: "capacity", label: "capacity" },
-  { key: "used", label: "used" },
-  { key: "access_mode", label: "access" },
+  { key: "name", label: "이름" },
+  { key: "storage_class", label: "스토리지 타입" },
+  { key: "capacity", label: "용량(Gi)" },
+  { key: "used", label: "사용량(Gi)" },
+  { key: "access_mode", label: "Access모드" },
 ];
 
 const VOLUME_COLUMNS = [
-  { key: "volume_name", label: "volume" },
-  { key: "pvc_name", label: "PVC" },
-  { key: "capacity_gi", label: "capacity (Gi)" },
+  { key: "volume_name", label: "볼륨" },
+  { key: "pvc_name", label: "영구저장소요청/할당" },
+  { key: "capacity_gi", label: "용량(Gi)" },
 ];
 
 export function ShapeDetailPanel({
@@ -1166,8 +1457,8 @@ export function ShapeDetailPanel({
                         <DeploymentTable rows={namespaceDetail?.deployments ?? []} />
                       </div>
                       <div>
-                        <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
-                          PVCs
+                        <p className="mb-1 text-[10px] font-semibold text-slate-500">
+                          영구저장소요청/할당(PersistentVolumeClaim)
                         </p>
                         <PvcTable rows={namespaceDetail?.pvcs ?? []} />
                       </div>
@@ -1192,15 +1483,37 @@ export function ShapeDetailPanel({
                 )}
               </div>
               {selectedIdx != null ? (
-                <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
-                  <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
-                    Pods on node
-                  </p>
-                  {isLoadingDetail && !nodeDetail ? (
-                    <p className="text-[11px] text-slate-500">불러오는 중...</p>
-                  ) : (
-                    <PodsOnNodeTable rows={nodeDetail?.pods ?? []} />
-                  )}
+                <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain">
+                  <div>
+                    <p className="mb-1 text-[10px] font-semibold text-slate-500">
+                      {displayValue(
+                        nodeDetail?.node?.node_name ??
+                          nodes.find((node) => node.idx === selectedIdx)?.node_name,
+                      )}{" "}
+                      에 배치된 Pods
+                    </p>
+                    {isLoadingDetail && !nodeDetail ? (
+                      <p className="text-[11px] text-slate-500">불러오는 중...</p>
+                    ) : (
+                      <PodsOnNodeTable rows={nodeDetail?.pods ?? []} />
+                    )}
+                  </div>
+                  {infraType === "kubevirt" ? (
+                    <div>
+                      <p className="mb-1 text-[10px] font-semibold text-slate-500">
+                        {displayValue(
+                          nodeDetail?.node?.node_name ??
+                            nodes.find((node) => node.idx === selectedIdx)?.node_name,
+                        )}{" "}
+                        에 배치된 VM
+                      </p>
+                      {isLoadingDetail && !nodeDetail ? (
+                        <p className="text-[11px] text-slate-500">불러오는 중...</p>
+                      ) : (
+                        <VmsOnNodeTable rows={nodeDetail?.vms ?? []} />
+                      )}
+                    </div>
+                  ) : null}
                 </div>
               ) : !isLoadingList ? (
                 <p className="text-[11px] text-slate-500">표에서 노드를 선택하세요.</p>

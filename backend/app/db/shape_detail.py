@@ -10,7 +10,9 @@ from backend.app.db.database import get_connection
 from backend.app.db.introspection import ci_order_clause
 from backend.app.db.k8s_inventory import (
     DEFAULT_INFRA_TYPE,
+    INFRA_TYPE_VSPHERE,
     SCRAPEABLE_INFRA_TYPES,
+    SHAPEABLE_INFRA_TYPES,
     _drop_namespace_readyreplicas_column,
     _ensure_deployment_readyreplicas_column,
     _ensure_namespace_egress_columns,
@@ -82,6 +84,7 @@ class ShapeNamespaceDetail:
 class ShapeNodeDetail:
     node: dict[str, Any]
     pods: list[dict[str, Any]] = field(default_factory=list)
+    vms: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass
@@ -91,6 +94,7 @@ class ShapeVmDetail:
 
 
 def _lookup_infra_type(connection, cluster_name: str) -> str | None:
+    """Return scrapeable (k8s/kubevirt) infra type for inventory detail paths."""
     row = connection.execute(
         """
         SELECT infra_type FROM infra_cluster WHERE cluster_name = ?
@@ -101,6 +105,21 @@ def _lookup_infra_type(connection, cluster_name: str) -> str | None:
         return None
     infra_type = str(row["infra_type"] or DEFAULT_INFRA_TYPE).strip() or DEFAULT_INFRA_TYPE
     if infra_type not in SCRAPEABLE_INFRA_TYPES:
+        return None
+    return infra_type
+
+
+def _lookup_shapeable_infra_type(connection, cluster_name: str) -> str | None:
+    row = connection.execute(
+        """
+        SELECT infra_type FROM infra_cluster WHERE cluster_name = ?
+        """,
+        (cluster_name,),
+    ).fetchone()
+    if row is None:
+        return None
+    infra_type = str(row["infra_type"] or DEFAULT_INFRA_TYPE).strip() or DEFAULT_INFRA_TYPE
+    if infra_type not in SHAPEABLE_INFRA_TYPES:
         return None
     return infra_type
 
@@ -333,7 +352,57 @@ def get_shape_node_detail(
                 (node_name,),
             ).fetchall()
             pods = [_row_to_dict(pod_row) for pod_row in pod_rows]
-        return ShapeNodeDetail(node=node, pods=pods)
+
+        vms: list[dict[str, Any]] = []
+        if infra_type == "kubevirt" and node_name:
+            ns_t, vms_t, _ = _kubevirt_vm_tables(name)
+            if vms_t in tables:
+                if ns_t in tables:
+                    vm_rows = connection.execute(
+                        f"""
+                        SELECT
+                            v.idx AS idx,
+                            v.name AS name,
+                            n.namespace AS namespace,
+                            v.run_strategy AS run_strategy,
+                            v.printable_status AS printable_status,
+                            v.ready AS ready,
+                            v.vmi_phase AS vmi_phase,
+                            v.node_name AS node_name,
+                            v.ip_address AS ip_address,
+                            v.cpu_cores AS cpu_cores,
+                            v.memory_gi AS memory_gi
+                        FROM {_quote_ident(vms_t)} AS v
+                        LEFT JOIN {_quote_ident(ns_t)} AS n ON n.idx = v.namespace_id
+                        WHERE v.node_name = ?
+                        ORDER BY {ci_order_clause(connection, "n.namespace", "v.name")},
+                                 v.idx ASC
+                        """,
+                        (node_name,),
+                    ).fetchall()
+                else:
+                    vm_rows = connection.execute(
+                        f"""
+                        SELECT
+                            idx,
+                            name,
+                            NULL AS namespace,
+                            run_strategy,
+                            printable_status,
+                            ready,
+                            vmi_phase,
+                            node_name,
+                            ip_address,
+                            cpu_cores,
+                            memory_gi
+                        FROM {_quote_ident(vms_t)}
+                        WHERE node_name = ?
+                        ORDER BY {ci_order_clause(connection, "name")}, idx ASC
+                        """,
+                        (node_name,),
+                    ).fetchall()
+                vms = [_row_to_dict(vm_row) for vm_row in vm_rows]
+        return ShapeNodeDetail(node=node, pods=pods, vms=vms)
 
 
 def list_shape_vms(
@@ -467,3 +536,209 @@ def get_shape_vm_detail(
             volumes = [_row_to_dict(item) for item in vol_rows]
 
     return ShapeVmDetail(vm=_row_to_dict(row), volumes=volumes)
+
+
+@dataclass
+class ShapeVsphereClusterListItem:
+    idx: int
+    cluster_id: str
+    cluster_name: str | None = None
+    ha_enabled: bool | None = None
+    drs_enabled: bool | None = None
+
+
+@dataclass
+class ShapeVsphereHostListItem:
+    idx: int
+    host_id: str
+    host_name: str | None = None
+    connection_state: str | None = None
+    power_state: str | None = None
+    cluster_id: str | None = None
+
+
+@dataclass
+class ShapeVsphereVmListItem:
+    idx: int
+    vm_id: str
+    host_id: str
+    vm_name: str | None = None
+    power_state: str | None = None
+    cpu_count: int | None = None
+    memory_mib: int | None = None
+
+
+@dataclass
+class ShapeVsphereClusterDetail:
+    cluster: dict[str, Any]
+    hosts: list[dict[str, Any]] = field(default_factory=list)
+
+
+@dataclass
+class ShapeVsphereHostDetail:
+    host: dict[str, Any]
+    vms: list[dict[str, Any]] = field(default_factory=list)
+
+
+def _as_optional_bool(value: Any) -> bool | None:
+    if value is None:
+        return None
+    try:
+        return bool(int(value))
+    except (TypeError, ValueError):
+        return bool(value)
+
+
+def list_shape_vsphere_clusters(
+    database_path: str | Path,
+    cluster_name: str,
+) -> list[ShapeVsphereClusterListItem] | None:
+    name = validate_cluster_name(cluster_name)
+    with get_connection(database_path) as connection:
+        infra_type = _lookup_shapeable_infra_type(connection, name)
+        if infra_type != INFRA_TYPE_VSPHERE:
+            return None
+        from backend.app.db.vsphere_inventory import vsphere_inventory_table
+
+        clusters_t = vsphere_inventory_table(name, "vsphere_cluster")
+        tables = _list_user_tables(connection)
+        if clusters_t not in tables:
+            return []
+        rows = connection.execute(
+            f"""
+            SELECT idx, cluster_id, cluster_name, ha_enabled, drs_enabled
+            FROM {_quote_ident(clusters_t)}
+            ORDER BY {ci_order_clause(connection, "cluster_name")}, idx ASC
+            """
+        ).fetchall()
+    return [
+        ShapeVsphereClusterListItem(
+            idx=int(row["idx"]),
+            cluster_id=str(row["cluster_id"] or ""),
+            cluster_name=str(row["cluster_name"]) if row["cluster_name"] else None,
+            ha_enabled=_as_optional_bool(row["ha_enabled"]),
+            drs_enabled=_as_optional_bool(row["drs_enabled"]),
+        )
+        for row in rows
+    ]
+
+
+def get_shape_vsphere_cluster_detail(
+    database_path: str | Path,
+    cluster_name: str,
+    cluster_idx: int,
+) -> ShapeVsphereClusterDetail | None:
+    name = validate_cluster_name(cluster_name)
+    with get_connection(database_path) as connection:
+        infra_type = _lookup_shapeable_infra_type(connection, name)
+        if infra_type != INFRA_TYPE_VSPHERE:
+            return None
+        from backend.app.db.vsphere_inventory import vsphere_inventory_table
+
+        clusters_t = vsphere_inventory_table(name, "vsphere_cluster")
+        hosts_t = vsphere_inventory_table(name, "vsphere_hosts")
+        tables = _list_user_tables(connection)
+        if clusters_t not in tables:
+            return None
+        row = connection.execute(
+            f"""
+            SELECT * FROM {_quote_ident(clusters_t)} WHERE idx = ?
+            """,
+            (int(cluster_idx),),
+        ).fetchone()
+        if row is None:
+            return None
+        cluster = _row_to_dict(row)
+        cluster_id = str(cluster.get("cluster_id") or "")
+        hosts: list[dict[str, Any]] = []
+        if cluster_id and hosts_t in tables:
+            host_rows = connection.execute(
+                f"""
+                SELECT *
+                FROM {_quote_ident(hosts_t)}
+                WHERE cluster_id = ?
+                ORDER BY {ci_order_clause(connection, "host_name")}, idx ASC
+                """,
+                (cluster_id,),
+            ).fetchall()
+            hosts = [_row_to_dict(item) for item in host_rows]
+    return ShapeVsphereClusterDetail(cluster=cluster, hosts=hosts)
+
+
+def list_shape_vsphere_hosts(
+    database_path: str | Path,
+    cluster_name: str,
+) -> list[ShapeVsphereHostListItem] | None:
+    name = validate_cluster_name(cluster_name)
+    with get_connection(database_path) as connection:
+        infra_type = _lookup_shapeable_infra_type(connection, name)
+        if infra_type != INFRA_TYPE_VSPHERE:
+            return None
+        from backend.app.db.vsphere_inventory import vsphere_inventory_table
+
+        hosts_t = vsphere_inventory_table(name, "vsphere_hosts")
+        tables = _list_user_tables(connection)
+        if hosts_t not in tables:
+            return []
+        rows = connection.execute(
+            f"""
+            SELECT idx, host_id, host_name, connection_state, power_state, cluster_id
+            FROM {_quote_ident(hosts_t)}
+            ORDER BY {ci_order_clause(connection, "host_name")}, idx ASC
+            """
+        ).fetchall()
+    return [
+        ShapeVsphereHostListItem(
+            idx=int(row["idx"]),
+            host_id=str(row["host_id"] or ""),
+            host_name=str(row["host_name"]) if row["host_name"] else None,
+            connection_state=(
+                str(row["connection_state"]) if row["connection_state"] else None
+            ),
+            power_state=str(row["power_state"]) if row["power_state"] else None,
+            cluster_id=str(row["cluster_id"]) if row["cluster_id"] else None,
+        )
+        for row in rows
+    ]
+
+
+def get_shape_vsphere_host_detail(
+    database_path: str | Path,
+    cluster_name: str,
+    host_idx: int,
+) -> ShapeVsphereHostDetail | None:
+    name = validate_cluster_name(cluster_name)
+    with get_connection(database_path) as connection:
+        infra_type = _lookup_shapeable_infra_type(connection, name)
+        if infra_type != INFRA_TYPE_VSPHERE:
+            return None
+        from backend.app.db.vsphere_inventory import vsphere_inventory_table
+
+        hosts_t = vsphere_inventory_table(name, "vsphere_hosts")
+        vms_t = vsphere_inventory_table(name, "vsphere_vms_on_host")
+        tables = _list_user_tables(connection)
+        if hosts_t not in tables:
+            return None
+        row = connection.execute(
+            f"""
+            SELECT * FROM {_quote_ident(hosts_t)} WHERE idx = ?
+            """,
+            (int(host_idx),),
+        ).fetchone()
+        if row is None:
+            return None
+        host = _row_to_dict(row)
+        host_id = str(host.get("host_id") or "")
+        vms: list[dict[str, Any]] = []
+        if host_id and vms_t in tables:
+            vm_rows = connection.execute(
+                f"""
+                SELECT *
+                FROM {_quote_ident(vms_t)}
+                WHERE host_id = ?
+                ORDER BY {ci_order_clause(connection, "vm_name")}, idx ASC
+                """,
+                (host_id,),
+            ).fetchall()
+            vms = [_row_to_dict(item) for item in vm_rows]
+    return ShapeVsphereHostDetail(host=host, vms=vms)

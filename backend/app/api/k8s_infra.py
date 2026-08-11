@@ -14,7 +14,7 @@ from backend.app.db.k8s_inventory import (
     DEFAULT_CRON_EXPR,
     DEFAULT_INFRA_TYPE,
     INFRA_TYPE_VSPHERE,
-    SCRAPEABLE_INFRA_TYPES,
+    SHAPEABLE_INFRA_TYPES,
     delete_k8s_cluster,
     get_cluster_shape_analysis,
     get_k8s_cluster,
@@ -25,9 +25,13 @@ from backend.app.db.shape_detail import (
     get_shape_namespace_detail,
     get_shape_node_detail,
     get_shape_vm_detail,
+    get_shape_vsphere_cluster_detail,
+    get_shape_vsphere_host_detail,
     list_shape_namespaces,
     list_shape_nodes,
     list_shape_vms,
+    list_shape_vsphere_clusters,
+    list_shape_vsphere_hosts,
 )
 from backend.app.db.roles import is_admin_role
 from backend.app.middleware.session_auth import get_request_auth_user
@@ -257,7 +261,7 @@ async def list_shape_clusters(request: Request) -> list[K8sShapeClusterItem]:
     _require_user(request)
     records = list_infra_clusters(
         request.app.state.database_path,
-        infra_types=tuple(sorted(SCRAPEABLE_INFRA_TYPES)),
+        infra_types=tuple(sorted(SHAPEABLE_INFRA_TYPES)),
     )
     return [
         K8sShapeClusterItem(
@@ -355,6 +359,7 @@ class ShapeNamespaceDetailResponse(BaseModel):
 class ShapeNodeDetailResponse(BaseModel):
     node: dict[str, Any] = Field(default_factory=dict)
     pods: list[dict[str, Any]] = Field(default_factory=list)
+    vms: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class ShapeVmDetailResponse(BaseModel):
@@ -469,7 +474,7 @@ async def shape_get_node(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     if detail is None:
         raise HTTPException(status_code=404, detail="노드를 찾을 수 없습니다.")
-    return ShapeNodeDetailResponse(node=detail.node, pods=detail.pods)
+    return ShapeNodeDetailResponse(node=detail.node, pods=detail.pods, vms=detail.vms)
 
 
 @router.get(
@@ -526,3 +531,131 @@ async def shape_get_vm(
     if detail is None:
         raise HTTPException(status_code=404, detail="VM을 찾을 수 없습니다.")
     return ShapeVmDetailResponse(vm=detail.vm, volumes=detail.volumes)
+
+
+class ShapeVsphereClusterListItemModel(BaseModel):
+    idx: int
+    cluster_id: str
+    cluster_name: str | None = None
+    ha_enabled: bool | None = None
+    drs_enabled: bool | None = None
+
+
+class ShapeVsphereHostListItemModel(BaseModel):
+    idx: int
+    host_id: str
+    host_name: str | None = None
+    connection_state: str | None = None
+    power_state: str | None = None
+    cluster_id: str | None = None
+
+
+class ShapeVsphereClusterDetailResponse(BaseModel):
+    cluster: dict[str, Any]
+    hosts: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class ShapeVsphereHostDetailResponse(BaseModel):
+    host: dict[str, Any]
+    vms: list[dict[str, Any]] = Field(default_factory=list)
+
+
+@router.get(
+    "/k8s-infra/shape/clusters/{cluster_name}/vsphere-clusters",
+    response_model=list[ShapeVsphereClusterListItemModel],
+)
+async def shape_list_vsphere_clusters(
+    cluster_name: str,
+    request: Request,
+) -> list[ShapeVsphereClusterListItemModel]:
+    _require_user(request)
+    try:
+        items = list_shape_vsphere_clusters(request.app.state.database_path, cluster_name)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if items is None:
+        raise HTTPException(status_code=404, detail="클러스터를 찾을 수 없습니다.")
+    return [
+        ShapeVsphereClusterListItemModel(
+            idx=item.idx,
+            cluster_id=item.cluster_id,
+            cluster_name=item.cluster_name,
+            ha_enabled=item.ha_enabled,
+            drs_enabled=item.drs_enabled,
+        )
+        for item in items
+    ]
+
+
+@router.get(
+    "/k8s-infra/shape/clusters/{cluster_name}/vsphere-clusters/{cluster_idx}",
+    response_model=ShapeVsphereClusterDetailResponse,
+)
+async def shape_get_vsphere_cluster(
+    cluster_name: str,
+    cluster_idx: int,
+    request: Request,
+) -> ShapeVsphereClusterDetailResponse:
+    _require_user(request)
+    try:
+        detail = get_shape_vsphere_cluster_detail(
+            request.app.state.database_path,
+            cluster_name,
+            cluster_idx,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if detail is None:
+        raise HTTPException(status_code=404, detail="vSphere 클러스터를 찾을 수 없습니다.")
+    return ShapeVsphereClusterDetailResponse(cluster=detail.cluster, hosts=detail.hosts)
+
+
+@router.get(
+    "/k8s-infra/shape/clusters/{cluster_name}/vsphere-hosts",
+    response_model=list[ShapeVsphereHostListItemModel],
+)
+async def shape_list_vsphere_hosts(
+    cluster_name: str,
+    request: Request,
+) -> list[ShapeVsphereHostListItemModel]:
+    _require_user(request)
+    try:
+        items = list_shape_vsphere_hosts(request.app.state.database_path, cluster_name)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if items is None:
+        raise HTTPException(status_code=404, detail="클러스터를 찾을 수 없습니다.")
+    return [
+        ShapeVsphereHostListItemModel(
+            idx=item.idx,
+            host_id=item.host_id,
+            host_name=item.host_name,
+            connection_state=item.connection_state,
+            power_state=item.power_state,
+            cluster_id=item.cluster_id,
+        )
+        for item in items
+    ]
+
+
+@router.get(
+    "/k8s-infra/shape/clusters/{cluster_name}/vsphere-hosts/{host_idx}",
+    response_model=ShapeVsphereHostDetailResponse,
+)
+async def shape_get_vsphere_host(
+    cluster_name: str,
+    host_idx: int,
+    request: Request,
+) -> ShapeVsphereHostDetailResponse:
+    _require_user(request)
+    try:
+        detail = get_shape_vsphere_host_detail(
+            request.app.state.database_path,
+            cluster_name,
+            host_idx,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if detail is None:
+        raise HTTPException(status_code=404, detail="호스트를 찾을 수 없습니다.")
+    return ShapeVsphereHostDetailResponse(host=detail.host, vms=detail.vms)
