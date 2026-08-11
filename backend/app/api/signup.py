@@ -1,7 +1,9 @@
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
+import logging
 
 from backend.app.services.auth_provider import MADANG_EMAIL_DOMAINS
+from backend.app.notifications.email_sender import send_signup_request_admin_emails
 from backend.app.services.user_signup import (
     approve_signup,
     register_pending_user,
@@ -9,6 +11,7 @@ from backend.app.services.user_signup import (
 )
 
 router = APIRouter(tags=["signup"])
+logger = logging.getLogger(__name__)
 
 
 class RegisterUserRequest(BaseModel):
@@ -45,7 +48,7 @@ async def register_user(payload: RegisterUserRequest, request: Request) -> Regis
     email = f"{email_local}{email_domain}"
     database_path = request.app.state.database_path
     try:
-        register_pending_user(
+        _user, job = register_pending_user(
             database_path,
             userid=payload.userid.strip(),
             email=email,
@@ -59,6 +62,21 @@ async def register_user(payload: RegisterUserRequest, request: Request) -> Regis
         if is_integrity_error(exc):
             raise HTTPException(status_code=409, detail="이미 사용 중인 아이디입니다.") from exc
         raise
+
+    try:
+        await send_signup_request_admin_emails(
+            database_path=database_path,
+            job_title=job.job_title,
+            srnum=job.srnum,
+            requester_name=job.requester_name,
+            request_reason=job.job_content or payload.request_reason.strip(),
+        )
+    except Exception:
+        logger.exception(
+            "Signup request admin email failed for srnum=%s userid=%s",
+            job.srnum,
+            job.madang_id,
+        )
 
     return RegisterUserResponse(
         message="가입 신청이 접수되었습니다. 관리자 승인 후 로그인할 수 있습니다.",

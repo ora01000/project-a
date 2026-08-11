@@ -9,6 +9,8 @@ import { JobBlockField, JobFieldLabel, JobInlineField } from "./JobFieldLabel";
 import { JobAiAuditCommentBlock } from "./JobAiAuditCommentBlock";
 import { JobAiReviewButton } from "./JobAiReviewButton";
 import { JobRejectReasonModal } from "./JobRejectReasonModal";
+import { ListPaginationControls } from "./ListPaginationControls";
+import { useClientPagination } from "./useClientPagination";
 
 async function parseError(response: Response, fallback: string): Promise<string> {
   const payload = (await response.json().catch(() => null)) as { detail?: string } | null;
@@ -222,10 +224,20 @@ export function JobReviewTab({ active, currentUser, onCopyToNote }: JobReviewTab
       ? usernameByUserid.get(selectedApproverUserid) ?? selectedApproverUserid
       : "";
 
+  const {
+    page,
+    pageSize,
+    totalPages,
+    totalItems,
+    pageItems,
+    setPage,
+    setPageSize,
+  } = useClientPagination(jobs);
+
   return (
     <>
       <div className="flex min-h-0 flex-1 gap-3 p-3">
-        <aside className="flex w-[148px] shrink-0 flex-col border-r border-slate-700/80 pr-3">
+        <aside className="flex w-[178px] shrink-0 flex-col border-r border-slate-700/80 pr-3">
           <h3 className="mb-2 text-xs font-semibold text-slate-300">작업 목록</h3>
           <div className="min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain">
             {isLoading && jobs.length === 0 ? (
@@ -234,14 +246,14 @@ export function JobReviewTab({ active, currentUser, onCopyToNote }: JobReviewTab
             {!isLoading && jobs.length === 0 ? (
               <p className="text-xs text-slate-500">접수된 작업이 없습니다.</p>
             ) : null}
-            {jobs.map((job) => {
+            {pageItems.map((job) => {
               const isSelected = job.idx === selectedIdx;
               return (
                 <button
                   key={job.idx}
                   type="button"
                   onClick={() => setSelectedIdx(job.idx)}
-                  className={`block w-full rounded-full border px-2.5 py-1 text-left text-[11px] font-medium transition-colors ${srnumButtonClass(job, isSelected)}`}
+                  className={`block w-full rounded-full border px-2.5 py-1 text-center text-[11px] font-medium transition-colors ${srnumButtonClass(job, isSelected)}`}
                   title={job.job_title}
                 >
                   {job.srnum}
@@ -249,6 +261,14 @@ export function JobReviewTab({ active, currentUser, onCopyToNote }: JobReviewTab
               );
             })}
           </div>
+          <ListPaginationControls
+            page={page}
+            pageSize={pageSize}
+            totalPages={totalPages}
+            totalItems={totalItems}
+            onPageChange={setPage}
+            onPageSizeChange={setPageSize}
+          />
         </aside>
 
         <section className="flex min-h-0 min-w-0 flex-1 flex-col">

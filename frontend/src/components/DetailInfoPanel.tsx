@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { AuthUser } from "../types/auth";
 import { WHATAP_EVENT_LOG_SOURCE } from "../types/agent-log";
+import { hasAdminAccess } from "../types/user";
 import { AgentLogsPanel } from "./AgentLogsPanel";
 import { JobWorkflowPanel } from "./JobWorkflowPanel";
 
@@ -13,16 +14,17 @@ interface DetailInfoPanelProps {
   onCollapsedChange?: (collapsed: boolean) => void;
 }
 
-type DetailTab = "logs" | "whatap" | "workflow";
+type DetailTab = "logs" | "whatap" | "workflow" | "job-mgmt";
 
-const TABS: { id: DetailTab; label: string }[] = [
+const ALL_TABS: { id: DetailTab; label: string; adminOnly?: boolean }[] = [
   { id: "workflow", label: "작업 진행" },
   { id: "whatap", label: "Whatap 이벤트 감지" },
   { id: "logs", label: "대화로그" },
+  { id: "job-mgmt", label: "작업 관리", adminOnly: true },
 ];
 
 const GENERAL_LOG_EXCLUDE_AGENT_IDS = [WHATAP_EVENT_LOG_SOURCE];
-const DEFAULT_HEIGHT = 500;
+const DEFAULT_HEIGHT = 400;
 const MIN_HEIGHT = 200;
 const MAX_HEIGHT_RATIO = 0.85;
 const COLLAPSED_HEIGHT = 36;
@@ -61,6 +63,11 @@ export function DetailInfoPanel({
   const isDraggingRef = useRef(false);
   const startYRef = useRef(0);
   const startHeightRef = useRef(DEFAULT_HEIGHT);
+  const isAdmin = hasAdminAccess(currentUser.role);
+  const visibleTabs = useMemo(
+    () => ALL_TABS.filter((tab) => !tab.adminOnly || isAdmin),
+    [isAdmin],
+  );
 
   const setActiveTab = (tab: DetailTab) => {
     if (onActiveTabChange) {
@@ -69,6 +76,13 @@ export function DetailInfoPanel({
     }
     setInternalActiveTab(tab);
   };
+
+  useEffect(() => {
+    if (visibleTabs.some((tab) => tab.id === activeTab)) {
+      return;
+    }
+    setActiveTab("workflow");
+  }, [activeTab, visibleTabs]);
 
   const setCollapsed = (next: boolean) => {
     if (controlledCollapsed === undefined) {
@@ -155,34 +169,32 @@ export function DetailInfoPanel({
           <span className="h-1 w-12 rounded-full bg-slate-600 group-hover:bg-slate-400" />
         </div>
 
-        <header className="flex shrink-0 items-center justify-between gap-2 border-b border-slate-700 px-4 py-3">
-          <h2 className="text-sm font-semibold text-slate-200">상세 정보</h2>
+        <div className="flex shrink-0 items-end gap-2 border-b border-slate-700 px-3 pt-2">
+          <div className="flex min-w-0 flex-1 gap-1 overflow-x-auto">
+            {visibleTabs.map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setActiveTab(tab.id)}
+                className={`shrink-0 rounded-t-md px-3 py-2 text-xs font-medium ${
+                  activeTab === tab.id
+                    ? "border border-b-0 border-slate-600 bg-slate-800 text-sky-200"
+                    : "text-slate-400 hover:bg-slate-800/60 hover:text-slate-200"
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
           <button
             type="button"
             onClick={() => setCollapsed(true)}
             aria-label="상세 정보 접기"
             title="패널 접기"
-            className="shrink-0 rounded-md border border-slate-700 bg-slate-800/60 p-1.5 text-slate-400 transition-colors hover:border-slate-500 hover:bg-slate-800 hover:text-slate-200"
+            className="mb-1.5 shrink-0 rounded-md border border-slate-700 bg-slate-800/60 p-1.5 text-slate-400 transition-colors hover:border-slate-500 hover:bg-slate-800 hover:text-slate-200"
           >
             <PanelCollapseDownIcon />
           </button>
-        </header>
-
-        <div className="flex shrink-0 gap-1 overflow-x-auto border-b border-slate-700 px-3 pt-2">
-          {TABS.map((tab) => (
-            <button
-              key={tab.id}
-              type="button"
-              onClick={() => setActiveTab(tab.id)}
-              className={`shrink-0 rounded-t-md px-3 py-2 text-xs font-medium ${
-                activeTab === tab.id
-                  ? "border border-b-0 border-slate-600 bg-slate-800 text-sky-200"
-                  : "text-slate-400 hover:bg-slate-800/60 hover:text-slate-200"
-              }`}
-            >
-              {tab.label}
-            </button>
-          ))}
         </div>
 
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden overscroll-contain p-4">
@@ -196,6 +208,10 @@ export function DetailInfoPanel({
               loadingMessage="Whatap 이벤트 로그를 불러오는 중..."
               errorMessage="Whatap 이벤트 로그를 불러오지 못했습니다."
             />
+          ) : activeTab === "job-mgmt" && isAdmin ? (
+            <div className="flex h-full min-h-[120px] items-center justify-center rounded-md border border-dashed border-slate-700 bg-slate-950/40 text-sm text-slate-500">
+              TBD
+            </div>
           ) : (
             <AgentLogsPanel
               currentUser={currentUser}

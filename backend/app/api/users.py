@@ -12,9 +12,11 @@ from backend.app.db.users import (
     get_user_by_idx,
     list_users,
     parse_agent_ids,
+    replace_whatap_event_subscribers,
     update_user,
     update_user_agents,
 )
+from backend.app.middleware.session_auth import get_request_auth_user
 
 router = APIRouter(tags=["users"])
 
@@ -31,6 +33,7 @@ class UserResponse(BaseModel):
     agent_ids: list[str] = Field(default_factory=list)
     request_reason: str = ""
     last_login: str | None = None
+    whatap_event_sub: bool = False
 
     @classmethod
     def from_user(cls, user: User) -> "UserResponse":
@@ -47,6 +50,7 @@ class UserResponse(BaseModel):
             agent_ids=agent_ids,
             request_reason=user.request_reason,
             last_login=user.last_login,
+            whatap_event_sub=user.whatap_event_sub,
         )
 
 
@@ -207,3 +211,58 @@ async def remove_users(
     database_path = request.app.state.database_path
     deleted_count = delete_users(database_path, payload.idx_list)
     return {"deleted": deleted_count}
+
+
+class WhatapEventSubscriptionResponse(BaseModel):
+    event_type: str = "Whatap Event"
+    userids: list[str] = Field(default_factory=list)
+
+
+class WhatapEventSubscriptionUpdateRequest(BaseModel):
+    userids: list[str] = Field(default_factory=list)
+
+
+@router.get(
+    "/admin/whatap-event-subscriptions",
+    response_model=WhatapEventSubscriptionResponse,
+)
+async def get_whatap_event_subscriptions(request: Request) -> WhatapEventSubscriptionResponse:
+    viewer = get_request_auth_user(request)
+    _require_admin(viewer.role)
+    subscribers = [
+        user.userid
+        for user in list_users(request.app.state.database_path, viewer_role=viewer.role)
+        if user.whatap_event_sub
+    ]
+    return WhatapEventSubscriptionResponse(userids=subscribers)
+
+
+@router.put(
+    "/admin/whatap-event-subscriptions",
+    response_model=WhatapEventSubscriptionResponse,
+)
+async def put_whatap_event_subscriptions(
+    payload: WhatapEventSubscriptionUpdateRequest,
+    request: Request,
+) -> WhatapEventSubscriptionResponse:
+    viewer = get_request_auth_user(request)
+    _require_admin(viewer.role)
+    database_path = request.app.state.database_path
+
+    validated: list[str] = []
+    known_users = {
+        user.userid: user
+        for user in list_users(database_path, viewer_role=viewer.role)
+    }
+    for raw in payload.userids:
+        userid = str(raw or "").strip()
+        if not userid:
+            continue
+        if userid not in known_users:
+            raise HTTPException(status_code=400, detail=f"존재하지 않는 사용자입니다: {userid}")
+        if is_hidden_system_user(userid, known_users[userid].role):
+            raise HTTPException(status_code=400, detail=f"사용할 수 없는 사용자입니다: {userid}")
+        validated.append(userid)
+
+    subscribers = replace_whatap_event_subscribers(database_path, validated)
+    return WhatapEventSubscriptionResponse(userids=[user.userid for user in subscribers])

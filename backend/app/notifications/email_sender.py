@@ -333,3 +333,140 @@ async def send_signup_rejection_email(
     except Exception as exc:
         logger.exception("Signup rejection email failed to=%s: %s", to_address, exc)
         return False
+
+
+WHATAP_SUBSCRIBER_FORWARD_MESSAGE = (
+    "본 메일은 Whatap 이벤트 리포트 구독자에게 자동으로 발송하는 메일입니다."
+)
+
+
+async def send_whatap_event_subscriber_report(
+    *,
+    database_path: Path | str | None,
+    job_title: str,
+    report_body: str,
+    settings: EmailNotificationSettings | None = None,
+) -> tuple[int, list[str]]:
+    """Email Whatap completion report to users with ``whatap_event_sub=True``.
+
+    Returns ``(sent_recipient_count, skipped_or_failed_targets)``.
+    """
+    if database_path is None:
+        logger.warning("Whatap subscriber report skipped: database_path missing")
+        return 0, []
+
+    from backend.app.db.roles import ROLE_ADMIN
+
+    subscribers = [
+        user
+        for user in list_users(database_path, viewer_role=ROLE_ADMIN)
+        if user.whatap_event_sub and "@" in (user.email or "")
+    ]
+    if not subscribers:
+        logger.info("Whatap subscriber report skipped: no subscribers with email")
+        return 0, []
+
+    to_addresses = list(
+        dict.fromkeys(user.email.strip() for user in subscribers if user.email.strip())
+    )
+    if not to_addresses:
+        logger.info("Whatap subscriber report skipped: no valid subscriber emails")
+        return 0, [user.userid for user in subscribers]
+
+    markdown_body = compose_report_markdown(
+        forward_message=WHATAP_SUBSCRIBER_FORWARD_MESSAGE,
+        report_body=report_body,
+    )
+    subject = (job_title or "").strip() or "Whatap 이벤트 리포트"
+
+    try:
+        sent_count, failed = await send_job_report_emails(
+            database_path=database_path,
+            to_addresses=to_addresses,
+            subject=subject,
+            markdown_body=markdown_body,
+            settings=settings,
+        )
+        if failed:
+            logger.warning(
+                "Whatap subscriber report partially failed subject=%s failed=%s",
+                subject,
+                failed,
+            )
+        else:
+            logger.info(
+                "Whatap subscriber report sent subject=%s recipients=%s",
+                subject,
+                sent_count,
+            )
+        return sent_count, failed
+    except Exception as exc:
+        logger.exception("Whatap subscriber report failed subject=%s: %s", subject, exc)
+        return 0, [user.userid for user in subscribers]
+
+
+async def send_signup_request_admin_emails(
+    *,
+    database_path: Path | str | None,
+    job_title: str,
+    srnum: str,
+    requester_name: str,
+    request_reason: str,
+    settings: EmailNotificationSettings | None = None,
+) -> tuple[int, list[str]]:
+    """Notify role=0 admins when a signup access-request job is received."""
+    if database_path is None:
+        logger.warning("Signup request admin email skipped: database_path missing")
+        return 0, []
+
+    from backend.app.db.roles import ROLE_ADMIN
+
+    admins = [
+        user
+        for user in list_users(database_path, viewer_role=ROLE_ADMIN)
+        if user.role == ROLE_ADMIN and "@" in (user.email or "")
+    ]
+    if not admins:
+        logger.info("Signup request admin email skipped: no role=0 admins with email")
+        return 0, []
+
+    to_addresses = list(
+        dict.fromkeys(user.email.strip() for user in admins if user.email.strip())
+    )
+    if not to_addresses:
+        logger.info("Signup request admin email skipped: no valid admin emails")
+        return 0, [user.userid for user in admins]
+
+    forward_message = (
+        f"[{srnum}]{requester_name} 님이 신규 사용자 접속 권한을 신청하셨습니다."
+    )
+    markdown_body = compose_report_markdown(
+        forward_message=forward_message,
+        report_body=(request_reason or "").strip(),
+    )
+    subject = (job_title or "").strip() or "신규 사용자 접속 권한 신청서"
+
+    try:
+        sent_count, failed = await send_job_report_emails(
+            database_path=database_path,
+            to_addresses=to_addresses,
+            subject=subject,
+            markdown_body=markdown_body,
+            settings=settings,
+        )
+        if failed:
+            logger.warning(
+                "Signup request admin email partially failed subject=%s failed=%s",
+                subject,
+                failed,
+            )
+        else:
+            logger.info(
+                "Signup request admin email sent subject=%s recipients=%s",
+                subject,
+                sent_count,
+            )
+        return sent_count, failed
+    except Exception as exc:
+        logger.exception("Signup request admin email failed subject=%s: %s", subject, exc)
+        return 0, [user.userid for user in admins]

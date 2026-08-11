@@ -20,6 +20,16 @@ class User:
     agents: str = ""
     last_login: str | None = None
     request_reason: str = ""
+    whatap_event_sub: bool = False
+
+
+def ensure_whatap_event_sub_column(connection) -> None:
+    connection.execute(
+        """
+        ALTER TABLE users
+        ADD COLUMN IF NOT EXISTS whatap_event_sub INTEGER NOT NULL DEFAULT 0
+        """
+    )
 
 
 def parse_agent_ids(raw: str | None) -> list[str]:
@@ -70,6 +80,11 @@ def _row_to_user(row) -> User:
         request_reason = str(row["request_reason"] or "")
     except (KeyError, IndexError):
         request_reason = ""
+    whatap_event_sub = False
+    try:
+        whatap_event_sub = bool(int(row["whatap_event_sub"] or 0))
+    except (KeyError, IndexError, TypeError, ValueError):
+        whatap_event_sub = False
     return User(
         idx=int(row["idx"]),
         userid=str(row["userid"]),
@@ -81,16 +96,19 @@ def _row_to_user(row) -> User:
         agents=agents_value,
         last_login=last_login,
         request_reason=request_reason,
+        whatap_event_sub=whatap_event_sub,
     )
 
 
 _USER_SELECT = (
-    "SELECT idx, userid, email, username, depart, role, band, agents, last_login, request_reason FROM users"
+    "SELECT idx, userid, email, username, depart, role, band, agents, "
+    "last_login, request_reason, whatap_event_sub FROM users"
 )
 
 
 def list_users(database_path: str | Path, *, viewer_role: int | None = None) -> list[User]:
     with get_connection(database_path) as connection:
+        ensure_whatap_event_sub_column(connection)
         rows = connection.execute(
             f"""
             {_USER_SELECT}
@@ -114,6 +132,7 @@ def list_admin_users(database_path: str | Path) -> list[User]:
 
 def get_user_by_idx(database_path: str | Path, idx: int) -> User | None:
     with get_connection(database_path) as connection:
+        ensure_whatap_event_sub_column(connection)
         row = connection.execute(
             f"""
             {_USER_SELECT}
@@ -128,6 +147,7 @@ def get_user_by_idx(database_path: str | Path, idx: int) -> User | None:
 
 def get_user_by_userid(database_path: str | Path, userid: str) -> User | None:
     with get_connection(database_path) as connection:
+        ensure_whatap_event_sub_column(connection)
         row = connection.execute(
             f"""
             {_USER_SELECT}
@@ -162,6 +182,7 @@ def resolve_username(value: str, username_by_key: dict[str, str]) -> str:
 
 def authenticate_user(database_path: str | Path, userid: str, password: str) -> User | None:
     with get_connection(database_path) as connection:
+        ensure_whatap_event_sub_column(connection)
         row = connection.execute(
             f"""
             {_USER_SELECT}
@@ -350,3 +371,31 @@ def delete_users(database_path: str | Path, idx_list: list[int]) -> int:
         )
         connection.commit()
         return int(cursor.rowcount)
+
+
+def replace_whatap_event_subscribers(
+    database_path: str | Path,
+    userids: list[str],
+) -> list[User]:
+    """Set ``whatap_event_sub=1`` for ``userids`` and ``0`` for all other users."""
+    selected: set[str] = set()
+    for raw in userids:
+        userid = str(raw or "").strip()
+        if userid:
+            selected.add(userid[:50])
+
+    with get_connection(database_path) as connection:
+        ensure_whatap_event_sub_column(connection)
+        connection.execute("UPDATE users SET whatap_event_sub = 0")
+        for userid in sorted(selected):
+            connection.execute(
+                """
+                UPDATE users
+                SET whatap_event_sub = 1
+                WHERE userid = ?
+                """,
+                (userid,),
+            )
+        connection.commit()
+
+    return [user for user in list_users(database_path, viewer_role=ROLE_ADMIN) if user.whatap_event_sub]

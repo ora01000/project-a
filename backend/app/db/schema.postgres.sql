@@ -12,7 +12,8 @@ CREATE TABLE IF NOT EXISTS users (
     band INTEGER NOT NULL DEFAULT 1,
     agents VARCHAR(200) NOT NULL DEFAULT '',
     last_login TEXT,
-    request_reason VARCHAR(200) NOT NULL DEFAULT ''
+    request_reason VARCHAR(200) NOT NULL DEFAULT '',
+    whatap_event_sub INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS agentruntime (

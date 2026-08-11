@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
@@ -29,8 +31,10 @@ from backend.app.services.madang_admin_bypass import (
     verify_admin_bypass_passkey,
 )
 from backend.app.services.user_signup import register_pending_user
+from backend.app.notifications.email_sender import send_signup_request_admin_emails
 
 router = APIRouter(tags=["auth"])
+logger = logging.getLogger(__name__)
 
 
 class LoginRequest(BaseModel):
@@ -314,7 +318,7 @@ async def register_madang_user(payload: MadangRegisterRequest, request: Request)
         raise HTTPException(status_code=409, detail="이미 등록된 사용자입니다.")
 
     try:
-        register_pending_user(
+        _user, job = register_pending_user(
             database_path,
             userid=normalized_userid,
             email=email,
@@ -328,6 +332,21 @@ async def register_madang_user(payload: MadangRegisterRequest, request: Request)
         if is_integrity_error(exc):
             raise HTTPException(status_code=409, detail="이미 사용 중인 아이디입니다.") from exc
         raise
+
+    try:
+        await send_signup_request_admin_emails(
+            database_path=database_path,
+            job_title=job.job_title,
+            srnum=job.srnum,
+            requester_name=job.requester_name,
+            request_reason=job.job_content or payload.request_reason.strip(),
+        )
+    except Exception:
+        logger.exception(
+            "Signup request admin email failed for srnum=%s userid=%s",
+            job.srnum,
+            job.madang_id,
+        )
 
     return MadangRegisterResponse(
         message="가입 신청이 접수되었습니다. 관리자 승인 후 로그인할 수 있습니다.",

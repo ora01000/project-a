@@ -449,6 +449,7 @@ async def shape_list_nodes(
             node_mem=item.node_mem,
             node_os=item.node_os,
             node_k8s_ver=item.node_k8s_ver,
+            node_role=item.node_role,
         )
         for item in items
     ]

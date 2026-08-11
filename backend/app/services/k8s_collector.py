@@ -267,80 +267,7 @@ def _sum_container_resources(containers: list[Any]) -> tuple[
     )
 
 
-def _as_mapping(value: Any) -> dict[str, Any]:
-    """Normalize DynamicClient ResourceField / dict-like objects to a plain dict."""
-    if value is None:
-        return {}
-    if isinstance(value, dict):
-        return dict(value)
-
-    items_method = getattr(value, "items", None)
-    if callable(items_method):
-        try:
-            return {str(key): item for key, item in items_method()}
-        except Exception:
-            pass
-
-    keys_method = getattr(value, "keys", None)
-    if callable(keys_method):
-        try:
-            return {
-                str(key): getattr(value, str(key), None)
-                for key in keys_method()
-            }
-        except Exception:
-            pass
-
-    to_dict = getattr(value, "to_dict", None)
-    if callable(to_dict):
-        try:
-            converted = to_dict()
-            if isinstance(converted, dict):
-                return dict(converted)
-        except Exception:
-            pass
-    try:
-        return {str(key): item for key, item in dict(value).items()}
-    except Exception:
-        pass
-    return {}
-
-
-def _node_label_candidates(item: Any) -> list[tuple[str, Any]]:
-    """Collect node label payloads from common DynamicClient / dict shapes."""
-    candidates: list[tuple[str, Any]] = [
-        ("metadata.labels", _attr(item, "metadata", "labels")),
-        ("metadata.labels.dot", _attr(item, "metadata.labels")),
-    ]
-    if isinstance(item, dict):
-        metadata = item.get("metadata") or {}
-        if isinstance(metadata, dict):
-            candidates.append(("dict.metadata.labels", metadata.get("labels")))
-
-    to_dict = getattr(item, "to_dict", None)
-    if callable(to_dict):
-        try:
-            converted = to_dict()
-            if isinstance(converted, dict):
-                metadata = converted.get("metadata") or {}
-                if isinstance(metadata, dict):
-                    candidates.append(("item.to_dict.metadata.labels", metadata.get("labels")))
-        except Exception as exc:
-            candidates.append(("item.to_dict", f"<error: {exc}>"))
-
-    return candidates
-
-
-def _role_related_label_keys(labels: dict[str, Any]) -> dict[str, Any]:
-    return {
-        str(key): value
-        for key, value in labels.items()
-        if str(key).startswith("node-role.kubernetes.io/")
-        or str(key) in {"kubernetes.io/role", "node.kubernetes.io/role"}
-    }
-
-
-def _node_role_from_labels(labels: Any, *, node_name: str | None = None) -> str | None:
+def _node_role_from_labels(labels: Any) -> str | None:
     """Derive a short role string from kubernetes node labels.
 
     DynamicClient returns metadata.labels as ResourceField (not dict);
@@ -348,81 +275,21 @@ def _node_role_from_labels(labels: Any, *, node_name: str | None = None) -> str 
     """
     mapped = _as_mapping(labels)
     if not mapped:
-        if node_name:
-            logger.warning(
-                "k8s node role labels empty after normalize: node=%s labels_type=%s labels_repr=%r",
-                node_name,
-                type(labels).__name__,
-                labels,
-            )
         return None
-
     roles: set[str] = set()
-    matched_keys: list[str] = []
     for key, value in mapped.items():
         key_text = str(key or "")
         if key_text.startswith("node-role.kubernetes.io/"):
             role = key_text.split("/", 1)[-1].strip()
             if role:
                 roles.add(role)
-                matched_keys.append(key_text)
         elif key_text in {"kubernetes.io/role", "node.kubernetes.io/role"}:
             role = str(value or "").strip()
             if role:
                 roles.add(role)
-                matched_keys.append(key_text)
-
     if not roles:
-        if node_name:
-            logger.warning(
-                "k8s node role not derived: node=%s label_count=%d role_related_labels=%s all_label_keys=%s",
-                node_name,
-                len(mapped),
-                _role_related_label_keys(mapped),
-                sorted(str(key) for key in mapped.keys()),
-            )
         return None
-
-    node_role = ",".join(sorted(roles))[:30]
-    logger.info(
-        "k8s node role derived: node=%s role=%s matched_keys=%s",
-        node_name or "-",
-        node_role,
-        matched_keys,
-    )
-    return node_role
-
-
-def _resolve_node_labels(item: Any, *, node_name: str) -> dict[str, Any]:
-    """Resolve node labels with fallbacks and detailed logging for http-mode diagnostics."""
-    attempts: list[tuple[str, Any, dict[str, Any]]] = []
-    for source, raw_labels in _node_label_candidates(item):
-        mapped = _as_mapping(raw_labels)
-        attempts.append((source, raw_labels, mapped))
-        if mapped:
-            if len(attempts) > 1 or source != "metadata.labels":
-                logger.info(
-                    "k8s node labels resolved: node=%s source=%s label_count=%d",
-                    node_name,
-                    source,
-                    len(mapped),
-                )
-            return mapped
-
-    logger.warning(
-        "k8s node labels unresolved: node=%s attempts=%s",
-        node_name,
-        [
-            {
-                "source": source,
-                "raw_type": type(raw_labels).__name__,
-                "raw_repr": repr(raw_labels)[:500],
-                "mapped_keys": sorted(mapped.keys()),
-            }
-            for source, raw_labels, mapped in attempts
-        ],
-    )
-    return {}
+    return ",".join(sorted(roles))[:30]
 
 
 def _collect_nodes(dyn: DynamicClient) -> list[K8sNodeRow]:
@@ -433,7 +300,7 @@ def _collect_nodes(dyn: DynamicClient) -> list[K8sNodeRow]:
             continue
         capacity = _attr(item, "status", "capacity", default={}) or {}
         node_info = _attr(item, "status", "nodeInfo", default={}) or {}
-        labels = _resolve_node_labels(item, node_name=name)
+        labels = _attr(item, "metadata", "labels", default=None)
         cpu = parse_cpu_cores(_attr(capacity, "cpu"))
         rows.append(
             K8sNodeRow(
@@ -447,7 +314,7 @@ def _collect_nodes(dyn: DynamicClient) -> list[K8sNodeRow]:
                 )
                 or None,
                 node_k8s_ver=str(_attr(node_info, "kubeletVersion") or "") or None,
-                node_role=_node_role_from_labels(labels, node_name=name),
+                node_role=_node_role_from_labels(labels),
             )
         )
     return rows
@@ -535,55 +402,6 @@ def _as_mapping(value: Any) -> dict[str, Any]:
         return {str(key): item for key, item in dict(value).items()}
     except Exception:
         pass
-    return {}
-
-
-def _extract_node_labels(item: Any, *, node_name: str) -> dict[str, str]:
-    """Read node metadata.labels with fallbacks for http DynamicClient payloads."""
-    sources: list[tuple[str, Any]] = [
-        ("metadata.labels", _attr(item, "metadata", "labels")),
-        ("metadata.labels.dot", _attr(item, "metadata.labels")),
-    ]
-    item_to_dict = getattr(item, "to_dict", None)
-    if callable(item_to_dict):
-        try:
-            payload = item_to_dict()
-            if isinstance(payload, dict):
-                meta = payload.get("metadata")
-                if isinstance(meta, dict):
-                    sources.append(("item.to_dict.metadata.labels", meta.get("labels")))
-        except Exception as exc:
-            logger.info(
-                "K8s node %s: item.to_dict() failed while reading labels (%s)",
-                node_name,
-                exc,
-            )
-
-    for source, raw in sources:
-        mapped = _as_mapping(raw)
-        if mapped:
-            if source != "metadata.labels":
-                logger.info(
-                    "K8s node %s: labels resolved via fallback source=%s key_count=%d",
-                    node_name,
-                    source,
-                    len(mapped),
-                )
-            return {str(key): "" if val is None else str(val) for key, val in mapped.items()}
-
-        if raw is not None:
-            logger.info(
-                "K8s node %s: labels source=%s did not normalize type=%s repr=%s",
-                node_name,
-                source,
-                type(raw).__name__,
-                repr(raw)[:500],
-            )
-
-    logger.warning(
-        "K8s node %s: could not extract metadata.labels from any source; node_role will be empty",
-        node_name,
-    )
     return {}
 
 

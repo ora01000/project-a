@@ -19,7 +19,7 @@ def register_pending_user(
     depart: str,
     band: int = 1,
     request_reason: str = "",
-) -> User:
+) -> tuple[User, JobRecord]:
     user = create_user(
         database_path,
         userid=userid,
@@ -31,9 +31,9 @@ def register_pending_user(
         band=band,
         request_reason=request_reason,
     )
-    create_user_access_request_job(database_path, user)
-    logger.info("Pending signup registered for userid=%s", user.userid)
-    return user
+    job = create_user_access_request_job(database_path, user)
+    logger.info("Pending signup registered for userid=%s job=%s", user.userid, job.srnum)
+    return user, job
 
 
 def approve_signup(database_path: Path, user_idx: int) -> User | None:

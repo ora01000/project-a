@@ -10,6 +10,7 @@ export interface UserRecord {
   agent_ids?: string[];
   request_reason?: string;
   last_login?: string | null;
+  whatap_event_sub?: boolean;
 }
 
 export interface UserFormValues {

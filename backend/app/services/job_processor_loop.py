@@ -14,12 +14,14 @@ from backend.app.db.jobs import (
     JOB_STATUS_COMPLETED_SUCCESS,
     JOB_STATUS_DIRECT_APPROVED,
     JOB_TYPE_SIGNUP,
+    JOB_TYPE_WHATAP,
     JobRecord,
     list_jobs,
     update_job_status,
 )
 from backend.app.db.agentruntime import StoredAgentRuntime, build_agent_chat_url, catalog_agent_id
 from backend.app.db.jobs_result import upsert_job_result
+from backend.app.notifications.email_sender import send_whatap_event_subscriber_report
 from backend.app.services.agent_runtime_client import AgentInvokeRequest, AgentRuntimeClient, normalize_runtime_mode
 from backend.app.services.job_processor import (
     build_job_agent_message,
@@ -104,6 +106,19 @@ async def process_approved_job(
             expected_status=JOB_STATUS_DIRECT_APPROVED,
         )
         logger.info("job processor completed job idx=%s srnum=%s", job.idx, job.srnum)
+        if int(job.job_type) == JOB_TYPE_WHATAP:
+            try:
+                await send_whatap_event_subscriber_report(
+                    database_path=database_path,
+                    job_title=job.job_title,
+                    report_body=result.content,
+                )
+            except Exception:
+                logger.exception(
+                    "Whatap subscriber email notification failed for idx=%s srnum=%s",
+                    job.idx,
+                    job.srnum,
+                )
     except Exception as exc:
         logger.exception("job processor failed job idx=%s srnum=%s: %s", job.idx, job.srnum, exc)
         try:

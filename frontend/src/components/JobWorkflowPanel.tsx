@@ -6,6 +6,8 @@ import {
   JOB_WORKFLOW_POLL_INTERVAL_MS,
   JOB_WORKFLOW_REFRESH_EVENT,
 } from "../utils/jobWorkflowRefresh";
+import { ListPaginationControls } from "./jobs/ListPaginationControls";
+import { useClientPagination } from "./jobs/useClientPagination";
 
 async function parseError(response: Response, fallback: string): Promise<string> {
   const payload = (await response.json().catch(() => null)) as { detail?: string } | null;
@@ -120,6 +122,16 @@ export function JobWorkflowPanel({ currentUser, active }: JobWorkflowPanelProps)
     return () => document.removeEventListener("visibilitychange", handleVisibility);
   }, [active, loadWorkflows]);
 
+  const {
+    page,
+    pageSize,
+    totalPages,
+    totalItems,
+    pageItems,
+    setPage,
+    setPageSize,
+  } = useClientPagination(items);
+
   if (!active) {
     return null;
   }
@@ -137,38 +149,49 @@ export function JobWorkflowPanel({ currentUser, active }: JobWorkflowPanelProps)
   }
 
   return (
-    <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain pr-1">
-      {items.map((item) => (
-        <article
-          key={item.idx}
-          className="grid grid-cols-[12rem_1fr] items-center gap-x-3 rounded-lg border border-slate-700/80 bg-slate-950/40 px-3 py-2.5"
-        >
-          <div className={`${JOB_INFO_COLUMN_CLASS} flex flex-col gap-0.5 text-xs whitespace-nowrap text-slate-300`}>
-            <span className="font-semibold text-slate-100">{item.srnum}</span>
-            <span>요청자 {item.requester_name}</span>
-          </div>
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain pr-1">
+        {pageItems.map((item) => (
+          <article
+            key={item.idx}
+            className="grid grid-cols-[12rem_1fr] items-center gap-x-3 rounded-lg border border-slate-700/80 bg-slate-950/40 px-3 py-2.5"
+          >
+            <div className={`${JOB_INFO_COLUMN_CLASS} flex flex-col gap-0.5 text-xs whitespace-nowrap text-slate-300`}>
+              <span className="font-semibold text-slate-100">{item.srnum}</span>
+              <span>요청자 {item.requester_name}</span>
+            </div>
 
-          <div className="flex min-w-0 items-center gap-1.5 overflow-x-auto">
-            {item.steps.map((step, index) => {
-              const isLast = index === item.steps.length - 1;
-              return (
-                <div
-                  key={`${item.idx}-${step.status_code}-${index}`}
-                  className="flex shrink-0 items-center gap-1.5"
-                >
-                  <div className={`${STEP_COLUMN_CLASS} flex shrink-0 flex-col items-center gap-0.5`}>
-                    <span className={stepButtonClass(step.status_code, isLast)}>{step.label}</span>
-                    <span className="w-full text-center text-[10px] whitespace-nowrap text-slate-500">
-                      {formatStepMeta(step.timestamp, step.detail)}
-                    </span>
+            <div className="flex min-w-0 items-center gap-1.5 overflow-x-auto">
+              {item.steps.map((step, index) => {
+                const isLast = index === item.steps.length - 1;
+                return (
+                  <div
+                    key={`${item.idx}-${step.status_code}-${index}`}
+                    className="flex shrink-0 items-center gap-1.5"
+                  >
+                    <div className={`${STEP_COLUMN_CLASS} flex shrink-0 flex-col items-center gap-0.5`}>
+                      <span className={stepButtonClass(step.status_code, isLast)}>{step.label}</span>
+                      <span className="w-full text-center text-[10px] whitespace-nowrap text-slate-500">
+                        {formatStepMeta(step.timestamp, step.detail)}
+                      </span>
+                    </div>
+                    {!isLast ? <span className="shrink-0 text-slate-600" aria-hidden>→</span> : null}
                   </div>
-                  {!isLast ? <span className="shrink-0 text-slate-600" aria-hidden>→</span> : null}
-                </div>
-              );
-            })}
-          </div>
-        </article>
-      ))}
+                );
+              })}
+            </div>
+          </article>
+        ))}
+      </div>
+      <ListPaginationControls
+        layout="bar"
+        page={page}
+        pageSize={pageSize}
+        totalPages={totalPages}
+        totalItems={totalItems}
+        onPageChange={setPage}
+        onPageSizeChange={setPageSize}
+      />
     </div>
   );
 }

@@ -354,7 +354,7 @@ export function InfraShapeTab({ active }: InfraShapeTabProps) {
 
   return (
     <div className="flex min-h-0 flex-1 gap-3 p-3">
-      <aside className="flex w-[168px] shrink-0 flex-col border-r border-slate-700/80 pr-3">
+      <aside className="flex w-[178px] shrink-0 flex-col border-r border-slate-700/80 pr-3">
         <h3 className="mb-2 text-xs font-semibold text-slate-300">인프라 목록</h3>
         <div className="min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain">
           {isLoadingList && clusters.length === 0 ? (

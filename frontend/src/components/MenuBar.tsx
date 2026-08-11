@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import type { AuthUser } from "../types/auth";
 import type { AppView } from "../types/navigation";
 import { hasAdminAccess } from "../types/user";
+import { EventReportSubscriptionModal } from "./users/EventReportSubscriptionModal";
 import {
   extendAuthSession,
   formatAuthSessionRemaining,
@@ -56,6 +57,7 @@ export function MenuBar({ activeView, user, onNavigate, onLogout, onUserUpdated 
   const [showK8sInfraConfig, setShowK8sInfraConfig] = useState(false);
   const [showMailServerConfig, setShowMailServerConfig] = useState(false);
   const [showMailTest, setShowMailTest] = useState(false);
+  const [showEventReportSub, setShowEventReportSub] = useState(false);
   const [runtimeMode, setRuntimeMode] = useState<string>("mock");
   const [showProfileEdit, setShowProfileEdit] = useState(false);
   const [showSaveSuccess, setShowSaveSuccess] = useState(false);
@@ -143,7 +145,7 @@ export function MenuBar({ activeView, user, onNavigate, onLogout, onUserUpdated 
     isAdmin && (activeView === "agent-assignment" || activeView === "agent-connections");
 
 
-  const isUserManagementActive = activeView === "user-list";
+  const isUserManagementActive = activeView === "user-list" || showEventReportSub;
 
   return (
     <>
@@ -228,6 +230,22 @@ export function MenuBar({ activeView, user, onNavigate, onLogout, onUserUpdated 
                 >
                   사용자 조회
                 </button>
+                {isAdmin ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowEventReportSub(true);
+                      setShowUserMenu(false);
+                    }}
+                    className={`block w-full px-3 py-2 text-left text-sm ${
+                      showEventReportSub
+                        ? "bg-slate-800 text-sky-200"
+                        : "text-slate-200 hover:bg-slate-800"
+                    }`}
+                  >
+                    이벤트 리포트 구독
+                  </button>
+                ) : null}
               </div>
             ) : null}
           </div>
@@ -506,6 +524,12 @@ export function MenuBar({ activeView, user, onNavigate, onLogout, onUserUpdated 
       ) : null}
       {showMailTest && isAdmin ? (
         <MailTestModal viewerRole={user.role} onClose={() => setShowMailTest(false)} />
+      ) : null}
+      {showEventReportSub && isAdmin ? (
+        <EventReportSubscriptionModal
+          viewerRole={user.role}
+          onClose={() => setShowEventReportSub(false)}
+        />
       ) : null}
       {showProfileEdit ? (
         <ProfileEditModal

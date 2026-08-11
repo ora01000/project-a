@@ -3,7 +3,9 @@ import { useEffect, useState } from "react";
 import type { AuthUser } from "../../types/auth";
 import { AssistantMessageContent } from "../AssistantMessageContent";
 import { ConfirmDialog } from "../ConfirmDialog";
+import { ListPaginationControls } from "./ListPaginationControls";
 import type { UseMyNotesResult } from "./useMyNotes";
+import { useClientPagination } from "./useClientPagination";
 import { JobReportEmailModal } from "./JobReportEmailModal";
 
 type NotePanelMode = "edit" | "preview";
@@ -51,6 +53,15 @@ export function MyNotesTab({ myNotes, currentUser }: MyNotesTabProps) {
   const [emailSuccess, setEmailSuccess] = useState<string | null>(null);
   const selectedNote = notes.find((note) => note.idx === selectedIdx) ?? null;
   const hasNoteContent = content.trim().length > 0;
+  const {
+    page,
+    pageSize,
+    totalPages,
+    totalItems,
+    pageItems,
+    setPage,
+    setPageSize,
+  } = useClientPagination(notes);
 
   useEffect(() => {
     setPanelMode("edit");
@@ -59,7 +70,7 @@ export function MyNotesTab({ myNotes, currentUser }: MyNotesTabProps) {
   return (
     <>
       <div className="flex min-h-0 flex-1 gap-3 overflow-hidden p-3">
-        <aside className="flex w-[148px] shrink-0 flex-col border-r border-slate-700/80 pr-3">
+        <aside className="flex w-[178px] shrink-0 flex-col border-r border-slate-700/80 pr-3">
           <h3 className="mb-2 text-xs font-semibold text-slate-300">노트 목록</h3>
           <div className="min-h-0 flex-1 space-y-1 overflow-y-auto overscroll-contain">
             {isLoading && notes.length === 0 ? (
@@ -68,7 +79,7 @@ export function MyNotesTab({ myNotes, currentUser }: MyNotesTabProps) {
             {!isLoading && notes.length === 0 ? (
               <p className="text-xs text-slate-500">노트가 없습니다.</p>
             ) : null}
-            {notes.map((note) => {
+            {pageItems.map((note) => {
               const isSelected = note.idx === selectedIdx;
               return (
                 <button
@@ -83,6 +94,14 @@ export function MyNotesTab({ myNotes, currentUser }: MyNotesTabProps) {
               );
             })}
           </div>
+          <ListPaginationControls
+            page={page}
+            pageSize={pageSize}
+            totalPages={totalPages}
+            totalItems={totalItems}
+            onPageChange={setPage}
+            onPageSizeChange={setPageSize}
+          />
         </aside>
 
         <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
