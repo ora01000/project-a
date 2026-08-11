@@ -1,0 +1,10 @@
+wafful:
+   mail:
+      enabled: false
+   data:
+      policy:
+         mail:
+            default:
+              placeholder: name, signature, location
+              template: /default
+          
