@@ -11,8 +11,8 @@ import { JobNotesPanel } from "./JobNotesPanel";
 const DEFAULT_CHAT_PANEL_WIDTH = 650;
 const MIN_CHAT_PANEL_WIDTH = 360;
 const AGENT_LIST_PANEL_WIDTH = 280;
+const AGENT_LIST_COLLAPSED_WIDTH = 36;
 const MIN_JOB_NOTES_PANEL_WIDTH = 240;
-const MIN_CENTER_PANEL_WIDTH = AGENT_LIST_PANEL_WIDTH + MIN_JOB_NOTES_PANEL_WIDTH;
 const PANEL_RESIZE_HANDLE_WIDTH = 8;
 
 interface DashboardPageProps {
@@ -37,18 +37,26 @@ export function DashboardPage({
     async () => {},
   );
   const [chatPanelWidth, setChatPanelWidth] = useState(DEFAULT_CHAT_PANEL_WIDTH);
+  const [isAgentListCollapsed, setIsAgentListCollapsed] = useState(false);
   const isResizingRef = useRef(false);
   const resizeStartXRef = useRef(0);
   const resizeStartWidthRef = useRef(DEFAULT_CHAT_PANEL_WIDTH);
 
-  const clampChatPanelWidth = useCallback((nextWidth: number) => {
-    const containerWidth = splitLayoutRef.current?.clientWidth ?? window.innerWidth;
-    const maxWidth = Math.max(
-      MIN_CHAT_PANEL_WIDTH,
-      containerWidth - MIN_CENTER_PANEL_WIDTH - PANEL_RESIZE_HANDLE_WIDTH - 16,
-    );
-    return Math.min(maxWidth, Math.max(MIN_CHAT_PANEL_WIDTH, nextWidth));
-  }, []);
+  const minCenterPanelWidth =
+    (isAgentListCollapsed ? AGENT_LIST_COLLAPSED_WIDTH : AGENT_LIST_PANEL_WIDTH) +
+    MIN_JOB_NOTES_PANEL_WIDTH;
+
+  const clampChatPanelWidth = useCallback(
+    (nextWidth: number) => {
+      const containerWidth = splitLayoutRef.current?.clientWidth ?? window.innerWidth;
+      const maxWidth = Math.max(
+        MIN_CHAT_PANEL_WIDTH,
+        containerWidth - minCenterPanelWidth - PANEL_RESIZE_HANDLE_WIDTH - 16,
+      );
+      return Math.min(maxWidth, Math.max(MIN_CHAT_PANEL_WIDTH, nextWidth));
+    },
+    [minCenterPanelWidth],
+  );
 
   const handlePanelResizeStart = useCallback(
     (event: React.MouseEvent) => {
@@ -97,6 +105,10 @@ export function DashboardPage({
     return () => window.removeEventListener("resize", handleWindowResize);
   }, [clampChatPanelWidth]);
 
+  useEffect(() => {
+    setChatPanelWidth((current) => clampChatPanelWidth(current));
+  }, [clampChatPanelWidth, isAgentListCollapsed]);
+
   const [detailTab, setDetailTab] = useState<DetailTab>("workflow");
 
   const assignedAgents = useMemo(() => {
@@ -130,7 +142,10 @@ export function DashboardPage({
           <>
             <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-4 self-stretch">
               <div className="flex min-h-0 flex-1 gap-4">
-                <AgentNodeListPanel className="w-[280px] shrink-0">
+                <AgentNodeListPanel
+                  collapsed={isAgentListCollapsed}
+                  onCollapsedChange={setIsAgentListCollapsed}
+                >
                   {assignedAgents.length > 0 ? <AgentGrid agents={assignedAgents} /> : null}
                 </AgentNodeListPanel>
 
