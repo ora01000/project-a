@@ -17,6 +17,13 @@ from backend.app.db.mynotes import (
     touch_mynote_last_update,
     update_mynote_name,
 )
+from backend.app.middleware.session_auth import get_request_auth_user
+from backend.app.notifications.email_recipients import (
+    SendEmailRecipientsRequest,
+    SendMarkdownEmailResponse,
+    resolve_recipient_emails,
+)
+from backend.app.notifications.email_sender import send_job_report_emails
 from backend.app.services.mynote_content_store import (
     delete_mynote_content_from_redis,
     hydrate_mynote_content,
@@ -78,6 +85,10 @@ class RenameMyNoteRequest(BaseModel):
 class SaveMyNoteContentRequest(BaseModel):
     userid: str = Field(min_length=1, max_length=50)
     content: str = ""
+
+
+class SendMyNoteEmailRequest(SendEmailRecipientsRequest):
+    userid: str = Field(min_length=1, max_length=50)
 
 
 async def _load_mynote_content(record: MyNoteRecord, database_path) -> str:
@@ -194,6 +205,58 @@ async def rename_my_note(
         logger.exception("My note rename failed")
         raise HTTPException(status_code=500, detail="Failed to rename note") from exc
     return MyNoteResponse.from_record(record)
+
+
+@router.post("/mynotes/{idx}/send-email", response_model=SendMarkdownEmailResponse)
+async def send_my_note_email(
+    request: Request,
+    idx: int,
+    body: SendMyNoteEmailRequest,
+) -> SendMarkdownEmailResponse:
+    get_request_auth_user(request)
+    database_path = request.app.state.database_path
+    record = get_mynote_by_idx(database_path, idx)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Note not found")
+    if record.userid != body.userid.strip():
+        raise HTTPException(status_code=403, detail="Note does not belong to this user")
+
+    content = await _load_mynote_content(record, database_path)
+    if not content.strip():
+        raise HTTPException(status_code=400, detail="노트 내용이 비어 있습니다.")
+
+    try:
+        recipient_emails = resolve_recipient_emails(database_path, body)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    try:
+        sent_count, failed = await send_job_report_emails(
+            database_path=database_path,
+            recipient_emails=recipient_emails,
+            subject=record.note_name.strip(),
+            markdown_body=content,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("My note email send failed for note=%s", idx)
+        raise HTTPException(status_code=502, detail="메일 전송에 실패했습니다.") from exc
+
+    if sent_count == 0:
+        raise HTTPException(
+            status_code=502,
+            detail=f"메일 전송에 실패했습니다: {', '.join(failed)}",
+        )
+
+    message = f"{sent_count}명에게 메일을 전송했습니다."
+    if failed:
+        message = f"{message} (실패: {', '.join(failed)})"
+    return SendMarkdownEmailResponse(
+        sent_count=sent_count,
+        failed_recipients=failed,
+        message=message,
+    )
 
 
 @router.delete("/mynotes/{idx}", status_code=204)

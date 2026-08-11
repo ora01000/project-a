@@ -102,3 +102,19 @@ CREATE TABLE IF NOT EXISTS vsphere_infra_info (
     vsphere_id VARCHAR(200) NOT NULL DEFAULT '',
     vsphere_pw TEXT NOT NULL DEFAULT ''
 );
+
+-- SMTP mail server settings (singleton row; replaces EMAIL_* env / yaml)
+CREATE TABLE IF NOT EXISTS mailserver_config (
+    idx BIGSERIAL PRIMARY KEY,
+    enabled INTEGER NOT NULL DEFAULT 0,
+    smtp_host VARCHAR(200) NOT NULL DEFAULT '',
+    smtp_port INTEGER NOT NULL DEFAULT 587,
+    smtp_username VARCHAR(200) NOT NULL DEFAULT '',
+    smtp_password TEXT NOT NULL DEFAULT '',
+    from_address VARCHAR(200) NOT NULL DEFAULT '',
+    smtp_auth INTEGER NOT NULL DEFAULT 1,
+    use_tls INTEGER NOT NULL DEFAULT 1,
+    use_ssl INTEGER NOT NULL DEFAULT 0,
+    timeout_seconds DOUBLE PRECISION NOT NULL DEFAULT 30,
+    updated_at TEXT NOT NULL DEFAULT ''
+);

@@ -46,6 +46,7 @@ class EmailNotificationSettings(BaseModel):
     smtp_username: str = ""
     smtp_password: str = ""
     from_address: str = ""
+    smtp_auth: bool = True
     use_tls: bool = True
     use_ssl: bool = False
     timeout_seconds: float = 30.0
@@ -64,7 +65,8 @@ class TeamsNotificationSettings(BaseModel):
 
 
 class NotificationSettings(BaseModel):
-    email: EmailNotificationSettings = Field(default_factory=EmailNotificationSettings)
+    """Teams webhook settings. Email SMTP is stored in ``mailserver_config`` DB table."""
+
     teams: TeamsNotificationSettings = Field(default_factory=TeamsNotificationSettings)
 
 
@@ -155,16 +157,6 @@ class AppSettings(BaseSettings):
     control_plane_base_url: str = Field(default="", alias="CONTROL_PLANE_BASE_URL")
     agent_runtime_host: str = Field(default="0.0.0.0", alias="AGENT_RUNTIME_HOST")
     agent_runtime_port: int = Field(default=8090, alias="AGENT_RUNTIME_PORT")
-
-    email_enabled: bool = Field(default=False, alias="EMAIL_ENABLED")
-    email_smtp_host: str = Field(default="", alias="EMAIL_SMTP_HOST")
-    email_smtp_port: int = Field(default=587, alias="EMAIL_SMTP_PORT")
-    email_smtp_username: str = Field(default="", alias="EMAIL_SMTP_USERNAME")
-    email_smtp_password: str = Field(default="", alias="EMAIL_SMTP_PASSWORD")
-    email_from_address: str = Field(default="", alias="EMAIL_FROM_ADDRESS")
-    email_use_tls: bool = Field(default=True, alias="EMAIL_USE_TLS")
-    email_use_ssl: bool = Field(default=False, alias="EMAIL_USE_SSL")
-    email_timeout_seconds: float = Field(default=30.0, alias="EMAIL_TIMEOUT_SECONDS")
 
     teams_enabled: bool = Field(default=False, alias="TEAMS_ENABLED")
     teams_mode: str = Field(default="webhook", alias="TEAMS_MODE")
@@ -420,21 +412,9 @@ def _as_bool(value: Any, default: bool = False) -> bool:
 def load_notification_settings() -> NotificationSettings:
     yaml_settings = _load_yaml(CONFIG_DIR / "settings.yaml")
     notify_yaml = yaml_settings.get("notifications", {})
-    email_yaml = notify_yaml.get("email", {})
     teams_yaml = notify_yaml.get("teams", {})
     env_settings = AppSettings()
 
-    email = EmailNotificationSettings(
-        enabled=_as_bool(env_settings.email_enabled, email_yaml.get("enabled", False)),
-        smtp_host=env_settings.email_smtp_host or email_yaml.get("smtp_host", ""),
-        smtp_port=env_settings.email_smtp_port or email_yaml.get("smtp_port", 587),
-        smtp_username=env_settings.email_smtp_username or email_yaml.get("smtp_username", ""),
-        smtp_password=env_settings.email_smtp_password or email_yaml.get("smtp_password", ""),
-        from_address=env_settings.email_from_address or email_yaml.get("from_address", ""),
-        use_tls=_as_bool(env_settings.email_use_tls, email_yaml.get("use_tls", True)),
-        use_ssl=_as_bool(env_settings.email_use_ssl, email_yaml.get("use_ssl", False)),
-        timeout_seconds=env_settings.email_timeout_seconds or email_yaml.get("timeout_seconds", 30.0),
-    )
     teams = TeamsNotificationSettings(
         enabled=_as_bool(env_settings.teams_enabled, teams_yaml.get("enabled", False)),
         mode=(env_settings.teams_mode or teams_yaml.get("mode", "webhook")).strip().lower(),
@@ -446,7 +426,7 @@ def load_notification_settings() -> NotificationSettings:
         channel_id=env_settings.teams_channel_id or teams_yaml.get("channel_id", ""),
         timeout_seconds=env_settings.teams_timeout_seconds or teams_yaml.get("timeout_seconds", 30.0),
     )
-    return NotificationSettings(email=email, teams=teams)
+    return NotificationSettings(teams=teams)
 
 
 def load_whatap_settings() -> WhatapSettings:

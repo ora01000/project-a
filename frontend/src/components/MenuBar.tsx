@@ -17,6 +17,8 @@ import { MockLlmSelectModal } from "./admin/MockLlmSelectModal";
 import { PostmanDebugModal } from "./admin/PostmanDebugModal";
 import { WhatapEventTestModal } from "./admin/WhatapEventTestModal";
 import { K8sInfraConfigModal } from "./admin/K8sInfraConfigModal";
+import { MailServerConfigModal } from "./admin/MailServerConfigModal";
+import { MailTestModal } from "./admin/MailTestModal";
 import { ProfileEditModal } from "./ProfileEditModal";
 import { ReleaseNotesModal } from "./ReleaseNotesModal";
 import { TableDebugModal } from "./TableDebugModal";
@@ -52,6 +54,8 @@ export function MenuBar({ activeView, user, onNavigate, onLogout, onUserUpdated 
   const [showMockLlmSelect, setShowMockLlmSelect] = useState(false);
   const [showWhatapEventTest, setShowWhatapEventTest] = useState(false);
   const [showK8sInfraConfig, setShowK8sInfraConfig] = useState(false);
+  const [showMailServerConfig, setShowMailServerConfig] = useState(false);
+  const [showMailTest, setShowMailTest] = useState(false);
   const [runtimeMode, setRuntimeMode] = useState<string>("mock");
   const [showProfileEdit, setShowProfileEdit] = useState(false);
   const [showSaveSuccess, setShowSaveSuccess] = useState(false);
@@ -250,6 +254,8 @@ export function MenuBar({ activeView, user, onNavigate, onLogout, onUserUpdated 
                         showMockLlmSelect ||
                         showWhatapEventTest ||
                         showK8sInfraConfig ||
+                        showMailServerConfig ||
+                        showMailTest ||
                   showThemeSettings,
               )}
             >
@@ -268,7 +274,9 @@ export function MenuBar({ activeView, user, onNavigate, onLogout, onUserUpdated 
                         showPostmanDebug ||
                         showMockLlmSelect ||
                         showWhatapEventTest ||
-                        showK8sInfraConfig
+                        showK8sInfraConfig ||
+                        showMailServerConfig ||
+                        showMailTest
                           ? "bg-slate-800 text-sky-200"
                           : "text-slate-200 hover:bg-slate-800"
                       }`}
@@ -323,6 +331,28 @@ export function MenuBar({ activeView, user, onNavigate, onLogout, onUserUpdated 
                           className="block w-full px-3 py-2 text-left text-sm text-slate-200 hover:bg-slate-800"
                         >
                           인프라 구성
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowSettingsMenu(false);
+                            setShowAdminWorkMenu(false);
+                            setShowMailServerConfig(true);
+                          }}
+                          className="block w-full px-3 py-2 text-left text-sm text-slate-200 hover:bg-slate-800"
+                        >
+                          메일 서버 설정
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowSettingsMenu(false);
+                            setShowAdminWorkMenu(false);
+                            setShowMailTest(true);
+                          }}
+                          className="block w-full px-3 py-2 text-left text-sm text-slate-200 hover:bg-slate-800"
+                        >
+                          테스트 메일 발송(디버깅)
                         </button>
                         <button
                           type="button"
@@ -467,6 +497,15 @@ export function MenuBar({ activeView, user, onNavigate, onLogout, onUserUpdated 
       ) : null}
       {showK8sInfraConfig && isAdmin ? (
         <K8sInfraConfigModal viewerRole={user.role} onClose={() => setShowK8sInfraConfig(false)} />
+      ) : null}
+      {showMailServerConfig && isAdmin ? (
+        <MailServerConfigModal
+          viewerRole={user.role}
+          onClose={() => setShowMailServerConfig(false)}
+        />
+      ) : null}
+      {showMailTest && isAdmin ? (
+        <MailTestModal viewerRole={user.role} onClose={() => setShowMailTest(false)} />
       ) : null}
       {showProfileEdit ? (
         <ProfileEditModal

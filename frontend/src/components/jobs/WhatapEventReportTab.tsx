@@ -4,6 +4,7 @@ import type { JobRecord } from "../../types/job";
 import { JOB_TYPE_WHATAP } from "../../types/job";
 import type { JobResult } from "../../types/jobResult";
 import { AssistantMessageContent } from "../AssistantMessageContent";
+import { JobReportEmailModal } from "./JobReportEmailModal";
 import { JobBlockField, JobInlineField } from "./JobFieldLabel";
 
 async function parseError(response: Response, fallback: string): Promise<string> {
@@ -74,6 +75,8 @@ export function WhatapEventReportTab({ active, onCopyToNote }: WhatapEventReport
   const [isLoading, setIsLoading] = useState(false);
   const [isLoadingResult, setIsLoadingResult] = useState(false);
   const [isCopyingToNote, setIsCopyingToNote] = useState(false);
+  const [emailModalOpen, setEmailModalOpen] = useState(false);
+  const [emailSuccess, setEmailSuccess] = useState<string | null>(null);
 
   const loadJobs = useCallback(async () => {
     setIsLoading(true);
@@ -195,7 +198,22 @@ export function WhatapEventReportTab({ active, onCopyToNote }: WhatapEventReport
       </aside>
 
       <section className="flex min-h-0 min-w-0 flex-1 flex-col">
-        <h3 className="mb-2 text-xs font-semibold text-slate-300">Whatap 이벤트 리포트</h3>
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <h3 className="text-xs font-semibold text-slate-300">Whatap 이벤트 리포트</h3>
+          {selectedJob && jobResult ? (
+            <button
+              type="button"
+              onClick={() => {
+                setEmailSuccess(null);
+                setEmailModalOpen(true);
+              }}
+              className="shrink-0 rounded-md border border-slate-600 bg-slate-800/80 px-2 py-1 text-[10px] font-medium text-slate-200 hover:bg-slate-700"
+            >
+              메일 전송
+            </button>
+          ) : null}
+        </div>
+        {emailSuccess ? <p className="mb-2 text-xs text-emerald-300">{emailSuccess}</p> : null}
         {error ? <p className="text-sm text-rose-300">{error}</p> : null}
         {!error && !selectedJob ? (
           <p className="text-sm text-slate-500">작업을 선택하면 리포트가 표시됩니다.</p>
@@ -254,6 +272,21 @@ export function WhatapEventReportTab({ active, onCopyToNote }: WhatapEventReport
           </div>
         ) : null}
       </section>
+
+      {emailModalOpen && selectedJob ? (
+        <JobReportEmailModal
+          subject={selectedJob.job_title}
+          sendEndpoint={`/api/jobs/${selectedJob.idx}/send-report-email`}
+          requester={{
+            name: selectedJob.requester_name,
+            email: selectedJob.requester_email,
+            depart: selectedJob.requester_depart,
+            madangId: selectedJob.madang_id,
+          }}
+          onClose={() => setEmailModalOpen(false)}
+          onSent={(message) => setEmailSuccess(message)}
+        />
+      ) : null}
     </div>
   );
 }

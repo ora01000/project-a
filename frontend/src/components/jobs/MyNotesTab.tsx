@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
 
+import type { AuthUser } from "../../types/auth";
 import { AssistantMessageContent } from "../AssistantMessageContent";
 import { ConfirmDialog } from "../ConfirmDialog";
 import type { UseMyNotesResult } from "./useMyNotes";
+import { JobReportEmailModal } from "./JobReportEmailModal";
 
 type NotePanelMode = "edit" | "preview";
 
@@ -20,9 +22,10 @@ function panelModeButtonClass(isSelected: boolean): string {
 
 interface MyNotesTabProps {
   myNotes: UseMyNotesResult;
+  currentUser: AuthUser;
 }
 
-export function MyNotesTab({ myNotes }: MyNotesTabProps) {
+export function MyNotesTab({ myNotes, currentUser }: MyNotesTabProps) {
   const {
     notes,
     selectedIdx,
@@ -44,7 +47,10 @@ export function MyNotesTab({ myNotes }: MyNotesTabProps) {
   } = myNotes;
 
   const [panelMode, setPanelMode] = useState<NotePanelMode>("edit");
+  const [emailModalOpen, setEmailModalOpen] = useState(false);
+  const [emailSuccess, setEmailSuccess] = useState<string | null>(null);
   const selectedNote = notes.find((note) => note.idx === selectedIdx) ?? null;
+  const hasNoteContent = content.trim().length > 0;
 
   useEffect(() => {
     setPanelMode("edit");
@@ -97,12 +103,29 @@ export function MyNotesTab({ myNotes }: MyNotesTabProps) {
                 미리보기
               </button>
             </div>
-            {saveMessage || isSaving ? (
-              <span className="text-[10px] text-slate-500">
-                {isSaving ? "저장 중..." : saveMessage}
-              </span>
-            ) : null}
+            <div className="flex items-center gap-2">
+              {selectedNote ? (
+                <button
+                  type="button"
+                  disabled={!hasNoteContent}
+                  onClick={() => {
+                    setEmailSuccess(null);
+                    setEmailModalOpen(true);
+                  }}
+                  className="shrink-0 rounded-md border border-slate-600 bg-slate-800/80 px-2 py-1 text-[10px] font-medium text-slate-200 hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  메일 전송
+                </button>
+              ) : null}
+              {saveMessage || isSaving ? (
+                <span className="text-[10px] text-slate-500">
+                  {isSaving ? "저장 중..." : saveMessage}
+                </span>
+              ) : null}
+            </div>
           </div>
+
+          {emailSuccess ? <p className="mb-2 text-xs text-emerald-300">{emailSuccess}</p> : null}
 
           {error ? <p className="mb-2 text-sm text-rose-300">{error}</p> : null}
 
@@ -142,6 +165,16 @@ export function MyNotesTab({ myNotes }: MyNotesTabProps) {
           confirmLabel="삭제"
           onConfirm={() => void confirmDelete()}
           onCancel={closeDeleteConfirm}
+        />
+      ) : null}
+
+      {emailModalOpen && selectedNote ? (
+        <JobReportEmailModal
+          subject={selectedNote.note_name}
+          sendEndpoint={`/api/mynotes/${selectedNote.idx}/send-email`}
+          extraBody={{ userid: currentUser.userid }}
+          onClose={() => setEmailModalOpen(false)}
+          onSent={(message) => setEmailSuccess(message)}
         />
       ) : null}
 

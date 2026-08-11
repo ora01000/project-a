@@ -1,7 +1,12 @@
 FROM python:3.12-slim-bookworm
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends curl jq tzdata vim-tiny \
+    && apt-get install -y --no-install-recommends curl jq tzdata vim-tiny librsvg2-bin fontconfig fonts-noto-cjk \
+    && curl -fsSL -o /tmp/d2.tar.gz "https://github.com/d2lang/d2/releases/download/v0.7.1/d2-v0.7.1-linux-amd64.tar.gz" \
+    && tar -xzf /tmp/d2.tar.gz -C /tmp \
+    && mv /tmp/d2-v0.7.1/bin/d2 /usr/local/bin/d2 \
+    && chmod +x /usr/local/bin/d2 \
+    && rm -rf /tmp/d2-v0.7.1 /tmp/d2.tar.gz \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv

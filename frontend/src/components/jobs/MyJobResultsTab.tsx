@@ -7,6 +7,7 @@ import { requestJobWorkflowRefresh } from "../../utils/jobWorkflowRefresh";
 import { AssistantMessageContent } from "../AssistantMessageContent";
 import { ConfirmDialog } from "../ConfirmDialog";
 import { JobCancelReasonModal } from "./JobCancelReasonModal";
+import { JobReportEmailModal } from "./JobReportEmailModal";
 import { JobBlockField, JobInlineField } from "./JobFieldLabel";
 
 async function parseError(response: Response, fallback: string): Promise<string> {
@@ -79,6 +80,8 @@ export function MyJobResultsTab({ active, currentUser, onCopyToNote }: MyJobResu
   const [isLoadingResult, setIsLoadingResult] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isCopyingToNote, setIsCopyingToNote] = useState(false);
+  const [emailModalOpen, setEmailModalOpen] = useState(false);
+  const [emailSuccess, setEmailSuccess] = useState<string | null>(null);
   const [confirmReworkOpen, setConfirmReworkOpen] = useState(false);
   const [cancelModalOpen, setCancelModalOpen] = useState(false);
 
@@ -260,7 +263,22 @@ export function MyJobResultsTab({ active, currentUser, onCopyToNote }: MyJobResu
         </aside>
 
         <section className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <h3 className="mb-2 text-xs font-semibold text-slate-300">작업 결과</h3>
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <h3 className="text-xs font-semibold text-slate-300">작업 결과</h3>
+            {selectedJob && jobResult ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setEmailSuccess(null);
+                  setEmailModalOpen(true);
+                }}
+                className="shrink-0 rounded-md border border-slate-600 bg-slate-800/80 px-2 py-1 text-[10px] font-medium text-slate-200 hover:bg-slate-700"
+              >
+                메일 전송
+              </button>
+            ) : null}
+          </div>
+          {emailSuccess ? <p className="mb-2 text-xs text-emerald-300">{emailSuccess}</p> : null}
           {error ? <p className="text-sm text-rose-300">{error}</p> : null}
           {!error && !selectedJob ? (
             <p className="text-sm text-slate-500">작업을 선택하면 결과가 표시됩니다.</p>
@@ -356,6 +374,20 @@ export function MyJobResultsTab({ active, currentUser, onCopyToNote }: MyJobResu
           defaultReason={jobResult?.result ?? ""}
           onClose={() => setCancelModalOpen(false)}
           onSave={(reason) => void handleCancel(reason)}
+        />
+      ) : null}
+      {emailModalOpen && selectedJob ? (
+        <JobReportEmailModal
+          subject={selectedJob.job_title}
+          sendEndpoint={`/api/jobs/${selectedJob.idx}/send-report-email`}
+          requester={{
+            name: selectedJob.requester_name,
+            email: selectedJob.requester_email,
+            depart: selectedJob.requester_depart,
+            madangId: selectedJob.madang_id,
+          }}
+          onClose={() => setEmailModalOpen(false)}
+          onSent={(message) => setEmailSuccess(message)}
         />
       ) : null}
     </>

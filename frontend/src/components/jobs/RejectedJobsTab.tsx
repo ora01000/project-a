@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import type { JobRecord } from "../../types/job";
 import { JobBlockField, JobInlineField } from "./JobFieldLabel";
+import { JobReportEmailModal } from "./JobReportEmailModal";
 
 async function parseError(response: Response, fallback: string): Promise<string> {
   const payload = (await response.json().catch(() => null)) as { detail?: string } | null;
@@ -32,6 +33,8 @@ export function RejectedJobsTab({ active }: RejectedJobsTabProps) {
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [emailModalOpen, setEmailModalOpen] = useState(false);
+  const [emailSuccess, setEmailSuccess] = useState<string | null>(null);
 
   const loadJobs = useCallback(async () => {
     setIsLoading(true);
@@ -78,6 +81,7 @@ export function RejectedJobsTab({ active }: RejectedJobsTabProps) {
   const rejectionReason = selectedJob?.drop_reason?.trim() || selectedJob?.reject_reason?.trim() || "";
 
   return (
+    <>
     <div className="flex min-h-0 flex-1 gap-3 p-3">
       <aside className="flex w-[148px] shrink-0 flex-col border-r border-slate-700/80 pr-3">
         <h3 className="mb-2 text-xs font-semibold text-slate-300">작업 목록</h3>
@@ -106,7 +110,22 @@ export function RejectedJobsTab({ active }: RejectedJobsTabProps) {
       </aside>
 
       <section className="flex min-h-0 min-w-0 flex-1 flex-col">
-        <h3 className="mb-2 text-xs font-semibold text-slate-300">작업 상세</h3>
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <h3 className="text-xs font-semibold text-slate-300">작업 상세</h3>
+          {selectedJob ? (
+            <button
+              type="button"
+              onClick={() => {
+                setEmailSuccess(null);
+                setEmailModalOpen(true);
+              }}
+              className="shrink-0 rounded-md border border-slate-600 bg-slate-800/80 px-2 py-1 text-[10px] font-medium text-slate-200 hover:bg-slate-700"
+            >
+              메일 전송
+            </button>
+          ) : null}
+        </div>
+        {emailSuccess ? <p className="mb-2 text-xs text-emerald-300">{emailSuccess}</p> : null}
         {error ? <p className="text-sm text-rose-300">{error}</p> : null}
         {!error && !selectedJob ? (
           <p className="text-sm text-slate-500">작업을 선택하면 상세 정보가 표시됩니다.</p>
@@ -148,5 +167,21 @@ export function RejectedJobsTab({ active }: RejectedJobsTabProps) {
         ) : null}
       </section>
     </div>
+
+    {emailModalOpen && selectedJob ? (
+      <JobReportEmailModal
+        subject={selectedJob.job_title}
+        sendEndpoint={`/api/jobs/${selectedJob.idx}/send-report-email`}
+        requester={{
+          name: selectedJob.requester_name,
+          email: selectedJob.requester_email,
+          depart: selectedJob.requester_depart,
+          madangId: selectedJob.madang_id,
+        }}
+        onClose={() => setEmailModalOpen(false)}
+        onSent={(message) => setEmailSuccess(message)}
+      />
+    ) : null}
+    </>
   );
 }

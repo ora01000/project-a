@@ -54,7 +54,7 @@ function renderActiveTab(
     case "rejected-jobs":
       return <RejectedJobsTab active />;
     case "my-notes":
-      return <MyNotesTab myNotes={myNotes} />;
+      return <MyNotesTab myNotes={myNotes} currentUser={currentUser} />;
     case "infra-shape":
       return <InfraShapeTab active />;
   }

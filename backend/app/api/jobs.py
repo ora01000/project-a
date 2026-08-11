@@ -3,14 +3,16 @@
 from __future__ import annotations
 
 import logging
+import re
 from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, Query, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from backend.app.db.jobs import (
     JOB_STATUS_APPROVER_ASSIGNED,
     JOB_STATUS_RECEIVED,
+    JOB_STATUS_REJECTED,
     JOB_TYPE_SIGNUP,
     JobRecord,
     approve_assigned_job,
@@ -27,6 +29,12 @@ from backend.app.db.jobs import (
 from backend.app.db.jobs_result import JobResultRecord, get_job_result_by_srnum
 from backend.app.db.roles import is_admin_role
 from backend.app.middleware.session_auth import get_request_auth_user
+from backend.app.notifications.email_recipients import (
+    SendEmailRecipientsRequest,
+    SendMarkdownEmailResponse,
+    resolve_recipient_emails,
+)
+from backend.app.notifications.email_sender import send_job_report_emails
 from backend.app.services.agent_runtime_client import AgentInvokeRequest
 from backend.app.services.job_auditor import (
     build_job_review_message,
@@ -260,6 +268,98 @@ async def get_job_result(request: Request, idx: int) -> JobResultResponse:
     if result is None:
         raise HTTPException(status_code=404, detail="Job result not found")
     return JobResultResponse.from_record(result)
+
+
+def _strip_html(text: str) -> str:
+    return re.sub(r"<[^>]+>", "", text).strip()
+
+
+def _build_job_report_markdown(job: JobRecord, result: JobResultRecord) -> str:
+    return (
+        f"# {job.job_title}\n\n"
+        f"- SR 번호: {job.srnum}\n"
+        f"- 완료 일시: {result.complete_date}\n\n"
+        f"## 처리 결과\n\n"
+        f"{result.result.strip()}\n"
+    )
+
+
+def _build_rejected_job_markdown(job: JobRecord) -> str:
+    reason = (job.drop_reason or job.reject_reason or "").strip() or "반려 사유가 등록되지 않았습니다."
+    content = _strip_html(job.job_content)
+    return (
+        f"# {job.job_title}\n\n"
+        f"- SR 번호: {job.srnum}\n"
+        f"- 요청 일시: {job.request_date}\n"
+        f"- 상태: 반려\n\n"
+        f"## 작업 내용\n\n{content}\n\n"
+        f"## 반려 사유\n\n{reason}\n"
+    )
+
+
+def _build_job_email_markdown(job: JobRecord, result: JobResultRecord | None) -> str | None:
+    if result is not None:
+        return _build_job_report_markdown(job, result)
+    if job.status_code == JOB_STATUS_REJECTED:
+        return _build_rejected_job_markdown(job)
+    return None
+
+
+@router.post("/jobs/{idx}/send-report-email", response_model=SendMarkdownEmailResponse)
+async def send_job_report_email(
+    request: Request,
+    idx: int,
+    body: SendEmailRecipientsRequest,
+) -> SendMarkdownEmailResponse:
+    get_request_auth_user(request)
+    database_path = request.app.state.database_path
+
+    job = get_job_by_idx(database_path, idx)
+    if job is None:
+        raise HTTPException(status_code=404, detail="작업을 찾을 수 없습니다.")
+    if job.job_type == JOB_TYPE_SIGNUP:
+        raise HTTPException(status_code=400, detail="이 작업 유형은 메일로 전송할 수 없습니다.")
+
+    result = get_job_result_by_srnum(database_path, job.srnum)
+    markdown_body = _build_job_email_markdown(job, result)
+    if markdown_body is None:
+        raise HTTPException(status_code=404, detail="메일로 전송할 작업 내용이 없습니다.")
+
+    try:
+        recipient_emails = resolve_recipient_emails(
+            database_path,
+            body,
+            requester_email=job.requester_email,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    try:
+        sent_count, failed = await send_job_report_emails(
+            database_path=database_path,
+            recipient_emails=recipient_emails,
+            subject=job.job_title.strip(),
+            markdown_body=markdown_body,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Job report email send failed for job=%s", idx)
+        raise HTTPException(status_code=502, detail="메일 전송에 실패했습니다.") from exc
+
+    if sent_count == 0:
+        raise HTTPException(
+            status_code=502,
+            detail=f"메일 전송에 실패했습니다: {', '.join(failed)}",
+        )
+
+    message = f"{sent_count}명에게 메일을 전송했습니다."
+    if failed:
+        message = f"{message} (실패: {', '.join(failed)})"
+    return SendMarkdownEmailResponse(
+        sent_count=sent_count,
+        failed_recipients=failed,
+        message=message,
+    )
 
 
 class AssignJobApproverRequest(BaseModel):
