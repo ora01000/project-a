@@ -1410,6 +1410,8 @@ dev-axplatform-multi-pod 는 목업(로컬)/http(서버) 환경 모두 postgres�
   - 작업 노트 > Whatap 이벤트 리포트 > 작업 목록
   - 작업 노트 > 반려된 작업 > 작업 목록
 
+  - 변경사항) 패이징/표시개수 배치 조정 : 페이징 과 표시개수를 동일 row 에 배치하고, 페이징은 왼쪽 정렬, 표시개수는 오른쪽 정렬한다. (완료)
+
 - 다음 패널의 가로 크기를 20% 확대한다. (완료)
   - 작업 노트 > 나의 노트 > 노트 목록
   - 작업 노트 > 인프라 형상 > 인프라 목록
@@ -1479,3 +1481,5 @@ dev-axplatform-multi-pod 는 목업(로컬)/http(서버) 환경 모두 postgres�
     - 수신자 : jobs.requester_email
     - 참조자 : jobs.approver = users.userid 인 users.email
     - 내용 : jobs.drop_reason
+
+

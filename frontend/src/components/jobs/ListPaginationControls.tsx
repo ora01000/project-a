@@ -67,19 +67,15 @@ export function ListPaginationControls({
     </div>
   );
 
-  if (layout === "bar") {
-    return (
-      <div className="mt-2 flex shrink-0 items-center justify-between gap-3 border-t border-slate-700/80 pt-2">
-        {pageSizeSelect}
-        {pageButtons}
-      </div>
-    );
-  }
+  const rowClassName =
+    layout === "bar"
+      ? "mt-2 flex shrink-0 items-center justify-between gap-3 border-t border-slate-700/80 pt-2"
+      : "mt-2 flex shrink-0 items-center justify-between gap-2 border-t border-slate-700/80 pt-2";
 
   return (
-    <div className="mt-2 shrink-0 space-y-1.5 border-t border-slate-700/80 pt-2">
-      <div className="flex items-center justify-between gap-1">{pageSizeSelect}</div>
-      <div className="flex items-center justify-between gap-1">{pageButtons}</div>
+    <div className={rowClassName}>
+      {pageButtons}
+      {pageSizeSelect}
     </div>
   );
 }
