@@ -39,7 +39,7 @@
 ### 인프라 형상 GAP 분석
 - 독립 에이전트 **`INFRA_GAP_ANALYSIS`** (AXIT runtime·목업 카탈로그와 분리, 코드 static 설정)
   - mock: 기존 LLM + MCP `http://localhost:30800/mcp`
-  - http: `gpt-oss-120b` + MCP `http://pgdb-mcp.mcps.svc.cluster.local:8000/mcp`
+  - http: `openai/gpt-oss-120b` + MCP `http://pgdb-mcp.mcps.svc.cluster.local:8000/mcp`
 - API: `GET/POST /api/infra-gap-analysis/{status,invoke}`
 - 인프라 형상 탭: **형상 변경 추이 → 형상 추이**, 우측 상단 **AI갭분석** 버튼
 - 갭분석 Q/A는 **대화로그**(`logs/agents/INFRA_GAP_ANALYSIS.log`)에 기록

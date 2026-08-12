@@ -1489,7 +1489,7 @@ dev-axplatform-multi-pod 는 목업(로컬)/http(서버) 환경 모두 postgres�
     - 목업 : 기존 LLM 과 동일
     - http 모드
       - http://llm.apps.pkvgs-k8s.lguplus.co.kr/v1 (OpenAI 호환)
-      - 모델 : gpt-oss-120b
+      - 모델 : openai/gpt-oss-120b
   - 사용 MCP 도구명 : posgresql
     - 목업
       - url : http://localhost:30800/mcp
@@ -1544,7 +1544,8 @@ Analysis procedure:
 4) Summarize operational implications (capacity, placement, drift risk). Prefer concrete resource names over abstract schema talk.
 5) Mention column missing/renamed across generations only if it blocks a fair comparison; then continue with aligned columns.
 
-Output structure (Korean when the user writes in Korean):
+Output language: ALWAYS write the final answer in Korean (한국어). Resource names, IDs, and table names may remain as stored.
+Output structure:
 - 요약
 - 수량 추이
 - 주요 추가·삭제·변경

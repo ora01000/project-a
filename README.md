@@ -122,7 +122,7 @@ OKD 매니페스트 예시는 [`deploy/okd/`](deploy/okd/)을 참고하세요.
 | [RELEASE.md](RELEASE.md) | 릴리즈 노트·현재 버전 |
 | [docs/ARCHITECTURE_MULTIPOD.md](docs/ARCHITECTURE_MULTIPOD.md) | Postgres + Redis + api/worker 멀티 파드 |
 | [docs/MOCK_RUNTIME.md](docs/MOCK_RUNTIME.md) | mock vs http 런타임 차이 |
-| [docs/BACKEND_AGENT_INTERFACE.md](docs/BACKEND_AGENT_INTERFACE.md) | 백엔드 에이전트 인터페이스 |
-| [docs/FRONTEND_UI.md](docs/FRONTEND_UI.md) | 프론트 UI 가이드 |
-| [docs/DISABLED_AGENTS.md](docs/DISABLED_AGENTS.md) | 비활성 에이전트 |
+| [docs/BACKEND_AGENT_INTERFACE.md](docs/BACKEND_AGENT_INTERFACE.md) | Control Plane ↔ runtime·카탈로그·invoke 계약 |
+| [docs/FRONTEND_UI.md](docs/FRONTEND_UI.md) | 프론트 화면·메뉴·패널 구성 |
+| [docs/DISABLED_AGENTS.md](docs/DISABLED_AGENTS.md) | 제거된 에이전트 ID |
 | [PLAN_AXIT_PLATFORM.md](PLAN_AXIT_PLATFORM.md) | 요구사항·구현 계획 |

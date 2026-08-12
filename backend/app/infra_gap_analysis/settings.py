@@ -15,7 +15,7 @@ MCP_TRANSPORT = "http"
 
 # HTTP-mode LLM (OpenAI-compatible). Mock mode reuses the existing control-plane LLM.
 HTTP_LLM_BASE_URL = "http://llm.apps.pkvgs-k8s.lguplus.co.kr/v1"
-HTTP_LLM_MODEL = "gpt-oss-120b"
+HTTP_LLM_MODEL = "openai/gpt-oss-120b"
 HTTP_LLM_API_KEY = "not-needed"
 
 SYSTEM_PROMPT = """You are an infrastructure architecture gap-analysis specialist.
@@ -63,7 +63,8 @@ Analysis procedure:
 4) Summarize operational implications (capacity, placement, drift risk). Prefer concrete resource names over abstract schema talk.
 5) Mention column missing/renamed across generations only if it blocks a fair comparison; then continue with aligned columns.
 
-Output structure (Korean when the user writes in Korean):
+Output language: ALWAYS write the final answer in Korean (한국어). Resource names, IDs, and table names may remain as stored.
+Output structure:
 - 요약
 - 수량 추이
 - 주요 추가·삭제·변경
