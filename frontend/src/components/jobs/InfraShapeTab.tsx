@@ -361,7 +361,9 @@ export function InfraShapeTab({ active }: InfraShapeTabProps) {
     const infraType = selectedInfraType;
     const message =
       `${selectedName} is ${infraType}. ` +
-      "Analyze generation-by-generation infrastructure shape changes and trends.";
+      "Compare inventory rows across snapshot generations (latest and backups). " +
+      "Report added, removed, and changed resources with count trends. " +
+      "Do not focus on table or schema DDL differences unless they block the comparison.";
     setIsGapAnalyzing(true);
     setGapAnalysisMessage(null);
     try {
