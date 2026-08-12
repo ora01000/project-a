@@ -37,6 +37,7 @@ interface ShapeAnalysis {
 
 interface InfraShapeTabProps {
   active: boolean;
+  onCopyToNote?: (content: string, noteName?: string) => Promise<void>;
 }
 
 type SeriesKey = keyof ShapeCounts;
@@ -248,7 +249,7 @@ function ShapeTrendChart({
   );
 }
 
-export function InfraShapeTab({ active }: InfraShapeTabProps) {
+export function InfraShapeTab({ active, onCopyToNote }: InfraShapeTabProps) {
   const [clusters, setClusters] = useState<ShapeCluster[]>([]);
   const [selectedName, setSelectedName] = useState<string | null>(null);
   const [analysis, setAnalysis] = useState<ShapeAnalysis | null>(null);
@@ -379,13 +380,37 @@ export function InfraShapeTab({ active }: InfraShapeTabProps) {
       if (!response.ok) {
         throw new Error(await parseError(response, "AI 갭분석 요청에 실패했습니다."));
       }
-      setGapAnalysisMessage("갭분석이 완료되었습니다. 상세정보 > 대화로그에서 확인할 수 있습니다.");
+      const payload = (await response.json()) as { content?: string };
+      const reportContent = (payload.content || "").trim();
+      if (!reportContent) {
+        throw new Error("갭분석 결과가 비어 있습니다.");
+      }
+
+      const reportDate = new Intl.DateTimeFormat("en-CA", {
+        timeZone: "Asia/Seoul",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      }).format(new Date());
+      const noteName =
+        `[GAP분석 보고서][${reportDate}] ${selectedName}(${infraType}) 의 인프라 형상 보고`;
+
+      if (onCopyToNote) {
+        await onCopyToNote(reportContent, noteName);
+        setGapAnalysisMessage(
+          "갭분석이 완료되어 나의 노트에 저장했습니다. 상세정보 > 대화로그에서도 확인할 수 있습니다.",
+        );
+      } else {
+        setGapAnalysisMessage(
+          "갭분석이 완료되었습니다. 상세정보 > 대화로그에서 확인할 수 있습니다.",
+        );
+      }
     } catch (err) {
       setGapAnalysisMessage(err instanceof Error ? err.message : "AI 갭분석 요청에 실패했습니다.");
     } finally {
       setIsGapAnalyzing(false);
     }
-  }, [selectedName, selectedInfraType]);
+  }, [selectedName, selectedInfraType, onCopyToNote]);
 
   return (
     <div className="flex min-h-0 flex-1 gap-3 p-3">

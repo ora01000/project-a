@@ -75,7 +75,7 @@ CREATE TABLE IF NOT EXISTS jobs_result (
 CREATE TABLE IF NOT EXISTS mynotes (
     idx BIGSERIAL PRIMARY KEY,
     userid VARCHAR(50) NOT NULL,
-    note_name VARCHAR(50) NOT NULL,
+    note_name VARCHAR(200) NOT NULL,
     create_date TEXT NOT NULL,
     origin_file VARCHAR(200) NOT NULL,
     last_update TEXT NOT NULL

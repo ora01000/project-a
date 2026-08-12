@@ -10,6 +10,17 @@ from backend.app.db.job_datetime import now_job_datetime
 
 MY_NOTES_ROOT = PROJECT_ROOT / "data" / "mynotes"
 _USER_ID_PATTERN = re.compile(r"^[\w.-]+$")
+NOTE_NAME_MAX_LENGTH = 200
+
+
+def ensure_mynote_name_column_width(connection) -> None:
+    """Widen legacy VARCHAR(50) note_name columns for longer report titles."""
+    connection.execute(
+        """
+        ALTER TABLE mynotes
+        ALTER COLUMN note_name TYPE VARCHAR(200)
+        """
+    )
 
 
 @dataclass(frozen=True)
@@ -60,6 +71,7 @@ def _row_to_mynote(row) -> MyNoteRecord:
 def list_mynotes(database_path: str | Path, *, userid: str) -> list[MyNoteRecord]:
     safe_userid = _sanitize_user_id(userid)
     with get_connection(database_path) as connection:
+        ensure_mynote_name_column_width(connection)
         rows = connection.execute(
             """
             SELECT idx, userid, note_name, create_date, origin_file, last_update
@@ -109,8 +121,8 @@ def create_mynote(
     create_date = now_job_datetime()
     last_update = create_date
     resolved_name = (note_name or "").strip() or create_date
-    if len(resolved_name) > 50:
-        resolved_name = resolved_name[:50]
+    if len(resolved_name) > NOTE_NAME_MAX_LENGTH:
+        resolved_name = resolved_name[:NOTE_NAME_MAX_LENGTH]
 
     origin_file = build_origin_file_relative(safe_userid, create_date)
     file_path = resolve_origin_file_path(origin_file)
@@ -119,6 +131,7 @@ def create_mynote(
         file_path.write_text("", encoding="utf-8")
 
     with get_connection(database_path) as connection:
+        ensure_mynote_name_column_width(connection)
         cursor = connection.execute(
             """
             INSERT INTO mynotes (userid, note_name, create_date, origin_file, last_update)
@@ -151,11 +164,12 @@ def update_mynote_name(
     resolved_name = note_name.strip()
     if not resolved_name:
         raise ValueError("note_name is required")
-    if len(resolved_name) > 50:
-        resolved_name = resolved_name[:50]
+    if len(resolved_name) > NOTE_NAME_MAX_LENGTH:
+        resolved_name = resolved_name[:NOTE_NAME_MAX_LENGTH]
 
     last_update = now_job_datetime()
     with get_connection(database_path) as connection:
+        ensure_mynote_name_column_width(connection)
         cursor = connection.execute(
             """
             UPDATE mynotes

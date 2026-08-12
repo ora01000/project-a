@@ -1557,5 +1557,5 @@ Keep the answer concise and structured.
       - User Message(영문으로 번역하여 적용) : (완료, 인벤토리 데이터 비교 중심으로 개선)
         - `{cluster_name} is {infra_type}. Compare inventory rows across snapshot generations (latest and backups). Report added, removed, and changed resources with count trends. Do not focus on table or schema DDL differences unless they block the comparison.`
   - 갭분석 시 질의/응답 은 대화로그 탭에 기록한다 (완료)
-
-
+  - 갭분석 결과 리포트를 생성, 나의 노트에 저장한다. (완료)
+    - 노트 제목 : [GAP분석 보고서][{date}] {cluster_name}({infra_type}) 의 인프라 형상 보고

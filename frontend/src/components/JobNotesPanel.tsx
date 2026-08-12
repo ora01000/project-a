@@ -56,7 +56,7 @@ function renderActiveTab(
     case "my-notes":
       return <MyNotesTab myNotes={myNotes} currentUser={currentUser} />;
     case "infra-shape":
-      return <InfraShapeTab active />;
+      return <InfraShapeTab active onCopyToNote={onCopyToNote} />;
   }
 }
 

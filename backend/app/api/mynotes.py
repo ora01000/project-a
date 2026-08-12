@@ -74,12 +74,12 @@ class MyNoteDetailResponse(MyNoteResponse):
 
 class CreateMyNoteRequest(BaseModel):
     userid: str = Field(min_length=1, max_length=50)
-    note_name: str | None = Field(default=None, max_length=50)
+    note_name: str | None = Field(default=None, max_length=200)
 
 
 class RenameMyNoteRequest(BaseModel):
     userid: str = Field(min_length=1, max_length=50)
-    note_name: str = Field(min_length=1, max_length=50)
+    note_name: str = Field(min_length=1, max_length=200)
 
 
 class SaveMyNoteContentRequest(BaseModel):
