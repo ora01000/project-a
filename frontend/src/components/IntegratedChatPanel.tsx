@@ -686,24 +686,26 @@ export function IntegratedChatPanel({
             className="flex shrink-0 gap-2"
             style={{ height: FIXED_USER_INPUT_HEIGHT }}
           >
-            <button
-              type="button"
-              onClick={handlePreviousMessage}
-              disabled={isDisabled || isLoading || !canShowPrevious}
-              title="이전 메시지 (최대 10개)"
-              className="rounded-md border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-200 disabled:cursor-not-allowed disabled:text-slate-500"
-            >
-              ↑
-            </button>
-            <button
-              type="button"
-              onClick={handleNextMessage}
-              disabled={isDisabled || isLoading || !canShowNext}
-              title="다음 메시지"
-              className="rounded-md border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-200 disabled:cursor-not-allowed disabled:text-slate-500"
-            >
-              ↓
-            </button>
+            <div className="flex h-full shrink-0 flex-col gap-1">
+              <button
+                type="button"
+                onClick={handlePreviousMessage}
+                disabled={isDisabled || isLoading || !canShowPrevious}
+                title="이전 메시지 (최대 10개)"
+                className="flex min-h-0 flex-1 items-center justify-center rounded-md border border-slate-700 bg-slate-900 px-2 text-sm text-slate-200 disabled:cursor-not-allowed disabled:text-slate-500"
+              >
+                ↑
+              </button>
+              <button
+                type="button"
+                onClick={handleNextMessage}
+                disabled={isDisabled || isLoading || !canShowNext}
+                title="다음 메시지"
+                className="flex min-h-0 flex-1 items-center justify-center rounded-md border border-slate-700 bg-slate-900 px-2 text-sm text-slate-200 disabled:cursor-not-allowed disabled:text-slate-500"
+              >
+                ↓
+              </button>
+            </div>
             <textarea
               value={input}
               onChange={(event) => handleInputChange(event.target.value)}

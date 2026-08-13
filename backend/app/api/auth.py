@@ -200,9 +200,9 @@ async def login(payload: LoginRequest, request: Request) -> LoginResponse:
 
     previous_last_login, updated_user = record_user_login(database_path, result.user.idx)
     user = updated_user or result.user
-    welcome_back = previous_last_login is not None and not result.profile_required
+    returning_user = previous_last_login is not None and not result.profile_required
     welcome_notices: list[WelcomeNoticeSummary] = []
-    if welcome_back:
+    if returning_user:
         username_by_key = build_userid_username_map(database_path)
         welcome_notices = [
             WelcomeNoticeSummary(
@@ -216,6 +216,7 @@ async def login(payload: LoginRequest, request: Request) -> LoginResponse:
             )
             for notice in list_welcome_notices(database_path)
         ]
+    welcome_back = returning_user and bool(welcome_notices)
 
     return await _issue_login_response(
         request,
@@ -255,9 +256,9 @@ async def madang_admin_bypass_login(
 
     previous_last_login, updated_user = record_user_login(database_path, target_user.idx)
     user = updated_user or target_user
-    welcome_back = previous_last_login is not None
+    returning_user = previous_last_login is not None
     welcome_notices: list[WelcomeNoticeSummary] = []
-    if welcome_back:
+    if returning_user:
         username_by_key = build_userid_username_map(database_path)
         welcome_notices = [
             WelcomeNoticeSummary(
@@ -271,6 +272,7 @@ async def madang_admin_bypass_login(
             )
             for notice in list_welcome_notices(database_path)
         ]
+    welcome_back = returning_user and bool(welcome_notices)
 
     return await _issue_login_response(
         request,

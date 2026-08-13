@@ -107,7 +107,8 @@ export function LoginPage({ onLoginSuccess }: LoginPageProps) {
     }
 
     if (payload.welcome_back) {
-      if (isWelcomeBackHiddenToday()) {
+      const notices = payload.welcome_notices ?? [];
+      if (isWelcomeBackHiddenToday() || notices.length === 0) {
         onLoginSuccess(user, accessToken, expiresInSeconds);
         return;
       }
@@ -116,7 +117,7 @@ export function LoginPage({ onLoginSuccess }: LoginPageProps) {
         accessToken,
         expiresInSeconds,
         previousLastLogin: payload.previous_last_login ?? null,
-        notices: payload.welcome_notices ?? [],
+        notices,
       });
       return;
     }
