@@ -48,7 +48,7 @@ export function MyNotesTab({ myNotes, currentUser }: MyNotesTabProps) {
     submitRename,
   } = myNotes;
 
-  const [panelMode, setPanelMode] = useState<NotePanelMode>("edit");
+  const [panelMode, setPanelMode] = useState<NotePanelMode>("preview");
   const [emailModalOpen, setEmailModalOpen] = useState(false);
   const [emailSuccess, setEmailSuccess] = useState<string | null>(null);
   const selectedNote = notes.find((note) => note.idx === selectedIdx) ?? null;
@@ -64,7 +64,7 @@ export function MyNotesTab({ myNotes, currentUser }: MyNotesTabProps) {
   } = useClientPagination(notes);
 
   useEffect(() => {
-    setPanelMode("edit");
+    setPanelMode("preview");
   }, [selectedIdx]);
 
   return (
