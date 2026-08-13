@@ -1,4 +1,4 @@
-"""Persist SMTP mail server settings in ``mailserver_config`` (singleton)."""
+"""Persist SMTP/IMAP mail server settings in ``mailserver_config`` (singleton)."""
 
 from __future__ import annotations
 
@@ -29,16 +29,22 @@ def ensure_mailserver_config_table(connection) -> None:
             use_tls INTEGER NOT NULL DEFAULT 1,
             use_ssl INTEGER NOT NULL DEFAULT 0,
             timeout_seconds DOUBLE PRECISION NOT NULL DEFAULT 30,
+            receive_enabled INTEGER NOT NULL DEFAULT 0,
+            imap_host VARCHAR(200) NOT NULL DEFAULT '',
+            imap_port INTEGER NOT NULL DEFAULT 993,
+            imap_use_ssl INTEGER NOT NULL DEFAULT 1,
             updated_at TEXT NOT NULL DEFAULT ''
         )
         """
     )
-    connection.execute(
-        """
-        ALTER TABLE mailserver_config
-        ADD COLUMN IF NOT EXISTS smtp_auth INTEGER NOT NULL DEFAULT 1
-        """
-    )
+    for statement in (
+        "ALTER TABLE mailserver_config ADD COLUMN IF NOT EXISTS smtp_auth INTEGER NOT NULL DEFAULT 1",
+        "ALTER TABLE mailserver_config ADD COLUMN IF NOT EXISTS receive_enabled INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE mailserver_config ADD COLUMN IF NOT EXISTS imap_host VARCHAR(200) NOT NULL DEFAULT ''",
+        "ALTER TABLE mailserver_config ADD COLUMN IF NOT EXISTS imap_port INTEGER NOT NULL DEFAULT 993",
+        "ALTER TABLE mailserver_config ADD COLUMN IF NOT EXISTS imap_use_ssl INTEGER NOT NULL DEFAULT 1",
+    ):
+        connection.execute(statement)
 
 
 @dataclass
@@ -53,15 +59,30 @@ class MailserverConfigRow:
     use_tls: bool = True
     use_ssl: bool = False
     timeout_seconds: float = 30.0
+    receive_enabled: bool = False
+    imap_host: str = ""
+    imap_port: int = 993
+    imap_use_ssl: bool = True
     updated_at: str = ""
     has_password: bool = False
+
+
+def _col(row: Any, name: str, default: Any = None) -> Any:
+    try:
+        if name in row.keys():
+            return row[name]
+    except Exception:
+        pass
+    return default
 
 
 def _row_from_db(row: Any | None) -> MailserverConfigRow | None:
     if row is None:
         return None
     password = str(row["smtp_password"] or "")
-    smtp_auth_raw = row["smtp_auth"] if "smtp_auth" in row.keys() else 1
+    smtp_auth_raw = _col(row, "smtp_auth", 1)
+    receive_enabled_raw = _col(row, "receive_enabled", 0)
+    imap_use_ssl_raw = _col(row, "imap_use_ssl", 1)
     return MailserverConfigRow(
         enabled=bool(int(row["enabled"] or 0)),
         smtp_host=str(row["smtp_host"] or ""),
@@ -73,19 +94,28 @@ def _row_from_db(row: Any | None) -> MailserverConfigRow | None:
         use_tls=bool(int(row["use_tls"] if row["use_tls"] is not None else 1)),
         use_ssl=bool(int(row["use_ssl"] or 0)),
         timeout_seconds=float(row["timeout_seconds"] or 30.0),
+        receive_enabled=bool(int(receive_enabled_raw if receive_enabled_raw is not None else 0)),
+        imap_host=str(_col(row, "imap_host", "") or ""),
+        imap_port=int(_col(row, "imap_port", 993) or 993),
+        imap_use_ssl=bool(int(imap_use_ssl_raw if imap_use_ssl_raw is not None else 1)),
         updated_at=str(row["updated_at"] or ""),
         has_password=bool(password),
     )
+
+
+_SELECT_COLUMNS = """
+    enabled, smtp_host, smtp_port, smtp_username, smtp_password,
+    from_address, smtp_auth, use_tls, use_ssl, timeout_seconds,
+    receive_enabled, imap_host, imap_port, imap_use_ssl, updated_at
+"""
 
 
 def get_mailserver_config(database_path: str | Path) -> MailserverConfigRow | None:
     with get_connection(database_path) as connection:
         ensure_mailserver_config_table(connection)
         row = connection.execute(
-            """
-            SELECT
-                enabled, smtp_host, smtp_port, smtp_username, smtp_password,
-                from_address, smtp_auth, use_tls, use_ssl, timeout_seconds, updated_at
+            f"""
+            SELECT {_SELECT_COLUMNS}
             FROM mailserver_config
             ORDER BY idx ASC
             LIMIT 1
@@ -107,6 +137,10 @@ def save_mailserver_config(
     use_tls: bool,
     use_ssl: bool,
     timeout_seconds: float,
+    receive_enabled: bool = False,
+    imap_host: str = "",
+    imap_port: int = 993,
+    imap_use_ssl: bool = True,
 ) -> MailserverConfigRow:
     """Upsert singleton config. ``smtp_password=None`` or empty keeps existing password."""
     with get_connection(database_path) as connection:
@@ -123,27 +157,33 @@ def save_mailserver_config(
             password = str(smtp_password)
 
         updated_at = _now_iso()
+        values = (
+            1 if enabled else 0,
+            smtp_host.strip(),
+            int(smtp_port),
+            smtp_username.strip(),
+            password,
+            from_address.strip(),
+            1 if smtp_auth else 0,
+            1 if use_tls else 0,
+            1 if use_ssl else 0,
+            float(timeout_seconds),
+            1 if receive_enabled else 0,
+            imap_host.strip(),
+            int(imap_port),
+            1 if imap_use_ssl else 0,
+            updated_at,
+        )
         if existing is None:
             connection.execute(
                 """
                 INSERT INTO mailserver_config (
                     enabled, smtp_host, smtp_port, smtp_username, smtp_password,
-                    from_address, smtp_auth, use_tls, use_ssl, timeout_seconds, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    from_address, smtp_auth, use_tls, use_ssl, timeout_seconds,
+                    receive_enabled, imap_host, imap_port, imap_use_ssl, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (
-                    1 if enabled else 0,
-                    smtp_host.strip(),
-                    int(smtp_port),
-                    smtp_username.strip(),
-                    password,
-                    from_address.strip(),
-                    1 if smtp_auth else 0,
-                    1 if use_tls else 0,
-                    1 if use_ssl else 0,
-                    float(timeout_seconds),
-                    updated_at,
-                ),
+                values,
             )
         else:
             connection.execute(
@@ -159,30 +199,19 @@ def save_mailserver_config(
                     use_tls = ?,
                     use_ssl = ?,
                     timeout_seconds = ?,
+                    receive_enabled = ?,
+                    imap_host = ?,
+                    imap_port = ?,
+                    imap_use_ssl = ?,
                     updated_at = ?
                 WHERE idx = ?
                 """,
-                (
-                    1 if enabled else 0,
-                    smtp_host.strip(),
-                    int(smtp_port),
-                    smtp_username.strip(),
-                    password,
-                    from_address.strip(),
-                    1 if smtp_auth else 0,
-                    1 if use_tls else 0,
-                    1 if use_ssl else 0,
-                    float(timeout_seconds),
-                    updated_at,
-                    int(existing["idx"]),
-                ),
+                (*values, int(existing["idx"])),
             )
 
         row = connection.execute(
-            """
-            SELECT
-                enabled, smtp_host, smtp_port, smtp_username, smtp_password,
-                from_address, smtp_auth, use_tls, use_ssl, timeout_seconds, updated_at
+            f"""
+            SELECT {_SELECT_COLUMNS}
             FROM mailserver_config
             ORDER BY idx ASC
             LIMIT 1

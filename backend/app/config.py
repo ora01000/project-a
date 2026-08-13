@@ -112,6 +112,16 @@ class MyNotesSettings(BaseModel):
     content_backend: str = "file"
 
 
+class ReceivedMailSettings(BaseModel):
+    """IMAP inbound mail poller (worker / BACKEND_ROLE=all)."""
+
+    poll_enabled: bool = True
+    poll_interval_seconds: int = 30
+    initial_delay_seconds: int = 5
+    # Shared volume path for api+worker: {home}/{received_mail.uuid}/...
+    attachment_home: Path = Path("data/received_mail_attachments")
+
+
 class K8sCollectorSettings(BaseModel):
     # Deployed (http) mount path; mock/local may omit and use ~/.kube/config
     kubeconfig: str = "/etc/k8s/kubeconfig"
@@ -220,6 +230,23 @@ class AppSettings(BaseSettings):
     mynotes_flush_initial_delay_seconds: int | None = Field(
         default=None,
         alias="MY_NOTES_FLUSH_INITIAL_DELAY_SECONDS",
+    )
+
+    received_mail_poll_enabled: bool | None = Field(
+        default=None,
+        alias="RECEIVED_MAIL_POLL_ENABLED",
+    )
+    received_mail_poll_interval_seconds: int | None = Field(
+        default=None,
+        alias="RECEIVED_MAIL_POLL_INTERVAL_SECONDS",
+    )
+    received_mail_poll_initial_delay_seconds: int | None = Field(
+        default=None,
+        alias="RECEIVED_MAIL_POLL_INITIAL_DELAY_SECONDS",
+    )
+    received_mail_attachment_home: str | None = Field(
+        default=None,
+        alias="RECEIVED_MAIL_ATTACHMENT_HOME",
     )
 
     k8s_collector_kubeconfig: str | None = Field(default=None, alias="K8S_COLLECTOR_KUBECONFIG")
@@ -614,6 +641,51 @@ def load_mynotes_settings() -> MyNotesSettings:
         flush_interval_seconds=max(30, flush_interval_seconds),
         initial_delay_seconds=max(0, initial_delay_seconds),
         content_backend=content_backend,
+    )
+
+
+def load_received_mail_settings() -> ReceivedMailSettings:
+    yaml_settings = _load_yaml(CONFIG_DIR / "settings.yaml")
+    mail_yaml = yaml_settings.get("received_mail", {})
+    env_settings = AppSettings()
+
+    if env_settings.received_mail_poll_enabled is not None:
+        poll_enabled = env_settings.received_mail_poll_enabled
+    else:
+        poll_enabled = _as_bool(mail_yaml.get("poll_enabled"), True)
+
+    if env_settings.received_mail_poll_interval_seconds is not None:
+        interval_raw = env_settings.received_mail_poll_interval_seconds
+    else:
+        interval_raw = mail_yaml.get("poll_interval_seconds", 30)
+
+    if env_settings.received_mail_poll_initial_delay_seconds is not None:
+        delay_raw = env_settings.received_mail_poll_initial_delay_seconds
+    else:
+        delay_raw = mail_yaml.get("initial_delay_seconds", 5)
+
+    try:
+        poll_interval_seconds = int(interval_raw)
+    except (TypeError, ValueError):
+        poll_interval_seconds = 30
+    try:
+        initial_delay_seconds = int(delay_raw)
+    except (TypeError, ValueError):
+        initial_delay_seconds = 5
+
+    home_raw = (
+        env_settings.received_mail_attachment_home
+        or str(mail_yaml.get("attachment_home", "data/received_mail_attachments"))
+    ).strip() or "data/received_mail_attachments"
+    home_path = Path(home_raw)
+    if not home_path.is_absolute():
+        home_path = PROJECT_ROOT / home_path
+
+    return ReceivedMailSettings(
+        poll_enabled=poll_enabled,
+        poll_interval_seconds=max(5, poll_interval_seconds),
+        initial_delay_seconds=max(0, initial_delay_seconds),
+        attachment_home=home_path,
     )
 
 

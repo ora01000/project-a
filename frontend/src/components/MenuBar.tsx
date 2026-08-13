@@ -20,6 +20,7 @@ import { WhatapEventTestModal } from "./admin/WhatapEventTestModal";
 import { K8sInfraConfigModal } from "./admin/K8sInfraConfigModal";
 import { MailServerConfigModal } from "./admin/MailServerConfigModal";
 import { MailTestModal } from "./admin/MailTestModal";
+import { ReceivedMailDebugModal } from "./admin/ReceivedMailDebugModal";
 import { ProfileEditModal } from "./ProfileEditModal";
 import { ReleaseNotesModal } from "./ReleaseNotesModal";
 import { TableDebugModal } from "./TableDebugModal";
@@ -57,6 +58,7 @@ export function MenuBar({ activeView, user, onNavigate, onLogout, onUserUpdated 
   const [showK8sInfraConfig, setShowK8sInfraConfig] = useState(false);
   const [showMailServerConfig, setShowMailServerConfig] = useState(false);
   const [showMailTest, setShowMailTest] = useState(false);
+  const [showReceivedMailDebug, setShowReceivedMailDebug] = useState(false);
   const [showEventReportSub, setShowEventReportSub] = useState(false);
   const [runtimeMode, setRuntimeMode] = useState<string>("mock");
   const [showProfileEdit, setShowProfileEdit] = useState(false);
@@ -274,6 +276,7 @@ export function MenuBar({ activeView, user, onNavigate, onLogout, onUserUpdated 
                         showK8sInfraConfig ||
                         showMailServerConfig ||
                         showMailTest ||
+                        showReceivedMailDebug ||
                   showThemeSettings,
               )}
             >
@@ -294,7 +297,8 @@ export function MenuBar({ activeView, user, onNavigate, onLogout, onUserUpdated 
                         showWhatapEventTest ||
                         showK8sInfraConfig ||
                         showMailServerConfig ||
-                        showMailTest
+                        showMailTest ||
+                        showReceivedMailDebug
                           ? "bg-slate-800 text-sky-200"
                           : "text-slate-200 hover:bg-slate-800"
                       }`}
@@ -371,6 +375,17 @@ export function MenuBar({ activeView, user, onNavigate, onLogout, onUserUpdated 
                           className="block w-full px-3 py-2 text-left text-sm text-slate-200 hover:bg-slate-800"
                         >
                           테스트 메일 발송(디버깅)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowSettingsMenu(false);
+                            setShowAdminWorkMenu(false);
+                            setShowReceivedMailDebug(true);
+                          }}
+                          className="block w-full px-3 py-2 text-left text-sm text-slate-200 hover:bg-slate-800"
+                        >
+                          수신메일 목록(디버깅)
                         </button>
                         <button
                           type="button"
@@ -524,6 +539,12 @@ export function MenuBar({ activeView, user, onNavigate, onLogout, onUserUpdated 
       ) : null}
       {showMailTest && isAdmin ? (
         <MailTestModal viewerRole={user.role} onClose={() => setShowMailTest(false)} />
+      ) : null}
+      {showReceivedMailDebug && isAdmin ? (
+        <ReceivedMailDebugModal
+          viewerRole={user.role}
+          onClose={() => setShowReceivedMailDebug(false)}
+        />
       ) : null}
       {showEventReportSub && isAdmin ? (
         <EventReportSubscriptionModal

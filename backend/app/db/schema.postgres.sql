@@ -104,7 +104,7 @@ CREATE TABLE IF NOT EXISTS vsphere_infra_info (
     vsphere_pw TEXT NOT NULL DEFAULT ''
 );
 
--- SMTP mail server settings (singleton row; replaces EMAIL_* env / yaml)
+-- SMTP/IMAP mail server settings (singleton row; replaces EMAIL_* env / yaml)
 CREATE TABLE IF NOT EXISTS mailserver_config (
     idx BIGSERIAL PRIMARY KEY,
     enabled INTEGER NOT NULL DEFAULT 0,
@@ -117,5 +117,39 @@ CREATE TABLE IF NOT EXISTS mailserver_config (
     use_tls INTEGER NOT NULL DEFAULT 1,
     use_ssl INTEGER NOT NULL DEFAULT 0,
     timeout_seconds DOUBLE PRECISION NOT NULL DEFAULT 30,
+    receive_enabled INTEGER NOT NULL DEFAULT 0,
+    imap_host VARCHAR(200) NOT NULL DEFAULT '',
+    imap_port INTEGER NOT NULL DEFAULT 993,
+    imap_use_ssl INTEGER NOT NULL DEFAULT 1,
     updated_at TEXT NOT NULL DEFAULT ''
 );
+
+-- Inbound mail captured by IMAP poller (worker / BACKEND_ROLE=all)
+CREATE TABLE IF NOT EXISTS received_mail (
+    idx BIGSERIAL PRIMARY KEY,
+    uuid VARCHAR(36) NOT NULL UNIQUE,
+    decision_type INTEGER NOT NULL DEFAULT 0,
+    message_id VARCHAR(500) NOT NULL DEFAULT '',
+    imap_uid BIGINT,
+    mailbox VARCHAR(100) NOT NULL DEFAULT 'INBOX',
+    subject TEXT NOT NULL DEFAULT '',
+    from_address VARCHAR(500) NOT NULL DEFAULT '',
+    to_addresses TEXT NOT NULL DEFAULT '',
+    cc_addresses TEXT NOT NULL DEFAULT '',
+    body_text TEXT NOT NULL DEFAULT '',
+    received_at TEXT NOT NULL DEFAULT '',
+    fetched_at TEXT NOT NULL DEFAULT '',
+    attachment_count INTEGER NOT NULL DEFAULT 0,
+    attachment_names TEXT NOT NULL DEFAULT '[]'
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS ux_received_mail_mailbox_uid
+    ON received_mail (mailbox, imap_uid)
+    WHERE imap_uid IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS ix_received_mail_message_id
+    ON received_mail (message_id)
+    WHERE message_id <> '';
+
+CREATE INDEX IF NOT EXISTS ix_received_mail_fetched_at
+    ON received_mail (fetched_at DESC);

@@ -36,8 +36,11 @@ from backend.app.api.whatap_webhook import router as whatap_webhook_router
 from backend.app.api.axit_mock import router as axit_mock_router
 from backend.app.api.k8s_infra import router as k8s_infra_router
 from backend.app.api.mailserver import router as mailserver_router
+from backend.app.api.received_mail import router as received_mail_router
 from backend.app.infra_gap_analysis.api import router as infra_gap_analysis_router
 from backend.app.infra_gap_analysis.agent import infra_gap_analysis_service
+from backend.app.job_decision_agent.api import router as job_decision_agent_router
+from backend.app.job_decision_agent.agent import job_decision_agent_service
 from backend.app.config import (
     backend_role_runs_workers,
     load_auth_session_settings,
@@ -45,6 +48,7 @@ from backend.app.config import (
     load_job_processor_settings,
     load_k8s_collector_settings,
     load_mynotes_settings,
+    load_received_mail_settings,
     load_redis_settings,
     load_settings,
     resolve_control_plane_base_url,
@@ -63,6 +67,7 @@ from backend.app.logging.agent_logger import ensure_agent_logs_dir, log_agent_er
 from backend.app.logging.user_comm_logger import initialize_user_comm_logs
 from backend.app.services.job_processor_loop import run_job_processor_loop
 from backend.app.services.k8s_scrape_scheduler import run_k8s_scrape_scheduler_loop
+from backend.app.services.mail_receive_loop import run_mail_receive_loop
 from backend.app.services.mynote_flush_loop import run_mynote_flush_loop
 from backend.app.usage.token_tracker import TokenTracker
 
@@ -430,6 +435,13 @@ async def lifespan(app: FastAPI):
         logger.exception("INFRA_GAP_ANALYSIS initialization failed (agent remains available for lazy init)")
         app.state.infra_gap_analysis = infra_gap_analysis_service
 
+    try:
+        await job_decision_agent_service.initialize(runtime_mode)
+        app.state.job_decision_agent = job_decision_agent_service
+    except Exception:
+        logger.exception("JOB_DECISION_AGENT initialization failed (agent remains available for lazy init)")
+        app.state.job_decision_agent = job_decision_agent_service
+
     health_task = asyncio.create_task(
         _health_check_loop(
             agent_manager,
@@ -472,6 +484,15 @@ async def lifespan(app: FastAPI):
                 settings=k8s_collector_settings,
             )
         )
+    received_mail_settings = load_received_mail_settings()
+    mail_receive_task: asyncio.Task | None = None
+    if run_workers and received_mail_settings.poll_enabled:
+        mail_receive_task = asyncio.create_task(
+            run_mail_receive_loop(
+                Path(app.state.database_path),
+                received_mail_settings,
+            )
+        )
     try:
         yield
     finally:
@@ -490,6 +511,10 @@ async def lifespan(app: FastAPI):
             k8s_scrape_task.cancel()
             with suppress(asyncio.CancelledError):
                 await k8s_scrape_task
+        if mail_receive_task is not None:
+            mail_receive_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await mail_receive_task
         await close_redis()
 
 
@@ -536,7 +561,9 @@ def create_app() -> FastAPI:
     app.include_router(whatap_test_router, prefix="/api")
     app.include_router(k8s_infra_router, prefix="/api")
     app.include_router(mailserver_router, prefix="/api")
+    app.include_router(received_mail_router, prefix="/api")
     app.include_router(infra_gap_analysis_router, prefix="/api")
+    app.include_router(job_decision_agent_router, prefix="/api")
     app.include_router(axit_mock_router)
     return app
 

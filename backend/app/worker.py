@@ -17,6 +17,7 @@ from backend.app.config import (
     load_job_processor_settings,
     load_k8s_collector_settings,
     load_mynotes_settings,
+    load_received_mail_settings,
     load_redis_settings,
     load_settings,
     resolve_control_plane_base_url,
@@ -28,6 +29,7 @@ from backend.app.services.agent_runtime_client import (
 )
 from backend.app.services.job_processor_loop import run_job_processor_loop
 from backend.app.services.k8s_scrape_scheduler import run_k8s_scrape_scheduler_loop
+from backend.app.services.mail_receive_loop import run_mail_receive_loop
 from backend.app.services.mynote_flush_loop import run_mynote_flush_loop
 from backend.app.services.redis_client import close_redis, init_redis
 
@@ -94,6 +96,16 @@ async def lifespan(app: FastAPI):
                     Path(app.state.database_path),
                     runtime_mode=runtime_mode,
                     settings=k8s_collector_settings,
+                )
+            )
+        )
+    received_mail_settings = load_received_mail_settings()
+    if received_mail_settings.poll_enabled:
+        tasks.append(
+            asyncio.create_task(
+                run_mail_receive_loop(
+                    Path(app.state.database_path),
+                    received_mail_settings,
                 )
             )
         )

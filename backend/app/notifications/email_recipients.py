@@ -20,13 +20,20 @@ class SendEmailRecipientsRequest(BaseModel):
     recipient_user_idxs: list[int] = Field(default_factory=list)
     cc_user_idxs: list[int] = Field(default_factory=list)
     bcc_user_idxs: list[int] = Field(default_factory=list)
+    to_emails: list[str] = Field(default_factory=list)
+    cc_emails: list[str] = Field(default_factory=list)
+    bcc_emails: list[str] = Field(default_factory=list)
     include_requester: bool = False
     subject: str | None = Field(default=None, max_length=300)
     forward_message: str = ""
 
     @model_validator(mode="after")
     def validate_recipients(self) -> "SendEmailRecipientsRequest":
-        if not self.include_requester and not self.recipient_user_idxs:
+        if (
+            not self.include_requester
+            and not self.recipient_user_idxs
+            and not self.to_emails
+        ):
             raise ValueError("수신자를 한 명 이상 선택해 주세요.")
         return self
 
@@ -50,14 +57,29 @@ def _resolve_user_email(database_path, user_idx: int) -> str:
     return email
 
 
+def _normalize_freeform_email(raw: str) -> str:
+    email = raw.strip()
+    if not email:
+        raise ValueError("빈 이메일 주소는 사용할 수 없습니다.")
+    if "@" not in email or email.startswith("@") or email.endswith("@"):
+        raise ValueError(f"유효하지 않은 이메일 주소입니다: {email}")
+    local, _, domain = email.partition("@")
+    if not local or not domain or "." not in domain:
+        raise ValueError(f"유효하지 않은 이메일 주소입니다: {email}")
+    return email
+
+
 def _unique_emails(addresses: list[str]) -> list[str]:
     unique: list[str] = []
     seen: set[str] = set()
     for address in addresses:
         normalized = address.strip()
-        if not normalized or normalized in seen:
+        if not normalized:
             continue
-        seen.add(normalized)
+        key = normalized.lower()
+        if key in seen:
+            continue
+        seen.add(key)
         unique.append(normalized)
     return unique
 
@@ -77,9 +99,14 @@ def resolve_email_recipients(
 
     for user_idx in body.recipient_user_idxs:
         to_addresses.append(_resolve_user_email(database_path, user_idx))
+    for raw in body.to_emails:
+        to_addresses.append(_normalize_freeform_email(raw))
 
     cc_addresses = [_resolve_user_email(database_path, user_idx) for user_idx in body.cc_user_idxs]
+    cc_addresses.extend(_normalize_freeform_email(raw) for raw in body.cc_emails)
+
     bcc_addresses = [_resolve_user_email(database_path, user_idx) for user_idx in body.bcc_user_idxs]
+    bcc_addresses.extend(_normalize_freeform_email(raw) for raw in body.bcc_emails)
 
     return ResolvedEmailRecipients(
         to_addresses=_unique_emails(to_addresses),

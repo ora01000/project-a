@@ -1560,3 +1560,131 @@ Keep the answer concise and structured.
   - 갭분석 시 질의/응답 은 대화로그 탭에 기록한다 (완료)
   - 갭분석 결과 리포트를 생성, 나의 노트에 저장한다. (완료)
     - 노트 제목 : [GAP분석 보고서][{date}] {cluster_name}({infra_type}) 의 인프라 형상 보고
+
+# 메일 수발신 기능 개선
+미등록 사용자 이메일 
+- 메일 발송시 현재는 등록된 사용자만 선택이 가능하다. 수신자 / 참조자 / 숨은 참조자 에 직접 입력할 수 있도록 한다. ";", ",", " " 등 separator 가 들어오면 메일 주소가 완성된 것으로 간주하고 텍스트 레이블 버튼으로 바꾼다(삭제표시 x 포함) (완료)
+
+수신 메일 설정
+- 기존 메일 서버 설정에서 메일 수신 활성화 기능을 둔다 (완료)
+  - `receive_enabled` + IMAP 호스트/포트/SSL (`mailserver_config`)
+
+메일 수신 활성화 이후
+- 설정된 메일 계정에서 주기적으로 메일을 가져온다. polling 주기는 기본 30초로 한다. (완료)
+- mail polling 은 스케줄 / 데몬 작업으로 backend 를 멀티 pod 로 분리할 경우 worker 에서 동작하게 된다. (완료, `BACKEND_ROLE=worker|all`)
+- 가져온 메일은 DB 테이블에 저장한다 (완료)
+  - RECEIVED_MAIL (`received_mail`)
+    - idx int auto increment, pk
+    - uuid varchar -> 랜덤 uuid 값을 넣는다. 이 값은 첨부 다운로드 API 에서 경로로 사용 
+    - decision_type int -> 처음 입력시 default 0, 로직에서 처리에 따라, 10 -> 작업(jobs)으로 처리 대상, 5 -> 작업 대상이나 자료 부족, 11 -> 비작업 대상 
+    - 기타: message_id, imap_uid, mailbox, subject, from/to/cc, body_text, received_at, fetched_at, attachment_count, attachment_names
+  - 첨부 파일이 있는 경우 텍스트로 읽을 수 있는 파일에 한해서 처리한다. (완료)
+    - 처리 대상 
+      - .crt, .key, .pem 등 인증서 파일
+      - sh, txt, log 등 텍스트로 된 파일
+    - 비처리 대상(무시)
+      - xls, docs, ppt, pdf 등 오피스 문서
+      - png, jpg 등 이미지
+    - 첨부파일 저장 홈 경로를 환경변수로 지정할 수 있게 한다. backend-worker, backend-api pod 가 향후 분리 되더라도 이 경로는 공유 볼륨으로 구성할 계획이다. 실제 첨부 파일은 {첨부 홈경로}/{received_mail.uuid} 이다.
+      - env: `RECEIVED_MAIL_ATTACHMENT_HOME` (기본 `data/received_mail_attachments`)
+  - api 를 통해 RECEIVED_MAIL 에 업데이트 된 메일의 첨부를 다운로드 받을 수 있어야 한다. 향후 JOB_DECISION_AGENT 라는 별도의 내부 에이전트에서 이 API 를 사용하게 할 것이다(TBD).
+    - `GET /api/received-mail`, `GET /api/received-mail/{uuid}`
+    - `GET /api/received-mail/{uuid}/attachments/{filename}` (완료)
+    - JOB_DECISION_AGENT evaluate 는 동일 프로세스에서 첨부 파일을 직접 읽어 분류한다 (HTTP 첨부 API 호출은 추후 원격 에이전트용 TBD).
+
+- 디버깅을 위해 수신 메일을 확인할 수 있는 메뉴를 추가한다 (users.role=0 | 100 만 접근) (완료)
+  - 환경설정 > 관리자 작업 > 수신메일 목록(디버깅) 메뉴 추가, 수신메일 팝업 생성 (완료)
+
+JOB_DECISION_AGENT 정의 (완료)
+- INFRA_GAP_ANALYSIS 와 동일하게 http모드/목업 환경 모두 동일하게 외부 axit runtime 을 사용하지 않고 static한 코드 내에서만 정의된 에이전트를 구성한다. (완료, `backend/app/job_decision_agent/`)
+- 사용하는 llm 도 INFRA_GAP_ANALYSIS 와 동일하다. (완료)
+- 이 에이전트는 임무는 다음과 같다. 이를 토대로 system prompt 를 생성(영문) (완료)
+  - 백엔드에서 received_mail 로 들어온 레코드를 JOB_DECISION_AGENT로 문의할 것이다. (`POST /api/job-decision-agent/evaluate`)
+  - jobs 에서 처리를 할 내용인지 아닌지를 판단하고, jobs에서 처리할 내용이라면 작업에 필요한 정보(본문의 내용 또는 첨부)가 최소한으로 주어졌는지를 판단한다.
+  - decision_type: 10 작업 / 5 자료부족 / 11 비작업
+  - 판단에 필요한 실제 작업의 범위는 다음과 같다. 이 내용은 SKILL 로 정의/관리한다. (`skills/job_scope.md`)
+    - 대상 인프라는 kubernetes, kubevirt, vSphere, Ansible
+    - 작업의 종류
+      1. 대상 인프라의 구성 정보제공, 아키텍처 분석, 현황 파악(비파괴성 인벤토리 Read)
+      2. 변경 작업(TBD)
+        2.1. Kubernetes
+          - Requirements
+            - 대상 manifests : RoleBinding, Group/Users(OKD only), Namespace(Project), Deployments(Deployment, Statefulset, DaemonSet, DeploymentConfig(OKD Only)), ServiceAccount, ConfigMap/Secret, PersistentVolumeClaim, Service, Route/Ingress, EgressIP(OKD 버전에 따라, 4.15 이하(ovs) : netnamespace, hostsubnet, 4.18 이상(ovn) : EgressIP)
+            - 대상 manifests 별 하위 Requirements
+              - Namespace
+                - 변경 대상 값 : ex) DisplayName, ResourceQuota, EgressIP 지정 등
+                - ResourceQuota 정보
+                  - CPU/MEM capacity
+                  - Pod 개수 Limit(옵션)
+              - Group/Users(OKD only)
+                - 그룹에 할당할 그룹명/사용자
+              - RoleBinding
+                - role 할당(OKD 인 경우 ["admin", "cru-damin", "view", "edit"], 일반 K8S 인 경우 ["admin", "view", "edit"])
+              - Deployments
+                - 변경 대상 값 : ex) 이미지 경로, Resources, Replicas, updateStrategy, serviceAccount 등
+                - sidecar/initcontainer 추가의 경우 이미지 경로 및 컨테이너 이름
+              - ServiceAccount SCC | rolebinding
+                - scc 의 종류 및 할당할 serviceAccount 정보 또는 할당하고자 하는 rolebinding 정보
+              - ConfigMap/Secret
+                - 변경할 내용(manifest 의 이름과 config, env 값등)
+              - PersistentVolumeClaim
+                - 변경하고자 하는 pvc 이름, capacity
+              - Service
+                - type 변경 정보(ClusterIP, NodePort)
+              - Route/Ingress 인증서 갱신(OKD 인 경우 Route 만)
+                - 인증서 원본, 반영 시각
+        2.2. KubeVirt
+          - Requirements
+            - 2.2.1. 포함
+            - 변경이 필요한 VM 정보와 변경할 자원의 종류와 capacity
+        2.3. vSphere
+          - Requitements
+            - 변경 대상 VM과 변경 대상 자원(CPU/MEM/DISK)
+            - Power On/Off/재시작(VM state/phase 변경) 할 VM 정보
+
+      3. 생성 작업(TBD)
+        3.1. Kubernetes
+          - Requirements
+            - 대상 manifests : RoleBinding, Group/Users(OKD only), Namespace(Project), Deployments(Deployment, Statefulset, DaemonSet, DeploymentConfig(OKD Only)), ServiceAccount, ConfigMap/Secret, PersistentVolumeClaim, Service, Route/Ingress, EgressIP(OKD 버전에 따라, 4.15 이하(ovs) : netnamespace, hostsubnet, 4.18 이상(ovn) : EgressIP)
+            - 대상 manifests 별 하위 Requirements
+              - Namespace
+                - 이름, DisplayName, ResourceQuota 등
+                - ResourceQuota 정보
+                  - CPU/MEM capacity
+                  - Pod 개수 Limit(옵션)
+              - Group/Users(OKD only)
+                - 신규 생성할 그룹, 할당할 사용자
+              - RoleBinding
+                - role 할당(OKD 인 경우 ["admin", "cru-damin", "view", "edit"], 일반 K8S 인 경우 ["admin", "view", "edit"])
+              - Deployments
+                - 이름, 이미지, replicas, updateStrategy, serviceAccount 정보 등
+              - ServiceAccount 
+                - 이름, 할당할 scc, rolebinding
+              - ConfigMap/Secret
+                - 이름, config, env 값을 정의한 파일 내용
+              - PersistentVolumeClaim
+                - 이름, capacity, storageclass
+              - Service
+                - expose 대상 deployment
+                - port
+                - target-port(옵션)
+              - Route/Ingress(OKD 인 경우 Route 만)
+                - 이름, 서비스도메인(hostname), forward service, forward path
+                - insecure 여부, secure인 경우 인증서 정보
+        3.2. KubeVirt
+          - Requirements
+            - 3.2.1. 포함
+            - 생성할 VM 정보
+              - hostname
+              - IP
+              - OS(베이스이미지)
+              - CPU/MEM/DISK
+        3.3. vSphere
+          - Requitements
+            - 생성할 VM 정보
+              - hostname
+              - IP
+              - OS(베이스이미지)
+              - CPU/MEM/DISK
+        
+

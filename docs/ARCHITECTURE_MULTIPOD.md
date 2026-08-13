@@ -11,9 +11,10 @@ embedded SQLite·로컬 파일·인메모리 스케줄러를 **공유 DB + Redis
 Ingress/Route
   ├─ frontend (Deployment, replicas N, HPA)     # 정적 nginx
   └─ backend-api (Deployment, replicas N, HPA) # FastAPI only
-backend-worker (Deployment, replicas 1)        # scrape / job / mynote flush
+backend-worker (Deployment, replicas 1)        # scrape / job / mynote flush / mail receive
 PostgreSQL  ← API + worker
 Redis       ← 세션·노트 버퍼·입력 히스토리·(선택) 분산 락
+Shared PVC  ← 수신 메일 첨부 (`RECEIVED_MAIL_ATTACHMENT_HOME`, api+worker 마운트)
 ```
 
 환경변수:
@@ -25,6 +26,8 @@ Redis       ← 세션·노트 버퍼·입력 히스토리·(선택) 분산 락
 | `REDIS_URL` | 공유 Redis |
 | `MY_NOTES_CONTENT_BACKEND` | `file` \| `database` |
 | `USER_COMM_LOG_BACKEND` | `file` \| `stdout` |
+| `RECEIVED_MAIL_ATTACHMENT_HOME` | 수신 메일 첨부 루트 (`{home}/{uuid}/…`) |
+| `RECEIVED_MAIL_POLL_INTERVAL_SECONDS` | IMAP 폴링 주기(기본 30) |
 
 ## Phase 1 — PostgreSQL 접속·스키마
 
@@ -47,7 +50,7 @@ PostgreSQL 버전은 별도 고정하지 않으나 운영은 **14/15+** 권장.
 ## Phase 2 — Worker 분리
 
 - `BACKEND_ROLE=api`: job processor / mynote flush / k8s scrape **미기동**
-- `BACKEND_ROLE=worker`: 위 루프만 기동 + `/healthz` (프로브용 최소 앱)
+- `BACKEND_ROLE=worker`: 위 루프만 기동 + `/healthz` (프로브용 최소 앱) — IMAP 수신 폴링 포함
 - `BACKEND_ROLE=all`: 현행(단일 프로세스) — 로컬 개발 기본
 
 이미지 엔트리포인트: `BACKEND_ROLE`에 따라 `backend.app.main:app` 또는 `backend.app.worker:app`.

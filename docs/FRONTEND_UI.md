@@ -155,7 +155,7 @@ flowchart LR
     S --> S3[About]
 ```
 
-**관리자 작업:** postman · (목업)LLM 변경(`runtime_mode`가 mock/local일 때만) · Whatap 이벤트 테스트 · 인프라 구성 · 메일 서버 설정 · 테스트 메일 발송 · 테이블 조회(디버깅)
+**관리자 작업:** postman · (목업)LLM 변경(`runtime_mode`가 mock/local일 때만) · Whatap 이벤트 테스트 · 인프라 구성 · 메일 서버 설정 · 테스트 메일 발송 · **수신메일 목록(디버깅)** · 테이블 조회(디버깅)
 
 **우측:** 시각 · 세션 남은 시간(≤5분 연장) · 사용자명(`ProfileEditModal`) · 로그아웃
 

@@ -21,7 +21,7 @@ spec:
     spec:
       containers:
         - name: worker
-          image: ora01000/project-a-backend:pg260811
+          image: ora01000/project-a-backend:pg260813
           imagePullPolicy: Always
           ports:
             - name: http
@@ -51,6 +51,18 @@ spec:
                 configMapKeyRef:
                   name: ax-platform-config
                   key: TZ
+                  optional: true
+            - name: RECEIVED_MAIL_ATTACHMENT_HOME
+              valueFrom:
+                configMapKeyRef:
+                  name: ax-platform-config
+                  key: RECEIVED_MAIL_ATTACHMENT_HOME
+                  optional: true
+            - name: RECEIVED_MAIL_POLL_INTERVAL_SECONDS
+              valueFrom:
+                configMapKeyRef:
+                  name: ax-platform-config
+                  key: RECEIVED_MAIL_POLL_INTERVAL_SECONDS
                   optional: true
             - name: DATABASE_URL
               valueFrom:

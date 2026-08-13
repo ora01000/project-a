@@ -3,7 +3,24 @@
 프로젝트 최초 개발일(2026-07-08) 이후 변경 이력을 **최근순**으로 요약합니다.  
 출처: git 커밋, `ADDITIONAL_PLAN.md`, 워킹 트리 반영분(2026-07-15~18).
 
-**현재 버전:** 1.5 / 릴리즈 `260811`
+**현재 버전:** 1.5 / 릴리즈 `260813`
+
+---
+
+## 2026-08-13 — 메일 수신·JOB_DECISION (`260813` / `pg260813`)
+
+### 메일 수발신
+- 리포트 메일: 미등록 이메일 직접 입력(칩, `;`/`,`/공백)
+- 메일 서버 설정: **메일 수신 활성화** + IMAP 호스트/포트/SSL
+- IMAP 폴링(기본 30초, worker/`BACKEND_ROLE=all`): `received_mail` 저장, 텍스트·인증서 첨부만 `{RECEIVED_MAIL_ATTACHMENT_HOME}/{uuid}/`
+- `decision_type`: `0` 대기, `5` 자료부족, `10` 작업 대상, `11` 비작업
+- API: `GET /api/received-mail`, `GET /api/received-mail/{uuid}`, `GET .../attachments/{filename}` (관리자)
+- 관리자 디버깅: 환경설정 → 관리자 작업 → **수신메일 목록(디버깅)**
+- 정적 에이전트 **`JOB_DECISION_AGENT`**: INFRA_GAP_ANALYSIS와 동일 LLM, AXIT 미사용, skill=`job_scope.md`
+  - `GET/POST /api/job-decision-agent/{status,invoke,evaluate}` — received_mail → decision_type(5/10/11)
+
+### 문서
+- Control Plane/UI/mock/disabled 에이전트 docs 현행화, 미사용 `lib/hsqldb.jar` 제거
 
 ---
 

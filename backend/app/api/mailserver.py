@@ -1,4 +1,4 @@
-"""Admin API for SMTP mailserver_config and test send."""
+"""Admin API for SMTP/IMAP mailserver_config and test send."""
 
 from __future__ import annotations
 
@@ -38,6 +38,10 @@ class MailserverConfigResponse(BaseModel):
     use_tls: bool = True
     use_ssl: bool = False
     timeout_seconds: float = 30.0
+    receive_enabled: bool = False
+    imap_host: str = ""
+    imap_port: int = 993
+    imap_use_ssl: bool = True
     updated_at: str = ""
     has_password: bool = False
     suggested_profile: str = "gmail"
@@ -56,6 +60,10 @@ class MailserverConfigUpdateRequest(BaseModel):
     use_tls: bool = True
     use_ssl: bool = False
     timeout_seconds: float = Field(default=30.0, gt=0)
+    receive_enabled: bool = False
+    imap_host: str = ""
+    imap_port: int = Field(default=993, ge=1, le=65535)
+    imap_use_ssl: bool = True
 
 
 class MailTestRequest(BaseModel):
@@ -81,6 +89,10 @@ def _to_response(row) -> MailserverConfigResponse:
                 smtp_auth=True,
                 use_tls=True,
                 use_ssl=False,
+                receive_enabled=False,
+                imap_host="imap.gmail.com",
+                imap_port=993,
+                imap_use_ssl=True,
                 suggested_profile=profile,
             )
         return MailserverConfigResponse(
@@ -90,6 +102,10 @@ def _to_response(row) -> MailserverConfigResponse:
             smtp_auth=True,
             use_tls=True,
             use_ssl=False,
+            receive_enabled=False,
+            imap_host="",
+            imap_port=993,
+            imap_use_ssl=True,
             suggested_profile=profile,
         )
     return MailserverConfigResponse(
@@ -102,6 +118,10 @@ def _to_response(row) -> MailserverConfigResponse:
         use_tls=row.use_tls,
         use_ssl=row.use_ssl,
         timeout_seconds=row.timeout_seconds,
+        receive_enabled=row.receive_enabled,
+        imap_host=row.imap_host,
+        imap_port=row.imap_port,
+        imap_use_ssl=row.imap_use_ssl,
         updated_at=row.updated_at,
         has_password=row.has_password,
         suggested_profile=profile,
@@ -127,6 +147,10 @@ async def admin_put_mailserver_config(
         raise HTTPException(status_code=400, detail="발신 주소를 입력해 주세요.")
     if payload.smtp_auth and not payload.smtp_username.strip():
         raise HTTPException(status_code=400, detail="SMTP 인증 사용 시 사용자명을 입력해 주세요.")
+    if payload.receive_enabled and not payload.imap_host.strip():
+        raise HTTPException(status_code=400, detail="메일 수신 활성화 시 IMAP 호스트를 입력해 주세요.")
+    if payload.receive_enabled and not payload.smtp_username.strip():
+        raise HTTPException(status_code=400, detail="메일 수신 활성화 시 계정 사용자명을 입력해 주세요.")
     row = save_mailserver_config(
         request.app.state.database_path,
         enabled=payload.enabled,
@@ -139,6 +163,10 @@ async def admin_put_mailserver_config(
         use_tls=payload.use_tls,
         use_ssl=payload.use_ssl,
         timeout_seconds=payload.timeout_seconds,
+        receive_enabled=payload.receive_enabled,
+        imap_host=payload.imap_host,
+        imap_port=payload.imap_port,
+        imap_use_ssl=payload.imap_use_ssl,
     )
     return _to_response(row)
 

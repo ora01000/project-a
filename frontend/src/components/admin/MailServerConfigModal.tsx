@@ -17,6 +17,10 @@ interface MailserverConfig {
   use_tls: boolean;
   use_ssl: boolean;
   timeout_seconds: number;
+  receive_enabled: boolean;
+  imap_host: string;
+  imap_port: number;
+  imap_use_ssl: boolean;
   updated_at: string;
   has_password: boolean;
   suggested_profile: string;
@@ -40,6 +44,10 @@ export function MailServerConfigModal({ viewerRole, onClose }: MailServerConfigM
   const [useTls, setUseTls] = useState(true);
   const [useSsl, setUseSsl] = useState(false);
   const [timeoutSeconds, setTimeoutSeconds] = useState(30);
+  const [receiveEnabled, setReceiveEnabled] = useState(false);
+  const [imapHost, setImapHost] = useState("");
+  const [imapPort, setImapPort] = useState(993);
+  const [imapUseSsl, setImapUseSsl] = useState(true);
   const [updatedAt, setUpdatedAt] = useState("");
   const [suggestedProfile, setSuggestedProfile] = useState("gmail");
   const [error, setError] = useState<string | null>(null);
@@ -71,6 +79,10 @@ export function MailServerConfigModal({ viewerRole, onClose }: MailServerConfigM
         setUseTls(data.use_tls);
         setUseSsl(data.use_ssl);
         setTimeoutSeconds(data.timeout_seconds);
+        setReceiveEnabled(Boolean(data.receive_enabled));
+        setImapHost(data.imap_host || (data.suggested_profile === "gmail" ? "imap.gmail.com" : ""));
+        setImapPort(data.imap_port || 993);
+        setImapUseSsl(data.imap_use_ssl !== false);
         setUpdatedAt(data.updated_at);
         setHasPassword(data.has_password);
         setSuggestedProfile(data.suggested_profile);
@@ -82,6 +94,15 @@ export function MailServerConfigModal({ viewerRole, onClose }: MailServerConfigM
       }
     })();
   }, [viewerRole]);
+
+  const handleReceiveToggle = (checked: boolean) => {
+    setReceiveEnabled(checked);
+    if (checked && !imapHost.trim() && suggestedProfile === "gmail") {
+      setImapHost("imap.gmail.com");
+      setImapPort(993);
+      setImapUseSsl(true);
+    }
+  };
 
   const handleSave = async () => {
     if (!hasAdminAccess(viewerRole)) {
@@ -106,6 +127,10 @@ export function MailServerConfigModal({ viewerRole, onClose }: MailServerConfigM
           use_tls: useTls,
           use_ssl: useSsl,
           timeout_seconds: timeoutSeconds,
+          receive_enabled: receiveEnabled,
+          imap_host: imapHost,
+          imap_port: imapPort,
+          imap_use_ssl: imapUseSsl,
         }),
       });
       if (!response.ok) {
@@ -114,6 +139,10 @@ export function MailServerConfigModal({ viewerRole, onClose }: MailServerConfigM
       const data = (await response.json()) as MailserverConfig;
       setUpdatedAt(data.updated_at);
       setHasPassword(data.has_password);
+      setReceiveEnabled(Boolean(data.receive_enabled));
+      setImapHost(data.imap_host);
+      setImapPort(data.imap_port);
+      setImapUseSsl(data.imap_use_ssl);
       setSmtpPassword("");
       setInfo("저장되었습니다.");
     } catch (err) {
@@ -125,8 +154,8 @@ export function MailServerConfigModal({ viewerRole, onClose }: MailServerConfigM
 
   const profileHint =
     suggestedProfile === "gmail"
-      ? "목업/로컬: Gmail SMTP(smtp.gmail.com:587, TLS) 사용을 권장합니다. 앱 비밀번호가 필요할 수 있습니다."
-      : "배포(http): 내부 SMTP 호스트를 입력하세요.";
+      ? "목업/로컬: Gmail SMTP(smtp.gmail.com:587) / IMAP(imap.gmail.com:993) 사용을 권장합니다. 앱 비밀번호가 필요할 수 있습니다."
+      : "배포(http): 내부 SMTP·IMAP 호스트를 입력하세요.";
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 px-4">
@@ -269,6 +298,52 @@ export function MailServerConfigModal({ viewerRole, onClose }: MailServerConfigM
                 className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1.5 font-mono text-slate-100"
               />
             </label>
+
+            <div className="rounded-md border border-slate-700 bg-slate-950/50 p-3 space-y-3">
+              <label className="flex items-center gap-2 text-slate-200">
+                <input
+                  type="checkbox"
+                  checked={receiveEnabled}
+                  onChange={(event) => handleReceiveToggle(event.target.checked)}
+                />
+                메일 수신 활성화
+              </label>
+              <p className="text-[10px] text-slate-500">
+                활성화 시 동일 계정(사용자명/비밀번호)으로 IMAP 수신을 사용합니다. worker(또는
+                BACKEND_ROLE=all)가 약 30초마다 UNSEEN 메일을 수집해 DB·첨부 경로에 저장합니다.
+              </p>
+              {receiveEnabled ? (
+                <>
+                  <label className="block space-y-1">
+                    <span className="text-slate-400">IMAP 호스트</span>
+                    <input
+                      type="text"
+                      value={imapHost}
+                      onChange={(event) => setImapHost(event.target.value)}
+                      className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1.5 font-mono text-slate-100"
+                      placeholder="imap.gmail.com"
+                    />
+                  </label>
+                  <label className="block space-y-1">
+                    <span className="text-slate-400">IMAP 포트</span>
+                    <input
+                      type="number"
+                      value={imapPort}
+                      onChange={(event) => setImapPort(Number(event.target.value) || 993)}
+                      className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1.5 font-mono text-slate-100"
+                    />
+                  </label>
+                  <label className="flex items-center gap-2 text-slate-200">
+                    <input
+                      type="checkbox"
+                      checked={imapUseSsl}
+                      onChange={(event) => setImapUseSsl(event.target.checked)}
+                    />
+                    IMAP SSL
+                  </label>
+                </>
+              ) : null}
+            </div>
           </div>
         )}
 

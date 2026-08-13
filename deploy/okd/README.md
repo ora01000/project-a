@@ -13,8 +13,11 @@
 #   5. Route/Ingress to ax-frontend (and webhook paths to ax-backend-api as needed)
 #
 # Roles:
-#   BACKEND_ROLE=api    → FastAPI only (no scrape/job/mynote loops)
+#   BACKEND_ROLE=api    → FastAPI only (no scrape/job/mynote/mail-receive loops)
 #   BACKEND_ROLE=worker → background loops only (replicas must stay 1)
 #   BACKEND_ROLE=all    → single-process (local / legacy)
+#
+# Received mail attachments (api+worker share the same path via PVC):
+#   RECEIVED_MAIL_ATTACHMENT_HOME=/var/lib/ax-platform/received-mail
 #
 # See docs/ARCHITECTURE_MULTIPOD.md
