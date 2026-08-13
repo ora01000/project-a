@@ -451,7 +451,7 @@ export function JobMgmtTab({ active, currentUser }: JobMgmtTabProps) {
                               event.stopPropagation();
                               toggleRightPanel("audit", job.idx);
                             }}
-                            className={`rounded-md border px-2 py-1 text-[10px] font-medium transition-colors ${
+                            className={`inline-flex h-5 items-center rounded border px-1.5 text-[10px] font-medium leading-none transition-colors ${
                               isAuditOpen
                                 ? "border-violet-500 bg-violet-950/70 text-violet-50"
                                 : "border-violet-700/80 bg-violet-950/40 text-violet-100 hover:border-violet-500 hover:bg-violet-950/60"
