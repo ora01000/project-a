@@ -125,10 +125,13 @@ def create_mynote(
         resolved_name = resolved_name[:NOTE_NAME_MAX_LENGTH]
 
     origin_file = build_origin_file_relative(safe_userid, create_date)
-    file_path = resolve_origin_file_path(origin_file)
-    file_path.parent.mkdir(parents=True, exist_ok=True)
-    if not file_path.exists():
-        file_path.write_text("", encoding="utf-8")
+    # File backend keeps a durable empty md; database backend stores body in
+    # mynote_contents and only keeps origin_file as a legacy path key.
+    if _mynote_content_backend() == "file":
+        file_path = resolve_origin_file_path(origin_file)
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        if not file_path.exists():
+            file_path.write_text("", encoding="utf-8")
 
     with get_connection(database_path) as connection:
         ensure_mynote_name_column_width(connection)
@@ -145,6 +148,8 @@ def create_mynote(
     created = get_mynote_by_idx(database_path, note_idx)
     if created is None:
         raise RuntimeError("Failed to load created mynote record")
+    if _mynote_content_backend() == "database":
+        write_mynote_content_db(database_path, created, "")
     return created
 
 
