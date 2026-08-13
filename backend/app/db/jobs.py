@@ -151,6 +151,22 @@ def get_job_by_idx(database_path: str | Path, idx: int) -> JobRecord | None:
     return _row_to_job(row)
 
 
+def can_view_job(*, job: JobRecord, viewer_userid: str, viewer_role: int) -> bool:
+    """Admin sees all jobs; general users see requester/approver jobs and Whatap events."""
+    if is_admin_role(viewer_role):
+        return True
+    if int(job.job_type) == JOB_TYPE_SIGNUP:
+        return False
+    if int(job.job_type) == JOB_TYPE_WHATAP:
+        return True
+    viewer = viewer_userid.strip()
+    if not viewer:
+        return False
+    if (job.madang_id or "").strip() == viewer:
+        return True
+    return (job.approver or "").strip() == viewer
+
+
 def list_jobs(
     database_path: str | Path,
     *,
@@ -160,6 +176,8 @@ def list_jobs(
     job_type: int | None = None,
     exclude_status_code: int | None = None,
     exclude_job_type: int | None = None,
+    viewer_userid: str | None = None,
+    viewer_role: int | None = None,
 ) -> list[JobRecord]:
     clauses: list[str] = []
     params: list[object] = []
@@ -181,6 +199,14 @@ def list_jobs(
     if approver is not None and approver.strip():
         clauses.append("approver = ?")
         params.append(approver.strip())
+
+    if viewer_role is not None and not is_admin_role(viewer_role):
+        viewer = (viewer_userid or "").strip()
+        if not viewer:
+            return []
+        # requester (madang_id), approver, or Whatap event jobs
+        clauses.append("(madang_id = ? OR approver = ? OR job_type = ?)")
+        params.extend([viewer, viewer, JOB_TYPE_WHATAP])
 
     where_sql = f"WHERE {' AND '.join(clauses)}" if clauses else ""
     with get_connection(database_path) as connection:

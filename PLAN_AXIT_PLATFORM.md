@@ -1688,3 +1688,32 @@ JOB_DECISION_AGENT 정의 (완료)
               - CPU/MEM/DISK
         
 
+# 로그 관리 보완 - 로직 확인이 필요하여 보류로 남김 - 260813
+사용자 대화 로그 보관 정책
+- USER_COMM_LOG_RETENTION_DAY 환경변수, default 30
+- USER_COMM_LOG_RETENTION_DAY 이전 로그는 삭제
+에이전트 로그 보관 정책
+- whatap 이벤트 수신을 제외한 에이전트 로그는 현재 코드에서 참조가 없을 경우(write 만 하는 경우) 수집하지 않음
+- whatap 이벤트 로그는 일별 로테이션
+- WHATAP_EVENT_LOG_RETENTION_DAY 환경변수, default 30
+- WHATAP_EVENT_LOG_RETENTION_DAY 이전 로그는 삭제
+
+
+# 상세정보 패널 > 작업 관리 탭 화면 구현 ✅
+users.role = 0 | 100 (관리자)는 모든 jobs 를 조회할 수 있다. users.role = 1 (일반)인 경우 1)자신이 requester 이거나, approver 인 경우, 그리고 job_type = 2(Whatap 이벤트) 인 경우 조회할 수 있다
+- jobs 테이블 출력
+- 탭 패널 하단에 페이징, 표시 개수 선택 박스 배치
+
+- AI검토 열 추가 ✅
+  - ai_audit_cnt > 0 인 경우, AI검토내용 버튼을 배치, 클릭시 동적으로 오른쪽 패널 생성, ai_audit_date와 ai_audit_comment의 내용을 렌더링해서 출력, 동적으로 생성된 패널은 닫기 버튼이 있고, 닫을 경우 동적으로 패널 사라짐
+
+- 유형(job_type) 한글 표현 ✅
+  1 = 작업요청서
+  10 = 가입신청
+  2 = Whatap이벤트
+
+- 승인자 컬럼 : userid -> {이름}" "{조직} ✅
+- 필터 버튼 - 테이블 상단 오른쪽에 상태(status_code) 필터 버튼을 둔다. 텍스트레이블 버튼으로 생성(전체 버튼 포함, default) ✅
+
+- 유형, 상태, 요청자, 요청일 헤더 컬럼 정렬 기능 추가 ✅
+- 행을 클릭하면 AI검토내용 버튼과 동일하게 동적으로 오른쪽 패널 생성, job의 상세 내용과, job_result가 있는 경우 함께 출력한다. ✅

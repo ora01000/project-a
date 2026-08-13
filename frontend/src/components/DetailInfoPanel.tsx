@@ -4,6 +4,7 @@ import type { AuthUser } from "../types/auth";
 import { WHATAP_EVENT_LOG_SOURCE } from "../types/agent-log";
 import { hasAdminAccess } from "../types/user";
 import { AgentLogsPanel } from "./AgentLogsPanel";
+import { JobMgmtTab } from "./jobs/JobMgmtTab";
 import { JobWorkflowPanel } from "./JobWorkflowPanel";
 
 interface DetailInfoPanelProps {
@@ -20,7 +21,7 @@ const ALL_TABS: { id: DetailTab; label: string; adminOnly?: boolean }[] = [
   { id: "workflow", label: "작업 진행" },
   { id: "whatap", label: "Whatap 이벤트 감지" },
   { id: "logs", label: "대화로그" },
-  { id: "job-mgmt", label: "작업 관리", adminOnly: true },
+  { id: "job-mgmt", label: "작업 관리" },
 ];
 
 const GENERAL_LOG_EXCLUDE_AGENT_IDS = [WHATAP_EVENT_LOG_SOURCE];
@@ -208,10 +209,8 @@ export function DetailInfoPanel({
               loadingMessage="Whatap 이벤트 로그를 불러오는 중..."
               errorMessage="Whatap 이벤트 로그를 불러오지 못했습니다."
             />
-          ) : activeTab === "job-mgmt" && isAdmin ? (
-            <div className="flex h-full min-h-[120px] items-center justify-center rounded-md border border-dashed border-slate-700 bg-slate-950/40 text-sm text-slate-500">
-              TBD
-            </div>
+          ) : activeTab === "job-mgmt" ? (
+            <JobMgmtTab active={activeTab === "job-mgmt"} currentUser={currentUser} />
           ) : (
             <AgentLogsPanel
               currentUser={currentUser}

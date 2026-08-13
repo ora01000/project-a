@@ -19,6 +19,7 @@ from backend.app.db.jobs import (
     JobRecord,
     approve_assigned_job,
     assign_job_approver,
+    can_view_job,
     cancel_failed_job,
     direct_approve_job,
     get_job_by_idx,
@@ -182,6 +183,8 @@ async def list_job_records(
         job_type=job_type,
         exclude_status_code=exclude_status_code,
         exclude_job_type=JOB_TYPE_SIGNUP if _hide_signup_jobs_for_viewer(viewer.role) else None,
+        viewer_userid=viewer.userid,
+        viewer_role=viewer.role,
     )
     return [JobRecordResponse.from_record(record) for record in records]
 
@@ -245,7 +248,7 @@ async def get_job_record(request: Request, idx: int) -> JobRecordResponse:
     record = get_job_by_idx(database_path, idx)
     if record is None:
         raise HTTPException(status_code=404, detail="Job not found")
-    if record.job_type == JOB_TYPE_SIGNUP and _hide_signup_jobs_for_viewer(viewer.role):
+    if not can_view_job(job=record, viewer_userid=viewer.userid, viewer_role=viewer.role):
         raise HTTPException(status_code=404, detail="Job not found")
     return JobRecordResponse.from_record(record)
 

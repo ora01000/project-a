@@ -439,6 +439,9 @@
 [data-theme="light"] .hover\:bg-slate-800:hover {
   background-color: rgb(241 245 249);
 }
+[data-theme="light"] .hover\:bg-slate-800\/40:hover {
+  background-color: rgb(226 232 240 / 0.85);
+}
 [data-theme="light"] .hover\:bg-slate-800\/60:hover {
   background-color: rgb(241 245 249 / 0.6);
 }
