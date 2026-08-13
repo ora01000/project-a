@@ -90,14 +90,21 @@ class PostgresConnection:
         cursor.execute(converted, parameters or ())
         lastrowid: int | None = None
         if re.match(r"^\s*INSERT\b", converted, flags=re.IGNORECASE):
+            # LASTVAL() fails when the INSERT target has no serial/identity
+            # column (e.g. mynote_contents). Without a savepoint that error
+            # aborts the whole transaction and silently drops the INSERT on
+            # commit/rollback.
+            probe = self._raw.cursor()
+            probe.execute("SAVEPOINT ax_lastval_probe")
             try:
-                probe = self._raw.cursor()
                 probe.execute("SELECT LASTVAL()")
                 row = probe.fetchone()
                 if row is not None:
                     value = row[0] if not hasattr(row, "keys") else next(iter(row.values()))
                     lastrowid = int(value)
+                probe.execute("RELEASE SAVEPOINT ax_lastval_probe")
             except Exception:
+                probe.execute("ROLLBACK TO SAVEPOINT ax_lastval_probe")
                 lastrowid = None
         return PostgresCursor(cursor, lastrowid=lastrowid)
 

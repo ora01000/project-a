@@ -47,6 +47,9 @@ def build_mynote_filename(create_date: str) -> str:
 
 def build_origin_file_relative(userid: str, create_date: str) -> str:
     safe_userid = _sanitize_user_id(userid)
+    if _mynote_content_backend() == "database":
+        # Durable body lives in mynote_contents; keep a stable non-path marker.
+        return f"db://mynotes/{safe_userid}/{build_mynote_filename(create_date)}"
     return f"data/mynotes/{safe_userid}/{build_mynote_filename(create_date)}"
 
 
