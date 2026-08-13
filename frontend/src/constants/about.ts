@@ -1,8 +1,8 @@
 export const APP_NAME = "AX 인프라 운영 콘솔";
 
-export const APP_VERSION = "1.5";
+export const APP_VERSION = "1.6";
 /** 릴리즈 버전 (YYMMDD 형식) */
-export const APP_RELEASE = "260811";
+export const APP_RELEASE = "260813";
 /** @deprecated Use APP_RELEASE — kept for existing About field mapping */
 export const APP_BUILD_NUMBER = APP_RELEASE;
 

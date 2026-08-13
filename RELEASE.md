@@ -3,11 +3,11 @@
 프로젝트 최초 개발일(2026-07-08) 이후 변경 이력을 **최근순**으로 요약합니다.  
 출처: git 커밋, `ADDITIONAL_PLAN.md`, 워킹 트리 반영분(2026-07-15~18).
 
-**현재 버전:** 1.5 / 릴리즈 `260813`
+**현재 버전:** 1.6 / 릴리즈 `260813`
 
 ---
 
-## 2026-08-13 — 메일 수신·JOB_DECISION (`260813` / `pg260813`)
+## 2026-08-13 — 메일 수신·JOB_DECISION·작업 관리 (`260813` / `pg260813`)
 
 ### 메일 수발신
 - 리포트 메일: 미등록 이메일 직접 입력(칩, `;`/`,`/공백)
@@ -19,8 +19,22 @@
 - 정적 에이전트 **`JOB_DECISION_AGENT`**: INFRA_GAP_ANALYSIS와 동일 LLM, AXIT 미사용, skill=`job_scope.md`
   - `GET/POST /api/job-decision-agent/{status,invoke,evaluate}` — received_mail → decision_type(5/10/11)
 
+### 상세정보·작업 관리
+- 역할 기반 **작업 관리** 탭: 작업 목록·AI검토내용 패널·행 클릭 상세
+- `AI검토내용` 버튼이 테이블 행 높이를 키우지 않도록 축소
+
+### 나의 노트·대시보드 UX
+- 노트 저장 시 `mynote_contents` 즉시 반영(Redis 재기동 유실 완화), INSERT/LASTVAL 오류 수정
+- database 모드 빈 md 파일 생성 중단, 밝은 테마 hover·미리보기 기본 선택 보정
+- 에이전트 노드 목록·상세정보 패널 접기, 채팅 history 버튼 세로 배치
+- 공지 없을 때 WelcomeBack 생략
+
 ### 문서
 - Control Plane/UI/mock/disabled 에이전트 docs 현행화, 미사용 `lib/hsqldb.jar` 제거
+
+### 릴리즈
+- About: 버전 **1.6**, 릴리즈 **260813**
+- Docker 이미지 태그: `pg260813` (`linux/amd64`)
 
 ---
 
@@ -427,12 +441,12 @@
 | 항목 | 내용 |
 |------|------|
 | 제품명 | AX 인프라 운영 콘솔 |
-| 버전 | 1.5 |
-| 릴리즈 | 260811 |
+| 버전 | 1.6 |
+| 릴리즈 | 260813 |
 | 백엔드 이미지 | `ora01000/project-a-backend:<tag>` |
 | 프론트 이미지 | `ora01000/project-a-frontend:<tag>` |
 | 최근 태그 예 | `260805`, `260806`, `260807` |
-| multi-pod(Postgres) 태그 | `pgYYMMDD` (예: `pg260811`) — `dev-axplatform-multi-pod` 배포용 |
+| multi-pod(Postgres) 태그 | `pgYYMMDD` (예: `pg260813`) — `dev-axplatform-multi-pod` 배포용 |
 
 ---
 
