@@ -14,7 +14,7 @@ from backend.app.db.mynotes import (
     get_mynote_by_idx,
     list_mynotes,
     read_mynote_content,
-    touch_mynote_last_update,
+    save_mynote_content,
     update_mynote_name,
 )
 from backend.app.middleware.session_auth import get_request_auth_user
@@ -155,12 +155,15 @@ async def save_my_note_content(
         raise HTTPException(status_code=403, detail="Note does not belong to this user")
 
     try:
-        await set_mynote_content_in_redis(existing.userid, existing.note_name, body.content)
-        record = touch_mynote_last_update(
+        # Durable write-through first so Redis restart cannot drop unflushed edits.
+        # Redis remains the multi-pod edit cache; worker flush is a backup sync.
+        record = save_mynote_content(
             database_path,
             idx,
             userid=body.userid,
+            content=body.content,
         )
+        await set_mynote_content_in_redis(record.userid, record.note_name, body.content)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
