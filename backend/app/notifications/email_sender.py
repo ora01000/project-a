@@ -335,6 +335,53 @@ async def send_signup_rejection_email(
         return False
 
 
+SIGNUP_APPROVAL_ACCESS_URL = "http://axit.apps.pcicd-k8s.lguplus.co.kr"
+
+
+async def send_signup_approval_email(
+    *,
+    database_path: Path | str | None,
+    to_address: str,
+    username: str,
+    userid: str,
+    access_url: str = SIGNUP_APPROVAL_ACCESS_URL,
+) -> bool:
+    config = load_email_settings_from_db(database_path)
+    if config is None:
+        logger.warning("Signup approval email skipped for %s: mailserver_config missing", userid)
+        return False
+    validation_error = _validate_email_settings(config)
+    if validation_error:
+        logger.warning("Signup approval email skipped for %s: %s", userid, validation_error)
+        return False
+
+    recipient = to_address.strip()
+    if not recipient or "@" not in recipient:
+        logger.warning("Signup approval email skipped for %s: invalid email", userid)
+        return False
+
+    display_name = (username or "").strip() or userid
+    subject = "회원 가입 신청 승인 안내"
+    body = (
+        f"{display_name} 님이 신청하신 접속 권한 신청이 승인되었습니다.\n"
+        f"접속 경로는 {access_url} 입니다.\n"
+        "감사합니다."
+    )
+    try:
+        await asyncio.to_thread(
+            _send_email_sync,
+            config,
+            to_addresses=[recipient],
+            subject=subject,
+            body=body,
+        )
+        logger.info("Signup approval email sent to=%s", recipient)
+        return True
+    except Exception as exc:
+        logger.exception("Signup approval email failed to=%s: %s", recipient, exc)
+        return False
+
+
 WHATAP_SUBSCRIBER_FORWARD_MESSAGE = (
     "본 메일은 Whatap 이벤트 리포트 구독자에게 자동으로 발송하는 메일입니다."
 )

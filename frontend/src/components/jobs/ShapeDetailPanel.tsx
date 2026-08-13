@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+
+import { maskIpDisplayValue } from "../../utils/ipMask";
 
 type DetailCategory = "namespaces" | "nodes" | "vms";
 
@@ -60,6 +62,22 @@ interface ShapeDetailPanelProps {
   clusterName: string | null;
   infraType: string;
   active: boolean;
+  /** When true, mask last two IPv4 octets in the detail UI only. */
+  maskIps?: boolean;
+}
+
+const ShapeIpMaskContext = createContext(false);
+
+function useShapeIpMask(): boolean {
+  return useContext(ShapeIpMaskContext);
+}
+
+function displayIpValue(value: unknown, maskIps: boolean): string {
+  const text = displayValue(value);
+  if (text === "-" || !maskIps) {
+    return text;
+  }
+  return maskIpDisplayValue(text);
 }
 
 async function parseError(response: Response, fallback: string): Promise<string> {
@@ -228,7 +246,8 @@ function EgressIpCell({
   ip: unknown;
   usingEgressIp: unknown;
 }) {
-  const text = displayValue(ip);
+  const maskIps = useShapeIpMask();
+  const text = displayIpValue(ip, maskIps);
   if (text === "-") {
     return <span>-</span>;
   }
@@ -242,7 +261,7 @@ function EgressIpCell({
       </span>
     );
   }
-  return <span className="truncate">{text}</span>;
+  return <span className="truncate" title={text}>{text}</span>;
 }
 
 function SelectableNamespaceTable({
@@ -658,6 +677,7 @@ const VMS_ON_NODE_COLUMNS = [
 ];
 
 function VmsOnNodeTable({ rows }: { rows: Record<string, unknown>[] }) {
+  const maskIps = useShapeIpMask();
   const summaries = useMemo(() => buildKubevirtVmSummaries(rows), [rows]);
   if (rows.length === 0) {
     return <p className="text-[11px] text-slate-500">노드에 배치된 VM이 없습니다.</p>;
@@ -666,6 +686,9 @@ function VmsOnNodeTable({ rows }: { rows: Record<string, unknown>[] }) {
   const renderCell = (row: Record<string, unknown>, key: string) => {
     if (key === "cpu_cores" || key === "memory_gi") {
       return formatMetric(toNumber(row[key]));
+    }
+    if (key === "ip_address") {
+      return displayIpValue(row[key], maskIps);
     }
     return displayValue(row[key]);
   };
@@ -746,6 +769,7 @@ function SelectableVmTable({
   selectedIdx: number | null;
   onSelect: (idx: number) => void;
 }) {
+  const maskIps = useShapeIpMask();
   const summaries = useMemo(
     () => buildKubevirtVmSummaries(rows as unknown as Record<string, unknown>[]),
     [rows],
@@ -757,6 +781,9 @@ function SelectableVmTable({
   const renderCell = (row: Record<string, unknown>, key: string) => {
     if (key === "cpu_cores" || key === "memory_gi") {
       return formatMetric(toNumber(row[key]));
+    }
+    if (key === "ip_address") {
+      return displayIpValue(row[key], maskIps);
     }
     return displayValue(row[key]);
   };
@@ -842,16 +869,22 @@ function KeyValueGrid({
   data: Record<string, unknown>;
   keys: { key: string; label: string }[];
 }) {
+  const maskIps = useShapeIpMask();
   return (
     <dl className="grid grid-cols-2 gap-x-3 gap-y-1.5">
-      {keys.map((item) => (
-        <div key={item.key} className="min-w-0">
-          <dt className="text-[10px] text-slate-500">{item.label}</dt>
-          <dd className="truncate font-mono text-[11px] text-slate-100" title={displayValue(data[item.key])}>
-            {displayValue(data[item.key])}
-          </dd>
-        </div>
-      ))}
+      {keys.map((item) => {
+        const raw = data[item.key];
+        const text =
+          item.key === "ip_address" ? displayIpValue(raw, maskIps) : displayValue(raw);
+        return (
+          <div key={item.key} className="min-w-0">
+            <dt className="text-[10px] text-slate-500">{item.label}</dt>
+            <dd className="truncate font-mono text-[11px] text-slate-100" title={text}>
+              {text}
+            </dd>
+          </div>
+        );
+      })}
     </dl>
   );
 }
@@ -1233,6 +1266,7 @@ export function ShapeDetailPanel({
   clusterName,
   infraType,
   active,
+  maskIps = false,
 }: ShapeDetailPanelProps) {
   const [category, setCategory] = useState<DetailCategory | null>(null);
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
@@ -1405,6 +1439,7 @@ export function ShapeDetailPanel({
   }
 
   return (
+    <ShapeIpMaskContext.Provider value={maskIps}>
     <section className="flex h-full min-h-0 flex-col rounded-lg border border-slate-700/80 bg-slate-950/40 p-3">
       <h3 className="mb-2 shrink-0 text-xs font-semibold text-slate-300">상세정보</h3>
 
@@ -1565,5 +1600,6 @@ export function ShapeDetailPanel({
         </div>
       )}
     </section>
+    </ShapeIpMaskContext.Provider>
   );
 }

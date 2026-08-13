@@ -4,7 +4,10 @@ from pathlib import Path
 from backend.app.db.roles import ROLE_PENDING, ROLE_USER
 from backend.app.db.jobs import JobRecord, create_user_access_request_job
 from backend.app.db.users import User, create_user, delete_users, get_user_by_idx, get_user_by_userid, update_user
-from backend.app.notifications.email_sender import send_signup_rejection_email
+from backend.app.notifications.email_sender import (
+    send_signup_approval_email,
+    send_signup_rejection_email,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +58,19 @@ def approve_signup(database_path: Path, user_idx: int) -> User | None:
     )
     logger.info("Signup approved for userid=%s", user.userid)
     return updated
+
+
+async def notify_signup_approved(database_path: Path, user: User) -> None:
+    """Best-effort approval notice to the requester; does not raise on mail failure."""
+    try:
+        await send_signup_approval_email(
+            database_path=database_path,
+            to_address=user.email,
+            username=user.username,
+            userid=user.userid,
+        )
+    except Exception:
+        logger.exception("Signup approval email notify failed for userid=%s", user.userid)
 
 
 def approve_pending_user_for_signup_job(database_path: Path, job: JobRecord) -> User | None:

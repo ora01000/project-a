@@ -37,6 +37,7 @@ interface ShapeAnalysis {
 
 interface InfraShapeTabProps {
   active: boolean;
+  maskIps?: boolean;
   onCopyToNote?: (content: string, noteName?: string) => Promise<void>;
 }
 
@@ -249,7 +250,7 @@ function ShapeTrendChart({
   );
 }
 
-export function InfraShapeTab({ active, onCopyToNote }: InfraShapeTabProps) {
+export function InfraShapeTab({ active, maskIps = false, onCopyToNote }: InfraShapeTabProps) {
   const [clusters, setClusters] = useState<ShapeCluster[]>([]);
   const [selectedName, setSelectedName] = useState<string | null>(null);
   const [analysis, setAnalysis] = useState<ShapeAnalysis | null>(null);
@@ -532,6 +533,7 @@ export function InfraShapeTab({ active, onCopyToNote }: InfraShapeTabProps) {
               active={active}
               clusterName={selectedName}
               infraType={selectedInfraType}
+              maskIps={maskIps}
             />
           )}
         </div>

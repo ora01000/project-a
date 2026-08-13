@@ -43,6 +43,8 @@ from backend.app.notifications.email_sender import (
     send_ax_infra_job_rejection_email,
     send_job_report_emails,
 )
+from backend.app.db.users import get_user_by_userid
+from backend.app.services.user_signup import notify_signup_approved
 from backend.app.services.agent_runtime_client import AgentInvokeRequest
 from backend.app.services.job_auditor import (
     build_job_review_message,
@@ -55,6 +57,19 @@ from backend.app.services.job_workflow import JobWorkflowItem, JobWorkflowStep, 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["jobs"])
+
+
+async def _notify_signup_job_approved(database_path, job: JobRecord) -> None:
+    if job.job_type != JOB_TYPE_SIGNUP:
+        return
+    userid = (job.madang_id or "").strip()
+    if not userid:
+        return
+    user = get_user_by_userid(database_path, userid)
+    if user is None:
+        logger.warning("Signup approval email skipped: user not found for madang_id=%s", userid)
+        return
+    await notify_signup_approved(database_path, user)
 
 
 class JobIntakeRequest(BaseModel):
@@ -456,6 +471,7 @@ async def direct_approve_job_endpoint(
     except Exception as exc:
         logger.exception("Job direct approve failed")
         raise HTTPException(status_code=500, detail="Failed to direct approve job") from exc
+    await _notify_signup_job_approved(database_path, record)
     return JobRecordResponse.from_record(record)
 
 
@@ -485,6 +501,7 @@ async def approve_job_review(
     except Exception as exc:
         logger.exception("Job approve failed")
         raise HTTPException(status_code=500, detail="Failed to approve job") from exc
+    await _notify_signup_job_approved(database_path, record)
     return JobRecordResponse.from_record(record)
 
 

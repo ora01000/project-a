@@ -41,13 +41,16 @@ def next_sr_sequence(connection, request_date: str) -> int:
     prefix = f"SR{yyyymmdd}_"
     row = connection.execute(
         """
-        SELECT MAX(CAST(SUBSTR(srnum, -5) AS INTEGER))
+        SELECT MAX(CAST(SUBSTR(srnum, -5) AS INTEGER)) AS max_seq
         FROM jobs
         WHERE srnum LIKE ?
         """,
         (f"{prefix}%",),
     ).fetchone()
-    current_max = int(row[0]) if row is not None and row[0] is not None else 0
+    if row is None:
+        return 1
+    raw = row["max_seq"] if hasattr(row, "keys") else row[0]
+    current_max = int(raw) if raw is not None else 0
     return current_max + 1
 
 

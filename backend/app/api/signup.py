@@ -6,6 +6,7 @@ from backend.app.services.auth_provider import MADANG_EMAIL_DOMAINS
 from backend.app.notifications.email_sender import send_signup_request_admin_emails
 from backend.app.services.user_signup import (
     approve_signup,
+    notify_signup_approved,
     register_pending_user,
     reject_signup,
 )
@@ -93,6 +94,7 @@ async def approve_signup_user(user_idx: int, request: Request) -> dict[str, str]
 
     if updated is None:
         raise HTTPException(status_code=404, detail="사용자를 찾을 수 없습니다.")
+    await notify_signup_approved(database_path, updated)
     return {"status": "approved", "userid": updated.userid}
 
 

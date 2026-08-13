@@ -463,13 +463,14 @@ def _record_signup_job_approval_result(database_path: str | Path, job: JobRecord
     )
 
 
-def _finalize_signup_job_approval(database_path: str | Path, job: JobRecord) -> None:
+def _finalize_signup_job_approval(database_path: str | Path, job: JobRecord):
     if job.job_type != JOB_TYPE_SIGNUP:
-        return
+        return None
     from backend.app.services.user_signup import approve_pending_user_for_signup_job
 
-    approve_pending_user_for_signup_job(database_path, job)
+    approved_user = approve_pending_user_for_signup_job(database_path, job)
     _record_signup_job_approval_result(database_path, job)
+    return approved_user
 
 
 def assign_job_approver(
