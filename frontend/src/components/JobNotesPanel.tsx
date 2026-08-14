@@ -22,12 +22,12 @@ type JobNotesTab =
   | "infra-shape";
 
 const TABS: { id: JobNotesTab; label: string }[] = [
+  { id: "infra-shape", label: "인프라 형상" },
   { id: "review", label: "작업 검토" },
   { id: "my-review", label: "나의 검토작업" },
   { id: "my-results", label: "나의 작업결과" },
   { id: "whatap-report", label: "Whatap 이벤트 리포트" },
   { id: "rejected-jobs", label: "반려된 작업" },
-  { id: "infra-shape", label: "인프라 형상" },
   { id: "my-notes", label: "나의 노트" },
 ];
 
@@ -72,7 +72,7 @@ export function JobNotesPanel({
   currentUser,
   onCopyToNoteReady,
 }: JobNotesPanelProps) {
-  const [activeTab, setActiveTab] = useState<JobNotesTab>("review");
+  const [activeTab, setActiveTab] = useState<JobNotesTab>("infra-shape");
   const myNotes = useMyNotes(currentUser, activeTab === "my-notes");
 
   const handleCopyToNote = useCallback(

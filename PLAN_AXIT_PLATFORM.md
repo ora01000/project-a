@@ -1213,6 +1213,8 @@ dev-axplatform-multi-pod 는 목업(로컬)/http(서버) 환경 모두 postgres�
       - host_id varchar(30)
       - host_name / connection_state / power_state
       - cluster_id varchar(30)  — vsphere_cluster.cluster_id (standalone이면 NULL)
+      - cpu_count INTEGER  — ESXi 물리 코어 (`HostSystem.summary.hardware.numCpuCores`)
+      - memory_mib INTEGER — 호스트 메모리 MiB (`summary.hardware.memorySize`)
     - {infra_cluster.cluster_name}_vsphere_vms_on_host 테이블
       - vm_id varchar(30)
       - host_id varchar(30)
@@ -1720,3 +1722,119 @@ users.role = 0 | 100 (관리자)는 모든 jobs 를 조회할 수 있다. users.
 
 # 한시적 정보 보안 정책 - IP 정보 화면 마스킹
 - users.role = 1에 한해 인프라 형상의 상세정보에서 모든 IP 정보에 대해 뒤 2옥텟을 마스킹하여 표시 ✅
+
+# 인프 형상 용량 집계 차트 추가
+인프라 형상 탭의 형상 추이 차트 위에 "클러스터 용량", "노드(호스트)별 용량", "저장소 용량" 를 동일 row 에 배치한다.
+"클러스터 용량", "노드(호스트)별 용량" "저장소 용량" 의 가로 비율을 1:1:1 로 설정
+- 클러스터 용량
+  - kubernetes ✅
+    1. 클러스터 용량
+    - 소스 테이블 : {cluster_name}_k8s_nodes, {cluster_name}_k8s_deployments
+    - 집계 방식
+      - 클러스터의 가용 용량은 node_role 이 worker 또는 worker 라는 단어가 포함된 노드의 CPU/MEM을 합산한다.
+      - 목업환경에 한해, 모든 노드 합산한다.
+      - 사용량
+        - deployments 중 replicas > 0 인 resource_cpu_request, resource_mem_request 를 각각 합산한다. ✅
+        - deployments 중 replicas > 0 인 resource_cpu_limit, resource_mem_limit 을 각각 합산한다. ✅
+    2. 표현 방식
+      - 하나의 원형차트로 표시한다. 기준 값은 (request 합산}/{가용 용량} 이다.
+        - 바깥 링: CPU Request, 안쪽 링: MEM Request, 중앙에 CPU/MEM Request 비율 표시 ✅
+      - 차트 아래 Limit 기준 가상화 비율만 표시 (CPU / MEM) ✅
+  - kubevirt ✅
+    1. 클러스터 용량
+    - 소스 테이블 : {cluster_name}_kubevirt_nodes, {cluster_name}_kubevirt_deployments, {cluster_name}_kubevirt_vms
+    - 집계 방식
+      - 클러스터의 가용 용량은 node_role 이 worker 또는 worker 라는 단어가 포함된 노드의 CPU/MEM을 합산한다.
+      - 목업환경에 한해, 모든 노드 합산한다.
+      - 사용량
+        - deployments 중 replicas > 0 인 resource_cpu_request, resource_mem_request 를 각각 합산한다. vms 중 printable_status 가 "Running" 인 cpu / mem 을 각각 합산한다. ✅
+        - deployments 중 replicas > 0 인 resource_cpu_limit, resource_mem_limit 을 각각 합산한다. ✅
+        
+    2. 표현 방식
+      - 하나의 원형차트로 표시한다. 기준 값은 (request 합산}/{가용 용량} 이다.
+      - 차트 아래 Limit 기준 가상화 비율만 표시 (CPU / MEM) ✅
+      - VM의 합산과 deploy(pod) 의 합산을 구분되게 표시 -> 원복한다. ✅
+  - vSphere ✅
+    1. 클러스터(데이터센터) 용량
+    - 소스 테이블 : {cluster_name}_vsphere_hosts, {cluster_name}_vsphere_vms_on_host
+    - 집계 방식
+      - 클러스터의 가용 용량은 _vsphere_hosts 테이블의 cpu_count, memory_mib 를 합산한다. (MEM은 MiB→Gi)
+      - 사용량
+        - _vsphere_vms_on_host 중 power_state 가 POWERED_ON (PLAN의 POWER_ON 포함) 인 VM 의 cpu_count, memory_mib 를 합산
+    2. 표현 방식
+      - 하나의 원형차트로 표시한다. 기준 값은 {VM 합산}/{가용 용량} 이다.
+        - 바깥 링 : CPU, 안쪽 링 : MEM, 중앙에 CPU/MEM 비율 표시
+      - 차트 아래 가상화 비율만 표시(CPU / MEM) ✅ -> 용어 수정 : 오버커밋을 "가상화" 로 수정
+
+- 노드(호스트)별 용량
+  - kubernetes ✅
+    1. 노드별 용량
+    - 소스 테이블 : {cluster_name}_k8s_nodes 에서 node_role이 "worker" 또는 "worker"를 포함하는 노드, {cluster_name}_k8s_pods_on_nodes 테이블
+    - 집계 방식
+      - 노드의 전체 용량(CPU/MEM) 은 _k8s_nodes 의 node_cpu, node_mem
+      - 각 노드에 배치된 Pod의 cpu_request, mem_request 를 합산(request), cpu_limit, mem_limit 를 합산(limit)
+    2. 표현 방식
+      - {노드명} 비율을 표현하는 가로 bar 차트
+        - 가로 bar 차트는 위 아래 2단으로 나타내며 위는 cpu_request 합산 / node_cpu, 아래는 mem_request 합산 / node_me 
+        - 차트 가운데 "CPU "{비율(%)}, "MEM "{비율(%)} 표시
+      - 노드가 많을 경우 CPU 비율 기준 Top5 개만 출력한다 ✅
+      - 추가) 패널의 오른쪽 위에 CPU/MEM 정렬 버튼을 배치한다. 기본 CPU 내림차순이며 버튼을 누르면 토글된다. ✅
+      - 보완) 버튼의 동작은 한번 누를때마다 오름차순정렬/내림차순정렬이 토글된다. ✅
+      - 노드 이름이 길 수 있다. 레이아웃을 벗어나거나 wordwrap 이 될 경우 이름을 줄이고 툴팁으로 표시 ✅
+  - kubevirt ✅
+    1. 노드별 용량
+    - 소스 테이블 : {cluster_name}_kubevirt_nodes 에서 node_role이 "worker" 또는 "worker"를 포함하는 노드, {cluster_name}_kubevirt_pods_on_nodes, {cluster_name}_kubevirt_vms
+    - 집계 방식
+      - 노드의 전체 용량(CPU/MEM) 은 _kubevirt_nodes 의 node_cpu, node_mem
+      - 각 노드에 배치된 Pod의 cpu_request, mem_request 를 합산(request), cpu_limit, mem_limit 를 합산(limit)
+      - 각 노드에 배치된 VM(_kubevirt_vms 의 node_name 매칭)의 cpu_cores 를 CPU request 합산, memory_gi 를 MEM request 합산에 추가
+    2. 표현 방식
+      - {노드명} 비율을 표현하는 가로 bar 차트
+        - 가로 bar 차트는 위 아래 2단으로 나타내며 위는 CPU 합산 / node_cpu, 아래는 MEM 합산 / node_mem
+        - 차트 가운데 "CPU "{비율(%)}, "MEM "{비율(%)} 표시
+      - 노드가 많을 경우 CPU 비율 기준 Top5 개만 출력한다
+      - 추가) 패널의 오른쪽 위에 CPU/MEM 정렬 버튼을 배치한다. 기본 CPU 내림차순이며 버튼을 누르면 토글된다. ✅
+      - 보완) 버튼의 동작은 한번 누를때마다 오름차순정렬/내림차순정렬이 토글된다. ✅
+      - 노드 이름이 길 수 있다. 레이아웃을 벗어나거나 wordwrap 이 될 경우 이름을 줄이고 툴팁으로 표시
+  - vSphere ✅
+    1. 호스트별 용량
+    - 소스 테이블 : {cluster_name}_vsphere_hosts, {cluster_name}_vsphere_vms_on_host 중 power_state 가 POWERED_ON 인 VM
+    - 집계 방식
+      - 호스트 전체 용량(CPU/MEM) 은 _vsphere_hosts 의 cpu_count, memory_mib
+      - host_id 조인으로 각 호스트에 배치된 VM(POWERED_ON / POWER_ON) 의 cpu_count, memory_mib 을 호스트별로 합산
+    2. 표현 방식
+      - {호스트명} 비율을 표현하는 가로 bar 차트
+        - 가로 bar 차트는 위 아래 2단으로 나타내며 위는 CPU 합산 / 호스트의 cpu_count, 아래는 MEM 합산 / 호스트의 memory_mib
+        - 차트 가운데 "CPU "{비율(%)}, "MEM "{비율(%)} 표시
+      - 호스트가 많을 경우 CPU 비율 기준 Top5 개만 출력한다.
+      - 추가) 패널의 오른쪽 위에 CPU/MEM 정렬 버튼을 배치한다. 기본 CPU 내림차순이며 버튼을 누르면 토글된다. ✅
+      - 보완) 버튼의 동작은 한번 누를때마다 오름차순정렬/내림차순정렬이 토글된다. ✅
+      - 호스트 이름이 길 수 있다. 레이아웃을 벗어나거나 wordwrap 이 될 경우 이름을 줄이고 툴팁으로 표시
+
+- 저장소 용량
+  - kubernetes ✅
+    1. 저장소별 용량
+    - 소스 테이블 : {cluster_name}_k8s_pvcs
+    2. 표현 방식
+      - {PVC명 : name} {용량 : capacity} {사용 : used}으로 테이블로 출력한다. ✅
+      - row 툴팁 : {네임스페이스명}/{디플로이명}/{스토리지클래스}/{accessmode} ✅
+        - {cluster_name}_k8s_namespaces, {cluster_name}_k8s_deployments 와 조인
+      
+- 작업 노트 패널의 탭 순서 변경
+  - 인프라 형상 탭을 제일 앞으로 배치한다. 화면 진입시 default 는 인프라 형상 탭이다. ✅
+  
+# vSphere scrape 개선
+- {cluster_name}_vsphere_hosts 테이블에 호스트의 CPU/MEM 정보를 추가할 수 있는지 검토하고 가능하면 컬럼을 추가, 수집 로직에 반영 ✅
+  - REST `GET /api/vcenter/host` 목록에는 CPU/MEM이 없음
+  - SOAP `RetrievePropertiesEx` 로 `HostSystem.summary.hardware` 조회
+    - 호스트 100대 단위 청크 + `maxObjects=100`
+    - 응답 `token` 이 있으면 `ContinueRetrievePropertiesEx` 로 이어서 수집
+  - 컬럼: `cpu_count`(코어), `memory_mib`
+
+# pvc scrape
+- http 모드에서는 아직 pvc used 값을 가져오지 못한다. 분석을 위해 pvc 정보 scrape 시 상세 로깅을 추가 ✅
+  - 로그 prefix: `PVC scrape:`
+  - kubelet `nodes/proxy/stats/summary` HTTP status / Content-Type / 본문 타입·길이 / JSON 키 / pods 수
+  - 실패 시 ApiException status/reason/body preview
+  - volume `pvcRef` vs `usedBytes` 유무, 없을 때 volume/fs 키 샘플
+  - PVC별 source(`kubelet`/`local_path`/`no_kubelet_stats`/`kubelet_discarded`)와 usedGi

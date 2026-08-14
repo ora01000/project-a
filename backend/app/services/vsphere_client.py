@@ -3,13 +3,19 @@
 from __future__ import annotations
 
 import logging
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlparse
+from xml.sax.saxutils import escape
 
 import httpx
 
 logger = logging.getLogger(__name__)
+
+# vCenter PropertyCollector typically returns ~100 objects per RetrievePropertiesEx.
+_SOAP_HARDWARE_PAGE_SIZE = 100
+_SOAP_HARDWARE_MAX_PAGES = 50
 
 
 class VsphereApiError(Exception):
@@ -296,3 +302,206 @@ class VsphereRestClient:
         if not isinstance(data, list):
             return []
         return [item for item in data if isinstance(item, dict)]
+
+    def fetch_hosts_hardware(
+        self,
+        host_ids: list[str],
+    ) -> dict[str, tuple[int | None, int | None]]:
+        """CPU cores / memory MiB via SOAP HostSystem.summary.hardware.
+
+        REST ``GET /api/vcenter/host`` does not include hardware capacity.
+        vCenter PropertyCollector truncates around 100 objects; page by chunk
+        and follow ``ContinueRetrievePropertiesEx`` tokens.
+        """
+        ids = [str(host_id).strip() for host_id in host_ids if str(host_id).strip()]
+        if not ids:
+            return {}
+        try:
+            self._soap_login()
+            parsed: dict[str, tuple[int | None, int | None]] = {}
+            pages = 0
+            for offset in range(0, len(ids), _SOAP_HARDWARE_PAGE_SIZE):
+                chunk = ids[offset : offset + _SOAP_HARDWARE_PAGE_SIZE]
+                xml_body = self._soap_retrieve_host_hardware(chunk)
+                while True:
+                    pages += 1
+                    if pages > _SOAP_HARDWARE_MAX_PAGES:
+                        raise VsphereApiError(
+                            "vCenter SOAP host hardware exceeded max pages",
+                            path="/sdk",
+                        )
+                    page, token = _parse_host_hardware_soap(xml_body)
+                    parsed.update(page)
+                    if not token:
+                        break
+                    xml_body = self._soap_continue_retrieve(token)
+            logger.info(
+                "vCenter SOAP host hardware collected hosts=%s requested=%s pages=%s",
+                len(parsed),
+                len(ids),
+                pages,
+            )
+            return parsed
+        except VsphereApiError as exc:
+            logger.warning("vCenter SOAP host hardware failed base=%s: %s", self._base, exc)
+            return {}
+        except Exception as exc:
+            logger.warning("vCenter SOAP host hardware failed base=%s: %s", self._base, exc)
+            return {}
+
+    def _soap_login(self) -> None:
+        user = escape(self._cfg.user)
+        password = escape(self._cfg.password)
+        body = (
+            "<Login xmlns=\"urn:vim25\">"
+            "<_this type=\"SessionManager\">SessionManager</_this>"
+            f"<userName>{user}</userName>"
+            f"<password>{password}</password>"
+            "</Login>"
+        )
+        response = self._soap_post(body)
+        if response.status_code >= 400:
+            raise VsphereApiError(
+                "vCenter SOAP login failed",
+                status_code=response.status_code,
+                path="/sdk",
+            )
+        if b"Fault" in response.content:
+            raise VsphereApiError("vCenter SOAP login fault", path="/sdk")
+
+    def _soap_retrieve_host_hardware(self, host_ids: list[str]) -> bytes:
+        object_sets = "".join(
+            "<objectSet>"
+            f"<obj type=\"HostSystem\">{escape(host_id)}</obj>"
+            "<skip>false</skip>"
+            "</objectSet>"
+            for host_id in host_ids
+        )
+        inner = (
+            "<RetrievePropertiesEx xmlns=\"urn:vim25\">"
+            "<_this type=\"PropertyCollector\">propertyCollector</_this>"
+            "<specSet>"
+            "<propSet>"
+            "<type>HostSystem</type>"
+            "<all>false</all>"
+            "<pathSet>summary.hardware.numCpuCores</pathSet>"
+            "<pathSet>summary.hardware.memorySize</pathSet>"
+            "</propSet>"
+            f"{object_sets}"
+            "</specSet>"
+            "<options>"
+            f"<maxObjects>{_SOAP_HARDWARE_PAGE_SIZE}</maxObjects>"
+            "</options>"
+            "</RetrievePropertiesEx>"
+        )
+        return self._soap_sdk_call(inner, "RetrievePropertiesEx")
+
+    def _soap_continue_retrieve(self, token: str) -> bytes:
+        inner = (
+            "<ContinueRetrievePropertiesEx xmlns=\"urn:vim25\">"
+            "<_this type=\"PropertyCollector\">propertyCollector</_this>"
+            f"<token>{escape(token)}</token>"
+            "</ContinueRetrievePropertiesEx>"
+        )
+        return self._soap_sdk_call(inner, "ContinueRetrievePropertiesEx")
+
+    def _soap_sdk_call(self, inner: str, operation: str) -> bytes:
+        response = self._soap_post(inner)
+        if response.status_code >= 400:
+            raise VsphereApiError(
+                f"vCenter SOAP {operation} failed",
+                status_code=response.status_code,
+                path="/sdk",
+            )
+        if b"Fault" in response.content:
+            raise VsphereApiError(f"vCenter SOAP {operation} fault", path="/sdk")
+        return response.content
+
+    def _soap_post(self, inner_body: str) -> httpx.Response:
+        envelope = (
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+            "<soapenv:Envelope xmlns:soapenv=\"http://schemas.xmlsoap.org/soap/envelope/\">"
+            f"<soapenv:Body>{inner_body}</soapenv:Body>"
+            "</soapenv:Envelope>"
+        )
+        try:
+            return self._client.post(
+                f"{self._base}/sdk",
+                content=envelope.encode("utf-8"),
+                headers={
+                    "Content-Type": "text/xml; charset=utf-8",
+                    "SOAPAction": "urn:vim25/7.0",
+                },
+            )
+        except Exception as exc:
+            self._raise_connect(exc, operation="SOAP")
+            raise
+
+
+def _xml_local(tag: str) -> str:
+    if "}" in tag:
+        return tag.rsplit("}", 1)[-1]
+    return tag
+
+
+def _parse_retrieve_token(root: ET.Element) -> str | None:
+    for elem in root.iter():
+        if _xml_local(elem.tag) != "token":
+            continue
+        text = (elem.text or "").strip()
+        if text:
+            return text
+    return None
+
+
+def _parse_host_hardware_soap(
+    xml_bytes: bytes,
+) -> tuple[dict[str, tuple[int | None, int | None]], str | None]:
+    """Map host MoID -> (cpu_count cores, memory_mib), plus continuation token."""
+    result: dict[str, tuple[int | None, int | None]] = {}
+    try:
+        root = ET.fromstring(xml_bytes)
+    except ET.ParseError as exc:
+        logger.warning("vCenter SOAP hardware XML parse failed: %s", exc)
+        return result, None
+
+    token = _parse_retrieve_token(root)
+
+    for objects in root.iter():
+        if _xml_local(objects.tag) != "objects":
+            continue
+        host_id = ""
+        cpu_count: int | None = None
+        memory_bytes: int | None = None
+        for child in list(objects):
+            local = _xml_local(child.tag)
+            if local == "obj":
+                host_id = (child.text or "").strip()
+                continue
+            if local != "propSet":
+                continue
+            name = ""
+            raw_val = ""
+            for prop in list(child):
+                pl = _xml_local(prop.tag)
+                if pl == "name":
+                    name = (prop.text or "").strip()
+                elif pl == "val":
+                    raw_val = (prop.text or "").strip()
+            if name == "summary.hardware.numCpuCores":
+                try:
+                    cpu_count = int(raw_val)
+                except ValueError:
+                    cpu_count = None
+            elif name == "summary.hardware.memorySize":
+                try:
+                    memory_bytes = int(raw_val)
+                except ValueError:
+                    memory_bytes = None
+        if not host_id:
+            continue
+        memory_mib = (
+            int(round(memory_bytes / (1024 * 1024))) if memory_bytes is not None else None
+        )
+        result[host_id] = (cpu_count, memory_mib)
+    return result, token

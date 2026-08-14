@@ -21,6 +21,7 @@ from backend.app.db.k8s_inventory import (
     list_infra_clusters,
     save_k8s_clusters,
 )
+from backend.app.db.shape_capacity import get_cluster_shape_capacity
 from backend.app.db.shape_detail import (
     get_shape_namespace_detail,
     get_shape_node_detail,
@@ -114,6 +115,40 @@ class K8sShapeAnalysisResponse(BaseModel):
     infra_type: str = DEFAULT_INFRA_TYPE
     summary: K8sShapeCountsModel
     history: list[K8sShapeHistoryPointModel] = Field(default_factory=list)
+
+
+class ResourceCapacityModel(BaseModel):
+    capacity: float = 0
+    request: float = 0
+    limit: float = 0
+
+
+class NodeShapeCapacityModel(BaseModel):
+    node_name: str
+    cpu: ResourceCapacityModel
+    mem: ResourceCapacityModel
+
+
+class PvcShapeCapacityModel(BaseModel):
+    name: str
+    capacity: int | None = None
+    used: int | None = None
+    namespace: str = ""
+    deployment_name: str = ""
+    storage_class: str = ""
+    access_mode: str = ""
+
+
+class ClusterShapeCapacityResponse(BaseModel):
+    cluster_name: str
+    infra_type: str = DEFAULT_INFRA_TYPE
+    supported: bool = False
+    node_count: int = 0
+    include_all_nodes: bool = False
+    cpu: ResourceCapacityModel | None = None
+    mem: ResourceCapacityModel | None = None
+    nodes: list[NodeShapeCapacityModel] = Field(default_factory=list)
+    storages: list[PvcShapeCapacityModel] = Field(default_factory=list)
 
 
 def _require_admin(request: Request) -> None:
@@ -309,6 +344,85 @@ async def get_shape_analysis(
                 counts=_shape_counts_model(point.counts),
             )
             for point in analysis.history
+        ],
+    )
+
+
+@router.get(
+    "/k8s-infra/shape/clusters/{cluster_name}/capacity",
+    response_model=ClusterShapeCapacityResponse,
+)
+async def get_shape_capacity(
+    cluster_name: str,
+    request: Request,
+) -> ClusterShapeCapacityResponse:
+    """Authenticated users: node capacity vs deployment (and VM) request/limit."""
+    _require_user(request)
+    runtime_mode = getattr(request.app.state, "agent_runtime_mode", None) or "mock"
+    include_all_nodes = str(runtime_mode).strip().lower() == "mock"
+    try:
+        capacity = get_cluster_shape_capacity(
+            request.app.state.database_path,
+            cluster_name,
+            include_all_nodes=include_all_nodes,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    if capacity is None:
+        raise HTTPException(status_code=404, detail="클러스터를 찾을 수 없습니다.")
+
+    return ClusterShapeCapacityResponse(
+        cluster_name=capacity.cluster_name,
+        infra_type=capacity.infra_type,
+        supported=capacity.supported,
+        node_count=capacity.node_count,
+        include_all_nodes=capacity.include_all_nodes,
+        cpu=(
+            None
+            if capacity.cpu is None
+            else ResourceCapacityModel(
+                capacity=capacity.cpu.capacity,
+                request=capacity.cpu.request,
+                limit=capacity.cpu.limit,
+            )
+        ),
+        mem=(
+            None
+            if capacity.mem is None
+            else ResourceCapacityModel(
+                capacity=capacity.mem.capacity,
+                request=capacity.mem.request,
+                limit=capacity.mem.limit,
+            )
+        ),
+        nodes=[
+            NodeShapeCapacityModel(
+                node_name=item.node_name,
+                cpu=ResourceCapacityModel(
+                    capacity=item.cpu.capacity,
+                    request=item.cpu.request,
+                    limit=item.cpu.limit,
+                ),
+                mem=ResourceCapacityModel(
+                    capacity=item.mem.capacity,
+                    request=item.mem.request,
+                    limit=item.mem.limit,
+                ),
+            )
+            for item in capacity.nodes
+        ],
+        storages=[
+            PvcShapeCapacityModel(
+                name=item.name,
+                capacity=item.capacity,
+                used=item.used,
+                namespace=item.namespace,
+                deployment_name=item.deployment_name,
+                storage_class=item.storage_class,
+                access_mode=item.access_mode,
+            )
+            for item in capacity.storages
         ],
     )
 
@@ -549,6 +663,8 @@ class ShapeVsphereHostListItemModel(BaseModel):
     connection_state: str | None = None
     power_state: str | None = None
     cluster_id: str | None = None
+    cpu_count: int | None = None
+    memory_mib: int | None = None
 
 
 class ShapeVsphereClusterDetailResponse(BaseModel):
@@ -634,6 +750,8 @@ async def shape_list_vsphere_hosts(
             connection_state=item.connection_state,
             power_state=item.power_state,
             cluster_id=item.cluster_id,
+            cpu_count=item.cpu_count,
+            memory_mib=item.memory_mib,
         )
         for item in items
     ]

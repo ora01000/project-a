@@ -15,6 +15,8 @@ interface VsphereHostListItem {
   connection_state: string | null;
   power_state: string | null;
   cluster_id: string | null;
+  cpu_count: number | null;
+  memory_mib: number | null;
 }
 
 interface VsphereClusterDetail {
@@ -159,7 +161,7 @@ function toNumber(value: unknown): number | null {
   return null;
 }
 
-/** memory_mib → GB display (1 GiB = 1024 MiB). */
+/** memory_mib → GiB display (1 GiB = 1024 MiB). */
 function formatMemoryGib(value: unknown): string {
   const mib = toNumber(value);
   if (mib === null) {
@@ -256,9 +258,25 @@ function HostTable({
   showClusterId?: boolean;
 }) {
   const normalized = rows as Array<Record<string, unknown>>;
-  const summary = useMemo(() => {
+    const summary = useMemo(() => {
     if (normalized.length === 0) {
       return null;
+    }
+    let cpuTotal = 0;
+    let memTotal = 0;
+    let hasCpu = false;
+    let hasMem = false;
+    for (const row of normalized) {
+      const cpu = toNumber(row.cpu_count);
+      if (cpu !== null) {
+        cpuTotal += cpu;
+        hasCpu = true;
+      }
+      const mem = toNumber(row.memory_mib);
+      if (mem !== null) {
+        memTotal += mem;
+        hasMem = true;
+      }
     }
     return {
       host_id: `Σ summary (${normalized.length})`,
@@ -266,12 +284,16 @@ function HostTable({
       connection_state: "",
       power_state: "",
       cluster_id: "",
+      cpu_count: hasCpu ? cpuTotal : null,
+      memory_mib: hasMem ? memTotal : null,
     };
   }, [normalized]);
 
   const columns = [
     { key: "host_id", label: "호스트ID" },
     { key: "host_name", label: "ESXi호스트명" },
+    { key: "cpu_count", label: "CPU(코어)" },
+    { key: "memory_mib", label: "MEM(GiB)" },
     { key: "connection_state", label: "연결상태" },
     { key: "power_state", label: "전원" },
     ...(showClusterId ? [{ key: "cluster_id", label: "소속클러스터" }] : []),
@@ -320,6 +342,13 @@ function HostTable({
                     </td>
                   );
                 }
+                if (column.key === "memory_mib") {
+                  return (
+                    <td key={column.key} className="whitespace-nowrap px-2 py-1 font-mono">
+                      {formatMemoryGib(raw)}
+                    </td>
+                  );
+                }
                 return (
                   <td key={column.key} className="whitespace-nowrap px-2 py-1 font-mono">
                     {displayValue(raw)}
@@ -333,7 +362,9 @@ function HostTable({
           <tr className="border-t border-slate-700 bg-slate-900/80 text-slate-300">
             {columns.map((column) => (
               <td key={column.key} className="whitespace-nowrap px-2 py-1 font-mono">
-                {displayValue(summary[column.key as keyof typeof summary])}
+                {column.key === "memory_mib"
+                  ? formatMemoryGib(summary.memory_mib)
+                  : displayValue(summary[column.key as keyof typeof summary])}
               </td>
             ))}
           </tr>

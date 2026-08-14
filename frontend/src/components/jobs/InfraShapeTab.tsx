@@ -1,5 +1,12 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
+import { useTheme } from "../../context/ThemeContext";
+import {
+  ClusterCapacityPanel,
+  NodeCapacityPanel,
+  StorageCapacityPanel,
+  type ClusterShapeCapacity,
+} from "./ClusterCapacityPanel";
 import { ShapeDetailPanel } from "./ShapeDetailPanel";
 import { VsphereShapeDetailPanel } from "./VsphereShapeDetailPanel";
 
@@ -61,14 +68,34 @@ const VSPHERE_SERIES: { key: SeriesKey; label: string; color: string }[] = [
   { key: "vms", label: "VMs", color: "#a78bfa" },
 ];
 
-function seriesForInfraType(infraType: string) {
+const BASE_SERIES_LIGHT: { key: SeriesKey; label: string; color: string }[] = [
+  { key: "nodes", label: "Nodes", color: "#0284c7" },
+  { key: "namespaces", label: "Namespaces", color: "#059669" },
+  { key: "deployments", label: "Deployments", color: "#d97706" },
+  { key: "pvcs", label: "PVCs", color: "#db2777" },
+];
+
+const KUBEVIRT_EXTRA_SERIES_LIGHT: { key: SeriesKey; label: string; color: string }[] = [
+  { key: "vms", label: "VMs", color: "#7c3aed" },
+  { key: "volumes", label: "Volumes", color: "#ea580c" },
+];
+
+const VSPHERE_SERIES_LIGHT: { key: SeriesKey; label: string; color: string }[] = [
+  { key: "namespaces", label: "Clusters", color: "#059669" },
+  { key: "nodes", label: "Hosts", color: "#0284c7" },
+  { key: "vms", label: "VMs", color: "#7c3aed" },
+];
+
+function seriesForInfraType(infraType: string, isLight: boolean) {
   if (infraType === "kubevirt") {
-    return [...BASE_SERIES, ...KUBEVIRT_EXTRA_SERIES];
+    return isLight
+      ? [...BASE_SERIES_LIGHT, ...KUBEVIRT_EXTRA_SERIES_LIGHT]
+      : [...BASE_SERIES, ...KUBEVIRT_EXTRA_SERIES];
   }
   if (infraType === "vSphere") {
-    return VSPHERE_SERIES;
+    return isLight ? VSPHERE_SERIES_LIGHT : VSPHERE_SERIES;
   }
-  return BASE_SERIES;
+  return isLight ? BASE_SERIES_LIGHT : BASE_SERIES;
 }
 
 async function parseError(response: Response, fallback: string): Promise<string> {
@@ -101,9 +128,11 @@ function ShapeTrendChart({
   history: ShapeHistoryPoint[];
   infraType: string;
 }) {
+  const { theme } = useTheme();
+  const isLight = theme === "light";
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [size, setSize] = useState({ width: 0, height: 0 });
-  const series = useMemo(() => seriesForInfraType(infraType), [infraType]);
+  const series = useMemo(() => seriesForInfraType(infraType, isLight), [infraType, isLight]);
 
   useLayoutEffect(() => {
     const node = containerRef.current;
@@ -178,6 +207,7 @@ function ShapeTrendChart({
                     x2={width - padding.right}
                     y1={y}
                     y2={y}
+                    className="shape-chart-grid"
                     stroke="#334155"
                     strokeWidth={1}
                   />
@@ -259,6 +289,8 @@ export function InfraShapeTab({ active, maskIps = false, onCopyToNote }: InfraSh
   const [isLoadingAnalysis, setIsLoadingAnalysis] = useState(false);
   const [isGapAnalyzing, setIsGapAnalyzing] = useState(false);
   const [gapAnalysisMessage, setGapAnalysisMessage] = useState<string | null>(null);
+  const [capacity, setCapacity] = useState<ClusterShapeCapacity | null>(null);
+  const [isLoadingCapacity, setIsLoadingCapacity] = useState(false);
 
   const loadClusters = useCallback(async () => {
     setIsLoadingList(true);
@@ -305,6 +337,24 @@ export function InfraShapeTab({ active, maskIps = false, onCopyToNote }: InfraSh
     }
   }, []);
 
+  const loadCapacity = useCallback(async (clusterName: string) => {
+    setIsLoadingCapacity(true);
+    try {
+      const response = await fetch(
+        `/api/k8s-infra/shape/clusters/${encodeURIComponent(clusterName)}/capacity`,
+      );
+      if (!response.ok) {
+        throw new Error(await parseError(response, "용량 정보를 불러오지 못했습니다."));
+      }
+      const data = (await response.json()) as ClusterShapeCapacity;
+      setCapacity(data);
+    } catch {
+      setCapacity(null);
+    } finally {
+      setIsLoadingCapacity(false);
+    }
+  }, []);
+
   useEffect(() => {
     if (!active) {
       return;
@@ -314,10 +364,12 @@ export function InfraShapeTab({ active, maskIps = false, onCopyToNote }: InfraSh
 
   useEffect(() => {
     if (!active || !selectedName) {
+      setCapacity(null);
       return;
     }
     void loadAnalysis(selectedName);
-  }, [active, selectedName, loadAnalysis]);
+    void loadCapacity(selectedName);
+  }, [active, selectedName, loadAnalysis, loadCapacity]);
 
   const summaryItems = useMemo(() => {
     if (!analysis) {
@@ -480,6 +532,12 @@ export function InfraShapeTab({ active, maskIps = false, onCopyToNote }: InfraSh
               </dl>
             )}
           </section>
+
+          <div className="grid shrink-0 grid-cols-3 gap-3">
+            <ClusterCapacityPanel capacity={capacity} isLoading={isLoadingCapacity} />
+            <NodeCapacityPanel capacity={capacity} isLoading={isLoadingCapacity} />
+            <StorageCapacityPanel capacity={capacity} isLoading={isLoadingCapacity} />
+          </div>
 
           <section className="flex min-h-0 flex-1 flex-col rounded-lg border border-slate-700/80 bg-slate-950/40 p-3">
             <div className="mb-1 flex shrink-0 items-center justify-between gap-2">

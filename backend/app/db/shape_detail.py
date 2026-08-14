@@ -555,6 +555,8 @@ class ShapeVsphereHostListItem:
     connection_state: str | None = None
     power_state: str | None = None
     cluster_id: str | None = None
+    cpu_count: int | None = None
+    memory_mib: int | None = None
 
 
 @dataclass
@@ -587,6 +589,15 @@ def _as_optional_bool(value: Any) -> bool | None:
         return bool(int(value))
     except (TypeError, ValueError):
         return bool(value)
+
+
+def _as_optional_int(value: Any) -> int | None:
+    if value is None or value == "":
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def list_shape_vsphere_clusters(
@@ -674,15 +685,20 @@ def list_shape_vsphere_hosts(
         infra_type = _lookup_shapeable_infra_type(connection, name)
         if infra_type != INFRA_TYPE_VSPHERE:
             return None
-        from backend.app.db.vsphere_inventory import vsphere_inventory_table
+        from backend.app.db.vsphere_inventory import (
+            _ensure_hosts_hardware_columns,
+            vsphere_inventory_table,
+        )
 
         hosts_t = vsphere_inventory_table(name, "vsphere_hosts")
         tables = _list_user_tables(connection)
         if hosts_t not in tables:
             return []
+        _ensure_hosts_hardware_columns(connection, hosts_t)
         rows = connection.execute(
             f"""
-            SELECT idx, host_id, host_name, connection_state, power_state, cluster_id
+            SELECT idx, host_id, host_name, connection_state, power_state, cluster_id,
+                   cpu_count, memory_mib
             FROM {_quote_ident(hosts_t)}
             ORDER BY {ci_order_clause(connection, "host_name")}, idx ASC
             """
@@ -697,6 +713,8 @@ def list_shape_vsphere_hosts(
             ),
             power_state=str(row["power_state"]) if row["power_state"] else None,
             cluster_id=str(row["cluster_id"]) if row["cluster_id"] else None,
+            cpu_count=_as_optional_int(row["cpu_count"]),
+            memory_mib=_as_optional_int(row["memory_mib"]),
         )
         for row in rows
     ]

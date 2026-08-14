@@ -63,6 +63,8 @@ class VsphereHostRow:
     connection_state: str | None = None
     power_state: str | None = None
     cluster_id: str | None = None
+    cpu_count: int | None = None
+    memory_mib: int | None = None
 
 
 @dataclass
@@ -107,6 +109,20 @@ def _ensure_hosts_cluster_id_column(connection, hosts_table: str) -> None:
         logger.info("Added %s.cluster_id", hosts_table)
 
 
+def _ensure_hosts_hardware_columns(connection, hosts_table: str) -> None:
+    columns = list_table_columns(connection, hosts_table)
+    if "cpu_count" not in columns:
+        connection.execute(
+            f"ALTER TABLE {_quote_ident(hosts_table)} ADD COLUMN cpu_count INTEGER"
+        )
+        logger.info("Added %s.cpu_count", hosts_table)
+    if "memory_mib" not in columns:
+        connection.execute(
+            f"ALTER TABLE {_quote_ident(hosts_table)} ADD COLUMN memory_mib INTEGER"
+        )
+        logger.info("Added %s.memory_mib", hosts_table)
+
+
 def ensure_vsphere_inventory_tables(
     connection,
     cluster_name: str,
@@ -138,12 +154,15 @@ def ensure_vsphere_inventory_tables(
                 host_name VARCHAR(100),
                 connection_state VARCHAR(30),
                 power_state VARCHAR(30),
-                cluster_id VARCHAR(30)
+                cluster_id VARCHAR(30),
+                cpu_count INTEGER,
+                memory_mib INTEGER
             )
             """
         )
     else:
         _ensure_hosts_cluster_id_column(connection, hosts_t)
+        _ensure_hosts_hardware_columns(connection, hosts_t)
     if vms_t not in tables:
         connection.execute(
             f"""
@@ -353,8 +372,9 @@ def replace_vsphere_snapshot(
             connection.execute(
                 f"""
                 INSERT INTO {_quote_ident(hosts_t)} (
-                    host_id, host_name, connection_state, power_state, cluster_id
-                ) VALUES (?, ?, ?, ?, ?)
+                    host_id, host_name, connection_state, power_state, cluster_id,
+                    cpu_count, memory_mib
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     host.host_id[:30],
@@ -362,6 +382,8 @@ def replace_vsphere_snapshot(
                     (host.connection_state or None) and host.connection_state[:30],
                     (host.power_state or None) and host.power_state[:30],
                     (host.cluster_id or None) and host.cluster_id[:30],
+                    host.cpu_count,
+                    host.memory_mib,
                 ),
             )
 

@@ -355,7 +355,14 @@ function SelectableNamespaceTable({
   );
 }
 
-function buildNodeSummary(rows: NodeListItem[]): Record<string, unknown> | null {
+function isWorkerNodeRole(role: string | null | undefined): boolean {
+  return (role ?? "").toLowerCase().includes("worker");
+}
+
+function buildNodeSummary(
+  rows: NodeListItem[],
+  label: string,
+): Record<string, unknown> | null {
   if (rows.length === 0) {
     return null;
   }
@@ -378,8 +385,8 @@ function buildNodeSummary(rows: NodeListItem[]): Record<string, unknown> | null 
   }
 
   return {
-    node_name: `Σ summary (${rows.length})`,
-    node_role: "",
+    node_name: `Σ ${label} (${rows.length})`,
+    node_role: label === "worker" ? "worker" : "",
     node_cpu: hasCpu ? cpuTotal : null,
     node_mem: hasMem ? memTotal : null,
     node_os: "",
@@ -396,7 +403,11 @@ function NodeTable({
   selectedIdx: number | null;
   onSelect: (idx: number) => void;
 }) {
-  const summary = useMemo(() => buildNodeSummary(rows), [rows]);
+  const summary = useMemo(() => buildNodeSummary(rows, "summary"), [rows]);
+  const workerSummary = useMemo(
+    () => buildNodeSummary(rows.filter((row) => isWorkerNodeRole(row.node_role)), "worker"),
+    [rows],
+  );
   if (rows.length === 0) {
     return <p className="text-[11px] text-slate-500">항목이 없습니다.</p>;
   }
@@ -448,6 +459,22 @@ function NodeTable({
             <tr className="border-t border-slate-600 bg-slate-900/70 font-semibold text-sky-100">
               {NODE_TABLE_COLUMNS.map((column) => {
                 const text = renderCell(summary, column.key);
+                return (
+                  <td
+                    key={column.key}
+                    className="max-w-[160px] truncate px-1.5 py-1.5 font-mono"
+                    title={text}
+                  >
+                    {text}
+                  </td>
+                );
+              })}
+            </tr>
+          ) : null}
+          {workerSummary ? (
+            <tr className="border-t border-slate-600 bg-slate-900/70 font-semibold text-sky-100">
+              {NODE_TABLE_COLUMNS.map((column) => {
+                const text = renderCell(workerSummary, column.key);
                 return (
                   <td
                     key={column.key}

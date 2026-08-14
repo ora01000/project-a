@@ -507,3 +507,23 @@
 [data-theme="light"] .disabled\:text-slate-500:disabled {
   color: rgb(148 163 184);
 }
+
+/* ── SVG chart fills / strokes (Tailwind fill-* is not remapped by text-*) ── */
+[data-theme="light"] .fill-slate-100 {
+  fill: rgb(15 23 42);
+}
+[data-theme="light"] .fill-slate-400 {
+  fill: rgb(71 85 105);
+}
+[data-theme="light"] .fill-slate-500 {
+  fill: rgb(100 116 139);
+}
+[data-theme="light"] .shape-chart-grid {
+  stroke: rgb(203 213 225);
+}
+[data-theme="light"] .shape-donut-track {
+  stroke: rgb(226 232 240);
+}
+[data-theme="light"] .shape-bar-track {
+  background-color: rgb(226 232 240);
+}

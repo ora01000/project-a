@@ -154,10 +154,26 @@ def collect_vsphere_snapshot(
         hosts_raw = client.list_hosts()
         hosts: list[VsphereHostRow] = []
         vms_on_host: list[VsphereVmOnHostRow] = []
+        host_ids = [
+            str(entry.get("host") or "").strip()
+            for entry in hosts_raw
+            if str(entry.get("host") or "").strip()
+        ]
+        hardware_by_host: dict[str, tuple[int | None, int | None]] = {}
+        if host_ids:
+            try:
+                hardware_by_host = client.fetch_hosts_hardware(host_ids)
+            except Exception as exc:
+                logger.warning(
+                    "fetch_hosts_hardware failed cluster=%s: %s",
+                    cluster_name,
+                    exc,
+                )
         for entry in hosts_raw:
             host_id = str(entry.get("host") or "").strip()
             if not host_id:
                 continue
+            cpu_count, memory_mib = hardware_by_host.get(host_id, (None, None))
             hosts.append(
                 VsphereHostRow(
                     host_id=host_id,
@@ -165,6 +181,8 @@ def collect_vsphere_snapshot(
                     connection_state=str(entry.get("connection_state") or "") or None,
                     power_state=str(entry.get("power_state") or "") or None,
                     cluster_id=host_to_cluster.get(host_id),
+                    cpu_count=cpu_count,
+                    memory_mib=memory_mib,
                 )
             )
             try:
