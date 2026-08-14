@@ -203,56 +203,6 @@ def _sane_pvc_used_gi(
     return _bytes_to_gi(used_bytes)
 
 
-def _preview_text(raw: Any, limit: int = 240) -> str:
-    if raw is None:
-        return ""
-    if isinstance(raw, (bytes, bytearray)):
-        try:
-            text = raw.decode("utf-8", errors="replace")
-        except Exception:
-            text = repr(raw)
-    else:
-        text = str(raw)
-    text = text.replace("\n", " ").strip()
-    if len(text) <= limit:
-        return text
-    return text[:limit] + "..."
-
-
-def _exc_http_fields(exc: BaseException) -> dict[str, Any]:
-    return {
-        "type": type(exc).__name__,
-        "status": getattr(exc, "status", None),
-        "reason": getattr(exc, "reason", None),
-        "err": _preview_text(exc, 180),
-        "body": _preview_text(getattr(exc, "body", None), 180),
-    }
-
-
-def _object_keys(obj: Any) -> list[str]:
-    if isinstance(obj, dict):
-        return sorted(str(key) for key in obj.keys())
-    return []
-
-
-def _header_value(headers: Any, name: str) -> str | None:
-    if headers is None:
-        return None
-    getter = getattr(headers, "get", None)
-    if callable(getter):
-        value = getter(name) or getter(name.lower())
-        if value is not None:
-            return str(value)
-    if isinstance(headers, (list, tuple)):
-        needle = name.lower()
-        for item in headers:
-            if not isinstance(item, (list, tuple)) or len(item) < 2:
-                continue
-            if str(item[0]).lower() == needle:
-                return str(item[1])
-    return None
-
-
 def _fetch_node_stats_summary(api_client: ApiClient, node_name: str) -> dict[str, Any] | None:
     """GET /api/v1/nodes/{node}/proxy/stats/summary (one call per node).
 
@@ -263,161 +213,61 @@ def _fetch_node_stats_summary(api_client: ApiClient, node_name: str) -> dict[str
     """
     host = (getattr(getattr(api_client, "configuration", None), "host", None) or "").rstrip("/")
     if not host:
-        logger.info("PVC scrape: skip stats/summary node=%s reason=no_api_host", node_name)
         return None
     try:
-        result = api_client.call_api(
+        data = api_client.call_api(
             "/api/v1/nodes/{name}/proxy/{path}",
             "GET",
             path_params={"name": node_name, "path": "stats/summary"},
             header_params={"Accept": "application/json"},
             auth_settings=["BearerToken"],
             response_types_map={200: "object"},
-            _return_http_data_only=False,
+            _return_http_data_only=True,
             _request_timeout=_K8S_REQUEST_TIMEOUT,
         )
     except Exception as exc:
-        fields = _exc_http_fields(exc)
-        logger.info(
-            "PVC scrape: skip stats/summary node=%s type=%s status=%s reason=%s err=%s body=%s",
-            node_name,
-            fields["type"],
-            fields["status"],
-            fields["reason"],
-            fields["err"],
-            fields["body"],
-        )
+        logger.warning("Skip kubelet stats/summary node=%s (%s)", node_name, exc)
         return None
 
-    data: Any = result
-    status = None
-    content_type = None
-    if isinstance(result, tuple) and len(result) >= 2:
-        data = result[0]
-        status = result[1]
-        content_type = _header_value(result[2] if len(result) > 2 else None, "Content-Type")
-    data_type = type(data).__name__
-    data_len = len(data) if isinstance(data, (str, bytes, bytearray)) else None
-    logger.info(
-        "PVC scrape: stats/summary http node=%s status=%s content_type=%s data_type=%s bytes=%s",
-        node_name,
-        status,
-        content_type,
-        data_type,
-        data_len,
-    )
-
-    parsed: dict[str, Any] | None = None
     if isinstance(data, dict):
-        parsed = data
-    elif isinstance(data, (bytes, bytearray)):
+        return data
+    if isinstance(data, (bytes, bytearray)):
         try:
-            decoded = data.decode("utf-8")
-        except UnicodeDecodeError as exc:
-            logger.info(
-                "PVC scrape: stats/summary decode-fail node=%s err=%s preview=%s",
-                node_name,
-                exc,
-                _preview_text(data),
-            )
+            data = data.decode("utf-8")
+        except UnicodeDecodeError:
             return None
-        data = decoded
     if isinstance(data, str):
         try:
             loaded = json.loads(data)
-        except json.JSONDecodeError as exc:
-            logger.info(
-                "PVC scrape: stats/summary json-fail node=%s err=%s preview=%s",
-                node_name,
-                exc,
-                _preview_text(data),
-            )
+        except json.JSONDecodeError:
             return None
-        parsed = loaded if isinstance(loaded, dict) else None
-        if parsed is None:
-            logger.info(
-                "PVC scrape: stats/summary not-object node=%s parsed_type=%s",
-                node_name,
-                type(loaded).__name__,
-            )
-            return None
-    if parsed is None:
-        logger.info(
-            "PVC scrape: stats/summary unusable node=%s data_type=%s",
-            node_name,
-            data_type,
-        )
-        return None
-
-    pods = parsed.get("pods")
-    pod_count = len(pods) if isinstance(pods, list) else -1
-    logger.info(
-        "PVC scrape: stats/summary ok node=%s keys=%s pods=%s node_name=%s",
-        node_name,
-        _object_keys(parsed),
-        pod_count,
-        _attr(parsed, "node", "nodeName"),
-    )
-    return parsed
+        return loaded if isinstance(loaded, dict) else None
+    return None
 
 
-def _pvc_used_from_stats(
-    summary: dict[str, Any],
-    *,
-    node_name: str,
-) -> dict[tuple[str, str], tuple[int, int | None]]:
+def _pvc_used_from_stats(summary: dict[str, Any]) -> dict[tuple[str, str], tuple[int, int | None]]:
     """Map (namespace, pvc_name) -> (usedBytes, capacityBytes) from one node."""
     used_by_pvc: dict[tuple[str, str], tuple[int, int | None]] = {}
     pods = summary.get("pods") or []
     if not isinstance(pods, list):
-        logger.info(
-            "PVC scrape: stats/summary pods-not-list node=%s type=%s",
-            node_name,
-            type(pods).__name__,
-        )
         return used_by_pvc
-    volume_count = 0
-    pvc_ref_count = 0
-    used_present = 0
-    used_missing_samples: list[str] = []
     for pod_stats in pods:
         volumes = _attr(pod_stats, "volume", default=[]) or []
         if not isinstance(volumes, list):
             continue
-        pod_name = str(_attr(pod_stats, "podRef", "name", default="") or "").strip()
         for volume in volumes:
-            volume_count += 1
             pvc_name = str(_attr(volume, "pvcRef", "name", default="") or "").strip()
             pvc_ns = str(_attr(volume, "pvcRef", "namespace", default="") or "").strip()
             if not pvc_name or not pvc_ns:
                 continue
-            pvc_ref_count += 1
             used_bytes = _as_nonneg_int(_attr(volume, "usedBytes"))
             if used_bytes is None:
-                if len(used_missing_samples) < 5:
-                    used_missing_samples.append(
-                        f"{pvc_ns}/{pvc_name} pod={pod_name} "
-                        f"vol_keys={_object_keys(volume)} "
-                        f"fs_keys={_object_keys(_attr(volume, 'fs'))} "
-                        f"top_used={_attr(volume, 'usedBytes')!r} "
-                        f"fs_used={_attr(volume, 'fs', 'usedBytes')!r}"
-                    )
                 continue
-            used_present += 1
             stats_cap = _as_nonneg_int(_attr(volume, "capacityBytes"))
             key = (pvc_ns, pvc_name)
             previous = used_by_pvc.get(key)
             if previous is None or used_bytes > previous[0]:
                 used_by_pvc[key] = (used_bytes, stats_cap)
-    logger.info(
-        "PVC scrape: stats/summary parse node=%s volumes=%s pvcRef=%s usedBytes=%s claims=%s missing_samples=%s",
-        node_name,
-        volume_count,
-        pvc_ref_count,
-        used_present,
-        len(used_by_pvc),
-        used_missing_samples,
-    )
     return used_by_pvc
 
 
@@ -427,32 +277,21 @@ def _collect_pvc_kubelet_stats(
     """Fill PVC fs stats via kubelet stats/summary — O(nodes), not O(PVCs)."""
     names = {name.strip() for name in node_names if name and str(name).strip()}
     if not names:
-        logger.info("PVC scrape: kubelet stats skipped reason=no_pvc_nodes")
         return {}
 
     api_client = getattr(dyn, "client", None)
     if api_client is None:
-        logger.info("PVC scrape: kubelet stats skipped reason=no_api_client")
         return {}
 
     used_by_pvc: dict[tuple[str, str], tuple[int, int | None]] = {}
     workers = min(_NODE_STATS_WORKERS, len(names))
-    logger.info(
-        "PVC scrape: kubelet stats start nodes=%s workers=%s names=%s",
-        len(names),
-        workers,
-        sorted(names),
-    )
 
     def _one(node_name: str) -> dict[tuple[str, str], tuple[int, int | None]]:
         summary = _fetch_node_stats_summary(api_client, node_name)
         if not summary:
             return {}
-        return _pvc_used_from_stats(summary, node_name=node_name)
+        return _pvc_used_from_stats(summary)
 
-    nodes_ok = 0
-    nodes_empty = 0
-    nodes_error = 0
     with ThreadPoolExecutor(max_workers=workers) as pool:
         futures = {pool.submit(_one, node_name): node_name for node_name in sorted(names)}
         for future in as_completed(futures):
@@ -460,41 +299,18 @@ def _collect_pvc_kubelet_stats(
             try:
                 chunk = future.result()
             except Exception as exc:
-                nodes_error += 1
-                fields = _exc_http_fields(exc)
-                logger.info(
-                    "PVC scrape: kubelet stats node-fail node=%s type=%s status=%s err=%s",
-                    node_name,
-                    fields["type"],
-                    fields["status"],
-                    fields["err"],
-                )
+                logger.warning("Skip kubelet stats/summary node=%s (%s)", node_name, exc)
                 continue
-            if chunk:
-                nodes_ok += 1
-            else:
-                nodes_empty += 1
             for key, (used_bytes, stats_cap) in chunk.items():
                 previous = used_by_pvc.get(key)
                 if previous is None or used_bytes > previous[0]:
                     used_by_pvc[key] = (used_bytes, stats_cap)
-
-    logger.info(
-        "PVC scrape: kubelet stats done claims=%s nodes=%s ok=%s empty=%s error=%s",
-        len(used_by_pvc),
-        len(names),
-        nodes_ok,
-        nodes_empty,
-        nodes_error,
-    )
     return used_by_pvc
 
 
 def _collect_pv_path_used_bytes(dyn: DynamicClient) -> dict[tuple[str, str], int]:
     """If a local/hostPath PV directory is readable on this host, use its size."""
     used: dict[tuple[str, str], int] = {}
-    local_pv_count = 0
-    unreadable = 0
     for item in _safe_list(dyn, "v1", "PersistentVolume"):
         claim_ns = str(_attr(item, "spec", "claimRef", "namespace", default="") or "").strip()
         claim_name = str(_attr(item, "spec", "claimRef", "name", default="") or "").strip()
@@ -505,33 +321,10 @@ def _collect_pv_path_used_bytes(dyn: DynamicClient) -> dict[tuple[str, str], int
         ).strip()
         if not path:
             continue
-        local_pv_count += 1
         size = _dir_used_bytes(path)
         if size is None:
-            unreadable += 1
-            logger.info(
-                "PVC scrape: local PV path unreadable ns=%s name=%s path=%s exists=%s isdir=%s",
-                claim_ns,
-                claim_name,
-                path,
-                os.path.exists(path),
-                os.path.isdir(path),
-            )
             continue
         used[(claim_ns, claim_name)] = size
-        logger.info(
-            "PVC scrape: used from local PV path ns=%s name=%s path=%s bytes=%s",
-            claim_ns,
-            claim_name,
-            path,
-            size,
-        )
-    logger.info(
-        "PVC scrape: local PV path scan local_or_hostpath=%s readable=%s unreadable=%s",
-        local_pv_count,
-        len(used),
-        unreadable,
-    )
     return used
 
 
@@ -1243,12 +1036,6 @@ def _pvc_to_workload(
                 nodes.add(node_name)
             if owners[0] and owners[1]:
                 mapping[(namespace, str(claim))] = (owners[0], owners[1])
-    logger.info(
-        "PVC scrape: workload map claims=%s pvc_nodes=%s nodes=%s",
-        len(mapping),
-        len(nodes),
-        sorted(nodes),
-    )
     return mapping, nodes
 
 
@@ -1260,76 +1047,32 @@ def _collect_pvcs(
     kubelet_stats = _collect_pvc_kubelet_stats(dyn, pvc_nodes)
     path_used = _collect_pv_path_used_bytes(dyn)
     rows: list[K8sPvcRow] = []
-    accepted = 0
-    discarded = 0
-    missing = 0
-    skipped_system = 0
-    listed = 0
     for item in _safe_list(dyn, "v1", "PersistentVolumeClaim"):
-        listed += 1
         namespace = str(_attr(item, "metadata", "namespace", default="") or "")
         name = str(_attr(item, "metadata", "name", default="") or "")
         if not namespace or not name or is_excluded_system_namespace(namespace):
-            skipped_system += 1
             continue
         storage_class = _attr(item, "spec", "storageClassName")
         requests = _attr(item, "spec", "resources", "requests", default={}) or {}
         capacity_status = _attr(item, "status", "capacity", default={}) or {}
         access_modes = _attr(item, "spec", "accessModes", default=[]) or []
-        phase = str(_attr(item, "status", "phase", default="") or "")
-        volume_name = str(_attr(item, "spec", "volumeName", default="") or "")
         dep = pvc_owners.get((namespace, name))
         capacity = parse_mem_gi(
             _attr(capacity_status, "storage") or _attr(requests, "storage")
         )
         key = (namespace, name)
         path_bytes = path_used.get(key)
-        source = "none"
         used = None
         if path_bytes is not None:
-            source = "local_path"
             used = _sane_pvc_used_gi(path_bytes, pvc_capacity_gi=capacity, allow_host_fs=True)
         else:
             stats = kubelet_stats.get(key)
-            if stats is None:
-                source = "no_kubelet_stats"
-            else:
-                source = "kubelet"
+            if stats is not None:
                 used = _sane_pvc_used_gi(
                     stats[0],
                     pvc_capacity_gi=capacity,
                     stats_capacity_bytes=stats[1],
                 )
-                if used is None:
-                    discarded += 1
-                    source = "kubelet_discarded"
-                    logger.info(
-                        "PVC scrape: discard kubelet used ns=%s name=%s usedBytes=%s statsCap=%s pvcGi=%s",
-                        namespace,
-                        name,
-                        stats[0],
-                        stats[1],
-                        capacity,
-                    )
-        if used is not None:
-            accepted += 1
-        else:
-            missing += 1
-        logger.info(
-            "PVC scrape: pvc ns=%s name=%s phase=%s volume=%s sc=%s capGi=%s usedGi=%s source=%s "
-            "in_kubelet=%s in_path=%s owner=%s",
-            namespace,
-            name,
-            phase or "-",
-            volume_name or "-",
-            storage_class or "-",
-            capacity,
-            used,
-            source,
-            key in kubelet_stats,
-            key in path_used,
-            f"{dep[0]}/{dep[1]}" if dep else "-",
-        )
         rows.append(
             K8sPvcRow(
                 namespace=namespace,
@@ -1342,18 +1085,6 @@ def _collect_pvcs(
                 access_mode=str(access_modes[0]) if access_modes else None,
             )
         )
-    logger.info(
-        "PVC scrape: summary listed=%s kept=%s skipped_system=%s used_ok=%s used_missing=%s "
-        "discarded_kubelet=%s kubelet_claims=%s path_claims=%s",
-        listed,
-        len(rows),
-        skipped_system,
-        accepted,
-        missing,
-        discarded,
-        len(kubelet_stats),
-        len(path_used),
-    )
     return rows
 
 

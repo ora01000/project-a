@@ -1456,6 +1456,11 @@ export function ShapeDetailPanel({
     return () => controller.abort();
   }, [active, clusterName, category, selectedIdx]);
 
+  const hasSelection = selectedIdx != null;
+  const listPanelClass = hasSelection
+    ? "max-h-[45%] shrink-0 overflow-y-auto overscroll-contain border-b border-slate-800 pb-2"
+    : "min-h-0 flex-1 overflow-y-auto overscroll-contain";
+
   if (!clusterName) {
     return (
       <section className="flex h-full min-h-0 flex-col rounded-lg border border-slate-700/80 bg-slate-950/40 p-3">
@@ -1495,7 +1500,7 @@ export function ShapeDetailPanel({
         <div className="flex min-h-0 flex-1 flex-col gap-2">
           {category === "namespaces" ? (
             <>
-              <div className="max-h-[45%] shrink-0 overflow-y-auto overscroll-contain border-b border-slate-800 pb-2">
+              <div className={listPanelClass}>
                 {isLoadingList ? (
                   <p className="text-[11px] text-slate-500">목록 불러오는 중...</p>
                 ) : (
@@ -1506,7 +1511,7 @@ export function ShapeDetailPanel({
                   />
                 )}
               </div>
-              {selectedIdx != null ? (
+              {hasSelection ? (
                 <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain">
                   {isLoadingDetail && !namespaceDetail ? (
                     <p className="text-[11px] text-slate-500">불러오는 중...</p>
@@ -1527,13 +1532,11 @@ export function ShapeDetailPanel({
                     </>
                   )}
                 </div>
-              ) : !isLoadingList ? (
-                <p className="text-[11px] text-slate-500">표에서 네임스페이스를 선택하세요.</p>
               ) : null}
             </>
           ) : category === "nodes" ? (
             <>
-              <div className="max-h-[45%] shrink-0 overflow-y-auto overscroll-contain border-b border-slate-800 pb-2">
+              <div className={listPanelClass}>
                 {isLoadingList ? (
                   <p className="text-[11px] text-slate-500">목록 불러오는 중...</p>
                 ) : (
@@ -1544,7 +1547,7 @@ export function ShapeDetailPanel({
                   />
                 )}
               </div>
-              {selectedIdx != null ? (
+              {hasSelection ? (
                 <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain">
                   <div>
                     <p className="mb-1 text-[10px] font-semibold text-slate-500">
@@ -1577,13 +1580,11 @@ export function ShapeDetailPanel({
                     </div>
                   ) : null}
                 </div>
-              ) : !isLoadingList ? (
-                <p className="text-[11px] text-slate-500">표에서 노드를 선택하세요.</p>
               ) : null}
             </>
           ) : category === "vms" ? (
             <>
-              <div className="max-h-[45%] shrink-0 overflow-y-auto overscroll-contain border-b border-slate-800 pb-2">
+              <div className={listPanelClass}>
                 {isLoadingList ? (
                   <p className="text-[11px] text-slate-500">목록 불러오는 중...</p>
                 ) : (
@@ -1594,7 +1595,7 @@ export function ShapeDetailPanel({
                   />
                 )}
               </div>
-              {selectedIdx != null ? (
+              {hasSelection ? (
                 <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
                   <div className="mb-2 border-b border-slate-800 pb-2">
                     <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
@@ -1619,8 +1620,6 @@ export function ShapeDetailPanel({
                     />
                   </div>
                 </div>
-              ) : !isLoadingList ? (
-                <p className="text-[11px] text-slate-500">표에서 VM을 선택하세요.</p>
               ) : null}
             </>
           ) : null}

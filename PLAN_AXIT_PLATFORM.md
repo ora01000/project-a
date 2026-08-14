@@ -1789,7 +1789,7 @@ users.role = 0 | 100 (관리자)는 모든 jobs 를 조회할 수 있다. users.
       - {노드명} 비율을 표현하는 가로 bar 차트
         - 가로 bar 차트는 위 아래 2단으로 나타내며 위는 cpu_request 합산 / node_cpu, 아래는 mem_request 합산 / node_me 
         - 차트 가운데 "CPU "{비율(%)}, "MEM "{비율(%)} 표시
-      - 노드가 많을 경우 CPU 비율 기준 Top5 개만 출력한다 ✅
+      - 노드 목록은 정렬된 전체 항목을 출력한다 (스크롤) ✅
       - 추가) 패널의 오른쪽 위에 CPU/MEM 정렬 버튼을 배치한다. 기본 CPU 내림차순이며 버튼을 누르면 토글된다. ✅
       - 보완) 버튼의 동작은 한번 누를때마다 오름차순정렬/내림차순정렬이 토글된다. ✅
       - 노드 이름이 길 수 있다. 레이아웃을 벗어나거나 wordwrap 이 될 경우 이름을 줄이고 툴팁으로 표시 ✅
@@ -1804,7 +1804,7 @@ users.role = 0 | 100 (관리자)는 모든 jobs 를 조회할 수 있다. users.
       - {노드명} 비율을 표현하는 가로 bar 차트
         - 가로 bar 차트는 위 아래 2단으로 나타내며 위는 CPU 합산 / node_cpu, 아래는 MEM 합산 / node_mem
         - 차트 가운데 "CPU "{비율(%)}, "MEM "{비율(%)} 표시
-      - 노드가 많을 경우 CPU 비율 기준 Top5 개만 출력한다
+      - 노드 목록은 정렬된 전체 항목을 출력한다 (스크롤) ✅
       - 추가) 패널의 오른쪽 위에 CPU/MEM 정렬 버튼을 배치한다. 기본 CPU 내림차순이며 버튼을 누르면 토글된다. ✅
       - 보완) 버튼의 동작은 한번 누를때마다 오름차순정렬/내림차순정렬이 토글된다. ✅
       - 노드 이름이 길 수 있다. 레이아웃을 벗어나거나 wordwrap 이 될 경우 이름을 줄이고 툴팁으로 표시
@@ -1818,7 +1818,7 @@ users.role = 0 | 100 (관리자)는 모든 jobs 를 조회할 수 있다. users.
       - {호스트명} 비율을 표현하는 가로 bar 차트
         - 가로 bar 차트는 위 아래 2단으로 나타내며 위는 CPU 합산 / 호스트의 cpu_count, 아래는 MEM 합산 / 호스트의 memory_mib
         - 차트 가운데 "CPU "{비율(%)}, "MEM "{비율(%)} 표시
-      - 호스트가 많을 경우 CPU 비율 기준 Top5 개만 출력한다.
+      - 호스트 목록은 정렬된 전체 항목을 출력한다 (스크롤) ✅
       - 추가) 패널의 오른쪽 위에 CPU/MEM 정렬 버튼을 배치한다. 기본 CPU 내림차순이며 버튼을 누르면 토글된다. ✅
       - 보완) 버튼의 동작은 한번 누를때마다 오름차순정렬/내림차순정렬이 토글된다. ✅
       - 호스트 이름이 길 수 있다. 레이아웃을 벗어나거나 wordwrap 이 될 경우 이름을 줄이고 툴팁으로 표시
@@ -1834,7 +1834,7 @@ users.role = 0 | 100 (관리자)는 모든 jobs 를 조회할 수 있다. users.
           2. {used} 가 없는 경우(ex. nfs) -> "용량: {capacity}" 표시한다. ✅
       - row 툴팁 : {네임스페이스명}/{디플로이명}/{스토리지클래스}/{accessmode} ✅
         - {cluster_name}_k8s_namespaces, {cluster_name}_k8s_deployments 와 조인
-      - pvc 가 많을 경우 비율 기준 Top5 만 출력한다. 비율 내림차순 정렬 ✅
+      - PVC 목록은 비율 내림차순으로 전체 출력한다 (스크롤) ✅
   - kubevirt ✅
     - kubernetes 와 동일한 방식이다. 참조하는 테이블만 {cluster_name}_kubevirt_pvcs 이다.
       - 조인: {cluster_name}_kubevirt_namespaces, {cluster_name}_kubevirt_deployments
@@ -1845,14 +1845,16 @@ users.role = 0 | 100 (관리자)는 모든 jobs 를 조회할 수 있다. users.
       - {name} 비율 표시 가로 bar 차트로 표현 ✅
         - {free_bytes} / {capacity_bytes} 비율로 표현 ✅
       - row 툴팁 : {datacenter_name}/{type}/{accessible} ✅
-      - 데이터스토어가 많을 경우 비율 기준 Top5 만 출력, 비율 내림차순 정렬 ✅
+      - 데이터스토어 목록은 비율 내림차순으로 전체 출력한다 (스크롤) ✅
         
 - 작업 노트 패널의 탭 순서 변경
   - 인프라 형상 탭을 제일 앞으로 배치한다. 화면 진입시 default 는 인프라 형상 탭이다. ✅
 
 - 인프라 형상 > 상세정보 패널
-  - kubernetes/kubevirt 인 경우 네임스페이스 탭이 default 선택되게 한다. ✅
+  - kubernetes/kubevirt 인 경우 네임스페이스 탭이 default 선택되게 한다. ✅ 
   - vSphere 인 경우 ESXi호스트 탭을 먼저 배치하고, ESXi호스트 탭이 default 선택되게 한다. ✅
+    
+
   
 # vSphere scrape 개선
 - {cluster_name}_vsphere_hosts 테이블에 호스트의 CPU/MEM 정보를 추가할 수 있는지 검토하고 가능하면 컬럼을 추가, 수집 로직에 반영 ✅
@@ -1870,11 +1872,12 @@ users.role = 0 | 100 (관리자)는 모든 jobs 를 조회할 수 있다. users.
 
 
 # pvc scrape
-- http 모드에서는 아직 pvc used 값을 가져오지 못한다. 분석을 위해 pvc 정보 scrape 시 상세 로깅을 추가 ✅
-  - 로그 prefix: `PVC scrape:`
-  - kubelet `nodes/proxy/stats/summary` HTTP status / Content-Type / 본문 타입·길이 / JSON 키 / pods 수
-  - 실패 시 ApiException status/reason/body preview
-  - volume `pvcRef` vs `usedBytes` 유무, 없을 때 volume/fs 키 샘플
-  - PVC별 source(`kubelet`/`local_path`/`no_kubelet_stats`/`kubelet_discarded`)와 usedGi
 - http 모드 used 실패 원인: `ApiClient.request()` 가 BearerToken 을 붙이지 않아 `system:anonymous` 403 ✅
   - `call_api(..., auth_settings=["BearerToken"])` 로 변경 (kubeconfig 인증 적용)
+  - kubelet `usedBytes` 가 호스트 df 인 경우(_sane_pvc_used_gi) 폐기. NFS 는 kubelet 으로 used 불가
+
+# 인프라 형상 > 상세정보 탭의 패널 분할 조정
+- 상세정보에서 탭을 클릭시 상단/하단 패널이 분할된 상태로 레이아웃이 배치되는데, 이를 다름과 같이 변경한다.
+  1. 상세정보 패널의 각 탭을 클릭시 height 가 100%인 하나의 패널만 생성된다. ✅
+  2. row 을 클릭하면 그 때 하단 패널이 생성된다. ✅
+

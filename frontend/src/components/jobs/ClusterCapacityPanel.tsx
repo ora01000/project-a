@@ -266,7 +266,7 @@ export function NodeCapacityPanel({
       const delta = rightRatio - leftRatio;
       return sortDir === "desc" ? delta : -delta;
     });
-    return list.slice(0, 5);
+    return list;
   }, [capacity?.nodes, sortKey, sortDir]);
   const showNodes =
     capacity?.infra_type === "k8s" ||
@@ -357,7 +357,13 @@ function StorageRatioBar({
   if (!hasUsed) {
     return (
       <div className="relative h-4 overflow-hidden rounded-sm bg-slate-800 shape-bar-track">
-        <span className="absolute inset-0 flex items-center justify-center font-mono text-[10px] font-semibold text-slate-200 [text-shadow:0_0_3px_rgba(0,0,0,0.85)]">
+        <span
+          className={
+            isLight
+              ? "absolute inset-0 flex items-center justify-center font-mono text-[10px] font-semibold text-slate-700"
+              : "absolute inset-0 flex items-center justify-center font-mono text-[10px] font-semibold text-slate-200 [text-shadow:0_0_3px_rgba(0,0,0,0.85)]"
+          }
+        >
           용량: {capacity == null ? "-" : capacity}
         </span>
       </div>
@@ -404,7 +410,7 @@ export function StorageCapacityPanel({
   const storages = useMemo(() => {
     const list = [...(capacity?.storages ?? [])];
     list.sort((left, right) => pvcUsageRatio(right) - pvcUsageRatio(left));
-    return list.slice(0, 5);
+    return list;
   }, [capacity?.storages]);
   const showStorage =
     capacity?.infra_type === "k8s" ||
