@@ -235,30 +235,45 @@ def _object_keys(obj: Any) -> list[str]:
     return []
 
 
+def _header_value(headers: Any, name: str) -> str | None:
+    if headers is None:
+        return None
+    getter = getattr(headers, "get", None)
+    if callable(getter):
+        value = getter(name) or getter(name.lower())
+        if value is not None:
+            return str(value)
+    if isinstance(headers, (list, tuple)):
+        needle = name.lower()
+        for item in headers:
+            if not isinstance(item, (list, tuple)) or len(item) < 2:
+                continue
+            if str(item[0]).lower() == needle:
+                return str(item[1])
+    return None
+
+
 def _fetch_node_stats_summary(api_client: ApiClient, node_name: str) -> dict[str, Any] | None:
     """GET /api/v1/nodes/{node}/proxy/stats/summary (one call per node).
 
-    Use the raw REST client. ``CoreV1Api.connect_get_node_proxy_with_path``
-    returns ``str(dict)`` (Python quotes), which ``json.loads`` cannot parse.
+    Must go through ``call_api`` so kubeconfig BearerToken is attached.
+    ``ApiClient.request`` skips ``update_params_for_auth`` and is sent as
+    ``system:anonymous``. ``CoreV1Api.connect_get_node_proxy_with_path``
+    authenticates but returns ``str(dict)`` (Python quotes).
     """
-    from urllib.parse import quote
-
     host = (getattr(getattr(api_client, "configuration", None), "host", None) or "").rstrip("/")
     if not host:
         logger.info("PVC scrape: skip stats/summary node=%s reason=no_api_host", node_name)
         return None
-    url = f"{host}/api/v1/nodes/{quote(node_name, safe='')}/proxy/stats/summary"
-    headers = dict(getattr(api_client, "default_headers", {}) or {})
-    headers.setdefault("Accept", "application/json")
     try:
-        resp = api_client.request(
-            method="GET",
-            url=url,
-            headers=headers,
-            query_params=[],
-            post_params=[],
-            body=None,
-            _preload_content=True,
+        result = api_client.call_api(
+            "/api/v1/nodes/{name}/proxy/{path}",
+            "GET",
+            path_params={"name": node_name, "path": "stats/summary"},
+            header_params={"Accept": "application/json"},
+            auth_settings=["BearerToken"],
+            response_types_map={200: "object"},
+            _return_http_data_only=False,
             _request_timeout=_K8S_REQUEST_TIMEOUT,
         )
     except Exception as exc:
@@ -274,10 +289,13 @@ def _fetch_node_stats_summary(api_client: ApiClient, node_name: str) -> dict[str
         )
         return None
 
-    status = getattr(resp, "status", None)
-    header_fn = getattr(resp, "getheader", None)
-    content_type = header_fn("Content-Type") if callable(header_fn) else None
-    data = getattr(resp, "data", resp)
+    data: Any = result
+    status = None
+    content_type = None
+    if isinstance(result, tuple) and len(result) >= 2:
+        data = result[0]
+        status = result[1]
+        content_type = _header_value(result[2] if len(result) > 2 else None, "Content-Type")
     data_type = type(data).__name__
     data_len = len(data) if isinstance(data, (str, bytes, bytearray)) else None
     logger.info(

@@ -1838,3 +1838,5 @@ users.role = 0 | 100 (관리자)는 모든 jobs 를 조회할 수 있다. users.
   - 실패 시 ApiException status/reason/body preview
   - volume `pvcRef` vs `usedBytes` 유무, 없을 때 volume/fs 키 샘플
   - PVC별 source(`kubelet`/`local_path`/`no_kubelet_stats`/`kubelet_discarded`)와 usedGi
+- http 모드 used 실패 원인: `ApiClient.request()` 가 BearerToken 을 붙이지 않아 `system:anonymous` 403 ✅
+  - `call_api(..., auth_settings=["BearerToken"])` 로 변경 (kubeconfig 인증 적용)
