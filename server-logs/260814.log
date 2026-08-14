@@ -1,0 +1,482 @@
+INFO:     Started server process [1]
+INFO:     Waiting for application startup.
+INFO:backend.app.main:AGENT_RUNTIME_MODE=http
+INFO:backend.app.main:AGENT_RUNTIME_HTTP_TIMEOUT_SECONDS=300.0
+INFO:backend.app.db.database:Skip user seeding: users table already has 14 record(s)
+INFO:backend.app.db.database:PostgreSQL database initialized via DATABASE_URL
+INFO:backend.app.services.redis_client:Redis connected: redis://redis:6379/0
+INFO:httpx:HTTP Request: POST http://pgdb-mcp.mcps.svc.cluster.local:8000/mcp "HTTP/1.1 200 OK"
+INFO:mcp.client.streamable_http:Received session ID: 1d723165394741ce9245aa16cecbcb11
+INFO:mcp.client.streamable_http:Negotiated protocol version: 2025-11-25
+INFO:httpx:HTTP Request: POST http://pgdb-mcp.mcps.svc.cluster.local:8000/mcp "HTTP/1.1 202 Accepted"
+INFO:httpx:HTTP Request: GET http://pgdb-mcp.mcps.svc.cluster.local:8000/mcp "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST http://pgdb-mcp.mcps.svc.cluster.local:8000/mcp "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: DELETE http://pgdb-mcp.mcps.svc.cluster.local:8000/mcp "HTTP/1.1 200 OK"
+INFO:backend.app.mcp.client:MCP server 'postgresql' connected with 4 tools
+INFO:backend.app.infra_gap_analysis.agent:INFRA_GAP_ANALYSIS initialized mode=http mcp_url=http://pgdb-mcp.mcps.svc.cluster.local:8000/mcp mcp_status=connected tools=4
+INFO:backend.app.job_decision_agent.agent:JOB_DECISION_AGENT initialized mode=http llm=openai/gpt-oss-120b
+INFO:backend.app.main:backend role=api run_workers=False
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8080 (Press CTRL+C to quit)
+INFO:     10.130.2.2:47368 - "GET /readyz HTTP/1.1" 200 OK
+INFO:     10.128.3.244:45610 - "GET /api/jobs/workflow HTTP/1.1" 200 OK
+INFO:     10.128.3.244:45622 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.130.2.2:44152 - "GET /readyz HTTP/1.1" 200 OK
+INFO:     10.128.3.244:55994 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.128.3.244:56014 - "GET /api/users?viewer_role=0 HTTP/1.1" 200 OK
+INFO:     10.130.2.2:39212 - "GET /readyz HTTP/1.1" 200 OK
+INFO:     10.130.2.2:36776 - "GET /healthz HTTP/1.1" 200 OK
+INFO:     10.130.2.2:36778 - "GET /readyz HTTP/1.1" 200 OK
+INFO:     10.130.2.2:53222 - "GET /readyz HTTP/1.1" 200 OK
+INFO:     10.129.2.130:56692 - "GET /api/agents HTTP/1.1" 200 OK
+INFO:     10.130.2.2:36762 - "GET /healthz HTTP/1.1" 200 OK
+INFO:     10.130.2.2:36764 - "GET /readyz HTTP/1.1" 200 OK
+INFO:     10.129.2.130:56730 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.129.2.130:36198 - "GET /api/jobs/workflow HTTP/1.1" 200 OK
+INFO:     10.129.2.130:36212 - "GET /api/auth/me HTTP/1.1" 200 OK
+INFO:     10.129.2.130:36234 - "GET /api/k8s-infra/shape/clusters HTTP/1.1" 200 OK
+INFO:     10.129.2.130:36238 - "GET /api/jobs/workflow HTTP/1.1" 200 OK
+INFO:     10.129.2.130:36250 - "GET /api/chat/logs/isyun HTTP/1.1" 200 OK
+INFO:     10.129.2.130:36278 - "GET /api/agents HTTP/1.1" 200 OK
+INFO:     10.129.2.130:36322 - "GET /api/chat/input-history/HELPDESK_AGENT HTTP/1.1" 200 OK
+INFO:     10.129.2.130:36326 - "GET /api/auth/me HTTP/1.1" 200 OK
+INFO:     10.129.2.130:36338 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     10.129.2.130:36362 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.129.2.130:36402 - "GET /api/chat/input-history/HELPDESK_AGENT HTTP/1.1" 200 OK
+INFO:     10.130.2.2:46830 - "GET /readyz HTTP/1.1" 200 OK
+INFO:     10.129.2.130:36418 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.129.2.130:50260 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.129.2.130:50266 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.129.2.130:50276 - "GET /api/k8s-infra/shape/clusters/private_datacenter HTTP/1.1" 200 OK
+INFO:     10.129.2.130:50282 - "GET /api/k8s-infra/shape/clusters/private_datacenter/capacity HTTP/1.1" 200 OK
+INFO:     10.130.2.2:32988 - "GET /healthz HTTP/1.1" 200 OK
+INFO:     10.130.2.2:33000 - "GET /readyz HTTP/1.1" 200 OK
+INFO:     10.129.2.130:50334 - "GET /api/k8s-infra/shape/clusters/dprrt-k8s/capacity HTTP/1.1" 200 OK
+INFO:     10.129.2.130:50354 - "GET /api/agents HTTP/1.1" 200 OK
+INFO:     10.129.2.130:43860 - "GET /api/k8s-infra/shape/clusters/dprv6-k8s/capacity HTTP/1.1" 200 OK
+INFO:     10.129.2.130:43866 - "GET /api/k8s-infra/shape/clusters/dprv-k8s HTTP/1.1" 200 OK
+INFO:     10.129.2.130:43876 - "GET /api/k8s-infra/shape/clusters/dprv-k8s/capacity HTTP/1.1" 200 OK
+INFO:     10.129.2.130:43906 - "GET /api/jobs/workflow HTTP/1.1" 200 OK
+INFO:     10.129.2.130:43908 - "GET /api/k8s-infra/shape/clusters/dtest-k8s HTTP/1.1" 200 OK
+INFO:     10.130.2.2:33642 - "GET /readyz HTTP/1.1" 200 OK
+INFO:     10.129.2.130:43966 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.129.2.130:42452 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.129.2.130:42472 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.129.2.130:42482 - "GET /api/agents HTTP/1.1" 200 OK
+INFO:     10.130.2.2:56018 - "GET /healthz HTTP/1.1" 200 OK
+INFO:     10.130.2.2:56026 - "GET /readyz HTTP/1.1" 200 OK
+INFO:     10.129.2.130:54598 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.129.2.130:54618 - "GET /api/jobs/workflow HTTP/1.1" 200 OK
+INFO:     10.130.2.2:59410 - "GET /readyz HTTP/1.1" 200 OK
+INFO:     10.129.2.130:54644 - "GET /api/agents HTTP/1.1" 200 OK
+INFO:     10.129.2.130:58636 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.129.2.130:58648 - "GET /api/jobs/workflow HTTP/1.1" 200 OK
+INFO:     10.130.2.2:54466 - "GET /healthz HTTP/1.1" 200 OK
+INFO:     10.130.2.2:54482 - "GET /readyz HTTP/1.1" 200 OK
+INFO:     10.129.2.130:58678 - "GET /api/k8s-infra/shape/clusters/dprv6-k8s HTTP/1.1" 200 OK
+INFO:     10.129.2.130:58670 - "GET /api/k8s-infra/shape/clusters/dprv6-k8s/capacity HTTP/1.1" 200 OK
+INFO:     10.129.2.130:36868 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.129.2.130:36890 - "GET /api/k8s-infra/shape/clusters/dprv-k8s HTTP/1.1" 200 OK
+INFO:     10.129.2.130:36878 - "GET /api/k8s-infra/shape/clusters/dprv-k8s/capacity HTTP/1.1" 200 OK
+INFO:     10.129.2.130:36900 - "GET /api/jobs/workflow HTTP/1.1" 200 OK
+INFO:     10.129.2.130:36922 - "GET /api/users?viewer_role=0 HTTP/1.1" 200 OK
+INFO:     10.130.2.2:55672 - "GET /readyz HTTP/1.1" 200 OK
+INFO:     10.129.2.130:36938 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.129.2.130:38270 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.130.2.2:42302 - "GET /readyz HTTP/1.1" 200 OK
+INFO:     10.130.2.2:42300 - "GET /healthz HTTP/1.1" 200 OK
+INFO:     10.129.2.130:38272 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.129.2.130:47112 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.129.2.130:47128 - "GET /api/jobs/workflow HTTP/1.1" 200 OK
+INFO:     10.129.2.130:47142 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.129.2.130:47154 - "GET /api/jobs/workflow HTTP/1.1" 200 OK
+INFO:     10.130.2.2:47526 - "GET /readyz HTTP/1.1" 200 OK
+INFO:     10.129.2.130:47164 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.129.2.130:48486 - "GET /api/jobs/workflow HTTP/1.1" 200 OK
+INFO:     10.129.2.130:48502 - "GET /api/jobs/workflow HTTP/1.1" 200 OK
+INFO:     10.129.2.130:48504 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.129.2.130:48522 - "GET /api/users?viewer_role=0 HTTP/1.1" 200 OK
+INFO:     10.130.2.2:37138 - "GET /healthz HTTP/1.1" 200 OK
+INFO:     10.130.2.2:37148 - "GET /readyz HTTP/1.1" 200 OK
+INFO:     10.129.2.130:48528 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.129.2.130:34666 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.129.2.130:34682 - "GET /api/jobs/workflow HTTP/1.1" 200 OK
+INFO:     10.130.2.2:44070 - "GET /readyz HTTP/1.1" 200 OK
+INFO:     10.129.2.130:34696 - "GET /api/k8s-infra/shape/clusters/pcicd-k8s HTTP/1.1" 200 OK
+INFO:     10.129.2.130:34718 - "GET /api/users?viewer_role=0 HTTP/1.1" 200 OK
+INFO:     10.129.2.130:44098 - "GET /api/k8s-infra/shape/clusters/dtest-k8s HTTP/1.1" 200 OK
+INFO:     10.129.2.130:44102 - "GET /api/k8s-infra/shape/clusters/dtest-k8s/capacity HTTP/1.1" 200 OK
+INFO:     10.129.2.130:44142 - "GET /api/k8s-infra/shape/clusters/dkvrt-k8s/capacity HTTP/1.1" 200 OK
+INFO:     10.129.2.130:44144 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.129.2.130:44160 - "GET /api/k8s-infra/shape/clusters/dprmn-k8s/capacity HTTP/1.1" 200 OK
+INFO:     10.129.2.130:44158 - "GET /api/k8s-infra/shape/clusters/dprmn-k8s HTTP/1.1" 200 OK
+INFO:     10.130.2.2:42970 - "GET /healthz HTTP/1.1" 200 OK
+INFO:     10.130.2.2:42976 - "GET /readyz HTTP/1.1" 200 OK
+INFO:     10.129.2.130:44174 - "GET /api/k8s-infra/shape/clusters/dprrt-k8s/capacity HTTP/1.1" 200 OK
+INFO:     10.129.2.130:44198 - "GET /api/k8s-infra/shape/clusters/dprsv-k8s/capacity HTTP/1.1" 200 OK
+INFO:     10.129.2.130:33384 - "GET /api/k8s-infra/shape/clusters/dprv6-k8s HTTP/1.1" 200 OK
+INFO:     10.129.2.130:33382 - "GET /api/k8s-infra/shape/clusters/dprv6-k8s/capacity HTTP/1.1" 200 OK
+INFO:     10.129.2.130:33416 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.129.2.130:33436 - "GET /api/users?viewer_role=0 HTTP/1.1" 200 OK
+INFO:     10.129.2.130:33442 - "GET /api/k8s-infra/clusters HTTP/1.1" 200 OK
+INFO:     10.130.2.2:33064 - "GET /readyz HTTP/1.1" 200 OK
+INFO:     10.129.2.130:33444 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+INFO:backend.app.services.k8s_collector:Collecting k8s inventory cluster=dprv6-k8s context=dprv6-k8s resolved=dprv6-k8s kubeconfig=/etc/k8s/kubeconfig mode=http
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+INFO:backend.app.services.k8s_collector:Skip API network.openshift.io/v1 kind=NetNamespace (No matches found for {'api_version': 'network.openshift.io/v1', 'kind': 'NetNamespace'})
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+INFO:backend.app.services.k8s_collector:PVC scrape: workload map claims=3 pvc_nodes=1 nodes=['dprv6wkr01p.dprv6-k8s.lguplus.co.kr']
+INFO:backend.app.services.k8s_collector:PVC scrape: kubelet stats start nodes=1 workers=1 names=['dprv6wkr01p.dprv6-k8s.lguplus.co.kr']
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+INFO:backend.app.services.k8s_collector:PVC scrape: skip stats/summary node=dprv6wkr01p.dprv6-k8s.lguplus.co.kr type=ForbiddenException status=403 reason=Forbidden err=(403) Reason: Forbidden HTTP response headers: HTTPHeaderDict({'Audit-Id': '364bf47d-ede3-48ea-8166-af26a97c0196', 'Cache-Control': 'no-cache, private', 'Content-Type': 'applicatio... body={"kind":"Status","apiVersion":"v1","metadata":{},"status":"Failure","message":"nodes \"dprv6wkr01p.dprv6-k8s.lguplus.co.kr\" is forbidden: User \"system:anonymous\" cannot get reso...
+INFO:backend.app.services.k8s_collector:PVC scrape: kubelet stats done claims=0 nodes=1 ok=0 empty=1 error=0
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+INFO:backend.app.services.k8s_collector:PVC scrape: local PV path scan local_or_hostpath=0 readable=0 unreadable=0
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+INFO:backend.app.services.k8s_collector:PVC scrape: pvc ns=ollama-test name=bifrost-test-pvc phase=Bound volume=bifrost-pv sc=internal-registry-storage-class capGi=50 usedGi=None source=no_kubelet_stats in_kubelet=False in_path=False owner=bifrost/deployment
+INFO:backend.app.services.k8s_collector:PVC scrape: pvc ns=ollama-test name=ollama-test-pvc phase=Bound volume=ollama-test-pv sc=internal-registry-storage-class capGi=100 usedGi=None source=no_kubelet_stats in_kubelet=False in_path=False owner=-
+INFO:backend.app.services.k8s_collector:PVC scrape: pvc ns=ollama-test name=webui-test-pvc phase=Bound volume=webui-test-pv sc=internal-registry-storage-class capGi=10 usedGi=None source=no_kubelet_stats in_kubelet=False in_path=False owner=open-webui/deployment
+INFO:backend.app.services.k8s_collector:PVC scrape: pvc ns=whatap-monitoring name=whatap-confbase phase=Bound volume=whatap-confbase sc=internal-registry-storage-class capGi=0 usedGi=None source=no_kubelet_stats in_kubelet=False in_path=False owner=whatap-master-agent/deployment
+INFO:backend.app.services.k8s_collector:PVC scrape: summary listed=5 kept=4 skipped_system=1 used_ok=0 used_missing=4 discarded_kubelet=0 kubelet_claims=0 path_claims=0
+/app/.venv/lib/python3.12/site-packages/urllib3/connectionpool.py:1110: InsecureRequestWarning: Unverified HTTPS request is being made to host 'api.dprv6-k8s.lguplus.co.kr'. Adding certificate verification is strongly advised. See: https://urllib3.readthedocs.io/en/latest/advanced-usage.html#tls-warnings
+  warnings.warn(
+INFO:     10.129.2.130:40090 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:backend.app.db.k8s_inventory:Backed up cluster=dprv6-k8s inventory -> ['dprv6-k8s_k8s_nodes_20260813_232520', 'dprv6-k8s_k8s_namespaces_20260813_232520', 'dprv6-k8s_k8s_deployments_20260813_232520', 'dprv6-k8s_k8s_pvcs_20260813_232520', 'dprv6-k8s_k8s_pods_on_nodes_20260813_232520']
+INFO:backend.app.db.k8s_inventory:Pruned cluster=dprv6-k8s inventory backups keep=4 dropped=['dprv6-k8s_k8s_nodes_20260807_152339', 'dprv6-k8s_k8s_namespaces_20260807_152339', 'dprv6-k8s_k8s_deployments_20260807_152339', 'dprv6-k8s_k8s_pvcs_20260807_152339']
+INFO:backend.app.db.k8s_inventory:Replaced per-cluster inventory cluster=dprv6-k8s idx=1 last_update=2026-08-14 13:51:48 counts={'cluster_id': 1, 'cluster_name': 'dprv6-k8s', 'tables': {'nodes': 'dprv6-k8s_k8s_nodes', 'namespaces': 'dprv6-k8s_k8s_namespaces', 'deployments': 'dprv6-k8s_k8s_deployments', 'pvcs': 'dprv6-k8s_k8s_pvcs', 'pods_on_nodes': 'dprv6-k8s_k8s_pods_on_nodes'}, 'nodes': 11, 'namespaces': 31, 'deployments': 33, 'pvcs': 4, 'pods_on_nodes': 51} backups=['dprv6-k8s_k8s_nodes_20260813_232520', 'dprv6-k8s_k8s_namespaces_20260813_232520', 'dprv6-k8s_k8s_deployments_20260813_232520', 'dprv6-k8s_k8s_pvcs_20260813_232520', 'dprv6-k8s_k8s_pods_on_nodes_20260813_232520'] pruned=['dprv6-k8s_k8s_nodes_20260807_152339', 'dprv6-k8s_k8s_namespaces_20260807_152339', 'dprv6-k8s_k8s_deployments_20260807_152339', 'dprv6-k8s_k8s_pvcs_20260807_152339']
+INFO:     10.129.2.130:40078 - "POST /api/k8s-infra/clusters/1/collect HTTP/1.1" 200 OK
+INFO:     10.129.2.130:40122 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.130.2.2:39924 - "GET /healthz HTTP/1.1" 200 OK
+INFO:     10.130.2.2:39926 - "GET /readyz HTTP/1.1" 200 OK
+INFO:     10.129.2.130:40946 - "GET /api/jobs/workflow HTTP/1.1" 200 OK
+INFO:     10.129.2.130:40962 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.130.2.2:34626 - "GET /readyz HTTP/1.1" 200 OK
+INFO:     10.129.2.130:49250 - "GET /api/jobs/workflow HTTP/1.1" 200 OK
+INFO:     10.129.2.130:49266 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.130.2.2:55344 - "GET /healthz HTTP/1.1" 200 OK
+INFO:     10.130.2.2:55350 - "GET /readyz HTTP/1.1" 200 OK
+INFO:     10.129.2.130:49302 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.129.2.130:50610 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.129.2.130:50636 - "GET /api/jobs/workflow HTTP/1.1" 200 OK
+INFO:     10.130.2.2:48288 - "GET /readyz HTTP/1.1" 200 OK
+INFO:     10.129.2.130:57968 - "GET /api/users?viewer_role=0 HTTP/1.1" 200 OK
+INFO:     10.130.2.2:33604 - "GET /readyz HTTP/1.1" 200 OK
+INFO:     10.130.2.2:33612 - "GET /healthz HTTP/1.1" 200 OK
+INFO:     10.129.2.130:58020 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.129.2.130:45384 - "GET /api/jobs/workflow HTTP/1.1" 200 OK
+INFO:     10.129.2.130:45406 - "GET /api/jobs/workflow HTTP/1.1" 200 OK
+INFO:     10.129.2.130:45390 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.129.2.130:45434 - "GET /api/agents HTTP/1.1" 200 OK
+INFO:     10.129.2.130:45418 - "GET /api/users?viewer_role=0 HTTP/1.1" 200 OK
+INFO:     10.130.2.2:58508 - "GET /readyz HTTP/1.1" 200 OK
+INFO:     10.129.2.130:45448 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.129.2.130:54988 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.129.2.130:54998 - "GET /api/jobs/workflow HTTP/1.1" 200 OK
+INFO:     10.130.2.2:34472 - "GET /healthz HTTP/1.1" 200 OK
+INFO:     10.130.2.2:34482 - "GET /readyz HTTP/1.1" 200 OK
+INFO:     10.129.2.130:43656 - "GET /api/users?viewer_role=0 HTTP/1.1" 200 OK
+INFO:     10.129.2.130:43636 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.130.2.2:49818 - "GET /readyz HTTP/1.1" 200 OK
+INFO:     10.129.2.130:43696 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.129.2.130:34456 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.129.2.130:34472 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.129.2.130:34488 - "GET /api/users?viewer_role=0 HTTP/1.1" 200 OK
+INFO:     10.130.2.2:53864 - "GET /healthz HTTP/1.1" 200 OK
+INFO:     10.130.2.2:53870 - "GET /readyz HTTP/1.1" 200 OK
+INFO:     10.130.2.2:43102 - "GET /readyz HTTP/1.1" 200 OK
+INFO:     10.129.2.130:41654 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.129.2.130:58590 - "GET /api/users?viewer_role=0 HTTP/1.1" 200 OK
+INFO:     10.129.2.130:58560 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.129.2.130:58604 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.129.2.130:58620 - "GET /api/jobs/workflow HTTP/1.1" 200 OK
+INFO:     10.129.2.130:58622 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.130.2.2:39058 - "GET /readyz HTTP/1.1" 200 OK
+INFO:     10.130.2.2:39072 - "GET /healthz HTTP/1.1" 200 OK
+INFO:     10.129.2.130:58630 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.129.2.130:56310 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.130.2.2:47552 - "GET /readyz HTTP/1.1" 200 OK
+INFO:     10.130.2.2:55504 - "GET /readyz HTTP/1.1" 200 OK
+INFO:     10.130.2.2:55506 - "GET /healthz HTTP/1.1" 200 OK
+INFO:     10.130.2.2:34000 - "GET /readyz HTTP/1.1" 200 OK
+INFO:     10.130.2.2:55692 - "GET /readyz HTTP/1.1" 200 OK
+INFO:     10.130.2.2:55696 - "GET /healthz HTTP/1.1" 200 OK
+INFO:     10.129.2.130:52598 - "GET /api/users?viewer_role=0 HTTP/1.1" 200 OK
+INFO:     10.129.2.130:52592 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.129.2.130:52584 - "GET /api/jobs/workflow HTTP/1.1" 200 OK
+INFO:     10.130.2.2:59648 - "GET /readyz HTTP/1.1" 200 OK
+INFO:     10.130.2.2:57044 - "GET /readyz HTTP/1.1" 200 OK
+INFO:     10.130.2.2:57054 - "GET /healthz HTTP/1.1" 200 OK
+INFO:     10.130.2.2:58230 - "GET /readyz HTTP/1.1" 200 OK
+INFO:     10.130.2.2:36530 - "GET /readyz HTTP/1.1" 200 OK
+INFO:     10.130.2.2:36532 - "GET /healthz HTTP/1.1" 200 OK
+INFO:     10.130.2.2:36892 - "GET /readyz HTTP/1.1" 200 OK
+INFO:     10.130.2.2:37060 - "GET /healthz HTTP/1.1" 200 OK
+INFO:     10.130.2.2:37058 - "GET /readyz HTTP/1.1" 200 OK
+
