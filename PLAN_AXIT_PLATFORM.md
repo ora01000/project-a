@@ -1500,6 +1500,7 @@ dev-axplatform-multi-pod 는 목업(로컬)/http(서버) 환경 모두 postgres�
 
   - INFRA_GAP_ANALYSIS 시스템프롬프트(영문으로 번역하여 적용하고 문맥상 보완이 필요하면 보완한다) : (완료)
     - 개선: 스키마/DDL 중심이 아니라 저장된 인벤토리 데이터(추가·삭제·변경·수량 추이) 비교를 1순위로 하도록 보강
+    - 보완: vSphere `{cluster_name}_vsphere_datastores` 갭분석(식별키·용량 바이트·세대 누락 처리) 반영
 // 시스템 프롬프트 시작 (적용본, 영문)
 You are an infrastructure architecture gap-analysis specialist.
 Your PRIMARY goal is to compare the MEANING of stored inventory data across snapshot generations:
@@ -1533,6 +1534,16 @@ There are three infrastructure types. Compare using the tables below.
 - {cluster_name}_vsphere_cluster: clusters configured in a vSphere datacenter
 - {cluster_name}_vsphere_hosts: ESXi host inventory
 - {cluster_name}_vsphere_vms_on_host: VMs placed on each ESXi host
+- {cluster_name}_vsphere_datastores: datastores collected per vSphere datacenter
+  - Identity key: datastore_id (MoID). If comparing across generations where an id was recycled, also use (datacenter_id, name).
+  - Columns: datastore_id, name, type (VMFS/NFS/NFS41/VSAN/VVOL/CIFS/…), datacenter_id, datacenter_name, capacity_bytes, free_bytes, accessible
+  - capacity_bytes / free_bytes are raw bytes (BIGINT), not Gi. Used space ≈ capacity_bytes - free_bytes. Report sizes in Gi/Ti for humans but query in bytes.
+  - Group and trend by datacenter_name (or datacenter_id). A datastore belongs to one datacenter in this scrape.
+  - accessible may be NULL in current snapshots (REST list does not provide it). Do not treat NULL as inaccessible.
+  - Older backup generations may lack this table entirely; then report "datastores not collected in that generation" and compare only overlapping generations. Do not treat a missing table as all datastores deleted.
+  - NFS/VSAN free_space is filesystem-level (df of the share/cluster), not per-VM usage.
+
+When infra_type is vSphere, ALWAYS include datastore inventory in the gap analysis (counts, add/remove, capacity/free drift), not only clusters/hosts/VMs.
 
 Shape (generation) table naming:
 - {table_name} -> current/latest snapshot
@@ -1541,9 +1552,10 @@ Shape (generation) table naming:
 Analysis procedure:
 1) Identify available generations for the selected cluster (latest + backups, oldest → newest).
 2) For each relevant inventory table, compare rows between consecutive generations using stable identity keys
-   (e.g. name, uid, namespace/name, host/vm name — pick the best available keys per table).
-3) Report added / removed / meaningfully changed resources, plus count trends (nodes, namespaces, deployments, PVCs, VMs, etc.).
+   (e.g. name, uid, namespace/name, host/vm name, datastore_id — pick the best available keys per table).
+3) Report added / removed / meaningfully changed resources, plus count trends (nodes, namespaces, deployments, PVCs, VMs, datastores, etc.).
 4) Summarize operational implications (capacity, placement, drift risk). Prefer concrete resource names over abstract schema talk.
+   For datastores, call out large free-space drops, capacity shrink/grow, type changes, and datacenters that gained or lost datastores.
 5) Mention column missing/renamed across generations only if it blocks a fair comparison; then continue with aligned columns.
 
 Output language: ALWAYS write the final answer in Korean (한국어). Resource names, IDs, and table names may remain as stored.
@@ -1816,12 +1828,31 @@ users.role = 0 | 100 (관리자)는 모든 jobs 를 조회할 수 있다. users.
     1. 저장소별 용량
     - 소스 테이블 : {cluster_name}_k8s_pvcs
     2. 표현 방식
-      - {PVC명 : name} {용량 : capacity} {사용 : used}으로 테이블로 출력한다. ✅
+      - {pvc명} 비율을 표현하는 가로 bar 차트로 변경 ✅
+        - 가로 bar 차트는 
+          1. {used} 가 있는 경우 -> {used}/{capacity} 비율로 표현 ✅
+          2. {used} 가 없는 경우(ex. nfs) -> "용량: {capacity}" 표시한다. ✅
       - row 툴팁 : {네임스페이스명}/{디플로이명}/{스토리지클래스}/{accessmode} ✅
         - {cluster_name}_k8s_namespaces, {cluster_name}_k8s_deployments 와 조인
-      
+      - pvc 가 많을 경우 비율 기준 Top5 만 출력한다. 비율 내림차순 정렬 ✅
+  - kubevirt ✅
+    - kubernetes 와 동일한 방식이다. 참조하는 테이블만 {cluster_name}_kubevirt_pvcs 이다.
+      - 조인: {cluster_name}_kubevirt_namespaces, {cluster_name}_kubevirt_deployments
+  - vSphere ✅
+    1. 저장소별 용량
+    - 소스 테이블 : {cluster_name}_vsphere_datastores
+    2. 표현 방식
+      - {name} 비율 표시 가로 bar 차트로 표현 ✅
+        - {free_bytes} / {capacity_bytes} 비율로 표현 ✅
+      - row 툴팁 : {datacenter_name}/{type}/{accessible} ✅
+      - 데이터스토어가 많을 경우 비율 기준 Top5 만 출력, 비율 내림차순 정렬 ✅
+        
 - 작업 노트 패널의 탭 순서 변경
   - 인프라 형상 탭을 제일 앞으로 배치한다. 화면 진입시 default 는 인프라 형상 탭이다. ✅
+
+- 인프라 형상 > 상세정보 패널
+  - kubernetes/kubevirt 인 경우 네임스페이스 탭이 default 선택되게 한다. ✅
+  - vSphere 인 경우 ESXi호스트 탭을 먼저 배치하고, ESXi호스트 탭이 default 선택되게 한다. ✅
   
 # vSphere scrape 개선
 - {cluster_name}_vsphere_hosts 테이블에 호스트의 CPU/MEM 정보를 추가할 수 있는지 검토하고 가능하면 컬럼을 추가, 수집 로직에 반영 ✅
@@ -1830,6 +1861,13 @@ users.role = 0 | 100 (관리자)는 모든 jobs 를 조회할 수 있다. users.
     - 호스트 100대 단위 청크 + `maxObjects=100`
     - 응답 `token` 이 있으면 `ContinueRetrievePropertiesEx` 로 이어서 수집
   - 컬럼: `cpu_count`(코어), `memory_mib`
+- 데이터센터 기준, 데이터스토어의 정보를 scrape 하고자 한다. 테이블은 {cluster_name}_vsphere_datastores 이다. ✅
+  - REST 1차: datacenter 목록 후 `GET /api/vcenter/datastore?datacenters={id}`
+  - 컬럼: datastore_id, name, type, datacenter_id, datacenter_name, capacity_bytes(BIGINT), free_bytes(BIGINT), accessible
+  - accessible 은 목록 REST에 없어 현재 NULL (SOAP/상세 GET 은 2차)
+  - datacenter 목록 실패 시 전체 datastore 목록 폴백 (datacenter_* 는 NULL)
+  - 권장안으로 코드 적용 및 테이블 구조 생성
+
 
 # pvc scrape
 - http 모드에서는 아직 pvc used 값을 가져오지 못한다. 분석을 위해 pvc 정보 scrape 시 상세 로깅을 추가 ✅

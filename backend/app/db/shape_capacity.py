@@ -100,7 +100,7 @@ def _mib_to_gi(memory_mib: float) -> float:
 def _vsphere_shape_capacity(connection, cluster_name: str, tables: set[str]) -> ClusterShapeCapacity:
     from backend.app.db.vsphere_inventory import vsphere_inventory_tables
 
-    _clusters_t, hosts_t, vms_t = vsphere_inventory_tables(cluster_name)
+    _clusters_t, hosts_t, vms_t, _ds_t = vsphere_inventory_tables(cluster_name)
     node_count = 0
     cpu_cap = 0.0
     mem_cap_mib = 0.0
@@ -133,7 +133,43 @@ def _vsphere_shape_capacity(connection, cluster_name: str, tables: set[str]) -> 
         cpu=ResourceCapacity(capacity=cpu_cap, request=cpu_used, limit=cpu_used),
         mem=ResourceCapacity(capacity=mem_cap, request=mem_used, limit=mem_used),
         nodes=_vsphere_host_shape_capacities(connection, hosts_t, vms_t, tables),
+        storages=_vsphere_datastore_shape_capacities(connection, _ds_t, tables),
     )
+
+
+def _vsphere_datastore_shape_capacities(
+    connection,
+    ds_t: str,
+    tables: set[str],
+) -> list[PvcShapeCapacity]:
+    if ds_t not in tables:
+        return []
+    sql = f"""
+        SELECT COALESCE(NULLIF(name, ''), datastore_id) AS name,
+               capacity_bytes AS capacity,
+               free_bytes AS used,
+               COALESCE(datacenter_name, '') AS namespace,
+               COALESCE(type, '') AS storage_class,
+               COALESCE(CAST(accessible AS TEXT), '') AS access_mode
+        FROM {_quote_ident(ds_t)}
+        ORDER BY name
+        """
+    rows: list[PvcShapeCapacity] = []
+    for row in connection.execute(sql).fetchall():
+        name = _row_text(row, "name")
+        if not name:
+            continue
+        rows.append(
+            PvcShapeCapacity(
+                name=name,
+                capacity=_row_optional_int(row, "capacity"),
+                used=_row_optional_int(row, "used"),
+                namespace=_row_text(row, "namespace"),
+                storage_class=_row_text(row, "storage_class"),
+                access_mode=_row_text(row, "access_mode"),
+            )
+        )
+    return rows
 
 
 def _vsphere_host_shape_capacities(

@@ -11,6 +11,7 @@ from backend.app.db.k8s_inventory import get_vsphere_credentials
 from backend.app.db.vsphere_inventory import (
     VsphereClusterSnapshot,
     VsphereComputeClusterRow,
+    VsphereDatastoreRow,
     VsphereHostRow,
     VsphereVmOnHostRow,
     replace_vsphere_snapshot,
@@ -58,6 +59,30 @@ def _as_optional_bool(value: Any) -> bool | None:
     if text in {"0", "false", "no", "off"}:
         return False
     return None
+
+
+def _datastore_row_from_rest(
+    entry: dict[str, Any],
+    *,
+    datacenter_id: str | None = None,
+    datacenter_name: str | None = None,
+) -> VsphereDatastoreRow | None:
+    datastore_id = str(entry.get("datastore") or "").strip()
+    if not datastore_id:
+        return None
+    ds_type = entry.get("type")
+    if isinstance(ds_type, dict):
+        ds_type = ds_type.get("name") or ds_type.get("value")
+    return VsphereDatastoreRow(
+        datastore_id=datastore_id,
+        name=str(entry.get("name") or "") or None,
+        type=str(ds_type or "") or None,
+        datacenter_id=datacenter_id,
+        datacenter_name=datacenter_name,
+        capacity_bytes=_as_optional_int(entry.get("capacity")),
+        free_bytes=_as_optional_int(entry.get("free_space")),
+        accessible=_as_optional_bool(entry.get("accessible")),
+    )
 
 
 def _build_client(
@@ -210,18 +235,70 @@ def collect_vsphere_snapshot(
                     )
                 )
 
+        datastores: list[VsphereDatastoreRow] = []
+        seen_ds: set[tuple[str, str]] = set()
+        datacenters_raw: list[dict[str, Any]] = []
+        try:
+            datacenters_raw = client.list_datacenters()
+        except VsphereApiError as exc:
+            logger.warning("list_datacenters failed cluster=%s: %s", cluster_name, exc)
+        if datacenters_raw:
+            for dc_entry in datacenters_raw:
+                datacenter_id = str(dc_entry.get("datacenter") or "").strip()
+                if not datacenter_id:
+                    continue
+                datacenter_name = str(dc_entry.get("name") or "") or None
+                try:
+                    ds_raw = client.list_datastores_by_datacenter(datacenter_id)
+                except VsphereApiError as exc:
+                    logger.warning(
+                        "list_datastores_by_datacenter failed dc=%s cluster=%s: %s",
+                        datacenter_id,
+                        cluster_name,
+                        exc,
+                    )
+                    continue
+                for ds_entry in ds_raw:
+                    row = _datastore_row_from_rest(
+                        ds_entry,
+                        datacenter_id=datacenter_id,
+                        datacenter_name=datacenter_name,
+                    )
+                    if row is None:
+                        continue
+                    key = (row.datacenter_id or "", row.datastore_id)
+                    if key in seen_ds:
+                        continue
+                    seen_ds.add(key)
+                    datastores.append(row)
+        else:
+            try:
+                for ds_entry in client.list_datastores():
+                    row = _datastore_row_from_rest(ds_entry)
+                    if row is None:
+                        continue
+                    key = (row.datacenter_id or "", row.datastore_id)
+                    if key in seen_ds:
+                        continue
+                    seen_ds.add(key)
+                    datastores.append(row)
+            except VsphereApiError as exc:
+                logger.warning("list_datastores failed cluster=%s: %s", cluster_name, exc)
+
         logger.info(
-            "Collected vsphere snapshot cluster=%s compute_clusters=%s hosts=%s vms=%s",
+            "Collected vsphere snapshot cluster=%s compute_clusters=%s hosts=%s vms=%s datastores=%s",
             cluster_name,
             len(compute_clusters),
             len(hosts),
             len(vms_on_host),
+            len(datastores),
         )
         return VsphereClusterSnapshot(
             cluster_name=cluster_name,
             compute_clusters=compute_clusters,
             hosts=hosts,
             vms_on_host=vms_on_host,
+            datastores=datastores,
         )
     finally:
         client.close()

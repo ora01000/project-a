@@ -258,6 +258,52 @@ class VsphereRestClient:
             return []
         return [item for item in data if isinstance(item, dict)]
 
+    def list_datacenters(self) -> list[dict[str, Any]]:
+        """GET /api/vcenter/datacenter — datacenter MoID and name."""
+        path = self._path("/rest/vcenter/datacenter", "/api/vcenter/datacenter")
+        response = self._request("GET", path)
+        self._check(response, path, "list datacenters")
+        data = self._extract_value(response)
+        if not isinstance(data, list):
+            return []
+        return [item for item in data if isinstance(item, dict)]
+
+    def list_datastores_by_datacenter(self, datacenter_id: str) -> list[dict[str, Any]]:
+        """Datastores in a datacenter (REST list has no datacenter field)."""
+        datacenter_id = (datacenter_id or "").strip()
+        if not datacenter_id:
+            raise ValueError("datacenter_id is required")
+        path = self._path("/rest/vcenter/datastore", "/api/vcenter/datastore")
+        params = (
+            {"datacenters": datacenter_id}
+            if self._api_mode == "api"
+            else {"filter.datacenters.1": datacenter_id}
+        )
+        response = self._request("GET", path, params=params)
+        if (
+            not response.is_success
+            and self._api_mode == "rest"
+            and response.status_code == 400
+        ):
+            response = self._request(
+                "GET", path, params={"filter.datacenters": datacenter_id}
+            )
+        self._check(response, path, f"list datastores in datacenter '{datacenter_id}'")
+        data = self._extract_value(response)
+        if not isinstance(data, list):
+            return []
+        return [item for item in data if isinstance(item, dict)]
+
+    def list_datastores(self) -> list[dict[str, Any]]:
+        """GET /api/vcenter/datastore — all datastores (no datacenter on items)."""
+        path = self._path("/rest/vcenter/datastore", "/api/vcenter/datastore")
+        response = self._request("GET", path)
+        self._check(response, path, "list datastores")
+        data = self._extract_value(response)
+        if not isinstance(data, list):
+            return []
+        return [item for item in data if isinstance(item, dict)]
+
     def list_hosts_by_cluster(self, cluster_id: str) -> list[dict[str, Any]]:
         """Hosts belonging to a ClusterComputeResource (REST filter.clusters / clusters)."""
         cluster_id = (cluster_id or "").strip()

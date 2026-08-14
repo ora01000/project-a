@@ -66,6 +66,7 @@ const VSPHERE_SERIES: { key: SeriesKey; label: string; color: string }[] = [
   { key: "namespaces", label: "Clusters", color: "#34d399" },
   { key: "nodes", label: "Hosts", color: "#38bdf8" },
   { key: "vms", label: "VMs", color: "#a78bfa" },
+  { key: "volumes", label: "Datastores", color: "#fb923c" },
 ];
 
 const BASE_SERIES_LIGHT: { key: SeriesKey; label: string; color: string }[] = [
@@ -84,6 +85,7 @@ const VSPHERE_SERIES_LIGHT: { key: SeriesKey; label: string; color: string }[] =
   { key: "namespaces", label: "Clusters", color: "#059669" },
   { key: "nodes", label: "Hosts", color: "#0284c7" },
   { key: "vms", label: "VMs", color: "#7c3aed" },
+  { key: "volumes", label: "Datastores", color: "#ea580c" },
 ];
 
 function seriesForInfraType(infraType: string, isLight: boolean) {
@@ -383,6 +385,7 @@ export function InfraShapeTab({ active, maskIps = false, onCopyToNote }: InfraSh
         { label: "클러스터 개수", value: String(analysis.summary.namespaces ?? 0) },
         { label: "호스트 개수", value: String(analysis.summary.nodes ?? 0) },
         { label: "VM 개수", value: String(analysis.summary.vms ?? 0) },
+        { label: "데이터스토어 개수", value: String(analysis.summary.volumes ?? 0) },
       ];
     }
     const items = [

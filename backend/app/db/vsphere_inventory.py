@@ -4,11 +4,14 @@ Layout (infra_type=vSphere):
   {cluster_name}_vsphere_cluster
   {cluster_name}_vsphere_hosts          (cluster_id → vsphere_cluster.cluster_id)
   {cluster_name}_vsphere_vms_on_host
+  {cluster_name}_vsphere_datastores     (datacenter_id from REST datacenter filter)
 
 vCenter mapping source:
   - Clusters: GET /api/vcenter/cluster (cluster, name, ha_enabled, drs_enabled)
   - Host↔cluster: GET /api/vcenter/host?clusters=<cluster_id>
     (standalone ESXi hosts have NULL cluster_id)
+  - Datastores: GET /api/vcenter/datacenter then
+    GET /api/vcenter/datastore?datacenters=<datacenter_id>
 
 Backups: {table}_{YYYYMMDD_HHMMSS} (keep newest 4 stamp sets).
 """
@@ -43,6 +46,7 @@ VSPHERE_INVENTORY_SUFFIXES = (
     "vsphere_cluster",
     "vsphere_hosts",
     "vsphere_vms_on_host",
+    "vsphere_datastores",
 )
 
 
@@ -78,11 +82,24 @@ class VsphereVmOnHostRow:
 
 
 @dataclass
+class VsphereDatastoreRow:
+    datastore_id: str
+    name: str | None = None
+    type: str | None = None
+    datacenter_id: str | None = None
+    datacenter_name: str | None = None
+    capacity_bytes: int | None = None
+    free_bytes: int | None = None
+    accessible: bool | None = None
+
+
+@dataclass
 class VsphereClusterSnapshot:
     cluster_name: str
     compute_clusters: list[VsphereComputeClusterRow] = field(default_factory=list)
     hosts: list[VsphereHostRow] = field(default_factory=list)
     vms_on_host: list[VsphereVmOnHostRow] = field(default_factory=list)
+    datastores: list[VsphereDatastoreRow] = field(default_factory=list)
 
 
 def vsphere_inventory_table(cluster_name: str, suffix: str) -> str:
@@ -132,6 +149,7 @@ def ensure_vsphere_inventory_tables(
     clusters_t = vsphere_inventory_table(name, "vsphere_cluster")
     hosts_t = vsphere_inventory_table(name, "vsphere_hosts")
     vms_t = vsphere_inventory_table(name, "vsphere_vms_on_host")
+    ds_t = vsphere_inventory_table(name, "vsphere_datastores")
 
     if clusters_t not in tables:
         connection.execute(
@@ -177,12 +195,29 @@ def ensure_vsphere_inventory_tables(
             )
             """
         )
-    for table_name in (clusters_t, hosts_t, vms_t):
+    if ds_t not in tables:
+        connection.execute(
+            f"""
+            CREATE TABLE {_quote_ident(ds_t)} (
+                {pk_autoincrement_sql(connection)},
+                datastore_id VARCHAR(30) NOT NULL,
+                name VARCHAR(80),
+                type VARCHAR(20),
+                datacenter_id VARCHAR(30),
+                datacenter_name VARCHAR(80),
+                capacity_bytes BIGINT,
+                free_bytes BIGINT,
+                accessible INTEGER
+            )
+            """
+        )
+    for table_name in (clusters_t, hosts_t, vms_t, ds_t):
         ensure_table_idx_serial(connection, table_name)
     return {
         "clusters": clusters_t,
         "hosts": hosts_t,
         "vms_on_host": vms_t,
+        "datastores": ds_t,
     }
 
 
@@ -348,10 +383,12 @@ def replace_vsphere_snapshot(
         clusters_t = table_map["clusters"]
         hosts_t = table_map["hosts"]
         vms_t = table_map["vms_on_host"]
+        ds_t = table_map["datastores"]
 
         connection.execute(f"DELETE FROM {_quote_ident(vms_t)}")
         connection.execute(f"DELETE FROM {_quote_ident(hosts_t)}")
         connection.execute(f"DELETE FROM {_quote_ident(clusters_t)}")
+        connection.execute(f"DELETE FROM {_quote_ident(ds_t)}")
 
         for compute in snapshot.compute_clusters:
             connection.execute(
@@ -404,6 +441,26 @@ def replace_vsphere_snapshot(
                 ),
             )
 
+        for datastore in snapshot.datastores:
+            connection.execute(
+                f"""
+                INSERT INTO {_quote_ident(ds_t)} (
+                    datastore_id, name, type, datacenter_id, datacenter_name,
+                    capacity_bytes, free_bytes, accessible
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    datastore.datastore_id[:30],
+                    (datastore.name or None) and datastore.name[:80],
+                    (datastore.type or None) and datastore.type[:20],
+                    (datastore.datacenter_id or None) and datastore.datacenter_id[:30],
+                    (datastore.datacenter_name or None) and datastore.datacenter_name[:80],
+                    datastore.capacity_bytes,
+                    datastore.free_bytes,
+                    _as_int_flag(datastore.accessible),
+                ),
+            )
+
         last_update = touch_k8s_cluster_last_update(connection, cluster_id)
         connection.commit()
 
@@ -412,6 +469,7 @@ def replace_vsphere_snapshot(
         "clusters": len(snapshot.compute_clusters),
         "hosts": len(snapshot.hosts),
         "vms": len(snapshot.vms_on_host),
+        "datastores": len(snapshot.datastores),
         "backup_tables": backups,
         "pruned_backup_tables": pruned,
     }

@@ -504,7 +504,7 @@ function VmTable({ rows }: { rows: Record<string, unknown>[] }) {
 }
 
 export function VsphereShapeDetailPanel({ clusterName, active }: VsphereShapeDetailPanelProps) {
-  const [category, setCategory] = useState<VsphereCategory | null>(null);
+  const [category, setCategory] = useState<VsphereCategory>("nodes");
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
   const [clusters, setClusters] = useState<VsphereClusterListItem[]>([]);
   const [hosts, setHosts] = useState<VsphereHostListItem[]>([]);
@@ -515,7 +515,7 @@ export function VsphereShapeDetailPanel({ clusterName, active }: VsphereShapeDet
   const [isLoadingDetail, setIsLoadingDetail] = useState(false);
 
   useEffect(() => {
-    setCategory(null);
+    setCategory("nodes");
     setSelectedIdx(null);
     setClusters([]);
     setHosts([]);
@@ -635,8 +635,8 @@ export function VsphereShapeDetailPanel({ clusterName, active }: VsphereShapeDet
       <div className="mb-2 flex shrink-0 flex-wrap gap-3">
         {(
           [
-            { id: "clusters" as const, label: "클러스터" },
             { id: "nodes" as const, label: "ESXi호스트" },
+            { id: "clusters" as const, label: "클러스터" },
           ] as const
         ).map((item) => (
           <button

@@ -275,22 +275,24 @@ def _counts_for_vsphere_tables(
 ) -> K8sShapeCounts:
     """Map vSphere inventory → shape counts.
 
-    namespaces ← compute clusters, nodes ← ESXi hosts, vms ← VMs on hosts.
+    namespaces ← compute clusters, nodes ← ESXi hosts, vms ← VMs on hosts,
+    volumes ← datastores.
     """
     from backend.app.db.vsphere_inventory import vsphere_inventory_tables
 
-    clusters_t, hosts_t, vms_t = vsphere_inventory_tables(cluster_name)
+    clusters_t, hosts_t, vms_t, ds_t = vsphere_inventory_tables(cluster_name)
     if stamp:
         clusters_t = f"{clusters_t}_{stamp}"
         hosts_t = f"{hosts_t}_{stamp}"
         vms_t = f"{vms_t}_{stamp}"
+        ds_t = f"{ds_t}_{stamp}"
     return K8sShapeCounts(
         nodes=_table_row_count(connection, hosts_t, tables),
         namespaces=_table_row_count(connection, clusters_t, tables),
         deployments=0,
         pvcs=0,
         vms=_table_row_count(connection, vms_t, tables),
-        volumes=0,
+        volumes=_table_row_count(connection, ds_t, tables),
     )
 
 

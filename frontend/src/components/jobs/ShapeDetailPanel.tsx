@@ -1295,7 +1295,7 @@ export function ShapeDetailPanel({
   active,
   maskIps = false,
 }: ShapeDetailPanelProps) {
-  const [category, setCategory] = useState<DetailCategory | null>(null);
+  const [category, setCategory] = useState<DetailCategory>("namespaces");
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
   const [namespaces, setNamespaces] = useState<NamespaceListItem[]>([]);
   const [nodes, setNodes] = useState<NodeListItem[]>([]);
@@ -1319,7 +1319,7 @@ export function ShapeDetailPanel({
   }, [infraType]);
 
   useEffect(() => {
-    setCategory(null);
+    setCategory("namespaces");
     setSelectedIdx(null);
     setNamespaces([]);
     setNodes([]);
@@ -1332,7 +1332,7 @@ export function ShapeDetailPanel({
 
   useEffect(() => {
     if (category === "vms" && infraType !== "kubevirt") {
-      setCategory(null);
+      setCategory("namespaces");
       setSelectedIdx(null);
     }
   }, [category, infraType]);

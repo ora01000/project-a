@@ -50,6 +50,16 @@ There are three infrastructure types. Compare using the tables below.
 - {cluster_name}_vsphere_cluster: clusters configured in a vSphere datacenter
 - {cluster_name}_vsphere_hosts: ESXi host inventory
 - {cluster_name}_vsphere_vms_on_host: VMs placed on each ESXi host
+- {cluster_name}_vsphere_datastores: datastores collected per vSphere datacenter
+  - Identity key: datastore_id (MoID). If comparing across generations where an id was recycled, also use (datacenter_id, name).
+  - Columns: datastore_id, name, type (VMFS/NFS/NFS41/VSAN/VVOL/CIFS/…), datacenter_id, datacenter_name, capacity_bytes, free_bytes, accessible
+  - capacity_bytes / free_bytes are raw bytes (BIGINT), not Gi. Used space ≈ capacity_bytes - free_bytes. Report sizes in Gi/Ti for humans but query in bytes.
+  - Group and trend by datacenter_name (or datacenter_id). A datastore belongs to one datacenter in this scrape.
+  - accessible may be NULL in current snapshots (REST list does not provide it). Do not treat NULL as inaccessible.
+  - Older backup generations may lack this table entirely; then report "datastores not collected in that generation" and compare only overlapping generations. Do not treat a missing table as all datastores deleted.
+  - NFS/VSAN free_space is filesystem-level (df of the share/cluster), not per-VM usage.
+
+When infra_type is vSphere, ALWAYS include datastore inventory in the gap analysis (counts, add/remove, capacity/free drift), not only clusters/hosts/VMs.
 
 Shape (generation) table naming:
 - {table_name} -> current/latest snapshot
@@ -58,9 +68,10 @@ Shape (generation) table naming:
 Analysis procedure:
 1) Identify available generations for the selected cluster (latest + backups, oldest → newest).
 2) For each relevant inventory table, compare rows between consecutive generations using stable identity keys
-   (e.g. name, uid, namespace/name, host/vm name — pick the best available keys per table).
-3) Report added / removed / meaningfully changed resources, plus count trends (nodes, namespaces, deployments, PVCs, VMs, etc.).
+   (e.g. name, uid, namespace/name, host/vm name, datastore_id — pick the best available keys per table).
+3) Report added / removed / meaningfully changed resources, plus count trends (nodes, namespaces, deployments, PVCs, VMs, datastores, etc.).
 4) Summarize operational implications (capacity, placement, drift risk). Prefer concrete resource names over abstract schema talk.
+   For datastores, call out large free-space drops, capacity shrink/grow, type changes, and datacenters that gained or lost datastores.
 5) Mention column missing/renamed across generations only if it blocks a fair comparison; then continue with aligned columns.
 
 Output language: ALWAYS write the final answer in Korean (한국어). Resource names, IDs, and table names may remain as stored.

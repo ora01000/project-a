@@ -65,13 +65,21 @@ function ringDash(request: number, capacity: number, radius: number): { used: nu
   return { used: circumference * clamped, free: circumference * (1 - clamped) };
 }
 
-function usedStrokeColor(request: number, capacity: number, isLight: boolean, kind: "cpu" | "mem"): string {
+function usedStrokeColor(
+  request: number,
+  capacity: number,
+  isLight: boolean,
+  kind: "cpu" | "mem" | "storage",
+): string {
   const over = capacity > 0 && request > capacity;
   if (over) {
     return isLight ? "#e11d48" : "#fb7185";
   }
   if (kind === "cpu") {
     return isLight ? "#0284c7" : "#38bdf8";
+  }
+  if (kind === "storage") {
+    return isLight ? "#db2777" : "#f472b6";
   }
   return isLight ? "#059669" : "#34d399";
 }
@@ -335,6 +343,56 @@ export function NodeCapacityPanel({
   );
 }
 
+function StorageRatioBar({
+  used,
+  capacity,
+}: {
+  used: number | null;
+  capacity: number | null;
+}) {
+  const { theme } = useTheme();
+  const isLight = theme === "light";
+  const hasUsed = used != null && Number.isFinite(used);
+  const cap = capacity != null && Number.isFinite(capacity) ? capacity : 0;
+  if (!hasUsed) {
+    return (
+      <div className="relative h-4 overflow-hidden rounded-sm bg-slate-800 shape-bar-track">
+        <span className="absolute inset-0 flex items-center justify-center font-mono text-[10px] font-semibold text-slate-200 [text-shadow:0_0_3px_rgba(0,0,0,0.85)]">
+          용량: {capacity == null ? "-" : capacity}
+        </span>
+      </div>
+    );
+  }
+  const pct = ratioPct(used, cap);
+  const widthPct = cap > 0 ? Math.min(Math.max((used / cap) * 100, 0), 100) : 0;
+  const fill = usedStrokeColor(used, cap, isLight, "storage");
+  return (
+    <div className="relative h-4 overflow-hidden rounded-sm bg-slate-800 shape-bar-track">
+      <div className="h-full" style={{ width: `${widthPct}%`, backgroundColor: fill }} />
+      <span className="absolute inset-0 flex items-center justify-center font-mono text-[10px] font-semibold text-white [text-shadow:0_0_3px_rgba(0,0,0,0.85)]">
+        {formatPct(pct)}
+      </span>
+    </div>
+  );
+}
+
+function pvcUsageRatio(pvc: PvcShapeCapacity): number {
+  if (pvc.used == null || !Number.isFinite(pvc.used)) {
+    return -1;
+  }
+  if (pvc.capacity == null || !Number.isFinite(pvc.capacity) || pvc.capacity <= 0) {
+    return -1;
+  }
+  return pvc.used / pvc.capacity;
+}
+
+function storageTooltip(infraType: string | undefined, pvc: PvcShapeCapacity): string {
+  if (infraType === "vSphere") {
+    return [pvc.namespace, pvc.storage_class, pvc.access_mode].join("/");
+  }
+  return [pvc.namespace, pvc.deployment_name, pvc.storage_class, pvc.access_mode].join("/");
+}
+
 export function StorageCapacityPanel({
   capacity,
   isLoading,
@@ -342,11 +400,18 @@ export function StorageCapacityPanel({
   capacity: ClusterShapeCapacity | null;
   isLoading: boolean;
 }) {
-  const storages = capacity?.storages ?? [];
+  const isVsphere = capacity?.infra_type === "vSphere";
+  const storages = useMemo(() => {
+    const list = [...(capacity?.storages ?? [])];
+    list.sort((left, right) => pvcUsageRatio(right) - pvcUsageRatio(left));
+    return list.slice(0, 5);
+  }, [capacity?.storages]);
   const showStorage =
     capacity?.infra_type === "k8s" ||
     capacity?.infra_type === "kubernetes" ||
-    capacity?.infra_type === "kubevirt";
+    capacity?.infra_type === "kubevirt" ||
+    isVsphere;
+  const emptyLabel = isVsphere ? "데이터스토어가 없습니다." : "PVC가 없습니다.";
 
   return (
     <section className="flex min-h-0 min-w-0 flex-1 flex-col rounded-lg border border-slate-700/80 bg-slate-950/40 p-3">
@@ -358,45 +423,29 @@ export function StorageCapacityPanel({
       ) : !showStorage ? (
         <p className="text-xs text-slate-500">이 인프라 유형의 저장소 용량은 준비 중입니다.</p>
       ) : storages.length === 0 ? (
-        <p className="text-xs text-slate-500">PVC가 없습니다.</p>
+        <p className="text-xs text-slate-500">{emptyLabel}</p>
       ) : (
-        <div className="min-h-0 max-h-[13rem] flex-1 overflow-auto">
-          <table className="w-full border-collapse text-left text-[11px]">
-            <thead>
-              <tr className="border-b border-slate-700 text-slate-500">
-                <th className="px-1.5 py-1 font-medium">PVC명</th>
-                <th className="px-1.5 py-1 text-right font-medium">용량</th>
-                <th className="px-1.5 py-1 text-right font-medium">사용</th>
-              </tr>
-            </thead>
-            <tbody>
-              {storages.map((pvc, index) => {
-                const tooltip = [
-                  pvc.namespace,
-                  pvc.deployment_name,
-                  pvc.storage_class,
-                  pvc.access_mode,
-                ].join("/");
-                return (
-                  <tr
-                    key={`${pvc.namespace}/${pvc.name}/${index}`}
-                    className="border-b border-slate-800/80 text-slate-200"
-                    title={tooltip}
-                  >
-                    <td className="max-w-[8rem] truncate px-1.5 py-1 font-mono" title={tooltip}>
-                      {pvc.name}
-                    </td>
-                    <td className="whitespace-nowrap px-1.5 py-1 text-right font-mono">
-                      {pvc.capacity == null ? "-" : pvc.capacity}
-                    </td>
-                    <td className="whitespace-nowrap px-1.5 py-1 text-right font-mono">
-                      {pvc.used == null ? "-" : pvc.used}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+        <div className="min-h-0 max-h-[13rem] flex-1 space-y-2 overflow-x-hidden overflow-y-auto pr-1">
+          {storages.map((pvc, index) => {
+            const tooltip = storageTooltip(capacity?.infra_type, pvc);
+            return (
+              <div
+                key={`${pvc.namespace}/${pvc.name}/${index}`}
+                className="flex min-w-0 items-center gap-2"
+                title={tooltip}
+              >
+                <div
+                  className="min-w-0 max-w-[38%] basis-[38%] truncate whitespace-nowrap font-mono text-[11px] text-slate-200"
+                  title={tooltip}
+                >
+                  {pvc.name}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <StorageRatioBar used={pvc.used} capacity={pvc.capacity} />
+                </div>
+              </div>
+            );
+          })}
         </div>
       )}
     </section>

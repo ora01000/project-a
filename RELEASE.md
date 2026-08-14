@@ -3,7 +3,38 @@
 프로젝트 최초 개발일(2026-07-08) 이후 변경 이력을 **최근순**으로 요약합니다.  
 출처: git 커밋, `ADDITIONAL_PLAN.md`, 워킹 트리 반영분(2026-07-15~18).
 
-**현재 버전:** 1.6 / 릴리즈 `260813`
+**현재 버전:** 1.7 / 릴리즈 `260814`
+
+---
+
+## 2026-08-14 — 인프라 형상 용량·PVC used·vSphere 데이터스토어 (`260814` / `pg260814`)
+
+### 인프라 형상 탭
+- 작업 노트에서 **인프라 형상을 맨 앞 탭**으로 두고 기본 진입 탭으로 사용
+- 요약 아래 **클러스터 용량 | 노드(호스트)별 용량 | 저장소 용량** (1:1:1), 그 아래 형상 추이
+- 클러스터 용량: worker(목업은 전체 노드) vs deploy request/limit 도넛, 가상화비율(k8s는 Limit)
+- kubevirt: Running VM cpu/mem을 request에 합산
+- vSphere: 호스트 cpu/mem 합 vs POWERED_ON VM, MEM MiB→Gi
+- 노드/호스트별 용량: 2단 가로 바, CPU/MEM 정렬 토글(기본 CPU 내림차순), Top 5, 긴 이름 truncate+툴팁
+- 저장소 용량
+  - k8s/kubevirt: PVC 가로 바 `used/capacity`, used 없으면 `용량: {capacity}`(NFS 등), 툴팁 `ns/deploy/sc/accessMode`, 비율 Top 5
+  - vSphere: 데이터스토어 가로 바 `free_bytes/capacity_bytes`, 툴팁 `datacenter/type/accessible`, 비율 Top 5
+- 상세정보: k8s/kubevirt 기본 탭 **네임스페이스**, vSphere 탭 순서 **ESXi호스트 → 클러스터**(기본 ESXi호스트)
+
+### 수집
+- vSphere 호스트 CPU/MEM: SOAP `RetrievePropertiesEx` 100대 청크 + Continue token
+- PVC used: kubelet `nodes/proxy/stats/summary`를 `call_api`(BearerToken)로 호출 — `request()` 익명 403 수정
+- kubelet host-disk df는 PVC 청구 대비 비정상 값으로 폐기, local/hostPath는 디렉터리 `du`
+- NFS PVC used는 kubelet df(공유 전체)라 수집하지 않음
+- vSphere 데이터스토어: 데이터센터별 REST 목록 → `{cluster_name}_vsphere_datastores` (`capacity_bytes`/`free_bytes` BIGINT)
+- INFRA_GAP_ANALYSIS 시스템 프롬프트에 데이터스토어 갭분석 규칙 추가
+
+### 기타
+- 가입 승인 메일·SR 시퀀스, role=1 IP 화면 마스킹
+
+### 릴리즈
+- About: 버전 **1.7**, 릴리즈 **260814**
+- Docker 이미지 태그: `pg260814` (`linux/amd64`)
 
 ---
 
@@ -441,12 +472,12 @@
 | 항목 | 내용 |
 |------|------|
 | 제품명 | AX 인프라 운영 콘솔 |
-| 버전 | 1.6 |
-| 릴리즈 | 260813 |
+| 버전 | 1.7 |
+| 릴리즈 | 260814 |
 | 백엔드 이미지 | `ora01000/project-a-backend:<tag>` |
 | 프론트 이미지 | `ora01000/project-a-frontend:<tag>` |
 | 최근 태그 예 | `260805`, `260806`, `260807` |
-| multi-pod(Postgres) 태그 | `pgYYMMDD` (예: `pg260813`) — `dev-axplatform-multi-pod` 배포용 |
+| multi-pod(Postgres) 태그 | `pgYYMMDD` (예: `pg260814`) — `dev-axplatform-multi-pod` 배포용 |
 
 ---
 
