@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 
 import { PasswordInput } from "../PasswordInput";
 import type { UserFormValues, UserRecord } from "../../types/user";
-import { BAND_OPTIONS, EMPTY_USER_FORM } from "../../types/user";
+import { ASSIGNABLE_ROLE_OPTIONS, BAND_OPTIONS, EMPTY_USER_FORM } from "../../types/user";
 
 interface UserFormModalProps {
   mode: "create" | "edit";
@@ -150,9 +150,11 @@ export function UserFormModal({ mode, user, onClose, onSave }: UserFormModalProp
               disabled={isSaving}
               className="w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 outline-none focus:border-sky-500"
             >
-              <option value={0}>0: admin</option>
-              <option value={1}>1: user</option>
-              <option value={5}>5: 보류</option>
+              {ASSIGNABLE_ROLE_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.value}: {option.label}
+                </option>
+              ))}
             </select>
           </label>
 

@@ -1734,6 +1734,7 @@ users.role = 0 | 100 (관리자)는 모든 jobs 를 조회할 수 있다. users.
 
 # 한시적 정보 보안 정책 - IP 정보 화면 마스킹
 - users.role = 1에 한해 인프라 형상의 상세정보에서 모든 IP 정보에 대해 뒤 2옥텟을 마스킹하여 표시 ✅
+  - users.role = 2 (infraadmin) 은 마스킹하지 않는다 ✅
 
 # 인프 형상 용량 집계 차트 추가
 인프라 형상 탭의 형상 추이 차트 위에 "클러스터 용량", "노드(호스트)별 용량", "저장소 용량" 를 동일 row 에 배치한다.
@@ -1881,3 +1882,11 @@ users.role = 0 | 100 (관리자)는 모든 jobs 를 조회할 수 있다. users.
   1. 상세정보 패널의 각 탭을 클릭시 height 가 100%인 하나의 패널만 생성된다. ✅
   2. row 을 클릭하면 그 때 하단 패널이 생성된다. ✅
 
+# 사용자 역할 추가
+users.role 역할은 기본 0:admin 1:user 100:superadmin 에서 2:infraadmin 을 추가한다. ✅
+  0:admin
+  1:user
+  100:superadmin
+  2:infraadmin
+
+2:infraadmin : 기본 1:user 와 같은데 IP 마스킹되지 않고 출력된다 ✅

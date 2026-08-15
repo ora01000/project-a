@@ -10,7 +10,7 @@ import { MyNotesTab } from "./jobs/MyNotesTab";
 import { RejectedJobsTab } from "./jobs/RejectedJobsTab";
 import { WhatapEventReportTab } from "./jobs/WhatapEventReportTab";
 import { useMyNotes } from "./jobs/useMyNotes";
-import { ROLE_USER } from "../types/user";
+import { shouldMaskIps } from "../types/user";
 
 type JobNotesTab =
   | "review"
@@ -60,7 +60,7 @@ function renderActiveTab(
       return (
         <InfraShapeTab
           active
-          maskIps={currentUser.role === ROLE_USER}
+          maskIps={shouldMaskIps(currentUser.role)}
           onCopyToNote={onCopyToNote}
         />
       );

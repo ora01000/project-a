@@ -1,9 +1,9 @@
 from fastapi import APIRouter, Body, HTTPException, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from backend.app.db.assignable_agents import known_assignable_agent_ids
 from backend.app.db.engine import is_integrity_error
-from backend.app.db.roles import is_admin_role, is_hidden_system_user
+from backend.app.db.roles import is_admin_role, is_assignable_role, is_hidden_system_user
 from backend.app.db.users import (
     User,
     create_user,
@@ -60,9 +60,16 @@ class CreateUserRequest(BaseModel):
     username: str = Field(min_length=1, max_length=50)
     password: str = Field(min_length=1, max_length=50)
     depart: str = Field(min_length=1, max_length=100)
-    role: int = Field(ge=0, le=5)
+    role: int
     band: int = Field(default=1, ge=1, le=3)
     viewer_role: int
+
+    @field_validator("role")
+    @classmethod
+    def _role_must_be_assignable(cls, value: int) -> int:
+        if not is_assignable_role(value):
+            raise ValueError("허용되지 않는 역할입니다.")
+        return value
 
 
 class UpdateUserRequest(BaseModel):
@@ -70,9 +77,16 @@ class UpdateUserRequest(BaseModel):
     username: str = Field(min_length=1, max_length=50)
     password: str | None = Field(default=None, max_length=50)
     depart: str = Field(min_length=1, max_length=100)
-    role: int = Field(ge=0, le=5)
+    role: int
     band: int = Field(default=1, ge=1, le=3)
     viewer_role: int
+
+    @field_validator("role")
+    @classmethod
+    def _role_must_be_assignable(cls, value: int) -> int:
+        if not is_assignable_role(value):
+            raise ValueError("허용되지 않는 역할입니다.")
+        return value
 
 
 class DeleteUsersRequest(BaseModel):
