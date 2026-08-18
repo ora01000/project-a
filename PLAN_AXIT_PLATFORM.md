@@ -1492,7 +1492,7 @@ dev-axplatform-multi-pod 는 목업(로컬)/http(서버) 환경 모두 postgres�
     - http 모드
       - http://llmgateway.apps.pkvgs-k8s.lguplus.co.kr/v1 (OpenAI 호환) ✅
         - API-KEY : 환경변수 `PRIVATE_LLM_API_KEY`
-      - 모델 : openai/gpt-oss-120b
+      - 모델 : axit/openai/gpt-oss-120b (Bifrost custom provider `axit` + vLLM `openai/gpt-oss-120b`)
   - 사용 MCP 도구명 : posgresql
     - 목업
       - url : http://localhost:30800/mcp

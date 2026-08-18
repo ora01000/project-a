@@ -9,8 +9,9 @@ AGENT_ID = "JOB_DECISION_AGENT"
 AGENT_NAME = "Job Decision Agent"
 
 # Same LLM gateway wiring as INFRA_GAP_ANALYSIS.
+# Bifrost custom provider "axit"; backend vLLM model remains openai/gpt-oss-120b.
 HTTP_LLM_BASE_URL = "http://llmgateway.apps.pkvgs-k8s.lguplus.co.kr/v1"
-HTTP_LLM_MODEL = "openai/gpt-oss-120b"
+HTTP_LLM_MODEL = "axit/openai/gpt-oss-120b"
 HTTP_LLM_API_KEY_ENV = "PRIVATE_LLM_API_KEY"
 
 _SKILLS_DIR = Path(__file__).resolve().parent / "skills"

@@ -16,8 +16,10 @@ MCP_URL_HTTP = "http://pgdb-mcp.mcps.svc.cluster.local:8000/mcp"
 MCP_TRANSPORT = "http"
 
 # HTTP-mode LLM gateway (OpenAI-compatible). Mock mode reuses the existing control-plane LLM.
+# Bifrost splits model on the first "/": provider/model. HF id openai/gpt-oss-120b must be
+# prefixed with the custom provider so vLLM still receives openai/gpt-oss-120b.
 HTTP_LLM_BASE_URL = "http://llmgateway.apps.pkvgs-k8s.lguplus.co.kr/v1"
-HTTP_LLM_MODEL = "openai/gpt-oss-120b"
+HTTP_LLM_MODEL = "axit/openai/gpt-oss-120b"
 HTTP_LLM_API_KEY_ENV = "PRIVATE_LLM_API_KEY"
 
 
