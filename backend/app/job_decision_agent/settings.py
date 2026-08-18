@@ -8,10 +8,10 @@ from pathlib import Path
 AGENT_ID = "JOB_DECISION_AGENT"
 AGENT_NAME = "Job Decision Agent"
 
-# Same LLM wiring as INFRA_GAP_ANALYSIS.
-HTTP_LLM_BASE_URL = "http://llm.apps.pkvgs-k8s.lguplus.co.kr/v1"
+# Same LLM gateway wiring as INFRA_GAP_ANALYSIS.
+HTTP_LLM_BASE_URL = "http://llmgateway.apps.pkvgs-k8s.lguplus.co.kr/v1"
 HTTP_LLM_MODEL = "openai/gpt-oss-120b"
-HTTP_LLM_API_KEY = "not-needed"
+HTTP_LLM_API_KEY_ENV = "PRIVATE_LLM_API_KEY"
 
 _SKILLS_DIR = Path(__file__).resolve().parent / "skills"
 
@@ -61,7 +61,7 @@ class JobDecisionStaticConfig:
     agent_name: str = AGENT_NAME
     http_llm_base_url: str = HTTP_LLM_BASE_URL
     http_llm_model: str = HTTP_LLM_MODEL
-    http_llm_api_key: str = HTTP_LLM_API_KEY
+    http_llm_api_key_env: str = HTTP_LLM_API_KEY_ENV
     system_prompt: str = SYSTEM_PROMPT
 
 

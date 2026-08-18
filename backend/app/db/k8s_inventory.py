@@ -153,6 +153,7 @@ class K8sClusterRecord:
     cron: bool = False
     cron_expr: str = "0 23 * * 6"
     infra_type: str = "k8s"
+    display_name: str = ""
     vsphere_url: str | None = None
     vsphere_id: str | None = None
     vsphere_has_password: bool = False
@@ -170,6 +171,10 @@ SHAPEABLE_INFRA_TYPES = frozenset({"k8s", "kubevirt", INFRA_TYPE_VSPHERE})
 COLLECTABLE_INFRA_TYPES = frozenset({"k8s", "kubevirt", INFRA_TYPE_VSPHERE})
 _CRON_EXPR_MAX_LEN = 20
 _INFRA_TYPE_MAX_LEN = 20
+_DISPLAY_NAME_MAX_LEN = 100
+_INFRA_CLUSTER_SELECT = (
+    "idx, cluster_name, display_name, last_update, cron, cron_expr, infra_type"
+)
 _INFRA_TYPE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,19}$")
 _VSPHERE_URL_MAX_LEN = 500
 _VSPHERE_ID_MAX_LEN = 200
@@ -203,6 +208,7 @@ class K8sClusterShapeAnalysis:
     summary: K8sShapeCounts
     history: list[K8sShapeHistoryPoint] = field(default_factory=list)
     infra_type: str = DEFAULT_INFRA_TYPE
+    display_name: str = ""
 
 
 def _table_row_count(connection, table_name: str, tables: set[str]) -> int:
@@ -337,9 +343,10 @@ def get_cluster_shape_analysis(
     keep = max(1, int(max_points))
 
     with get_connection(database_path) as connection:
+        ensure_infra_cluster_display_name_column(connection)
         row = connection.execute(
-            """
-            SELECT idx, cluster_name, last_update, cron, cron_expr, infra_type
+            f"""
+            SELECT {_INFRA_CLUSTER_SELECT}
             FROM infra_cluster
             WHERE cluster_name = ?
             """,
@@ -381,6 +388,7 @@ def get_cluster_shape_analysis(
             else _cluster_version_from_nodes(connection, nodes_t, tables)
         )
         last_update = str(row["last_update"]) if row["last_update"] else None
+        display_name = str(row["display_name"] or "").strip() if "display_name" in row.keys() else ""
 
         # Newest backups first; keep room for live "latest" point.
         backup_limit = max(0, keep - 1)
@@ -415,6 +423,7 @@ def get_cluster_shape_analysis(
         summary=summary,
         history=history,
         infra_type=infra_type,
+        display_name=display_name,
     )
 
 
@@ -429,6 +438,15 @@ def validate_cluster_name(cluster_name: str) -> str:
             "cluster_name은 영문/숫자/._- 만 사용할 수 있으며 테이블명으로 안전해야 합니다."
         )
     return name
+
+
+def validate_display_name(display_name: str | None) -> str:
+    text = "" if display_name is None else str(display_name).strip()
+    if len(text) > _DISPLAY_NAME_MAX_LEN:
+        raise ValueError(
+            f"display_name은 {_DISPLAY_NAME_MAX_LEN}자를 초과할 수 없습니다."
+        )
+    return text
 
 
 def validate_cron_expr(cron_expr: str | None) -> str:
@@ -511,6 +529,15 @@ def ensure_vsphere_infra_info_table(connection) -> None:
             vsphere_id VARCHAR(200) NOT NULL DEFAULT '',
             vsphere_pw TEXT NOT NULL DEFAULT ''
         )
+        """
+    )
+
+
+def ensure_infra_cluster_display_name_column(connection) -> None:
+    connection.execute(
+        """
+        ALTER TABLE infra_cluster
+        ADD COLUMN IF NOT EXISTS display_name VARCHAR(100) NOT NULL DEFAULT ''
         """
     )
 
@@ -643,6 +670,7 @@ def _cluster_record_from_row(row: Any) -> K8sClusterRecord:
     cron_raw = row["cron"] if "cron" in keys else 0
     cron_expr_raw = row["cron_expr"] if "cron_expr" in keys else DEFAULT_CRON_EXPR
     infra_type_raw = row["infra_type"] if "infra_type" in keys else DEFAULT_INFRA_TYPE
+    display_name_raw = row["display_name"] if "display_name" in keys else ""
     return K8sClusterRecord(
         idx=int(row["idx"]),
         cluster_name=str(row["cluster_name"]),
@@ -651,6 +679,7 @@ def _cluster_record_from_row(row: Any) -> K8sClusterRecord:
         cron_expr=str(cron_expr_raw or DEFAULT_CRON_EXPR)[:_CRON_EXPR_MAX_LEN],
         infra_type=str(infra_type_raw or DEFAULT_INFRA_TYPE)[:_INFRA_TYPE_MAX_LEN]
         or DEFAULT_INFRA_TYPE,
+        display_name=str(display_name_raw or "").strip()[:_DISPLAY_NAME_MAX_LEN],
     )
 
 
@@ -1032,9 +1061,10 @@ def list_infra_clusters(
     placeholders = ", ".join("?" for _ in types)
     with get_connection(database_path) as connection:
         ensure_vsphere_infra_info_table(connection)
+        ensure_infra_cluster_display_name_column(connection)
         rows = connection.execute(
             f"""
-            SELECT idx, cluster_name, last_update, cron, cron_expr, infra_type
+            SELECT {_INFRA_CLUSTER_SELECT}
             FROM infra_cluster
             WHERE infra_type IN ({placeholders})
             ORDER BY cluster_name
@@ -1071,9 +1101,10 @@ def list_scheduled_k8s_clusters(database_path: str | Path) -> list[K8sClusterRec
     managed = tuple(sorted(COLLECTABLE_INFRA_TYPES))
     placeholders = ", ".join("?" for _ in managed)
     with get_connection(database_path) as connection:
+        ensure_infra_cluster_display_name_column(connection)
         rows = connection.execute(
             f"""
-            SELECT idx, cluster_name, last_update, cron, cron_expr, infra_type
+            SELECT {_INFRA_CLUSTER_SELECT}
             FROM infra_cluster
             WHERE cron = 1 AND infra_type IN ({placeholders})
             ORDER BY cluster_name
@@ -1088,9 +1119,10 @@ def get_k8s_cluster(
     cluster_idx: int,
 ) -> K8sClusterRecord | None:
     with get_connection(database_path) as connection:
+        ensure_infra_cluster_display_name_column(connection)
         row = connection.execute(
-            """
-            SELECT idx, cluster_name, last_update, cron, cron_expr, infra_type
+            f"""
+            SELECT {_INFRA_CLUSTER_SELECT}
             FROM infra_cluster
             WHERE idx = ?
             """,
@@ -1140,16 +1172,17 @@ def save_k8s_clusters(
     - Names must be unique and non-empty
     - Clusters removed from the list are deleted (with per-cluster table drop)
     - Renamed clusters rename their inventory tables
-    - Persists cron / cron_expr / infra_type when provided
+    - Persists cron / cron_expr / infra_type / display_name when provided
     - vSphere rows also upsert vsphere_infra_info (password omitted => keep)
     """
-    normalized: list[tuple[int | None, str, bool, str, str, dict[str, Any] | None]] = []
+    normalized: list[tuple[int | None, str, str, bool, str, str, dict[str, Any] | None]] = []
     seen_names: set[str] = set()
     for item in clusters:
         name = validate_cluster_name(str(item.get("cluster_name") or ""))
         if name in seen_names:
             raise ValueError(f"중복된 cluster_name 입니다: {name}")
         seen_names.add(name)
+        display_name = validate_display_name(item.get("display_name"))
         raw_idx = item.get("idx")
         idx: int | None
         if raw_idx is None or raw_idx == "":
@@ -1169,7 +1202,7 @@ def save_k8s_clusters(
                 "vsphere_pw": item.get("vsphere_pw"),
             }
         normalized.append(
-            (idx, name, cron_enabled, cron_expr, infra_type, vsphere_payload)
+            (idx, name, display_name, cron_enabled, cron_expr, infra_type, vsphere_payload)
         )
 
     managed_types = tuple(sorted(KNOWN_INFRA_TYPES))
@@ -1177,9 +1210,10 @@ def save_k8s_clusters(
 
     with get_connection(database_path) as connection:
         ensure_vsphere_infra_info_table(connection)
+        ensure_infra_cluster_display_name_column(connection)
         existing_rows = connection.execute(
             f"""
-            SELECT idx, cluster_name, last_update, cron, cron_expr, infra_type
+            SELECT {_INFRA_CLUSTER_SELECT}
             FROM infra_cluster
             WHERE infra_type IN ({placeholders})
             """,
@@ -1188,7 +1222,15 @@ def save_k8s_clusters(
         existing_by_idx = {int(row["idx"]): row for row in existing_rows}
         keep_ids: set[int] = set()
 
-        for idx, name, cron_enabled, cron_expr, infra_type, vsphere_payload in normalized:
+        for (
+            idx,
+            name,
+            display_name,
+            cron_enabled,
+            cron_expr,
+            infra_type,
+            vsphere_payload,
+        ) in normalized:
             if idx is not None:
                 if idx not in existing_by_idx:
                     raise ValueError(f"존재하지 않는 클러스터 idx 입니다: {idx}")
@@ -1207,10 +1249,10 @@ def save_k8s_clusters(
                 connection.execute(
                     """
                     UPDATE infra_cluster
-                    SET cluster_name = ?, cron = ?, cron_expr = ?, infra_type = ?
+                    SET cluster_name = ?, display_name = ?, cron = ?, cron_expr = ?, infra_type = ?
                     WHERE idx = ?
                     """,
-                    (name, 1 if cron_enabled else 0, cron_expr, infra_type, idx),
+                    (name, display_name, 1 if cron_enabled else 0, cron_expr, infra_type, idx),
                 )
                 cluster_id = idx
                 keep_ids.add(idx)
@@ -1225,11 +1267,11 @@ def save_k8s_clusters(
                 cursor = connection.execute(
                     """
                     INSERT INTO infra_cluster (
-                        cluster_name, last_update, cron, cron_expr, infra_type
+                        cluster_name, display_name, last_update, cron, cron_expr, infra_type
                     )
-                    VALUES (?, NULL, ?, ?, ?)
+                    VALUES (?, ?, NULL, ?, ?, ?)
                     """,
-                    (name, 1 if cron_enabled else 0, cron_expr, infra_type),
+                    (name, display_name, 1 if cron_enabled else 0, cron_expr, infra_type),
                 )
                 cluster_id = int(cursor.lastrowid)
                 keep_ids.add(cluster_id)

@@ -72,6 +72,12 @@ spec:
                   name: ax-platform-secrets
                   key: AGENT_RUNTIME_API_KEY
                   optional: true
+            - name: PRIVATE_LLM_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: ax-platform-secrets
+                  key: PRIVATE_LLM_API_KEY
+                  optional: true
           readinessProbe:
             httpGet:
               path: /readyz

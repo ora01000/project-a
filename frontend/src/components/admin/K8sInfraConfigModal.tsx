@@ -12,6 +12,7 @@ const COLLECTABLE_INFRA_TYPES = new Set(["k8s", "kubevirt", INFRA_TYPE_VSPHERE])
 interface K8sClusterRow {
   idx: number | null;
   cluster_name: string;
+  display_name: string;
   infra_type: string;
   last_update: string | null;
   cron: boolean;
@@ -58,6 +59,7 @@ function nextDraftKey(): string {
 type ApiCluster = {
   idx: number;
   cluster_name: string;
+  display_name?: string;
   last_update: string | null;
   cron?: boolean;
   cron_expr?: string;
@@ -71,6 +73,7 @@ function mapApiRows(data: ApiCluster[]): K8sClusterRow[] {
   return data.map((item) => ({
     idx: item.idx,
     cluster_name: item.cluster_name,
+    display_name: (item.display_name ?? "").slice(0, 100),
     infra_type: (item.infra_type || DEFAULT_INFRA_TYPE).slice(0, 20),
     last_update: item.last_update,
     cron: Boolean(item.cron),
@@ -89,6 +92,7 @@ function emptyDraftRow(): K8sClusterRow {
   return {
     idx: null,
     cluster_name: "",
+    display_name: "",
     infra_type: DEFAULT_INFRA_TYPE,
     last_update: null,
     cron: false,
@@ -190,6 +194,7 @@ export function K8sInfraConfigModal({ viewerRole, onClose }: K8sInfraConfigModal
       const base = {
         idx: row.idx,
         cluster_name: row.cluster_name.trim(),
+        display_name: row.display_name.trim().slice(0, 100),
         infra_type: (row.infra_type.trim() || DEFAULT_INFRA_TYPE).slice(0, 20),
         cron: row.cron,
         cron_expr: (row.cron_expr.trim() || DEFAULT_CRON_EXPR).slice(0, 20),
@@ -353,6 +358,7 @@ export function K8sInfraConfigModal({ viewerRole, onClose }: K8sInfraConfigModal
                 <tr className="border-b border-slate-700 text-left text-slate-400">
                   <th className="px-3 py-2">idx</th>
                   <th className="px-3 py-2">cluster_name</th>
+                  <th className="px-3 py-2">display_name</th>
                   <th className="px-3 py-2">infra_type</th>
                   <th className="px-3 py-2">last_update</th>
                   <th className="px-3 py-2">상태</th>
@@ -390,6 +396,26 @@ export function K8sInfraConfigModal({ viewerRole, onClose }: K8sInfraConfigModal
                             />
                           ) : (
                             <span className="font-mono text-xs">{row.cluster_name}</span>
+                          )}
+                        </td>
+                        <td className="px-3 py-2">
+                          {isEditMode ? (
+                            <input
+                              type="text"
+                              value={row.display_name}
+                              maxLength={100}
+                              placeholder="표시 이름"
+                              onChange={(event) => {
+                                updateRow(row.localKey, {
+                                  display_name: event.target.value.slice(0, 100),
+                                });
+                              }}
+                              className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-sm text-slate-100 focus:border-sky-600 focus:outline-none"
+                            />
+                          ) : (
+                            <span className="text-xs text-slate-300">
+                              {row.display_name.trim() || "-"}
+                            </span>
                           )}
                         </td>
                         <td className="px-3 py-2">
@@ -500,7 +526,7 @@ export function K8sInfraConfigModal({ viewerRole, onClose }: K8sInfraConfigModal
                       </tr>
                       {isEditMode && isVsphere ? (
                         <tr className="border-b border-slate-800 bg-slate-950/50">
-                          <td colSpan={8} className="px-3 py-3">
+                          <td colSpan={9} className="px-3 py-3">
                             <div className="grid gap-3 sm:grid-cols-3">
                               <label className="flex flex-col gap-1 text-xs text-slate-400">
                                 vSphere 서버 URL

@@ -57,6 +57,7 @@ class K8sClusterItem(BaseModel):
     cron: bool = False
     cron_expr: str = DEFAULT_CRON_EXPR
     infra_type: str = DEFAULT_INFRA_TYPE
+    display_name: str = ""
     vsphere_url: str | None = None
     vsphere_id: str | None = None
     vsphere_has_password: bool = False
@@ -68,6 +69,7 @@ class K8sClusterSaveItem(BaseModel):
     cron: bool = False
     cron_expr: str = DEFAULT_CRON_EXPR
     infra_type: str = DEFAULT_INFRA_TYPE
+    display_name: str = ""
     vsphere_url: str | None = None
     vsphere_id: str | None = None
     vsphere_pw: str | None = None
@@ -90,6 +92,7 @@ class K8sShapeClusterItem(BaseModel):
     cluster_name: str
     last_update: str | None = None
     infra_type: str = DEFAULT_INFRA_TYPE
+    display_name: str = ""
 
 
 class K8sShapeCountsModel(BaseModel):
@@ -113,6 +116,7 @@ class K8sShapeAnalysisResponse(BaseModel):
     last_update: str | None = None
     cluster_version: str | None = None
     infra_type: str = DEFAULT_INFRA_TYPE
+    display_name: str = ""
     summary: K8sShapeCountsModel
     history: list[K8sShapeHistoryPointModel] = Field(default_factory=list)
 
@@ -169,6 +173,7 @@ def _to_item(record) -> K8sClusterItem:
         cron=bool(record.cron),
         cron_expr=record.cron_expr or DEFAULT_CRON_EXPR,
         infra_type=record.infra_type or DEFAULT_INFRA_TYPE,
+        display_name=record.display_name or "",
         vsphere_url=getattr(record, "vsphere_url", None),
         vsphere_id=getattr(record, "vsphere_id", None),
         vsphere_has_password=bool(getattr(record, "vsphere_has_password", False)),
@@ -304,6 +309,7 @@ async def list_shape_clusters(request: Request) -> list[K8sShapeClusterItem]:
             cluster_name=record.cluster_name,
             last_update=record.last_update,
             infra_type=record.infra_type or DEFAULT_INFRA_TYPE,
+            display_name=record.display_name or "",
         )
         for record in records
     ]
@@ -335,6 +341,7 @@ async def get_shape_analysis(
         last_update=analysis.last_update,
         cluster_version=analysis.cluster_version,
         infra_type=analysis.infra_type or DEFAULT_INFRA_TYPE,
+        display_name=analysis.display_name or "",
         summary=_shape_counts_model(analysis.summary),
         history=[
             K8sShapeHistoryPointModel(

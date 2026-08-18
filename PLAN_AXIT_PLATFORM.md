@@ -1490,7 +1490,8 @@ dev-axplatform-multi-pod 는 목업(로컬)/http(서버) 환경 모두 postgres�
   - 사용 LLM
     - 목업 : 기존 LLM 과 동일
     - http 모드
-      - http://llm.apps.pkvgs-k8s.lguplus.co.kr/v1 (OpenAI 호환)
+      - http://llmgateway.apps.pkvgs-k8s.lguplus.co.kr/v1 (OpenAI 호환) ✅
+        - API-KEY : 환경변수 `PRIVATE_LLM_API_KEY`
       - 모델 : openai/gpt-oss-120b
   - 사용 MCP 도구명 : posgresql
     - 목업
@@ -1890,6 +1891,11 @@ jobs 에 작업 검토 대상이 신규로 제출 되거나, 내가 승인자로
   - status_code=0 접수 작업 중, 탭을 열기 전에 새로 들어온 job 이 있으면 🆕 표시
 2. 나의 검토작업 탭에 New 이모지 표시 ✅
   - status_code=1 이고 approver=본인인 job 중, 탭을 열기 전에 새로 들어온 job 이 있으면 🆕 표시
+
+# infra_cluster 테이블 display_name 컬럼 추가
+  - display_name varchar(100) ✅
+  - 추가된 컬럼 값은 "인프라 형상" 탭 > "인프라 목록" 패널의 출력 목록에서 {cluster_name} {display_name} 형태로 출력 ✅
+  - 요약 패널에도 항목 추가 ✅
 
 
 # 로그 관리 보완 - 로직 확인이 필요하여 보류로 남김 - 260813

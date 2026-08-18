@@ -12,7 +12,7 @@ from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import create_react_agent
 
 from backend.app.agents.base import AgentInvokeResult, invoke_agent
-from backend.app.config import resolve_agent_runtime_mode
+from backend.app.config import _env_setting, resolve_agent_runtime_mode
 from backend.app.db.received_mail import (
     DECISION_TYPE_INSUFFICIENT,
     DECISION_TYPE_JOB,
@@ -38,9 +38,14 @@ def _build_llm(runtime_mode: str) -> ChatOpenAI:
     from backend.app.logging.prompt_debug import wrap_llm_for_prompt_debug
 
     if runtime_mode == "http":
+        api_key = _env_setting(STATIC_CONFIG.http_llm_api_key_env)
+        if not api_key:
+            raise RuntimeError(
+                f"http 모드 JOB_DECISION_AGENT 는 {STATIC_CONFIG.http_llm_api_key_env} 가 필요합니다."
+            )
         llm: ChatOpenAI = ChatOpenAI(
             base_url=STATIC_CONFIG.http_llm_base_url,
-            api_key=STATIC_CONFIG.http_llm_api_key,
+            api_key=api_key,
             model=STATIC_CONFIG.http_llm_model,
             temperature=0,
             streaming=False,

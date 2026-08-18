@@ -15,6 +15,7 @@ interface ShapeCluster {
   cluster_name: string;
   last_update: string | null;
   infra_type: string;
+  display_name?: string;
 }
 
 interface ShapeCounts {
@@ -38,6 +39,7 @@ interface ShapeAnalysis {
   last_update: string | null;
   cluster_version: string | null;
   infra_type: string;
+  display_name?: string;
   summary: ShapeCounts;
   history: ShapeHistoryPoint[];
 }
@@ -121,6 +123,11 @@ function clusterButtonClass(isSelected: boolean): string {
     return "border-sky-600 bg-sky-950/60 text-sky-100";
   }
   return "border-slate-700 bg-slate-900/80 text-slate-300 hover:border-slate-600 hover:bg-slate-800/60";
+}
+
+function clusterListLabel(cluster: { cluster_name: string; display_name?: string }): string {
+  const display = (cluster.display_name ?? "").trim();
+  return display ? `${cluster.cluster_name} ${display}` : cluster.cluster_name;
 }
 
 function ShapeTrendChart({
@@ -380,6 +387,7 @@ export function InfraShapeTab({ active, maskIps = false, onCopyToNote }: InfraSh
     if (analysis.infra_type === "vSphere") {
       return [
         { label: "등록 이름", value: analysis.cluster_name },
+        { label: "표시 이름", value: (analysis.display_name ?? "").trim() || "-" },
         { label: "인프라 유형", value: analysis.infra_type },
         { label: "마지막 수집", value: analysis.last_update ?? "-" },
         { label: "클러스터 개수", value: String(analysis.summary.namespaces ?? 0) },
@@ -390,6 +398,7 @@ export function InfraShapeTab({ active, maskIps = false, onCopyToNote }: InfraSh
     }
     const items = [
       { label: "클러스터 이름", value: analysis.cluster_name },
+      { label: "표시 이름", value: (analysis.display_name ?? "").trim() || "-" },
       { label: "인프라 유형", value: analysis.infra_type || "k8s" },
       { label: "클러스터 버전", value: analysis.cluster_version ?? "-" },
       { label: "노드 개수", value: String(analysis.summary.nodes) },
@@ -491,10 +500,10 @@ export function InfraShapeTab({ active, maskIps = false, onCopyToNote }: InfraSh
                 title={
                   cluster.last_update
                     ? `${infraType} · last_update: ${cluster.last_update}`
-                    : `${cluster.cluster_name} (${infraType})`
+                    : `${clusterListLabel(cluster)} (${infraType})`
                 }
               >
-                <span className="block truncate">{cluster.cluster_name}</span>
+                <span className="block truncate">{clusterListLabel(cluster)}</span>
                 <span
                   className={`mt-0.5 block truncate text-[10px] font-normal ${
                     isSelected ? "text-sky-300/80" : "text-slate-500"

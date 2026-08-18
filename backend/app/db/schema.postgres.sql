@@ -90,11 +90,15 @@ CREATE TABLE IF NOT EXISTS mynote_contents (
 CREATE TABLE IF NOT EXISTS infra_cluster (
     idx BIGSERIAL PRIMARY KEY,
     cluster_name VARCHAR(50) NOT NULL UNIQUE,
+    display_name VARCHAR(100) NOT NULL DEFAULT '',
     last_update TEXT,
     cron INTEGER NOT NULL DEFAULT 0,
     cron_expr VARCHAR(20) NOT NULL DEFAULT '0 23 * * 6',
     infra_type VARCHAR(20) NOT NULL DEFAULT 'k8s'
 );
+
+ALTER TABLE infra_cluster
+    ADD COLUMN IF NOT EXISTS display_name VARCHAR(100) NOT NULL DEFAULT '';
 
 -- vSphere credentials linked to infra_cluster.idx (infra_type = 'vSphere')
 CREATE TABLE IF NOT EXISTS vsphere_infra_info (
