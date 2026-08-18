@@ -9,6 +9,7 @@ import { MyNotesHeaderButtons } from "./jobs/MyNotesHeaderButtons";
 import { MyNotesTab } from "./jobs/MyNotesTab";
 import { RejectedJobsTab } from "./jobs/RejectedJobsTab";
 import { WhatapEventReportTab } from "./jobs/WhatapEventReportTab";
+import { useJobReviewNewBadges } from "./jobs/useJobReviewNewBadges";
 import { useMyNotes } from "./jobs/useMyNotes";
 import { shouldMaskIps } from "../types/user";
 
@@ -74,6 +75,7 @@ export function JobNotesPanel({
 }: JobNotesPanelProps) {
   const [activeTab, setActiveTab] = useState<JobNotesTab>("infra-shape");
   const myNotes = useMyNotes(currentUser, activeTab === "my-notes");
+  const { hasNewReview, hasNewMyReview } = useJobReviewNewBadges(currentUser, activeTab);
 
   const handleCopyToNote = useCallback(
     async (content: string, noteName?: string) => {
@@ -110,7 +112,11 @@ export function JobNotesPanel({
         </header>
 
         <div className="flex shrink-0 gap-1 overflow-x-auto border-b border-slate-700/80 px-3 pt-2">
-          {TABS.map((tab) => (
+          {TABS.map((tab) => {
+            const showNewBadge =
+              (tab.id === "review" && hasNewReview) ||
+              (tab.id === "my-review" && hasNewMyReview);
+            return (
             <button
               key={tab.id}
               type="button"
@@ -122,8 +128,10 @@ export function JobNotesPanel({
               }`}
             >
               {tab.label}
+              {showNewBadge ? " 🆕" : ""}
             </button>
-          ))}
+            );
+          })}
         </div>
 
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">

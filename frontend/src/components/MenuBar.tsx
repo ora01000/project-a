@@ -45,7 +45,6 @@ function menuButtonClass(isActive: boolean): string {
 export function MenuBar({ activeView, user, onNavigate, onLogout, onUserUpdated }: MenuBarProps) {
   const [currentTime, setCurrentTime] = useState(formatCurrentTime(new Date()));
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
-  const [showSessionExtendConfirm, setShowSessionExtendConfirm] = useState(false);
   const [sessionRemainingMs, setSessionRemainingMs] = useState(() => getAuthSessionRemainingMs());
   const [isExtendingSession, setIsExtendingSession] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
@@ -85,8 +84,10 @@ export function MenuBar({ activeView, user, onNavigate, onLogout, onUserUpdated 
   const canExtendSession =
     sessionRemainingMs > 0 && sessionRemainingMs <= SESSION_EXTEND_THRESHOLD_MS;
 
-  const handleConfirmSessionExtend = () => {
-    setShowSessionExtendConfirm(false);
+  const handleSessionExtend = () => {
+    if (!canExtendSession || isExtendingSession) {
+      return;
+    }
     setIsExtendingSession(true);
     void extendAuthSession()
       .then(() => {
@@ -456,7 +457,7 @@ export function MenuBar({ activeView, user, onNavigate, onLogout, onUserUpdated 
             <button
               type="button"
               disabled={!canExtendSession || isExtendingSession}
-              onClick={() => setShowSessionExtendConfirm(true)}
+              onClick={handleSessionExtend}
               title={
                 canExtendSession
                   ? "세션 만료 전 연장 (클릭)"
@@ -500,16 +501,6 @@ export function MenuBar({ activeView, user, onNavigate, onLogout, onUserUpdated 
             setShowLogoutConfirm(false);
             onLogout();
           }}
-        />
-      ) : null}
-
-      {showSessionExtendConfirm ? (
-        <ConfirmDialog
-          title="세션 연장"
-          message="세션을 연장하시겠습니까?"
-          confirmLabel="연장"
-          onCancel={() => setShowSessionExtendConfirm(false)}
-          onConfirm={handleConfirmSessionExtend}
         />
       ) : null}
 

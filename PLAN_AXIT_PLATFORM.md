@@ -1702,15 +1702,7 @@ JOB_DECISION_AGENT 정의 (완료)
               - CPU/MEM/DISK
         
 
-# 로그 관리 보완 - 로직 확인이 필요하여 보류로 남김 - 260813
-사용자 대화 로그 보관 정책
-- USER_COMM_LOG_RETENTION_DAY 환경변수, default 30
-- USER_COMM_LOG_RETENTION_DAY 이전 로그는 삭제
-에이전트 로그 보관 정책
-- whatap 이벤트 수신을 제외한 에이전트 로그는 현재 코드에서 참조가 없을 경우(write 만 하는 경우) 수집하지 않음
-- whatap 이벤트 로그는 일별 로테이션
-- WHATAP_EVENT_LOG_RETENTION_DAY 환경변수, default 30
-- WHATAP_EVENT_LOG_RETENTION_DAY 이전 로그는 삭제
+
 
 
 # 상세정보 패널 > 작업 관리 탭 화면 구현 ✅
@@ -1890,3 +1882,25 @@ users.role 역할은 기본 0:admin 1:user 100:superadmin 에서 2:infraadmin �
   2:infraadmin
 
 2:infraadmin : 기본 1:user 와 같은데 IP 마스킹되지 않고 출력된다 ✅
+
+
+# 작업 검토에 New 이모지
+jobs 에 작업 검토 대상이 신규로 제출 되거나, 내가 승인자로 지장된 신규 jobs 가 생성될 경우
+1. 작업 검토 탭에 New 이모지 표사 ✅
+  - status_code=0 접수 작업 중, 탭을 열기 전에 새로 들어온 job 이 있으면 🆕 표시
+2. 나의 검토작업 탭에 New 이모지 표시 ✅
+  - status_code=1 이고 approver=본인인 job 중, 탭을 열기 전에 새로 들어온 job 이 있으면 🆕 표시
+
+
+# 로그 관리 보완 - 로직 확인이 필요하여 보류로 남김 - 260813
+사용자 대화 로그 보관 정책
+- USER_COMM_LOG_RETENTION_DAY 환경변수, default 30
+- USER_COMM_LOG_RETENTION_DAY 이전 로그는 삭제
+에이전트 로그 보관 정책
+- whatap 이벤트 수신을 제외한 에이전트 로그는 현재 코드에서 참조가 없을 경우(write 만 하는 경우) 수집하지 않음
+- whatap 이벤트 로그는 일별 로테이션
+- WHATAP_EVENT_LOG_RETENTION_DAY 환경변수, default 30
+- WHATAP_EVENT_LOG_RETENTION_DAY 이전 로그는 삭제
+
+
+
