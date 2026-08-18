@@ -1,7 +1,9 @@
 import asyncio
 import logging
+import re
 import smtplib
 from email.message import EmailMessage
+from html import unescape
 from pathlib import Path
 
 import markdown
@@ -66,11 +68,36 @@ def _smtp_login_if_needed(smtp: smtplib.SMTP, settings: EmailNotificationSetting
     smtp.login(settings.smtp_username, settings.smtp_password)
 
 
-def convert_markdown_to_html(markdown_text: str) -> str:
-    rendered = markdown.markdown(
+def _render_markdown_fragment(markdown_text: str) -> str:
+    return markdown.markdown(
         markdown_text,
         extensions=["extra", "nl2br", "sane_lists"],
     )
+
+
+def markdown_to_plain_text(markdown_text: str) -> str:
+    """Readable plain-text fallback for multipart email (no raw markdown syntax)."""
+    stripped = markdown_text.strip()
+    if not stripped:
+        return ""
+
+    rendered = _render_markdown_fragment(stripped)
+    text = rendered
+    text = re.sub(r"<br\s*/?>", "\n", text, flags=re.IGNORECASE)
+    text = re.sub(r"</li>", "\n", text, flags=re.IGNORECASE)
+    text = re.sub(r"<li[^>]*>", "• ", text, flags=re.IGNORECASE)
+    text = re.sub(r"</(p|div|h[1-6]|tr|blockquote)>", "\n", text, flags=re.IGNORECASE)
+    text = re.sub(r"<hr\s*/?>", "\n---\n", text, flags=re.IGNORECASE)
+    text = re.sub(r"<[^>]+>", "", text)
+    text = unescape(text)
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    text = re.sub(r"[ \t]+\n", "\n", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
+
+
+def convert_markdown_to_html(markdown_text: str) -> str:
+    rendered = _render_markdown_fragment(markdown_text)
     return (
         "<!DOCTYPE html>\n"
         '<html lang="ko">\n'
@@ -225,8 +252,9 @@ async def send_markdown_email(
     cc_addresses: list[str] | None = None,
     bcc_addresses: list[str] | None = None,
 ) -> None:
-    plain_body, html_markdown = prepare_markdown_for_email(markdown_body.strip())
+    plain_markdown, html_markdown = prepare_markdown_for_email(markdown_body.strip())
     html_body = convert_markdown_to_html(html_markdown)
+    plain_body = markdown_to_plain_text(plain_markdown)
     await asyncio.to_thread(
         _send_email_sync,
         settings,
@@ -247,6 +275,23 @@ def compose_report_markdown(*, forward_message: str, report_body: str) -> str:
     if forward:
         return forward
     return report
+
+
+def build_job_result_report_markdown(
+    *,
+    job_title: str,
+    srnum: str,
+    complete_date: str,
+    result_body: str,
+) -> str:
+    title = (job_title or "").strip() or "작업 리포트"
+    return (
+        f"# {title}\n\n"
+        f"- SR 번호: {(srnum or '').strip()}\n"
+        f"- 완료 일시: {(complete_date or '').strip()}\n\n"
+        f"## 처리 결과\n\n"
+        f"{(result_body or '').strip()}\n"
+    )
 
 
 async def send_job_report_emails(
@@ -391,6 +436,8 @@ async def send_whatap_event_subscriber_report(
     *,
     database_path: Path | str | None,
     job_title: str,
+    srnum: str,
+    complete_date: str,
     report_body: str,
     settings: EmailNotificationSettings | None = None,
 ) -> tuple[int, list[str]]:
@@ -422,7 +469,12 @@ async def send_whatap_event_subscriber_report(
 
     markdown_body = compose_report_markdown(
         forward_message=WHATAP_SUBSCRIBER_FORWARD_MESSAGE,
-        report_body=report_body,
+        report_body=build_job_result_report_markdown(
+            job_title=job_title,
+            srnum=srnum,
+            complete_date=complete_date,
+            result_body=report_body,
+        ),
     )
     subject = (job_title or "").strip() or "Whatap 이벤트 리포트"
 

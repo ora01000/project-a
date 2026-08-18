@@ -135,6 +135,8 @@ async def process_approved_job(
                 await send_whatap_event_subscriber_report(
                     database_path=database_path,
                     job_title=job.job_title,
+                    srnum=job.srnum,
+                    complete_date=complete_date,
                     report_body=result.content,
                 )
             except Exception:

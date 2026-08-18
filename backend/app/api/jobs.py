@@ -38,6 +38,7 @@ from backend.app.notifications.email_recipients import (
     resolve_email_recipients,
 )
 from backend.app.notifications.email_sender import (
+    build_job_result_report_markdown,
     compose_report_markdown,
     send_ax_infra_job_cancellation_email,
     send_ax_infra_job_rejection_email,
@@ -300,12 +301,11 @@ def _strip_html(text: str) -> str:
 
 
 def _build_job_report_markdown(job: JobRecord, result: JobResultRecord) -> str:
-    return (
-        f"# {job.job_title}\n\n"
-        f"- SR 번호: {job.srnum}\n"
-        f"- 완료 일시: {result.complete_date}\n\n"
-        f"## 처리 결과\n\n"
-        f"{result.result.strip()}\n"
+    return build_job_result_report_markdown(
+        job_title=job.job_title,
+        srnum=job.srnum,
+        complete_date=result.complete_date,
+        result_body=result.result,
     )
 
 
