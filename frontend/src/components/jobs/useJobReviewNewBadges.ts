@@ -14,7 +14,8 @@ type JobNotesTab =
   | "whatap-report"
   | "rejected-jobs"
   | "my-notes"
-  | "infra-shape";
+  | "infra-shape"
+  | "fossflow";
 
 async function fetchJobIdxs(params: URLSearchParams): Promise<number[]> {
   try {

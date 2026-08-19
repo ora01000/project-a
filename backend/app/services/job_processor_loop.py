@@ -20,7 +20,7 @@ from backend.app.db.jobs import (
     list_jobs,
     update_job_status,
 )
-from backend.app.db.agentruntime import StoredAgentRuntime, build_agent_chat_url, catalog_agent_id
+from backend.app.db.agentruntime import StoredAgentRuntime, build_agent_chat_url
 from backend.app.db.jobs_result import upsert_job_result
 from backend.app.notifications.email_sender import (
     send_ax_infra_job_completion_email,
@@ -29,6 +29,7 @@ from backend.app.notifications.email_sender import (
 from backend.app.services.agent_runtime_client import AgentInvokeRequest, AgentRuntimeClient, normalize_runtime_mode
 from backend.app.services.job_processor import (
     build_job_agent_message,
+    try_resolve_helpdesk_agent_id,
     try_resolve_helpdesk_runtime_record,
 )
 
@@ -192,13 +193,13 @@ async def _dispatch_pending_jobs(
     if not jobs:
         return
 
-    helpdesk_runtime_record = await asyncio.to_thread(
-        try_resolve_helpdesk_runtime_record,
+    helpdesk_agent_id = await asyncio.to_thread(
+        try_resolve_helpdesk_agent_id,
         database_path,
         runtime_mode,
         settings=processor_settings,
     )
-    if helpdesk_runtime_record is None:
+    if helpdesk_agent_id is None:
         logger.warning(
             "job processor skipped %s approved job(s): helpdesk orchestrator agentruntime not found "
             "(http mode, is_orchestrator=1 required). Register orchestrator or set "
@@ -207,7 +208,12 @@ async def _dispatch_pending_jobs(
         )
         return
 
-    helpdesk_agent_id = catalog_agent_id(helpdesk_runtime_record)
+    helpdesk_runtime_record = await asyncio.to_thread(
+        try_resolve_helpdesk_runtime_record,
+        database_path,
+        runtime_mode,
+        settings=processor_settings,
+    )
 
     for job in jobs:
         if not await _mark_in_flight(state, job.idx):

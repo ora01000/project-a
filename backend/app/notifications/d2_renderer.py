@@ -10,6 +10,8 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+from backend.app.notifications.fossflow_renderer import apply_fossflow_to_email_markdown
+
 logger = logging.getLogger(__name__)
 
 D2_FENCE_PATTERN = re.compile(r"```d2\s*\r?\n(.*?)```", re.DOTALL | re.IGNORECASE)
@@ -120,11 +122,10 @@ def _image_html(data: bytes, mime_subtype: str, *, alt: str = "D2 diagram") -> s
 
 
 def prepare_markdown_for_email(markdown_text: str) -> tuple[str, str]:
-    """Split markdown into plain text and HTML-oriented markdown with embedded D2 images."""
-    plain_body = markdown_text
-    html_markdown = markdown_text
+    """Split markdown into plain text and HTML-oriented markdown with embedded diagrams."""
+    plain_body, html_markdown = apply_fossflow_to_email_markdown(markdown_text)
 
-    for match in reversed(list(D2_FENCE_PATTERN.finditer(markdown_text))):
+    for match in reversed(list(D2_FENCE_PATTERN.finditer(html_markdown))):
         start, end = match.span()
         d2_source = match.group(1).strip()
         rendered = render_d2_diagram_image(d2_source) if d2_source else None
@@ -136,7 +137,12 @@ def prepare_markdown_for_email(markdown_text: str) -> tuple[str, str]:
         html_replacement = f"\n{_image_html(image_bytes, mime_subtype)}\n"
         plain_replacement = f"\n{_PLAIN_DIAGRAM_PLACEHOLDER}\n"
 
-        plain_body = plain_body[:start] + plain_replacement + plain_body[end:]
+        # D2 fences may already have been removed from plain_body if they overlapped FossFLOW;
+        # replace the matching span in the current html_markdown, and the same fence text in plain.
+        fence_text = html_markdown[start:end]
+        plain_at = plain_body.find(fence_text)
+        if plain_at >= 0:
+            plain_body = plain_body[:plain_at] + plain_replacement + plain_body[plain_at + len(fence_text) :]
         html_markdown = html_markdown[:start] + html_replacement + html_markdown[end:]
 
     return plain_body.strip(), html_markdown.strip()

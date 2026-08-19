@@ -6,6 +6,8 @@ const MARKDOWN_PATTERNS = [
   /_[^_]+_/,
   /```mermaid[\s\S]*?```/,
   /```d2[\s\S]*?```/,
+  /```fossflow[\s\S]*?```/,
+  /```isoflow[\s\S]*?```/,
   /```[\s\S]*?```/,
   /`[^`]+`/,
   /^\s*[-*+]\s/m,

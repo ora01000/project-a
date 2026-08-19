@@ -1,11 +1,28 @@
-import { isValidElement, memo, useMemo } from "react";
+import { isValidElement, lazy, memo, Suspense, useMemo } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { Components } from "react-markdown";
 
+import { parseFossflowCompactJson } from "../types/fossflow";
+import type { FossflowCompactDiagram } from "../types/fossflow";
+import { embedFossflowJsonFences, parseEmbeddedFossflowJson } from "../utils/fossflowExtract";
 import { hasMarkdownSyntax } from "../utils/markdown";
 import { D2Diagram } from "./D2Diagram";
 import { MermaidDiagram } from "./MermaidDiagram";
+
+const FossFlowDiagram = lazy(() =>
+  import("./FossFlowDiagram").then((module) => ({ default: module.FossFlowDiagram })),
+);
+
+function FossFlowDiagramPreview({ diagram }: { diagram: FossflowCompactDiagram | string }) {
+  return (
+    <Suspense fallback={<p className="text-xs text-slate-400">다이어그램을 불러오는 중...</p>}>
+      <div className="my-2 flex h-[28rem] min-h-[16rem] w-full flex-col">
+        <FossFlowDiagram diagram={diagram} />
+      </div>
+    </Suspense>
+  );
+}
 
 interface AssistantMessageContentProps {
   content: string;
@@ -17,7 +34,10 @@ function normalizeExcessiveNewlines(content: string): string {
 }
 
 function isDiagramElement(child: unknown): boolean {
-  return isValidElement(child) && (child.type === MermaidDiagram || child.type === D2Diagram);
+  return (
+    isValidElement(child) &&
+    (child.type === MermaidDiagram || child.type === D2Diagram || child.type === FossFlowDiagramPreview)
+  );
 }
 
 const MARKDOWN_COMPONENTS: Components = {
@@ -38,6 +58,14 @@ const MARKDOWN_COMPONENTS: Components = {
 
     if (language === "d2") {
       return <D2Diagram chart={text} />;
+    }
+
+    const compact = parseFossflowCompactJson(text);
+    if (compact) {
+      return <FossFlowDiagramPreview diagram={compact} />;
+    }
+    if (language === "fossflow" || language === "isoflow") {
+      return <p className="text-xs text-amber-300">FossFLOW compact JSON을 해석하지 못했습니다.</p>;
     }
 
     if (className) {
@@ -80,13 +108,18 @@ const MARKDOWN_COMPONENTS: Components = {
 };
 
 function AssistantMessageContentInner({ content }: AssistantMessageContentProps) {
-  const displayContent = useMemo(
-    () => normalizeExcessiveNewlines(content),
-    [content],
-  );
+  const displayContent = useMemo(() => {
+    const normalized = normalizeExcessiveNewlines(content);
+    return embedFossflowJsonFences(normalized);
+  }, [content]);
 
   if (!content) {
     return null;
+  }
+
+  const compactMessage = parseEmbeddedFossflowJson(content);
+  if (compactMessage) {
+    return <FossFlowDiagramPreview diagram={compactMessage} />;
   }
 
   if (!hasMarkdownSyntax(displayContent)) {

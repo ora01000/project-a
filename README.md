@@ -2,7 +2,7 @@
 
 인프라 운영을 위한 웹 콘솔입니다. 작업 요청·검토, 인프라 형상 조회, 통합 채팅, 메일 알림을 한곳에서 다룹니다.
 
-**현재 버전:** 1.7 / 릴리즈 `260814` — 상세 변경 이력은 [RELEASE.md](RELEASE.md)를 참고하세요.
+**현재 버전:** 1.8 / 릴리즈 `260819` — 상세 변경 이력은 [RELEASE.md](RELEASE.md)를 참고하세요.
 
 ## 아키텍처 요약
 
@@ -95,23 +95,23 @@ cd frontend && npm run dev
 - **작업 노트**: 작업 검토·나의 검토/결과, Whatap 이벤트 리포트, 반려 작업, 나의 노트 (목록 페이징)
 - **인프라 형상**: k8s / kubevirt / vSphere 수집·요약·세대 추이, **AI갭분석** (`INFRA_GAP_ANALYSIS`)
 - **통합 채팅·대화로그**: 에이전트 채팅(SSE), 상세정보 패널 로그
-- **메일**: 리포트 수동 전송(Markdown + D2 이미지), 작업 완료/반려/취소·가입·Whatap 구독 자동 알림
+- **메일**: 리포트 수동 전송(Markdown + D2/FossFLOW 이미지), 작업 완료/반려/취소·가입·Whatap 구독 자동 알림
 - **관리자**: 에이전트 연결, 인프라 구성, 메일 서버, 공지사항 등
 
 mock 모드에서 제한되는 런타임 API는 [docs/MOCK_RUNTIME.md](docs/MOCK_RUNTIME.md)를 참고하세요.
 
 ## Docker 이미지
 
-Postgres multipod 배포용 태그는 **`pgYYMMDD`** 형식입니다 (예: `pg260814`).
+Postgres multipod 배포용 태그는 **`pgYYMMDD`** 형식입니다 (예: `pg260819`).
 
 ```bash
-IMAGE_TAG=pg260814 PUSH=true PLATFORMS=linux/amd64 bash scripts/docker-build-push.sh
+IMAGE_TAG=pg260819 PUSH=true PLATFORMS=linux/amd64 bash scripts/docker-build-push.sh
 ```
 
 | 이미지 | 예시 태그 |
 |--------|-----------|
-| `ora01000/project-a-backend` | `pg260814` |
-| `ora01000/project-a-frontend` | `pg260814` |
+| `ora01000/project-a-backend` | `pg260819` |
+| `ora01000/project-a-frontend` | `pg260819` |
 
 OKD 매니페스트 예시는 [`deploy/okd/`](deploy/okd/)을 참고하세요.
 
