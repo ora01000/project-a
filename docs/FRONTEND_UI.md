@@ -128,7 +128,7 @@ flowchart TD
 진입: 작업 노트 → **인프라 형상** (`InfraShapeTab`).
 
 - 인프라 목록 / 요약 / **형상 추이**
-- **AI갭분석** → `POST /api/infra-gap-analysis/invoke` → 성공 시 **나의 노트**로 복사 가능
+- **AI갭분석** (`users.role = 0 | 100` 만 버튼 표시) → `POST /api/infra-gap-analysis/invoke` → 성공 시 **나의 노트**로 복사 가능
 - 클러스터 설정(관리자): 환경설정 → 관리자 작업 → **인프라 구성** (`K8sInfraConfigModal`)
 
 ---

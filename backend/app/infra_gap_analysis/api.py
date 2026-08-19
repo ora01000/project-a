@@ -7,6 +7,7 @@ import logging
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from backend.app.db.roles import is_admin_role
 from backend.app.infra_gap_analysis.agent import infra_gap_analysis_service
 from backend.app.infra_gap_analysis.settings import STATIC_CONFIG
 from backend.app.logging.agent_logger import log_agent_error, log_agent_interaction
@@ -31,6 +32,12 @@ class InfraGapAnalysisInvokeResponse(BaseModel):
     output_tokens: int = 0
 
 
+def _require_admin(request: Request) -> None:
+    viewer = get_request_auth_user(request)
+    if not is_admin_role(viewer.role):
+        raise HTTPException(status_code=403, detail="관리자만 수행할 수 있습니다.")
+
+
 @router.get("/infra-gap-analysis/status")
 async def infra_gap_analysis_status() -> dict:
     return infra_gap_analysis_service.status()
@@ -41,6 +48,7 @@ async def infra_gap_analysis_invoke(
     body: InfraGapAnalysisInvokeRequest,
     request: Request,
 ) -> InfraGapAnalysisInvokeResponse:
+    _require_admin(request)
     auth_user = get_request_auth_user(request)
     try:
         result = await infra_gap_analysis_service.invoke(body.message)

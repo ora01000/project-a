@@ -47,6 +47,7 @@ interface ShapeAnalysis {
 interface InfraShapeTabProps {
   active: boolean;
   maskIps?: boolean;
+  canRunGapAnalysis?: boolean;
   onCopyToNote?: (content: string, noteName?: string) => Promise<void>;
 }
 
@@ -289,7 +290,12 @@ function ShapeTrendChart({
   );
 }
 
-export function InfraShapeTab({ active, maskIps = false, onCopyToNote }: InfraShapeTabProps) {
+export function InfraShapeTab({
+  active,
+  maskIps = false,
+  canRunGapAnalysis = false,
+  onCopyToNote,
+}: InfraShapeTabProps) {
   const [clusters, setClusters] = useState<ShapeCluster[]>([]);
   const [selectedName, setSelectedName] = useState<string | null>(null);
   const [analysis, setAnalysis] = useState<ShapeAnalysis | null>(null);
@@ -421,13 +427,16 @@ export function InfraShapeTab({ active, maskIps = false, onCopyToNote }: InfraSh
   }, [analysis?.infra_type, clusters, selectedName]);
 
   const runGapAnalysis = useCallback(async () => {
-    if (!selectedName) {
+    if (!canRunGapAnalysis || !selectedName) {
       return;
     }
     const infraType = selectedInfraType;
     const message =
       `${selectedName} is ${infraType}. ` +
-      "Compare inventory rows across snapshot generations (latest and backups). " +
+      "Compare inventory rows across snapshot generations (latest plus at most 2 newest backups; 3 generations total). " +
+      "Query only tables prefixed with this cluster_name and only this infra_type family. " +
+      "Do not list the full database catalog. " +
+      "Skip _vsphere_datastores and _kubevirt_vm_volumes. " +
       "Report added, removed, and changed resources with count trends. " +
       "Do not focus on table or schema DDL differences unless they block the comparison.";
     setIsGapAnalyzing(true);
@@ -475,7 +484,7 @@ export function InfraShapeTab({ active, maskIps = false, onCopyToNote }: InfraSh
     } finally {
       setIsGapAnalyzing(false);
     }
-  }, [selectedName, selectedInfraType, onCopyToNote]);
+  }, [canRunGapAnalysis, selectedName, selectedInfraType, onCopyToNote]);
 
   return (
     <div className="flex min-h-0 flex-1 gap-3 p-3">
@@ -554,19 +563,21 @@ export function InfraShapeTab({ active, maskIps = false, onCopyToNote }: InfraSh
           <section className="flex min-h-0 flex-1 flex-col rounded-lg border border-slate-700/80 bg-slate-950/40 p-3">
             <div className="mb-1 flex shrink-0 items-center justify-between gap-2">
               <h3 className="text-xs font-semibold text-slate-300">형상 추이</h3>
-              <button
-                type="button"
-                disabled={!selectedName || isGapAnalyzing}
-                onClick={() => void runGapAnalysis()}
-                className="rounded border border-sky-700 bg-sky-950/50 px-2 py-0.5 text-[11px] font-medium text-sky-200 hover:bg-sky-900/60 disabled:cursor-not-allowed disabled:opacity-40"
-                title={
-                  selectedName
-                    ? `${selectedName} (${selectedInfraType}) AI 갭분석`
-                    : "클러스터를 선택해 주세요"
-                }
-              >
-                {isGapAnalyzing ? "분석 중..." : "AI갭분석"}
-              </button>
+              {canRunGapAnalysis ? (
+                <button
+                  type="button"
+                  disabled={!selectedName || isGapAnalyzing}
+                  onClick={() => void runGapAnalysis()}
+                  className="rounded border border-sky-700 bg-sky-950/50 px-2 py-0.5 text-[11px] font-medium text-sky-200 hover:bg-sky-900/60 disabled:cursor-not-allowed disabled:opacity-40"
+                  title={
+                    selectedName
+                      ? `${selectedName} (${selectedInfraType}) AI 갭분석`
+                      : "클러스터를 선택해 주세요"
+                  }
+                >
+                  {isGapAnalyzing ? "분석 중..." : "AI갭분석"}
+                </button>
+              ) : null}
             </div>
             <p className="mb-2 text-[11px] text-slate-500">
               최신 테이블과 백업(최대 4세대) 기준 개수 변화

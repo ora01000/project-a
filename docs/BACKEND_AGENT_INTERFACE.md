@@ -100,10 +100,10 @@ POST /api/agents/{agent_id}/chat
 ### 4.4 INFRA_GAP_ANALYSIS (독립)
 
 - 패키지: `backend/app/infra_gap_analysis/`
-- API: `GET/POST /api/infra-gap-analysis/{status,invoke}`
+- API: `GET/POST /api/infra-gap-analysis/{status,invoke}` (`invoke`는 `is_admin_role`, `users.role = 0 | 100`)
 - AXIT·`agentruntime`·통합 채팅과 **무관**. MCP/LLM은 해당 모듈 설정 사용.
 - http LLM: `http://llmgateway.apps.pkvgs-k8s.lguplus.co.kr/v1` · `axit/openai/gpt-oss-120b` · API key `PRIVATE_LLM_API_KEY`
-- UI: 인프라 형상(형상 추이) **AI갭분석**.
+- UI: 인프라 형상(형상 추이) **AI갭분석** (admin/superadmin만).
 
 ---
 

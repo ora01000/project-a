@@ -11,7 +11,7 @@ import { RejectedJobsTab } from "./jobs/RejectedJobsTab";
 import { WhatapEventReportTab } from "./jobs/WhatapEventReportTab";
 import { useJobReviewNewBadges } from "./jobs/useJobReviewNewBadges";
 import { useMyNotes } from "./jobs/useMyNotes";
-import { shouldMaskIps } from "../types/user";
+import { hasAdminAccess, shouldMaskIps } from "../types/user";
 
 type JobNotesTab =
   | "review"
@@ -62,6 +62,7 @@ function renderActiveTab(
         <InfraShapeTab
           active
           maskIps={shouldMaskIps(currentUser.role)}
+          canRunGapAnalysis={hasAdminAccess(currentUser.role)}
           onCopyToNote={onCopyToNote}
         />
       );
