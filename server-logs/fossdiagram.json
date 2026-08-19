@@ -1,0 +1,63 @@
+{
+  "t": "dmdgaa 프로젝트 아키텍처 (dprv-k8s)",
+  "i": [
+    ["External User", "user", "외부 사용자 요청 (mdgadev.lguplus.co.kr 접속)"],
+    ["Route: mdga-service-api", "k8s-ingress", "OpenShift Route, /api 경로, edge TLS termination"],
+    ["Route: mdga-service-front", "k8s-ingress", "OpenShift Route, 프론트엔드 경로, edge TLS termination"],
+    ["mdga-service-api-svc", "k8s-service", "ClusterIP 8080/TCP, API 서비스 노출"],
+    ["mdga-service-front-svc", "k8s-service", "ClusterIP 8080/TCP, 프론트엔드 서비스 노출"],
+    ["mdga-service-redis-svc", "k8s-service", "ClusterIP 6379/TCP, Redis 캐시 서비스 노출"],
+    ["mdga-service-api-deploy", "k8s-deployment", "API 배포 1/1, mdga-dev API 컨테이너, 729d"],
+    ["mdga-service-front-deploy", "k8s-deployment", "프론트엔드 배포 1/1, mdga-dev Front 컨테이너, 729d"],
+    ["mdga-service-batch-deploy", "k8s-deployment", "상시 배치 배포 1/1, 재시작 19회, 622d"],
+    ["mdga-service-redis-1", "cache", "Redis 캐시 Pod (DeploymentConfig, 455d 운영)"],
+    ["mdga-batch-cronjobs(11)", "k8s-cronjob", "일/시간 단위 배치: ce,ced,cn,cp,ct,dqu,dsmms,gr,nc,tc,vsmms"],
+    ["mdga-logrotate", "k8s-cronjob", "매일 15:10 로그 로테이션 Job, 587d"],
+    ["dmdgaa-data-volume-claim", "k8s-persistent-volume", "NFS RWX 450Gi, 데이터 저장소"],
+    ["dmdgaa-logs-volume-claim", "k8s-persistent-volume", "NFS RWX 50Gi, 로그 저장소"],
+    ["dmdgaa Namespace", "k8s-namespace", "restricted PSA, type=sharded, dprv-k8s IT공통 개발기"]
+  ],
+  "v": [
+    [
+      [
+        [0, 0, -14],
+        [1, -8, -10],
+        [2, 8, -10],
+        [3, -8, -6],
+        [4, 8, -6],
+        [5, 0, 2],
+        [6, -8, -2],
+        [7, 8, -2],
+        [8, 0, -2],
+        [9, 0, 6],
+        [10, -8, 6],
+        [11, -14, 10],
+        [12, -4, 10],
+        [13, 4, 10],
+        [14, -14, -14]
+      ],
+      [
+        [0, 1],
+        [0, 2],
+        [1, 3],
+        [2, 4],
+        [3, 6],
+        [4, 7],
+        [6, 5],
+        [8, 5],
+        [5, 9],
+        [8, 12],
+        [8, 13],
+        [10, 12],
+        [10, 13],
+        [11, 13],
+        [14, 6],
+        [14, 7],
+        [14, 8],
+        [14, 10],
+        [14, 11]
+      ]
+    ]
+  ],
+  "_": { "f": "compact", "v": "1.0" }
+}
