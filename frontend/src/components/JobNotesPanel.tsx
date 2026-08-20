@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import type { AuthUser } from "../types/auth";
+import { FossFlowTab } from "./jobs/FossFlowTab";
 import { InfraShapeTab } from "./jobs/InfraShapeTab";
 import { JobReviewTab } from "./jobs/JobReviewTab";
 import { MyJobResultsTab } from "./jobs/MyJobResultsTab";
@@ -20,9 +21,10 @@ type JobNotesTab =
   | "whatap-report"
   | "rejected-jobs"
   | "my-notes"
-  | "infra-shape";
+  | "infra-shape"
+  | "fossflow";
 
-const TABS: { id: JobNotesTab; label: string }[] = [
+const TABS: { id: JobNotesTab; label: string; adminOnly?: boolean }[] = [
   { id: "infra-shape", label: "인프라 형상" },
   { id: "review", label: "작업 검토" },
   { id: "my-review", label: "나의 검토작업" },
@@ -30,6 +32,7 @@ const TABS: { id: JobNotesTab; label: string }[] = [
   { id: "whatap-report", label: "Whatap 이벤트 리포트" },
   { id: "rejected-jobs", label: "반려된 작업" },
   { id: "my-notes", label: "나의 노트" },
+  { id: "fossflow", label: "FossFLOW", adminOnly: true },
 ];
 
 interface JobNotesPanelProps {
@@ -66,6 +69,8 @@ function renderActiveTab(
           onCopyToNote={onCopyToNote}
         />
       );
+    case "fossflow":
+      return <FossFlowTab />;
   }
 }
 
@@ -75,8 +80,16 @@ export function JobNotesPanel({
   onCopyToNoteReady,
 }: JobNotesPanelProps) {
   const [activeTab, setActiveTab] = useState<JobNotesTab>("infra-shape");
+  const isAdmin = hasAdminAccess(currentUser.role);
+  const visibleTabs = TABS.filter((tab) => !tab.adminOnly || isAdmin);
   const myNotes = useMyNotes(currentUser, activeTab === "my-notes");
   const { hasNewReview, hasNewMyReview } = useJobReviewNewBadges(currentUser, activeTab);
+
+  useEffect(() => {
+    if (activeTab === "fossflow" && !isAdmin) {
+      setActiveTab("infra-shape");
+    }
+  }, [activeTab, isAdmin]);
 
   const handleCopyToNote = useCallback(
     async (content: string, noteName?: string) => {
@@ -113,7 +126,7 @@ export function JobNotesPanel({
         </header>
 
         <div className="flex shrink-0 gap-1 overflow-x-auto border-b border-slate-700/80 px-3 pt-2">
-          {TABS.map((tab) => {
+          {visibleTabs.map((tab) => {
             const showNewBadge =
               (tab.id === "review" && hasNewReview) ||
               (tab.id === "my-review" && hasNewMyReview);

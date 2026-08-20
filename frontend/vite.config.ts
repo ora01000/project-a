@@ -19,6 +19,10 @@ export default defineConfig(({ mode }) => {
     plugins: [react(), accessLogPlugin(path.join(projectRoot, "logs"))],
     optimizeDeps: {
       exclude: ["@terrastruct/d2"],
+      include: [
+        "@isoflow/isopacks/dist/isoflow",
+        "@isoflow/isopacks/dist/kubernetes",
+      ],
     },
     server: {
       host: frontendHost,
