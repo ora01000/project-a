@@ -25,6 +25,7 @@ class ReceivedMailResponse(BaseModel):
     decision_type: int
     message_id: str
     imap_uid: int | None = None
+    pop3_uidl: str = ""
     mailbox: str
     subject: str
     from_address: str
@@ -58,6 +59,7 @@ def _to_response(record) -> ReceivedMailResponse:
         decision_type=record.decision_type,
         message_id=record.message_id,
         imap_uid=record.imap_uid,
+        pop3_uidl=record.pop3_uidl,
         mailbox=record.mailbox,
         subject=record.subject,
         from_address=record.from_address,

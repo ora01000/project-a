@@ -1,12 +1,19 @@
-"""Admin API for SMTP/IMAP mailserver_config and test send."""
+"""Admin API for SMTP/IMAP/POP3 mailserver_config and test send."""
 
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from backend.app.config import EmailNotificationSettings, resolve_agent_runtime_mode
-from backend.app.db.mailserver_config import get_mailserver_config, save_mailserver_config
+from backend.app.db.mailserver_config import (
+    RECEIVE_PROTOCOL_IMAP,
+    RECEIVE_PROTOCOL_POP3,
+    VALID_RECEIVE_PROTOCOLS,
+    get_mailserver_config,
+    normalized_receive_protocol,
+    save_mailserver_config,
+)
 from backend.app.db.roles import is_admin_role
 from backend.app.middleware.session_auth import get_request_auth_user
 from backend.app.notifications.email_sender import send_test_email
@@ -39,9 +46,14 @@ class MailserverConfigResponse(BaseModel):
     use_ssl: bool = False
     timeout_seconds: float = 30.0
     receive_enabled: bool = False
+    receive_protocol: str = RECEIVE_PROTOCOL_IMAP
     imap_host: str = ""
     imap_port: int = 993
     imap_use_ssl: bool = True
+    pop3_host: str = ""
+    pop3_port: int = 995
+    pop3_use_ssl: bool = True
+    pop3_leave_on_server: bool = True
     updated_at: str = ""
     has_password: bool = False
     suggested_profile: str = "gmail"
@@ -61,9 +73,22 @@ class MailserverConfigUpdateRequest(BaseModel):
     use_ssl: bool = False
     timeout_seconds: float = Field(default=30.0, gt=0)
     receive_enabled: bool = False
+    receive_protocol: str = RECEIVE_PROTOCOL_IMAP
     imap_host: str = ""
     imap_port: int = Field(default=993, ge=1, le=65535)
     imap_use_ssl: bool = True
+    pop3_host: str = ""
+    pop3_port: int = Field(default=995, ge=1, le=65535)
+    pop3_use_ssl: bool = True
+    pop3_leave_on_server: bool = True
+
+    @field_validator("receive_protocol")
+    @classmethod
+    def validate_receive_protocol(cls, value: str) -> str:
+        protocol = normalized_receive_protocol(value)
+        if protocol not in VALID_RECEIVE_PROTOCOLS:
+            raise ValueError("receive_protocol은 imap 또는 pop3만 허용됩니다.")
+        return protocol
 
 
 class MailTestRequest(BaseModel):
@@ -80,7 +105,6 @@ class MailTestResponse(BaseModel):
 def _to_response(row) -> MailserverConfigResponse:
     profile = _suggested_profile()
     if row is None:
-        # Defaults for empty DB: Gmail profile on mock/local.
         if profile == "gmail":
             return MailserverConfigResponse(
                 enabled=False,
@@ -90,6 +114,7 @@ def _to_response(row) -> MailserverConfigResponse:
                 use_tls=True,
                 use_ssl=False,
                 receive_enabled=False,
+                receive_protocol=RECEIVE_PROTOCOL_IMAP,
                 imap_host="imap.gmail.com",
                 imap_port=993,
                 imap_use_ssl=True,
@@ -103,6 +128,7 @@ def _to_response(row) -> MailserverConfigResponse:
             use_tls=True,
             use_ssl=False,
             receive_enabled=False,
+            receive_protocol=RECEIVE_PROTOCOL_IMAP,
             imap_host="",
             imap_port=993,
             imap_use_ssl=True,
@@ -119,9 +145,14 @@ def _to_response(row) -> MailserverConfigResponse:
         use_ssl=row.use_ssl,
         timeout_seconds=row.timeout_seconds,
         receive_enabled=row.receive_enabled,
+        receive_protocol=row.receive_protocol,
         imap_host=row.imap_host,
         imap_port=row.imap_port,
         imap_use_ssl=row.imap_use_ssl,
+        pop3_host=row.pop3_host,
+        pop3_port=row.pop3_port,
+        pop3_use_ssl=row.pop3_use_ssl,
+        pop3_leave_on_server=row.pop3_leave_on_server,
         updated_at=row.updated_at,
         has_password=row.has_password,
         suggested_profile=profile,
@@ -147,10 +178,15 @@ async def admin_put_mailserver_config(
         raise HTTPException(status_code=400, detail="발신 주소를 입력해 주세요.")
     if payload.smtp_auth and not payload.smtp_username.strip():
         raise HTTPException(status_code=400, detail="SMTP 인증 사용 시 사용자명을 입력해 주세요.")
-    if payload.receive_enabled and not payload.imap_host.strip():
-        raise HTTPException(status_code=400, detail="메일 수신 활성화 시 IMAP 호스트를 입력해 주세요.")
     if payload.receive_enabled and not payload.smtp_username.strip():
         raise HTTPException(status_code=400, detail="메일 수신 활성화 시 계정 사용자명을 입력해 주세요.")
+
+    protocol = normalized_receive_protocol(payload.receive_protocol)
+    if payload.receive_enabled and protocol == RECEIVE_PROTOCOL_IMAP and not payload.imap_host.strip():
+        raise HTTPException(status_code=400, detail="IMAP 수신 시 IMAP 호스트를 입력해 주세요.")
+    if payload.receive_enabled and protocol == RECEIVE_PROTOCOL_POP3 and not payload.pop3_host.strip():
+        raise HTTPException(status_code=400, detail="POP3 수신 시 POP3 호스트를 입력해 주세요.")
+
     row = save_mailserver_config(
         request.app.state.database_path,
         enabled=payload.enabled,
@@ -164,9 +200,14 @@ async def admin_put_mailserver_config(
         use_ssl=payload.use_ssl,
         timeout_seconds=payload.timeout_seconds,
         receive_enabled=payload.receive_enabled,
+        receive_protocol=protocol,
         imap_host=payload.imap_host,
         imap_port=payload.imap_port,
         imap_use_ssl=payload.imap_use_ssl,
+        pop3_host=payload.pop3_host,
+        pop3_port=payload.pop3_port,
+        pop3_use_ssl=payload.pop3_use_ssl,
+        pop3_leave_on_server=payload.pop3_leave_on_server,
     )
     return _to_response(row)
 

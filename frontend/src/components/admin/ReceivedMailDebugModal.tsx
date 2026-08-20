@@ -13,6 +13,7 @@ interface ReceivedMailItem {
   decision_type: number;
   message_id: string;
   imap_uid: number | null;
+  pop3_uidl: string;
   mailbox: string;
   subject: string;
   from_address: string;
@@ -116,7 +117,7 @@ export function ReceivedMailDebugModal({ viewerRole, onClose }: ReceivedMailDebu
               수신메일 목록 (디버깅)
             </h2>
             <p className="mt-1 text-[11px] text-slate-400">
-              IMAP 폴링으로 저장된 `received_mail` 레코드입니다. role=0|100만 접근 가능합니다.
+              IMAP/POP3 폴링으로 저장된 `received_mail` 레코드입니다. role=0|100만 접근 가능합니다.
             </p>
           </div>
           <button
@@ -240,9 +241,9 @@ export function ReceivedMailDebugModal({ viewerRole, onClose }: ReceivedMailDebu
                   </div>
                 </div>
                 <div>
-                  <span className="text-slate-500">message_id / imap_uid</span>
+                  <span className="text-slate-500">message_id / imap_uid / pop3_uidl</span>
                   <p className="break-all font-mono text-[10px] text-slate-400">
-                    {selected.message_id || "-"} / {selected.imap_uid ?? "-"}
+                    {selected.message_id || "-"} / {selected.imap_uid ?? "-"} / {selected.pop3_uidl || "-"}
                   </p>
                 </div>
                 <div>

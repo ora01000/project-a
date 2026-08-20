@@ -1,4 +1,4 @@
-"""Persist inbound mail rows fetched by the IMAP poller."""
+"""Persist inbound mail rows fetched by the IMAP/POP3 poller."""
 
 from __future__ import annotations
 
@@ -39,6 +39,7 @@ def ensure_received_mail_table(connection) -> None:
             decision_type INTEGER NOT NULL DEFAULT 0,
             message_id VARCHAR(500) NOT NULL DEFAULT '',
             imap_uid BIGINT,
+            pop3_uidl VARCHAR(500) NOT NULL DEFAULT '',
             mailbox VARCHAR(100) NOT NULL DEFAULT 'INBOX',
             subject TEXT NOT NULL DEFAULT '',
             from_address VARCHAR(500) NOT NULL DEFAULT '',
@@ -66,6 +67,16 @@ def ensure_received_mail_table(connection) -> None:
             WHERE message_id <> ''
         """
     )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS ix_received_mail_pop3_uidl
+            ON received_mail (pop3_uidl)
+            WHERE pop3_uidl <> ''
+        """
+    )
+    connection.execute(
+        "ALTER TABLE received_mail ADD COLUMN IF NOT EXISTS pop3_uidl VARCHAR(500) NOT NULL DEFAULT ''"
+    )
 
 
 @dataclass(frozen=True)
@@ -75,6 +86,7 @@ class ReceivedMailRecord:
     decision_type: int
     message_id: str
     imap_uid: int | None
+    pop3_uidl: str
     mailbox: str
     subject: str
     from_address: str
@@ -109,6 +121,7 @@ def _row_to_record(row: Any) -> ReceivedMailRecord:
         decision_type=int(row["decision_type"] or 0),
         message_id=str(row["message_id"] or ""),
         imap_uid=int(row["imap_uid"]) if row["imap_uid"] is not None else None,
+        pop3_uidl=str(row["pop3_uidl"] or ""),
         mailbox=str(row["mailbox"] or "INBOX"),
         subject=str(row["subject"] or ""),
         from_address=str(row["from_address"] or ""),
@@ -123,7 +136,7 @@ def _row_to_record(row: Any) -> ReceivedMailRecord:
 
 
 _SELECT = """
-    idx, uuid, decision_type, message_id, imap_uid, mailbox, subject,
+    idx, uuid, decision_type, message_id, imap_uid, pop3_uidl, mailbox, subject,
     from_address, to_addresses, cc_addresses, body_text, received_at,
     fetched_at, attachment_count, attachment_names
 """
@@ -135,6 +148,7 @@ def message_already_stored(
     message_id: str,
     mailbox: str,
     imap_uid: int | None,
+    pop3_uidl: str | None = None,
 ) -> bool:
     with get_connection(database_path) as connection:
         ensure_received_mail_table(connection)
@@ -147,6 +161,18 @@ def message_already_stored(
                 LIMIT 1
                 """,
                 (normalized_id,),
+            ).fetchone()
+            if row is not None:
+                return True
+        normalized_uidl = (pop3_uidl or "").strip()
+        if normalized_uidl:
+            row = connection.execute(
+                """
+                SELECT idx FROM received_mail
+                WHERE pop3_uidl = ?
+                LIMIT 1
+                """,
+                (normalized_uidl,),
             ).fetchone()
             if row is not None:
                 return True
@@ -169,6 +195,7 @@ def insert_received_mail(
     *,
     message_id: str,
     imap_uid: int | None,
+    pop3_uidl: str | None = None,
     mailbox: str,
     subject: str,
     from_address: str,
@@ -187,12 +214,12 @@ def insert_received_mail(
         row = connection.execute(
             """
             INSERT INTO received_mail (
-                uuid, decision_type, message_id, imap_uid, mailbox, subject,
+                uuid, decision_type, message_id, imap_uid, pop3_uidl, mailbox, subject,
                 from_address, to_addresses, cc_addresses, body_text,
                 received_at, fetched_at, attachment_count, attachment_names
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             RETURNING
-                idx, uuid, decision_type, message_id, imap_uid, mailbox, subject,
+                idx, uuid, decision_type, message_id, imap_uid, pop3_uidl, mailbox, subject,
                 from_address, to_addresses, cc_addresses, body_text, received_at,
                 fetched_at, attachment_count, attachment_names
             """,
@@ -201,6 +228,7 @@ def insert_received_mail(
                 DECISION_TYPE_PENDING,
                 message_id.strip(),
                 int(imap_uid) if imap_uid is not None else None,
+                (pop3_uidl or "").strip(),
                 mailbox.strip() or "INBOX",
                 subject,
                 from_address,
