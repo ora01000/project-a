@@ -7,6 +7,8 @@ interface MailServerConfigModalProps {
   onClose: () => void;
 }
 
+type ReceiveProtocol = "imap" | "pop3";
+
 interface MailserverConfig {
   enabled: boolean;
   smtp_host: string;
@@ -18,9 +20,14 @@ interface MailserverConfig {
   use_ssl: boolean;
   timeout_seconds: number;
   receive_enabled: boolean;
+  receive_protocol: ReceiveProtocol;
   imap_host: string;
   imap_port: number;
   imap_use_ssl: boolean;
+  pop3_host: string;
+  pop3_port: number;
+  pop3_use_ssl: boolean;
+  pop3_leave_on_server: boolean;
   updated_at: string;
   has_password: boolean;
   suggested_profile: string;
@@ -45,9 +52,14 @@ export function MailServerConfigModal({ viewerRole, onClose }: MailServerConfigM
   const [useSsl, setUseSsl] = useState(false);
   const [timeoutSeconds, setTimeoutSeconds] = useState(30);
   const [receiveEnabled, setReceiveEnabled] = useState(false);
+  const [receiveProtocol, setReceiveProtocol] = useState<ReceiveProtocol>("imap");
   const [imapHost, setImapHost] = useState("");
   const [imapPort, setImapPort] = useState(993);
   const [imapUseSsl, setImapUseSsl] = useState(true);
+  const [pop3Host, setPop3Host] = useState("");
+  const [pop3Port, setPop3Port] = useState(995);
+  const [pop3UseSsl, setPop3UseSsl] = useState(true);
+  const [pop3LeaveOnServer, setPop3LeaveOnServer] = useState(true);
   const [updatedAt, setUpdatedAt] = useState("");
   const [suggestedProfile, setSuggestedProfile] = useState("gmail");
   const [error, setError] = useState<string | null>(null);
@@ -80,9 +92,14 @@ export function MailServerConfigModal({ viewerRole, onClose }: MailServerConfigM
         setUseSsl(data.use_ssl);
         setTimeoutSeconds(data.timeout_seconds);
         setReceiveEnabled(Boolean(data.receive_enabled));
+        setReceiveProtocol(data.receive_protocol === "pop3" ? "pop3" : "imap");
         setImapHost(data.imap_host || (data.suggested_profile === "gmail" ? "imap.gmail.com" : ""));
         setImapPort(data.imap_port || 993);
         setImapUseSsl(data.imap_use_ssl !== false);
+        setPop3Host(data.pop3_host || "");
+        setPop3Port(data.pop3_port || 995);
+        setPop3UseSsl(data.pop3_use_ssl !== false);
+        setPop3LeaveOnServer(data.pop3_leave_on_server !== false);
         setUpdatedAt(data.updated_at);
         setHasPassword(data.has_password);
         setSuggestedProfile(data.suggested_profile);
@@ -97,7 +114,19 @@ export function MailServerConfigModal({ viewerRole, onClose }: MailServerConfigM
 
   const handleReceiveToggle = (checked: boolean) => {
     setReceiveEnabled(checked);
-    if (checked && !imapHost.trim() && suggestedProfile === "gmail") {
+    if (!checked) {
+      return;
+    }
+    if (receiveProtocol === "imap" && !imapHost.trim() && suggestedProfile === "gmail") {
+      setImapHost("imap.gmail.com");
+      setImapPort(993);
+      setImapUseSsl(true);
+    }
+  };
+
+  const handleProtocolChange = (protocol: ReceiveProtocol) => {
+    setReceiveProtocol(protocol);
+    if (protocol === "imap" && !imapHost.trim() && suggestedProfile === "gmail") {
       setImapHost("imap.gmail.com");
       setImapPort(993);
       setImapUseSsl(true);
@@ -128,9 +157,14 @@ export function MailServerConfigModal({ viewerRole, onClose }: MailServerConfigM
           use_ssl: useSsl,
           timeout_seconds: timeoutSeconds,
           receive_enabled: receiveEnabled,
+          receive_protocol: receiveProtocol,
           imap_host: imapHost,
           imap_port: imapPort,
           imap_use_ssl: imapUseSsl,
+          pop3_host: pop3Host,
+          pop3_port: pop3Port,
+          pop3_use_ssl: pop3UseSsl,
+          pop3_leave_on_server: pop3LeaveOnServer,
         }),
       });
       if (!response.ok) {
@@ -140,9 +174,14 @@ export function MailServerConfigModal({ viewerRole, onClose }: MailServerConfigM
       setUpdatedAt(data.updated_at);
       setHasPassword(data.has_password);
       setReceiveEnabled(Boolean(data.receive_enabled));
+      setReceiveProtocol(data.receive_protocol === "pop3" ? "pop3" : "imap");
       setImapHost(data.imap_host);
       setImapPort(data.imap_port);
       setImapUseSsl(data.imap_use_ssl);
+      setPop3Host(data.pop3_host);
+      setPop3Port(data.pop3_port);
+      setPop3UseSsl(data.pop3_use_ssl);
+      setPop3LeaveOnServer(data.pop3_leave_on_server);
       setSmtpPassword("");
       setInfo("저장되었습니다.");
     } catch (err) {
@@ -155,7 +194,7 @@ export function MailServerConfigModal({ viewerRole, onClose }: MailServerConfigM
   const profileHint =
     suggestedProfile === "gmail"
       ? "목업/로컬: Gmail SMTP(smtp.gmail.com:587) / IMAP(imap.gmail.com:993) 사용을 권장합니다. 앱 비밀번호가 필요할 수 있습니다."
-      : "배포(http): 내부 SMTP·IMAP 호스트를 입력하세요.";
+      : "배포(http): 내부 SMTP·IMAP/POP3 호스트를 입력하세요.";
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 px-4">
@@ -309,38 +348,93 @@ export function MailServerConfigModal({ viewerRole, onClose }: MailServerConfigM
                 메일 수신 활성화
               </label>
               <p className="text-[10px] text-slate-500">
-                활성화 시 동일 계정(사용자명/비밀번호)으로 IMAP 수신을 사용합니다. worker(또는
-                BACKEND_ROLE=all)가 약 30초마다 UNSEEN 메일을 수집해 DB·첨부 경로에 저장합니다.
+                활성화 시 동일 계정(사용자명/비밀번호)으로 IMAP 또는 POP3 수신을 사용합니다.
+                worker(또는 BACKEND_ROLE=all)가 약 30초마다 새 메일을 수집해 DB·첨부 경로에
+                저장합니다.
               </p>
               {receiveEnabled ? (
                 <>
                   <label className="block space-y-1">
-                    <span className="text-slate-400">IMAP 호스트</span>
-                    <input
-                      type="text"
-                      value={imapHost}
-                      onChange={(event) => setImapHost(event.target.value)}
-                      className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1.5 font-mono text-slate-100"
-                      placeholder="imap.gmail.com"
-                    />
+                    <span className="text-slate-400">수신 프로토콜</span>
+                    <select
+                      value={receiveProtocol}
+                      onChange={(event) => handleProtocolChange(event.target.value as ReceiveProtocol)}
+                      className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1.5 text-slate-100"
+                    >
+                      <option value="imap">IMAP</option>
+                      <option value="pop3">POP3</option>
+                    </select>
                   </label>
-                  <label className="block space-y-1">
-                    <span className="text-slate-400">IMAP 포트</span>
-                    <input
-                      type="number"
-                      value={imapPort}
-                      onChange={(event) => setImapPort(Number(event.target.value) || 993)}
-                      className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1.5 font-mono text-slate-100"
-                    />
-                  </label>
-                  <label className="flex items-center gap-2 text-slate-200">
-                    <input
-                      type="checkbox"
-                      checked={imapUseSsl}
-                      onChange={(event) => setImapUseSsl(event.target.checked)}
-                    />
-                    IMAP SSL
-                  </label>
+
+                  {receiveProtocol === "imap" ? (
+                    <>
+                      <label className="block space-y-1">
+                        <span className="text-slate-400">IMAP 호스트</span>
+                        <input
+                          type="text"
+                          value={imapHost}
+                          onChange={(event) => setImapHost(event.target.value)}
+                          className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1.5 font-mono text-slate-100"
+                          placeholder="imap.gmail.com"
+                        />
+                      </label>
+                      <label className="block space-y-1">
+                        <span className="text-slate-400">IMAP 포트</span>
+                        <input
+                          type="number"
+                          value={imapPort}
+                          onChange={(event) => setImapPort(Number(event.target.value) || 993)}
+                          className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1.5 font-mono text-slate-100"
+                        />
+                      </label>
+                      <label className="flex items-center gap-2 text-slate-200">
+                        <input
+                          type="checkbox"
+                          checked={imapUseSsl}
+                          onChange={(event) => setImapUseSsl(event.target.checked)}
+                        />
+                        IMAP SSL
+                      </label>
+                    </>
+                  ) : (
+                    <>
+                      <label className="block space-y-1">
+                        <span className="text-slate-400">POP3 호스트</span>
+                        <input
+                          type="text"
+                          value={pop3Host}
+                          onChange={(event) => setPop3Host(event.target.value)}
+                          className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1.5 font-mono text-slate-100"
+                          placeholder="pop.example.com"
+                        />
+                      </label>
+                      <label className="block space-y-1">
+                        <span className="text-slate-400">POP3 포트</span>
+                        <input
+                          type="number"
+                          value={pop3Port}
+                          onChange={(event) => setPop3Port(Number(event.target.value) || 995)}
+                          className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1.5 font-mono text-slate-100"
+                        />
+                      </label>
+                      <label className="flex items-center gap-2 text-slate-200">
+                        <input
+                          type="checkbox"
+                          checked={pop3UseSsl}
+                          onChange={(event) => setPop3UseSsl(event.target.checked)}
+                        />
+                        POP3 SSL
+                      </label>
+                      <label className="flex items-center gap-2 text-slate-200">
+                        <input
+                          type="checkbox"
+                          checked={pop3LeaveOnServer}
+                          onChange={(event) => setPop3LeaveOnServer(event.target.checked)}
+                        />
+                        서버에 메일 유지 (끄면 수집 후 DELE)
+                      </label>
+                    </>
+                  )}
                 </>
               ) : null}
             </div>

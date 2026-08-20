@@ -3,116 +3,26 @@
 from __future__ import annotations
 
 import email
-import email.header
 import email.policy
 import imaplib
 import logging
 import uuid
-from email.message import Message
 from pathlib import Path
 
 from backend.app.config import ReceivedMailSettings, load_received_mail_settings
 from backend.app.db.mailserver_config import get_mailserver_config
 from backend.app.db.received_mail import insert_received_mail, message_already_stored
-from backend.app.services.received_mail_attachments import (
-    ensure_attachment_dir,
-    is_allowed_attachment_filename,
-    sanitize_attachment_filename,
+from backend.app.services.mail_message_parse import (
+    address_list,
+    decode_header_value,
+    extract_body_text,
+    iter_attachments,
+    save_attachments,
 )
 
 logger = logging.getLogger(__name__)
 
 MAILBOX = "INBOX"
-
-
-def _decode_header_value(raw: str | None) -> str:
-    if not raw:
-        return ""
-    parts: list[str] = []
-    for chunk, charset in email.header.decode_header(raw):
-        if isinstance(chunk, bytes):
-            parts.append(chunk.decode(charset or "utf-8", errors="replace"))
-        else:
-            parts.append(str(chunk))
-    return " ".join(parts).strip()
-
-
-def _address_list(msg: Message, header: str) -> str:
-    values = msg.get_all(header, [])
-    if not values:
-        return ""
-    joined = ", ".join(str(value) for value in values)
-    return _decode_header_value(joined)
-
-
-def _extract_body_text(msg: Message) -> str:
-    if msg.is_multipart():
-        plain_parts: list[str] = []
-        for part in msg.walk():
-            content_type = (part.get_content_type() or "").lower()
-            disposition = str(part.get("Content-Disposition") or "").lower()
-            if "attachment" in disposition:
-                continue
-            if content_type != "text/plain":
-                continue
-            payload = part.get_payload(decode=True)
-            if payload is None:
-                continue
-            charset = part.get_content_charset() or "utf-8"
-            plain_parts.append(payload.decode(charset, errors="replace"))
-        if plain_parts:
-            return "\n".join(plain_parts).strip()
-        return ""
-
-    if (msg.get_content_type() or "").lower() == "text/plain":
-        payload = msg.get_payload(decode=True)
-        if payload is None:
-            return str(msg.get_payload() or "")
-        charset = msg.get_content_charset() or "utf-8"
-        return payload.decode(charset, errors="replace").strip()
-    return ""
-
-
-def _iter_attachments(msg: Message) -> list[tuple[str, bytes]]:
-    attachments: list[tuple[str, bytes]] = []
-    for part in msg.walk():
-        disposition = str(part.get("Content-Disposition") or "")
-        filename = part.get_filename()
-        decoded_name = _decode_header_value(filename) if filename else ""
-        is_attachment = "attachment" in disposition.lower() or bool(decoded_name)
-        if not is_attachment:
-            continue
-        if not decoded_name:
-            continue
-        if not is_allowed_attachment_filename(decoded_name):
-            logger.info("skip unsupported attachment name=%s", decoded_name)
-            continue
-        payload = part.get_payload(decode=True)
-        if not isinstance(payload, (bytes, bytearray)):
-            continue
-        attachments.append((sanitize_attachment_filename(decoded_name), bytes(payload)))
-    return attachments
-
-
-def _save_attachments(mail_uuid: str, attachments: list[tuple[str, bytes]], home: Path) -> list[str]:
-    if not attachments:
-        return []
-    directory = ensure_attachment_dir(mail_uuid, home=home)
-    saved: list[str] = []
-    used_names: set[str] = set()
-    for filename, payload in attachments:
-        name = filename
-        if name in used_names:
-            stem = Path(name).stem
-            suffix = Path(name).suffix
-            index = 2
-            while f"{stem}_{index}{suffix}" in used_names:
-                index += 1
-            name = f"{stem}_{index}{suffix}"
-        used_names.add(name)
-        (directory / name).write_bytes(payload)
-        saved.append(name)
-    return saved
 
 
 def _connect_imap(host: str, port: int, *, use_ssl: bool, timeout: float) -> imaplib.IMAP4:
@@ -121,7 +31,7 @@ def _connect_imap(host: str, port: int, *, use_ssl: bool, timeout: float) -> ima
     return imaplib.IMAP4(host, port, timeout=timeout)
 
 
-def poll_received_mail_once(
+def poll_imap_once(
     database_path: Path,
     settings: ReceivedMailSettings | None = None,
 ) -> int:
@@ -183,8 +93,8 @@ def poll_received_mail_once(
                 continue
 
             mail_uuid = str(uuid.uuid4())
-            attachments = _iter_attachments(msg)
-            saved_names = _save_attachments(
+            attachments = iter_attachments(msg)
+            saved_names = save_attachments(
                 mail_uuid,
                 attachments,
                 poll_settings.attachment_home,
@@ -194,12 +104,12 @@ def poll_received_mail_once(
                 message_id=message_id,
                 imap_uid=imap_uid,
                 mailbox=MAILBOX,
-                subject=_decode_header_value(msg.get("Subject")),
-                from_address=_address_list(msg, "From"),
-                to_addresses=_address_list(msg, "To"),
-                cc_addresses=_address_list(msg, "Cc"),
-                body_text=_extract_body_text(msg),
-                received_at=_decode_header_value(msg.get("Date")),
+                subject=decode_header_value(msg.get("Subject")),
+                from_address=address_list(msg, "From"),
+                to_addresses=address_list(msg, "To"),
+                cc_addresses=address_list(msg, "Cc"),
+                body_text=extract_body_text(msg),
+                received_at=decode_header_value(msg.get("Date")),
                 attachment_names=saved_names,
                 mail_uuid=mail_uuid,
             )

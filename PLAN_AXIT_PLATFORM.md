@@ -1907,6 +1907,109 @@ jobs 에 작업 검토 대상이 신규로 제출 되거나, 내가 승인자로
   - 추가된 컬럼 값은 "인프라 형상" 탭 > "인프라 목록" 패널의 출력 목록에서 {cluster_name} {display_name} 형태로 출력 ✅
   - 요약 패널에도 항목 추가 ✅
 
+# FossFLOW 작용
+에이전트의 응답에 인프라 아키텍처 다이어그램을 FossFLOW의 compact 형태 json 으로 응답하는 경우 이를 렌더링하는 기능을 구현한다. FossFLOW는 아키텍처 다이어그램을 편집/렌더링하는 응용이다.
+- FossFLOW 프로젝트는 /Users/insu/FossFLOW 에 있다.
+- json sample 은 /Users/insu/FossFLOW/server-samples 에 있다.
+
+개발단계이므로 admin(users.role = 0 | 100 ) 만 접근 가능한 탭 패널을 생성한다.
+- 작업노트 > FossFLOW 탭 생성
+  - /Users/insu/FossFLOW/server-samples/diagram-sample-nuca-vms.json 의 샘플을 FossFLOW 탭 아래 패널에 렌더링한다.
+  - FossFLOW 가 제공하는 편집기능을 그대로 이식한다.
+
+계획한대로 동작을 잘 하는데 클라이언트 웹브라우저의 부하가 상당히 큰 것 같다. FossFLOW 자체의 기능을 이식하는것은 생각보다 cost 가 클 것 같다. 기능 이식 대신, 다음 대안으로 변경하고자 한다.
+- 에이전트의 응답에 인프라 아키텍처 다이어그램을 FossFLOW의 compact 형태 json 으로 응답하는 경우 이를 이미지로 렌더링하고, 다이어그램이 클 수 있으므로 확대 축소만 한다.
+- 이식한 UI 컴포넌트는 사용하지 않는다
+
+svg로 렌더링시 각 노드의 툴팁이 사라지고, 라인의 방향성 삭제 및 모양이 다르다.
+FossFLOW 에서 이미지 export 기능의 경우 시 grid 와 라인을 그대로 저장(png)할 수 있다. FosFLOW 자체의 이미지 저장 로직을 참고할 수 있는가?
+- 마우스 드래그 기능을 넣어서 패널 뷰포인트 밖으로 벗어난 영역을 볼 수 있도록(이동할수 있도록) 보완
+
+
+# 대화형 터미널 대화창에 FossFLOW 적용
+에이전트의 응답에 인프라 아키텍처 다이어그램을 FossFLOW의 json 이 들어오는 경우 대화창에서 json 을 렌더링해서 보여준다.
+
+# 나의 노트에서 FossFLOW 적용
+대화 내용을 나의 노트로 복사시 나의 노트 에서도 FossFLOW json 을 렌더링해서 보여준다.
+
+# 나의 노트 메일 발송시
+메일 발송시 FossFLOW json 을 렌더링해서 메일을 발송한다.
+
+# 나의 작업 결과에서 FossFLOW 적용
+나의 작업 결과 내용에 FossFLOW json 이 있는 경우 렌더링해서 보여준다.
+
+# 테스트
+테스트를 위해 샘플 작업 요청서를 발급한다. 
+제목 : [테스트작업] orbstack 클러스터의 네임스페이스 목록을 출력
+요청자 : 윤인수, 조직 : IT플랫폼운영팀, isyun@lguplus.co.kr
+내용 : orbstack 클러스터의 네임스페이스 목록을 표로 출력해 주세요. 그리고 다음 정보는 다이어그램 json 입니다. 응답 마지막에 붙여주시기 바랍니다.
+
+// attach to end of response
+{
+  "t": "NUCA Batch-DB Architecture",
+  "i": [
+    ["pnucabat01v", "vm", "Batch VM, 4vCPU/16GB, OS on NU_PRDI_OS_Datastore05"],
+    ["pnucabat02v", "vm", "Batch VM, 4vCPU/16GB, OS on NU_PRDI_OS_Datastore01"],
+    ["pnucadb01v", "vm", "DB node1, 48vCPU/512GB, shared CAIaaS DB storage"],
+    ["pnucadb02v", "vm", "DB node2, 48vCPU/512GB, shared CAIaaS DB storage"],
+    ["pnucadb03v", "vm", "DB node3, 48vCPU/512GB, shared CAIaaS DB storage"],
+    [
+      "CAIaaS DB Datastore",
+      "storage",
+      "Shared DB datastores (01-08) used by DB cluster nodes"
+    ],
+    [
+      "NU_PRDI OS Datastore",
+      "storage",
+      "Per-VM OS datastore pool (NU_PRDI_OS_Datastore)"
+    ],
+    [
+      "SA_PRDI_NUCB_C01 Cluster",
+      "server",
+      "ESXi cluster hosting all 5 NUCA VMs (HA enabled)"
+    ]
+  ],
+  "v": [
+    [
+      [
+        [0, -9, -6],
+        [1, 9, -6],
+        [2, -9, 0],
+        [3, 0, 0],
+        [4, 9, 0],
+        [5, 0, 6],
+        [6, 0, -12],
+        [7, 0, -18]
+      ],
+      [
+        [7, 0],
+        [7, 1],
+        [7, 2],
+        [7, 3],
+        [7, 4],
+        [6, 0],
+        [6, 1],
+        [6, 2],
+        [6, 3],
+        [6, 4],
+        [0, 2],
+        [0, 3],
+        [0, 4],
+        [1, 2],
+        [1, 3],
+        [1, 4],
+        [2, 5],
+        [3, 5],
+        [4, 5]
+      ]
+    ]
+  ],
+  "_": { "f": "compact", "v": "1.0" }
+}
+// end of json
+
+
+
 
 # 로그 관리 보완 - 로직 확인이 필요하여 보류로 남김 - 260813
 사용자 대화 로그 보관 정책

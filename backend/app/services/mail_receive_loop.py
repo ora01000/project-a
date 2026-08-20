@@ -1,4 +1,4 @@
-"""Background loop: IMAP poll → received_mail (worker / BACKEND_ROLE=all)."""
+"""Background loop: IMAP/POP3 poll → received_mail (worker / BACKEND_ROLE=all)."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import logging
 from pathlib import Path
 
 from backend.app.config import ReceivedMailSettings, load_received_mail_settings
-from backend.app.services.mail_imap_poller import poll_received_mail_once
+from backend.app.services.mail_receive_poller import poll_received_mail_once
 
 logger = logging.getLogger(__name__)
 

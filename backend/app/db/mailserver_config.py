@@ -1,4 +1,4 @@
-"""Persist SMTP/IMAP mail server settings in ``mailserver_config`` (singleton)."""
+"""Persist SMTP/IMAP/POP3 mail server settings in ``mailserver_config`` (singleton)."""
 
 from __future__ import annotations
 
@@ -8,6 +8,17 @@ from pathlib import Path
 from typing import Any
 
 from backend.app.db.database import get_connection
+
+RECEIVE_PROTOCOL_IMAP = "imap"
+RECEIVE_PROTOCOL_POP3 = "pop3"
+VALID_RECEIVE_PROTOCOLS = frozenset({RECEIVE_PROTOCOL_IMAP, RECEIVE_PROTOCOL_POP3})
+
+
+def normalized_receive_protocol(value: str | None) -> str:
+    protocol = (value or RECEIVE_PROTOCOL_IMAP).strip().lower()
+    if protocol == RECEIVE_PROTOCOL_POP3:
+        return RECEIVE_PROTOCOL_POP3
+    return RECEIVE_PROTOCOL_IMAP
 
 
 def _now_iso() -> str:
@@ -30,9 +41,14 @@ def ensure_mailserver_config_table(connection) -> None:
             use_ssl INTEGER NOT NULL DEFAULT 0,
             timeout_seconds DOUBLE PRECISION NOT NULL DEFAULT 30,
             receive_enabled INTEGER NOT NULL DEFAULT 0,
+            receive_protocol VARCHAR(10) NOT NULL DEFAULT 'imap',
             imap_host VARCHAR(200) NOT NULL DEFAULT '',
             imap_port INTEGER NOT NULL DEFAULT 993,
             imap_use_ssl INTEGER NOT NULL DEFAULT 1,
+            pop3_host VARCHAR(200) NOT NULL DEFAULT '',
+            pop3_port INTEGER NOT NULL DEFAULT 995,
+            pop3_use_ssl INTEGER NOT NULL DEFAULT 1,
+            pop3_leave_on_server INTEGER NOT NULL DEFAULT 1,
             updated_at TEXT NOT NULL DEFAULT ''
         )
         """
@@ -40,9 +56,14 @@ def ensure_mailserver_config_table(connection) -> None:
     for statement in (
         "ALTER TABLE mailserver_config ADD COLUMN IF NOT EXISTS smtp_auth INTEGER NOT NULL DEFAULT 1",
         "ALTER TABLE mailserver_config ADD COLUMN IF NOT EXISTS receive_enabled INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE mailserver_config ADD COLUMN IF NOT EXISTS receive_protocol VARCHAR(10) NOT NULL DEFAULT 'imap'",
         "ALTER TABLE mailserver_config ADD COLUMN IF NOT EXISTS imap_host VARCHAR(200) NOT NULL DEFAULT ''",
         "ALTER TABLE mailserver_config ADD COLUMN IF NOT EXISTS imap_port INTEGER NOT NULL DEFAULT 993",
         "ALTER TABLE mailserver_config ADD COLUMN IF NOT EXISTS imap_use_ssl INTEGER NOT NULL DEFAULT 1",
+        "ALTER TABLE mailserver_config ADD COLUMN IF NOT EXISTS pop3_host VARCHAR(200) NOT NULL DEFAULT ''",
+        "ALTER TABLE mailserver_config ADD COLUMN IF NOT EXISTS pop3_port INTEGER NOT NULL DEFAULT 995",
+        "ALTER TABLE mailserver_config ADD COLUMN IF NOT EXISTS pop3_use_ssl INTEGER NOT NULL DEFAULT 1",
+        "ALTER TABLE mailserver_config ADD COLUMN IF NOT EXISTS pop3_leave_on_server INTEGER NOT NULL DEFAULT 1",
     ):
         connection.execute(statement)
 
@@ -60,9 +81,14 @@ class MailserverConfigRow:
     use_ssl: bool = False
     timeout_seconds: float = 30.0
     receive_enabled: bool = False
+    receive_protocol: str = RECEIVE_PROTOCOL_IMAP
     imap_host: str = ""
     imap_port: int = 993
     imap_use_ssl: bool = True
+    pop3_host: str = ""
+    pop3_port: int = 995
+    pop3_use_ssl: bool = True
+    pop3_leave_on_server: bool = True
     updated_at: str = ""
     has_password: bool = False
 
@@ -83,6 +109,8 @@ def _row_from_db(row: Any | None) -> MailserverConfigRow | None:
     smtp_auth_raw = _col(row, "smtp_auth", 1)
     receive_enabled_raw = _col(row, "receive_enabled", 0)
     imap_use_ssl_raw = _col(row, "imap_use_ssl", 1)
+    pop3_use_ssl_raw = _col(row, "pop3_use_ssl", 1)
+    pop3_leave_raw = _col(row, "pop3_leave_on_server", 1)
     return MailserverConfigRow(
         enabled=bool(int(row["enabled"] or 0)),
         smtp_host=str(row["smtp_host"] or ""),
@@ -95,9 +123,14 @@ def _row_from_db(row: Any | None) -> MailserverConfigRow | None:
         use_ssl=bool(int(row["use_ssl"] or 0)),
         timeout_seconds=float(row["timeout_seconds"] or 30.0),
         receive_enabled=bool(int(receive_enabled_raw if receive_enabled_raw is not None else 0)),
+        receive_protocol=normalized_receive_protocol(_col(row, "receive_protocol", RECEIVE_PROTOCOL_IMAP)),
         imap_host=str(_col(row, "imap_host", "") or ""),
         imap_port=int(_col(row, "imap_port", 993) or 993),
         imap_use_ssl=bool(int(imap_use_ssl_raw if imap_use_ssl_raw is not None else 1)),
+        pop3_host=str(_col(row, "pop3_host", "") or ""),
+        pop3_port=int(_col(row, "pop3_port", 995) or 995),
+        pop3_use_ssl=bool(int(pop3_use_ssl_raw if pop3_use_ssl_raw is not None else 1)),
+        pop3_leave_on_server=bool(int(pop3_leave_raw if pop3_leave_raw is not None else 1)),
         updated_at=str(row["updated_at"] or ""),
         has_password=bool(password),
     )
@@ -106,7 +139,8 @@ def _row_from_db(row: Any | None) -> MailserverConfigRow | None:
 _SELECT_COLUMNS = """
     enabled, smtp_host, smtp_port, smtp_username, smtp_password,
     from_address, smtp_auth, use_tls, use_ssl, timeout_seconds,
-    receive_enabled, imap_host, imap_port, imap_use_ssl, updated_at
+    receive_enabled, receive_protocol, imap_host, imap_port, imap_use_ssl,
+    pop3_host, pop3_port, pop3_use_ssl, pop3_leave_on_server, updated_at
 """
 
 
@@ -138,9 +172,14 @@ def save_mailserver_config(
     use_ssl: bool,
     timeout_seconds: float,
     receive_enabled: bool = False,
+    receive_protocol: str = RECEIVE_PROTOCOL_IMAP,
     imap_host: str = "",
     imap_port: int = 993,
     imap_use_ssl: bool = True,
+    pop3_host: str = "",
+    pop3_port: int = 995,
+    pop3_use_ssl: bool = True,
+    pop3_leave_on_server: bool = True,
 ) -> MailserverConfigRow:
     """Upsert singleton config. ``smtp_password=None`` or empty keeps existing password."""
     with get_connection(database_path) as connection:
@@ -169,9 +208,14 @@ def save_mailserver_config(
             1 if use_ssl else 0,
             float(timeout_seconds),
             1 if receive_enabled else 0,
+            normalized_receive_protocol(receive_protocol),
             imap_host.strip(),
             int(imap_port),
             1 if imap_use_ssl else 0,
+            pop3_host.strip(),
+            int(pop3_port),
+            1 if pop3_use_ssl else 0,
+            1 if pop3_leave_on_server else 0,
             updated_at,
         )
         if existing is None:
@@ -180,8 +224,9 @@ def save_mailserver_config(
                 INSERT INTO mailserver_config (
                     enabled, smtp_host, smtp_port, smtp_username, smtp_password,
                     from_address, smtp_auth, use_tls, use_ssl, timeout_seconds,
-                    receive_enabled, imap_host, imap_port, imap_use_ssl, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    receive_enabled, receive_protocol, imap_host, imap_port, imap_use_ssl,
+                    pop3_host, pop3_port, pop3_use_ssl, pop3_leave_on_server, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 values,
             )
@@ -200,9 +245,14 @@ def save_mailserver_config(
                     use_ssl = ?,
                     timeout_seconds = ?,
                     receive_enabled = ?,
+                    receive_protocol = ?,
                     imap_host = ?,
                     imap_port = ?,
                     imap_use_ssl = ?,
+                    pop3_host = ?,
+                    pop3_port = ?,
+                    pop3_use_ssl = ?,
+                    pop3_leave_on_server = ?,
                     updated_at = ?
                 WHERE idx = ?
                 """,
