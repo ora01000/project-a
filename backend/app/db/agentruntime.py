@@ -465,3 +465,31 @@ def delete_agentruntime_record(database_path: str | Path, idx: int) -> bool:
         cursor = connection.execute("DELETE FROM agentruntime WHERE idx = ?", (idx,))
         connection.commit()
         return cursor.rowcount > 0
+
+
+def ensure_mock_ansible_lint_agentruntime(database_path: str | Path) -> StoredAgentRuntime | None:
+    """Insert mock-only ansible-lint agentruntime row if missing (not part of DB seed)."""
+    from backend.app.agents.ansible_lint_agent import (
+        ANSIBLE_LINT_AGENT,
+        ANSIBLE_LINT_LOCAL_AGENT_ID,
+    )
+
+    existing = get_agentruntime_by_local_agent_id(
+        database_path,
+        ANSIBLE_LINT_LOCAL_AGENT_ID,
+        runtime_mode="mock",
+    )
+    if existing is not None:
+        return existing
+
+    return create_agentruntime_record(
+        database_path,
+        runtime_type=AGENTRUNTIME_TYPE_MOCKUP,
+        agent_name=ANSIBLE_LINT_AGENT.name,
+        agent_id=build_axit_agent_id(ANSIBLE_LINT_LOCAL_AGENT_ID),
+        local_agent_id=ANSIBLE_LINT_LOCAL_AGENT_ID,
+        description=ANSIBLE_LINT_AGENT.role,
+        service_id=DEFAULT_SERVICE_ID,
+        talkable=True,
+        is_orchestrator=False,
+    )

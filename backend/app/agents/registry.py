@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from backend.app.agents.ansible_agent import ANSIBLE_AGENT
+from backend.app.agents.ansible_lint_agent import ANSIBLE_LINT_AGENT
 from backend.app.agents.base import AgentDefinition
 from backend.app.agents.k8s_agent import K8S_CLUSTER_AGENTS
 from backend.app.agents.kubevirt_agent import KUBEVIRT_AGENT
@@ -16,6 +17,7 @@ AGENT_DEFINITIONS: list[AgentDefinition] = [
     KUBEVIRT_AGENT,
     VCENTER_AGENT,
     ANSIBLE_AGENT,
+    ANSIBLE_LINT_AGENT,
 ]
 
 AGENT_DEFINITIONS_BY_ID: dict[str, AgentDefinition] = {

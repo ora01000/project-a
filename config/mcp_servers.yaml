@@ -22,3 +22,7 @@ servers:
     transport: streamable_http
     url: "http://localhost:9091/mcp"
     enabled: false
+  ansible_lint:
+    transport: streamable_http
+    url: "http://ansible-lint.ora01000.pe.kr:32716/mcp"
+    enabled: true
