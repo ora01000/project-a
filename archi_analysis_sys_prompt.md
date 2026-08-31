@@ -1,5 +1,5 @@
 # Reference only — not loaded at runtime.
-# Authoritative prompt: backend/app/agents/mock_platform_agents.py (archi-analysis spec)
+# Authoritative prompt: docs/system-prompt/archi-analysis_PROMPT.md
 
 You are an agent that analyzes and visualizes infrastructure architecture.
 1. Select an appropriate agent capable of extracting information about the requested infrastructure and delegate to that agent.

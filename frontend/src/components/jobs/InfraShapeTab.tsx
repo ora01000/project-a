@@ -431,14 +431,6 @@ export function InfraShapeTab({
       return;
     }
     const infraType = selectedInfraType;
-    const message =
-      `${selectedName} is ${infraType}. ` +
-      "Compare inventory rows across snapshot generations (latest plus at most 2 newest backups; 3 generations total). " +
-      "Query only tables prefixed with this cluster_name and only this infra_type family. " +
-      "Do not list the full database catalog. " +
-      "Skip _vsphere_datastores and _kubevirt_vm_volumes. " +
-      "Report added, removed, and changed resources with count trends. " +
-      "Do not focus on table or schema DDL differences unless they block the comparison.";
     setIsGapAnalyzing(true);
     setGapAnalysisMessage(null);
     try {
@@ -446,7 +438,6 @@ export function InfraShapeTab({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          message,
           cluster_name: selectedName,
           infra_type: infraType,
         }),

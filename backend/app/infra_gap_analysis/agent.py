@@ -11,8 +11,10 @@ from langgraph.prebuilt import create_react_agent
 
 from backend.app.agents.base import AgentInvokeResult, invoke_agent
 from backend.app.config import MCPServerConfig, resolve_agent_runtime_mode
+from backend.app.infra_gap_analysis.generation_context import GAP_ANALYSIS_ALLOWED_TOOLS
 from backend.app.infra_gap_analysis.settings import (
     STATIC_CONFIG,
+    build_system_prompt,
     http_llm_api_key,
     mcp_url_for_mode,
 )
@@ -103,9 +105,10 @@ class InfraGapAnalysisService:
             for tool in await self._mcp_manager.get_tools_for_servers(
                 [STATIC_CONFIG.mcp_server_key]
             )
+            if tool.name in GAP_ANALYSIS_ALLOWED_TOOLS
         ]
 
-        prompt = STATIC_CONFIG.system_prompt
+        prompt = build_system_prompt()
         if not tools:
             prompt = (
                 f"{prompt}\n\n"
@@ -119,11 +122,12 @@ class InfraGapAnalysisService:
             prompt=SystemMessage(content=prompt),
         )
         logger.info(
-            "INFRA_GAP_ANALYSIS initialized mode=%s mcp_url=%s mcp_status=%s tools=%s",
+            "INFRA_GAP_ANALYSIS initialized mode=%s mcp_url=%s mcp_status=%s tools=%s tool_names=%s",
             mode,
             mcp_url,
             self._mcp_status,
             len(tools),
+            [tool.name for tool in tools],
         )
 
     async def invoke(self, message: str) -> AgentInvokeResult:

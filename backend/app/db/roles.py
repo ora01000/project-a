@@ -13,6 +13,10 @@ def is_admin_role(role: int) -> bool:
     return role == ROLE_ADMIN or role == ROLE_SUPERADMIN
 
 
+def can_run_gap_analysis(role: int) -> bool:
+    return is_admin_role(role) or role == ROLE_INFRAADMIN
+
+
 def is_assignable_role(role: int) -> bool:
     return role in ASSIGNABLE_ROLES
 

@@ -56,6 +56,10 @@ export function hasAdminAccess(role: number): boolean {
   return role === ROLE_ADMIN || role === ROLE_SUPERADMIN;
 }
 
+export function canRunGapAnalysis(role: number): boolean {
+  return hasAdminAccess(role) || role === ROLE_INFRAADMIN;
+}
+
 /** IP masking in infra shape detail applies only to ordinary users. */
 export function shouldMaskIps(role: number): boolean {
   return role === ROLE_USER;

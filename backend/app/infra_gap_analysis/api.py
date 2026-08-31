@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import logging
 
+from pathlib import Path
+
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from backend.app.db.roles import is_admin_role
+from backend.app.db.roles import can_run_gap_analysis
 from backend.app.infra_gap_analysis.agent import infra_gap_analysis_service
+from backend.app.infra_gap_analysis.generation_context import build_gap_analysis_user_message
 from backend.app.infra_gap_analysis.settings import STATIC_CONFIG
 from backend.app.logging.agent_logger import log_agent_error, log_agent_interaction
 from backend.app.middleware.session_auth import get_request_auth_user
@@ -19,9 +22,22 @@ router = APIRouter(tags=["infra-gap-analysis"])
 
 
 class InfraGapAnalysisInvokeRequest(BaseModel):
-    message: str = Field(min_length=1)
     cluster_name: str | None = Field(default=None, max_length=200)
     infra_type: str | None = Field(default=None, max_length=50)
+    message: str | None = Field(default=None, min_length=1)
+
+    def resolved_message(self, database_path: str | Path | None) -> str:
+        if self.message and self.message.strip():
+            return self.message.strip()
+        cluster_name = (self.cluster_name or "").strip()
+        infra_type = (self.infra_type or "").strip()
+        if cluster_name and infra_type:
+            return build_gap_analysis_user_message(
+                cluster_name=cluster_name,
+                infra_type=infra_type,
+                database_path=database_path,
+            )
+        raise ValueError("cluster_name and infra_type are required when message is omitted")
 
 
 class InfraGapAnalysisInvokeResponse(BaseModel):
@@ -32,10 +48,10 @@ class InfraGapAnalysisInvokeResponse(BaseModel):
     output_tokens: int = 0
 
 
-def _require_admin(request: Request) -> None:
+def _require_gap_analysis_access(request: Request) -> None:
     viewer = get_request_auth_user(request)
-    if not is_admin_role(viewer.role):
-        raise HTTPException(status_code=403, detail="관리자만 수행할 수 있습니다.")
+    if not can_run_gap_analysis(viewer.role):
+        raise HTTPException(status_code=403, detail="AI 갭분석 권한이 없습니다.")
 
 
 @router.get("/infra-gap-analysis/status")
@@ -48,16 +64,21 @@ async def infra_gap_analysis_invoke(
     body: InfraGapAnalysisInvokeRequest,
     request: Request,
 ) -> InfraGapAnalysisInvokeResponse:
-    _require_admin(request)
+    _require_gap_analysis_access(request)
     auth_user = get_request_auth_user(request)
+    database_path = getattr(request.app.state, "database_path", None)
     try:
-        result = await infra_gap_analysis_service.invoke(body.message)
+        message = body.resolved_message(database_path)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    try:
+        result = await infra_gap_analysis_service.invoke(message)
     except Exception as exc:
         logger.exception("INFRA_GAP_ANALYSIS invoke failed")
         log_agent_error(
             STATIC_CONFIG.agent_id,
             reason=str(exc),
-            input_message=body.message,
+            input_message=message,
             user_id=auth_user.userid,
             user_name=auth_user.username,
         )
@@ -65,7 +86,7 @@ async def infra_gap_analysis_invoke(
 
     log_agent_interaction(
         agent_id=STATIC_CONFIG.agent_id,
-        input_message=body.message,
+        input_message=message,
         output_message=result.content,
         tools_used=result.tools_used,
         user_id=auth_user.userid,

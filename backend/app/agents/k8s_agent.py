@@ -1,5 +1,6 @@
 from backend.app.agents.base import AgentDefinition
 from backend.app.agents.infra_diagram_prompt import INFRA_ARCHITECTURE_D2_INSTRUCTION
+from backend.app.agents.system_prompt_loader import load_system_prompt_template
 
 K8S_CLUSTER_SPECS: list[tuple[str, str]] = [
     ("dprv6-k8s", "구 PaaS 대개체 개발기(6층)"),
@@ -14,15 +15,12 @@ K8S_CLUSTER_SPECS: list[tuple[str, str]] = [
 
 
 def _build_k8s_system_prompt(cluster_id: str, display_name: str) -> str:
-    return (
-        f"You are a Kubernetes cluster information specialist for cluster `{cluster_id}` ({display_name}). "
-        f"Always scope queries and answers to this cluster only. "
-        "Use kubernetes-mcp-server and kubectl-ai MCP tools to query cluster resources such as "
-        "namespaces, pods, nodes, deployments, services, and events. "
-        "Provide concise, structured answers in Korean when possible. "
-        "Do not perform destructive operations; read-only queries only.\n\n"
-        f"{INFRA_ARCHITECTURE_D2_INSTRUCTION}"
+    base = load_system_prompt_template(
+        "k8s-cluster",
+        cluster_id=cluster_id,
+        display_name=display_name,
     )
+    return f"{base}\n\n{INFRA_ARCHITECTURE_D2_INSTRUCTION}"
 
 
 def create_k8s_cluster_agent(cluster_id: str, display_name: str) -> AgentDefinition:

@@ -5,11 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from backend.app.agents.base import AgentDefinition
-from backend.app.agents.infra_diagram_prompt import (
-    INFRA_D2_ANALYSIS_GUIDELINES,
-    INFRA_D2_MANIFEST_SHAPE_MAPPING,
-    INFRA_D2_NODE_LABEL_RULE,
-)
+from backend.app.agents.system_prompt_loader import load_system_prompt
 from backend.app.db.agentruntime import ORCHESTRATOR_LOCAL_AGENT_IDS, MockAgentRuntimePreset
 
 CALLABLE_INFRA_AGENT_IDS: tuple[str, ...] = (
@@ -58,79 +54,35 @@ class MockPlatformAgentSpec:
 JOB_AUDITOR_LOCAL_AGENT_ID = "job_auditor"
 JOB_AUDITOR_AXIT_LOCAL_AGENT_ID = "JOB_AUDITOR_AGENT"
 
-# Runtime prompt (reference copy: job_auditor_sys_prompt.md)
-JOB_AUDITOR_SYSTEM_PROMPT = (
-    "You are an agent that produces job review opinions or draft work plans.\n\n"
-    "Job targets:\n"
-    "1. Kubernetes clusters\n"
-    "2. KubeVirt clusters\n"
-    "3. vCenter\n"
-    "4. Ansible\n\n"
-    "Available tools:\n"
-    "You may use all tools registered for the target infrastructure when they are enabled.\n\n"
-    "For job review requests:\n"
-    "- Determine whether the request includes CUD (create, update, delete) changes "
-    "to infrastructure.\n"
-    "  - When CUD is included:\n"
-    "    - Verify the request does not violate existing infrastructure component "
-    "shapes or policies (K8s manifests, VMs, playbooks, networks, datastores).\n"
-    "    - Assess whether the request could expose security vulnerabilities.\n"
-    "    - Assess service impact:\n"
-    "      - No service impact (rolling update, dual redundancy, blue/green, canary, etc.)\n"
-    "      - Low service impact (brief outage)\n"
-    "      - Medium service impact (planned downtime)\n"
-    "      - High service impact (critical service or high probability of outage)\n"
-    "    - Confirm a recovery plan exists when problems occur (fallback, etc.).\n"
-    "- For read-only (information request) work:\n"
-    "  - Check whether the request includes or would expose sensitive data "
-    "(passwords, secrets, credentials, certificates) or personal information.\n"
-    "- State the review conclusion as one of: (1) no particular issues, or "
-    "(2) needs improvement. Briefly summarize the reason in Korean within 50 characters.\n\n"
-    "For work plan creation requests:\n"
-    "- Define procedures within 10 steps or fewer. Estimate expected time for each step.\n"
-    "- Include CLI commands when CLI is needed; name MCP tools when MCP tools should be used.\n"
-    "- For each step, assess service impact using the same criteria as job review."
-)
+
+def _mock_platform_system_prompt(agent_id: str) -> str:
+    return load_system_prompt(agent_id)
+
 
 MOCK_PLATFORM_AGENT_SPECS: tuple[MockPlatformAgentSpec, ...] = (
     MockPlatformAgentSpec(
         agent_id="job-scheduler",
         agent_name="작업 접수/계획",
         description="채널을 통해 작업 요청을 수신/계획 수립",
-        system_prompt="You receive and plan tasks via a channel. Analyze the user's request and plan the task.",
+        system_prompt=_mock_platform_system_prompt("job-scheduler"),
     ),
     MockPlatformAgentSpec(
         agent_id="archi-analysis",
         agent_name="아키텍처 분석",
         description="인프라의 설계 구성 분석/도식화",
-        # Runtime prompt (reference copy: archi_analysis_sys_prompt.md)
-        system_prompt=(
-            "You are an agent that analyzes and visualizes infrastructure architecture.\n"
-            "1. Select an appropriate agent capable of extracting information about the requested "
-            "infrastructure and delegate to that agent.\n"
-            "2. Do not answer directly; the delegated infra agent will query resources and "
-            "produce the final response including a D2 diagram when applicable.\n"
-            "3. When a D2 diagram is produced, the infra agent must use these manifest-specific "
-            "node shapes:\n"
-            f"{INFRA_D2_MANIFEST_SHAPE_MAPPING}\n"
-            f"4. {INFRA_D2_NODE_LABEL_RULE}\n"
-            "5. When delegating diagram work, ensure the infra agent follows these analysis "
-            "guidelines:\n"
-            f"{INFRA_D2_ANALYSIS_GUIDELINES}"
-        ),
+        system_prompt=_mock_platform_system_prompt("archi-analysis"),
     ),
     MockPlatformAgentSpec(
         agent_id="helpdesk",
         agent_name="헬프데스크",
         description="문의응대",
-        # Runtime prompt (reference copy: helpdesk_sys_prompt.md)
-        system_prompt="You are an agent that handles infrastructure inquiries. When you receive a user request, identify the infrastructure and call the appropriate agent to provide a correct answer.",
+        system_prompt=_mock_platform_system_prompt("helpdesk"),
     ),
     MockPlatformAgentSpec(
         agent_id=JOB_AUDITOR_LOCAL_AGENT_ID,
         agent_name="작업검토",
         description="작업 내용에 대한 검토를 수행하고 필요시 작업 계획서를 작성",
-        system_prompt=JOB_AUDITOR_SYSTEM_PROMPT,
+        system_prompt=_mock_platform_system_prompt(JOB_AUDITOR_LOCAL_AGENT_ID),
         callable_agent_ids=(),
     ),
 )
