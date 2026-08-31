@@ -2057,6 +2057,12 @@ Your sole task is to write high-quality, production-ready, and syntactically cor
 '''
 
 
+# 자체 에이전트의 시스템 프롬프트 지정방식 변경
+자체 에이전트로 등록된 에이전트의 시스템 프롬프트를 md 파일로 관리하고 md 를 읽어서 적용할 수 있도록 변경한다.
+- 시스템 프롬프트의 md 파일 위치  
+  - docs/system-prompt/{에이전트명}_PROMPT.md
+
+
 
 
 # 로그 관리 보완 - 로직 확인이 필요하여 보류로 남김 - 260813
