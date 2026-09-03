@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
-import re
+from dataclasses import dataclass, field
 from typing import Any
 
 from langchain_core.messages import SystemMessage
@@ -28,10 +28,56 @@ from backend.app.services.received_mail_attachments import resolve_attachment_fi
 
 logger = logging.getLogger(__name__)
 
-_JSON_LINE = re.compile(
-    r"\{[^{}]*\"decision_type\"\s*:\s*\d+[^{}]*\}",
-    re.DOTALL,
-)
+
+@dataclass(frozen=True)
+class ParsedDecision:
+    decision_type: int
+    infra: str = "unknown"
+    job_kind: str = "none"
+    missing: list[str] = field(default_factory=list)
+    summary: str = ""
+    reply_ko: str = ""
+    operator_ko: str = ""
+
+
+def parse_decision_payload(content: str) -> ParsedDecision:
+    text = content or ""
+    decoder = json.JSONDecoder()
+    payload: dict[str, Any] | None = None
+    tail = ""
+    for index, char in enumerate(text):
+        if char != "{":
+            continue
+        try:
+            parsed, end = decoder.raw_decode(text[index:])
+        except json.JSONDecodeError:
+            continue
+        if isinstance(parsed, dict) and "decision_type" in parsed:
+            payload = parsed
+            tail = text[index + end :].strip()
+            break
+    if payload is None:
+        raise ValueError("decision JSON not found in agent output")
+
+    value = int(payload.get("decision_type"))
+    if value not in VALID_DECISION_TYPES:
+        raise ValueError(f"invalid decision_type from agent: {value}")
+
+    missing_raw = payload.get("missing") or []
+    missing = [str(item).strip() for item in missing_raw if str(item).strip()] if isinstance(missing_raw, list) else []
+    return ParsedDecision(
+        decision_type=value,
+        infra=str(payload.get("infra") or "unknown").strip() or "unknown",
+        job_kind=str(payload.get("job_kind") or "none").strip() or "none",
+        missing=missing,
+        summary=str(payload.get("summary") or "").strip(),
+        reply_ko=str(payload.get("reply_ko") or "").strip(),
+        operator_ko=tail,
+    )
+
+
+def parse_decision_type(content: str) -> int:
+    return parse_decision_payload(content).decision_type
 
 
 def _build_llm(runtime_mode: str) -> ChatOpenAI:
@@ -107,25 +153,16 @@ def build_mail_decision_message(
                 parts.append(f"[failed to read {name}: {exc}]")
             parts.append("")
     else:
-        parts.append("=== attachments ===")
+        parts.append("=== attachments (text) ===")
         parts.append("(none)")
 
+    if record.unreadable_attachment_names:
+        parts.append("=== unreadable attachments (office/binary; treat as insufficient for type 10) ===")
+        for name in record.unreadable_attachment_names:
+            parts.append(f"- {name}")
+        parts.append("")
+
     return "\n".join(parts), record.uuid
-
-
-def parse_decision_type(content: str) -> int:
-    match = _JSON_LINE.search(content or "")
-    if not match:
-        raise ValueError("decision JSON not found in agent output")
-    payload = json.loads(match.group(0))
-    value = int(payload.get("decision_type"))
-    if value not in VALID_DECISION_TYPES:
-        raise ValueError(f"invalid decision_type from agent: {value}")
-    if value == DECISION_TYPE_PENDING:
-        # Empty/unusable → treat as non-job unless content truly pending; map to non-job
-        # only when agent chose 0 for empty — keep 0 allowed but prefer callers to set 5/10/11.
-        return DECISION_TYPE_PENDING
-    return value
 
 
 class JobDecisionAgentService:
@@ -181,9 +218,9 @@ class JobDecisionAgentService:
     ) -> dict[str, Any]:
         message, uuid_value = build_mail_decision_message(database_path, mail_uuid)
         result = await self.invoke(message)
-        decision_type = parse_decision_type(result.content)
+        parsed = parse_decision_payload(result.content)
+        decision_type = parsed.decision_type
         if decision_type == DECISION_TYPE_PENDING:
-            # Empty mail → insufficient/non-actionable; use 11 if no content signals job intent.
             decision_type = DECISION_TYPE_NON_JOB
 
         record = None
@@ -193,6 +230,7 @@ class JobDecisionAgentService:
         return {
             "uuid": uuid_value,
             "decision_type": decision_type,
+            "parsed": parsed,
             "persisted": persist,
             "content": result.content,
             "tools_used": [

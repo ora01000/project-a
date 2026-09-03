@@ -144,7 +144,8 @@ CREATE TABLE IF NOT EXISTS received_mail (
     received_at TEXT NOT NULL DEFAULT '',
     fetched_at TEXT NOT NULL DEFAULT '',
     attachment_count INTEGER NOT NULL DEFAULT 0,
-    attachment_names TEXT NOT NULL DEFAULT '[]'
+    attachment_names TEXT NOT NULL DEFAULT '[]',
+    unreadable_attachment_names TEXT NOT NULL DEFAULT '[]'
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS ux_received_mail_mailbox_uid
@@ -157,3 +158,6 @@ CREATE INDEX IF NOT EXISTS ix_received_mail_message_id
 
 CREATE INDEX IF NOT EXISTS ix_received_mail_fetched_at
     ON received_mail (fetched_at DESC);
+
+ALTER TABLE received_mail
+    ADD COLUMN IF NOT EXISTS unreadable_attachment_names TEXT NOT NULL DEFAULT '[]';

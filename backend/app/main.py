@@ -45,6 +45,7 @@ from backend.app.config import (
     backend_role_runs_workers,
     load_auth_session_settings,
     load_backend_role,
+    load_job_decision_loop_settings,
     load_job_processor_settings,
     load_k8s_collector_settings,
     load_mynotes_settings,
@@ -66,6 +67,7 @@ from backend.app.disabled_features import filter_agent_definitions
 from backend.app.logging.prompt_debug import bind_token_tracker
 from backend.app.logging.agent_logger import ensure_agent_logs_dir, log_agent_error
 from backend.app.logging.user_comm_logger import initialize_user_comm_logs
+from backend.app.services.job_decision_loop import run_job_decision_loop
 from backend.app.services.job_processor_loop import run_job_processor_loop
 from backend.app.services.k8s_scrape_scheduler import run_k8s_scrape_scheduler_loop
 from backend.app.services.mail_receive_loop import run_mail_receive_loop
@@ -497,6 +499,15 @@ async def lifespan(app: FastAPI):
                 received_mail_settings,
             )
         )
+    job_decision_settings = load_job_decision_loop_settings()
+    job_decision_task: asyncio.Task | None = None
+    if run_workers and job_decision_settings.enabled:
+        job_decision_task = asyncio.create_task(
+            run_job_decision_loop(
+                Path(app.state.database_path),
+                job_decision_settings,
+            )
+        )
     try:
         yield
     finally:
@@ -519,6 +530,10 @@ async def lifespan(app: FastAPI):
             mail_receive_task.cancel()
             with suppress(asyncio.CancelledError):
                 await mail_receive_task
+        if job_decision_task is not None:
+            job_decision_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await job_decision_task
         await close_redis()
 
 

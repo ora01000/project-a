@@ -14,9 +14,9 @@ from backend.app.db.mailserver_config import get_mailserver_config
 from backend.app.db.received_mail import insert_received_mail, message_already_stored
 from backend.app.services.mail_message_parse import (
     address_list,
+    collect_mail_attachments,
     decode_header_value,
     extract_body_text,
-    iter_attachments,
     save_attachments,
 )
 
@@ -93,7 +93,7 @@ def poll_imap_once(
                 continue
 
             mail_uuid = str(uuid.uuid4())
-            attachments = iter_attachments(msg)
+            attachments, unreadable_names = collect_mail_attachments(msg)
             saved_names = save_attachments(
                 mail_uuid,
                 attachments,
@@ -111,6 +111,7 @@ def poll_imap_once(
                 body_text=extract_body_text(msg),
                 received_at=decode_header_value(msg.get("Date")),
                 attachment_names=saved_names,
+                unreadable_attachment_names=unreadable_names,
                 mail_uuid=mail_uuid,
             )
             client.uid("store", uid_bytes, "+FLAGS", "(\\Seen)")

@@ -24,6 +24,7 @@ interface ReceivedMailItem {
   fetched_at: string;
   attachment_count: number;
   attachment_names: string[];
+  unreadable_attachment_names?: string[];
 }
 
 const DECISION_LABELS: Record<number, string> = {
@@ -264,6 +265,14 @@ export function ReceivedMailDebugModal({ viewerRole, onClose }: ReceivedMailDebu
                         </li>
                       ))}
                     </ul>
+                  )}
+                </div>
+                <div>
+                  <span className="text-slate-500">unreadable attachments</span>
+                  {(selected.unreadable_attachment_names ?? []).length === 0 ? (
+                    <p className="text-slate-500">없음</p>
+                  ) : (
+                    <p>{(selected.unreadable_attachment_names ?? []).join(", ")}</p>
                   )}
                 </div>
                 <div>

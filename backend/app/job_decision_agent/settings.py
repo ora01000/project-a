@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
 
+from backend.app.agents.skill_loader import load_skill
 from backend.app.agents.system_prompt_loader import load_system_prompt_template
 
 AGENT_ID = "JOB_DECISION_AGENT"
 AGENT_NAME = "Job Decision Agent"
+JOB_SCOPE_SKILL_NAME = "job_scope"
 
 # Same LLM gateway wiring as INFRA_GAP_ANALYSIS.
 # Bifrost custom provider "axit"; backend vLLM model remains openai/gpt-oss-120b.
@@ -16,12 +17,9 @@ HTTP_LLM_BASE_URL = "http://llmgateway.apps.pkvgs-k8s.lguplus.co.kr/v1"
 HTTP_LLM_MODEL = "axit/openai/gpt-oss-120b"
 HTTP_LLM_API_KEY_ENV = "PRIVATE_LLM_API_KEY"
 
-_SKILLS_DIR = Path(__file__).resolve().parent / "skills"
-
 
 def load_job_scope_skill() -> str:
-    path = _SKILLS_DIR / "job_scope.md"
-    return path.read_text(encoding="utf-8")
+    return load_skill(JOB_SCOPE_SKILL_NAME)
 
 
 def build_system_prompt() -> str:

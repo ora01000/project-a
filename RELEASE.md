@@ -72,7 +72,7 @@
 - `decision_type`: `0` 대기, `5` 자료부족, `10` 작업 대상, `11` 비작업
 - API: `GET /api/received-mail`, `GET /api/received-mail/{uuid}`, `GET .../attachments/{filename}` (관리자)
 - 관리자 디버깅: 환경설정 → 관리자 작업 → **수신메일 목록(디버깅)**
-- 정적 에이전트 **`JOB_DECISION_AGENT`**: INFRA_GAP_ANALYSIS와 동일 LLM, AXIT 미사용, skill=`job_scope.md`
+- 정적 에이전트 **`JOB_DECISION_AGENT`**: INFRA_GAP_ANALYSIS와 동일 LLM, AXIT 미사용, skill=`docs/skill/job_scope.md`
   - `GET/POST /api/job-decision-agent/{status,invoke,evaluate}` — received_mail → decision_type(5/10/11)
 
 ### 상세정보·작업 관리

@@ -14,6 +14,7 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
 from backend.app.config import (
+    load_job_decision_loop_settings,
     load_job_processor_settings,
     load_k8s_collector_settings,
     load_mynotes_settings,
@@ -27,6 +28,7 @@ from backend.app.services.agent_runtime_client import (
     create_agent_runtime_client,
     normalize_runtime_mode,
 )
+from backend.app.services.job_decision_loop import run_job_decision_loop
 from backend.app.services.job_processor_loop import run_job_processor_loop
 from backend.app.services.k8s_scrape_scheduler import run_k8s_scrape_scheduler_loop
 from backend.app.services.mail_receive_loop import run_mail_receive_loop
@@ -106,6 +108,16 @@ async def lifespan(app: FastAPI):
                 run_mail_receive_loop(
                     Path(app.state.database_path),
                     received_mail_settings,
+                )
+            )
+        )
+    job_decision_settings = load_job_decision_loop_settings()
+    if job_decision_settings.enabled:
+        tasks.append(
+            asyncio.create_task(
+                run_job_decision_loop(
+                    Path(app.state.database_path),
+                    job_decision_settings,
                 )
             )
         )

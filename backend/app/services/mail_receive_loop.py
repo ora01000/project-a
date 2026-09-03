@@ -47,7 +47,7 @@ async def run_mail_receive_loop(
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                logger.exception("mail receive cycle failed: %s", exc)
+                logger.exception("mail receive poll failed: %s", exc)
 
             await asyncio.sleep(poll_settings.poll_interval_seconds)
     except asyncio.CancelledError:

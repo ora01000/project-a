@@ -61,7 +61,14 @@ def extract_body_text(msg: Message) -> str:
 
 
 def iter_attachments(msg: Message) -> list[tuple[str, bytes]]:
-    attachments: list[tuple[str, bytes]] = []
+    allowed, _unreadable = collect_mail_attachments(msg)
+    return allowed
+
+
+def collect_mail_attachments(msg: Message) -> tuple[list[tuple[str, bytes]], list[str]]:
+    """Return (text attachments to save, unreadable/office attachment names)."""
+    allowed: list[tuple[str, bytes]] = []
+    unreadable: list[str] = []
     for part in msg.walk():
         disposition = str(part.get("Content-Disposition") or "")
         filename = part.get_filename()
@@ -70,12 +77,14 @@ def iter_attachments(msg: Message) -> list[tuple[str, bytes]]:
         if not is_attachment or not decoded_name:
             continue
         if not is_allowed_attachment_filename(decoded_name):
+            unreadable.append(sanitize_attachment_filename(decoded_name))
             continue
         payload = part.get_payload(decode=True)
         if not isinstance(payload, (bytes, bytearray)):
+            unreadable.append(sanitize_attachment_filename(decoded_name))
             continue
-        attachments.append((sanitize_attachment_filename(decoded_name), bytes(payload)))
-    return attachments
+        allowed.append((sanitize_attachment_filename(decoded_name), bytes(payload)))
+    return allowed, unreadable
 
 
 def save_attachments(mail_uuid: str, attachments: list[tuple[str, bytes]], home: Path) -> list[str]:

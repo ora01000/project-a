@@ -49,7 +49,8 @@ def ensure_received_mail_table(connection) -> None:
             received_at TEXT NOT NULL DEFAULT '',
             fetched_at TEXT NOT NULL DEFAULT '',
             attachment_count INTEGER NOT NULL DEFAULT 0,
-            attachment_names TEXT NOT NULL DEFAULT '[]'
+            attachment_names TEXT NOT NULL DEFAULT '[]',
+            unreadable_attachment_names TEXT NOT NULL DEFAULT '[]'
         )
         """
     )
@@ -68,6 +69,9 @@ def ensure_received_mail_table(connection) -> None:
         """
     )
     connection.execute(
+        "ALTER TABLE received_mail ADD COLUMN IF NOT EXISTS pop3_uidl VARCHAR(500) NOT NULL DEFAULT ''"
+    )
+    connection.execute(
         """
         CREATE INDEX IF NOT EXISTS ix_received_mail_pop3_uidl
             ON received_mail (pop3_uidl)
@@ -75,7 +79,10 @@ def ensure_received_mail_table(connection) -> None:
         """
     )
     connection.execute(
-        "ALTER TABLE received_mail ADD COLUMN IF NOT EXISTS pop3_uidl VARCHAR(500) NOT NULL DEFAULT ''"
+        """
+        ALTER TABLE received_mail
+            ADD COLUMN IF NOT EXISTS unreadable_attachment_names TEXT NOT NULL DEFAULT '[]'
+        """
     )
 
 
@@ -97,6 +104,7 @@ class ReceivedMailRecord:
     fetched_at: str
     attachment_count: int
     attachment_names: list[str]
+    unreadable_attachment_names: list[str]
 
 
 def _parse_attachment_names(raw: object) -> list[str]:
@@ -132,13 +140,16 @@ def _row_to_record(row: Any) -> ReceivedMailRecord:
         fetched_at=str(row["fetched_at"] or ""),
         attachment_count=int(row["attachment_count"] or 0),
         attachment_names=_parse_attachment_names(row["attachment_names"]),
+        unreadable_attachment_names=_parse_attachment_names(
+            row["unreadable_attachment_names"] if "unreadable_attachment_names" in row.keys() else "[]"
+        ),
     )
 
 
 _SELECT = """
     idx, uuid, decision_type, message_id, imap_uid, pop3_uidl, mailbox, subject,
     from_address, to_addresses, cc_addresses, body_text, received_at,
-    fetched_at, attachment_count, attachment_names
+    fetched_at, attachment_count, attachment_names, unreadable_attachment_names
 """
 
 
@@ -204,11 +215,13 @@ def insert_received_mail(
     body_text: str,
     received_at: str,
     attachment_names: list[str],
+    unreadable_attachment_names: list[str] | None = None,
     mail_uuid: str | None = None,
 ) -> ReceivedMailRecord:
     mail_id = (mail_uuid or str(uuid.uuid4())).strip()
     fetched_at = _now_iso()
     names_json = json.dumps(list(attachment_names), ensure_ascii=False)
+    unreadable_json = json.dumps(list(unreadable_attachment_names or []), ensure_ascii=False)
     with get_connection(database_path) as connection:
         ensure_received_mail_table(connection)
         row = connection.execute(
@@ -216,12 +229,13 @@ def insert_received_mail(
             INSERT INTO received_mail (
                 uuid, decision_type, message_id, imap_uid, pop3_uidl, mailbox, subject,
                 from_address, to_addresses, cc_addresses, body_text,
-                received_at, fetched_at, attachment_count, attachment_names
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                received_at, fetched_at, attachment_count, attachment_names,
+                unreadable_attachment_names
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             RETURNING
                 idx, uuid, decision_type, message_id, imap_uid, pop3_uidl, mailbox, subject,
                 from_address, to_addresses, cc_addresses, body_text, received_at,
-                fetched_at, attachment_count, attachment_names
+                fetched_at, attachment_count, attachment_names, unreadable_attachment_names
             """,
             (
                 mail_id,
@@ -239,6 +253,7 @@ def insert_received_mail(
                 fetched_at,
                 len(attachment_names),
                 names_json,
+                unreadable_json,
             ),
         ).fetchone()
         return _row_to_record(row)
@@ -294,6 +309,28 @@ def list_received_mail(
                 """,
                 (int(decision_type), capped, skip),
             ).fetchall()
+        return [_row_to_record(row) for row in rows]
+
+
+def list_pending_received_mail(
+    database_path: str | Path,
+    *,
+    limit: int = 50,
+) -> list[ReceivedMailRecord]:
+    """Oldest pending (decision_type=0) rows for sequential JOB_DECISION processing."""
+    capped = max(1, min(int(limit), 200))
+    with get_connection(database_path) as connection:
+        ensure_received_mail_table(connection)
+        rows = connection.execute(
+            f"""
+            SELECT {_SELECT}
+            FROM received_mail
+            WHERE decision_type = ?
+            ORDER BY idx ASC
+            LIMIT ?
+            """,
+            (DECISION_TYPE_PENDING, capped),
+        ).fetchall()
         return [_row_to_record(row) for row in rows]
 
 

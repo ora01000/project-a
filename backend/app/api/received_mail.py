@@ -36,6 +36,7 @@ class ReceivedMailResponse(BaseModel):
     fetched_at: str
     attachment_count: int
     attachment_names: list[str] = Field(default_factory=list)
+    unreadable_attachment_names: list[str] = Field(default_factory=list)
 
 
 class ReceivedMailDecisionUpdate(BaseModel):
@@ -70,6 +71,7 @@ def _to_response(record) -> ReceivedMailResponse:
         fetched_at=record.fetched_at,
         attachment_count=record.attachment_count,
         attachment_names=list(record.attachment_names),
+        unreadable_attachment_names=list(record.unreadable_attachment_names),
     )
 
 

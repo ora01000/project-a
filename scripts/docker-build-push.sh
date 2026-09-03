@@ -12,6 +12,26 @@ PLATFORMS="${PLATFORMS:-linux/amd64}"
 BUILDER_NAME="${BUILDER_NAME:-project-a-multiarch}"
 PUSH="${PUSH:-true}"
 
+# Backend image bundles agent prompts/skills from docs/ (see docker/backend/Dockerfile).
+BACKEND_DEPLOY_DIRS=(
+  docs/system-prompt
+  docs/skill
+)
+
+verify_backend_deploy_assets() {
+  local missing=()
+  for dir in "${BACKEND_DEPLOY_DIRS[@]}"; do
+    if [[ ! -d "${ROOT_DIR}/${dir}" ]]; then
+      missing+=("${dir}")
+    fi
+  done
+  if [[ ${#missing[@]} -gt 0 ]]; then
+    echo "Missing backend deploy directories (required for image COPY):" >&2
+    printf '  - %s\n' "${missing[@]}" >&2
+    exit 1
+  fi
+}
+
 ensure_builder() {
   if ! docker buildx inspect "${BUILDER_NAME}" >/dev/null 2>&1; then
     echo "==> Creating buildx builder: ${BUILDER_NAME}"
@@ -49,6 +69,7 @@ build_image() {
 }
 
 ensure_builder
+verify_backend_deploy_assets
 build_image docker/backend/Dockerfile "${BACKEND_IMAGE}"
 build_image docker/frontend/Dockerfile "${FRONTEND_IMAGE}"
 

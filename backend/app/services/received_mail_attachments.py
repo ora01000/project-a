@@ -7,7 +7,7 @@ from pathlib import Path
 
 from backend.app.config import load_received_mail_settings
 
-# Text-readable attachments only (certificates / scripts / logs).
+# Text-readable attachments only. Office/binary types are rejected as unreadable.
 ALLOWED_ATTACHMENT_EXTENSIONS = frozenset(
     {
         ".crt",
@@ -21,6 +21,31 @@ ALLOWED_ATTACHMENT_EXTENSIONS = frozenset(
         ".log",
         ".conf",
         ".cfg",
+        ".csv",
+        ".md",
+        ".json",
+        ".yaml",
+        ".yml",
+        ".xml",
+        ".ini",
+        ".toml",
+        ".properties",
+    }
+)
+
+OFFICE_ATTACHMENT_EXTENSIONS = frozenset(
+    {
+        ".doc",
+        ".docx",
+        ".xls",
+        ".xlsx",
+        ".ppt",
+        ".pptx",
+        ".odt",
+        ".ods",
+        ".odp",
+        ".hwp",
+        ".hwpx",
     }
 )
 
@@ -33,6 +58,15 @@ def is_allowed_attachment_filename(filename: str) -> bool:
         return False
     suffix = Path(name).suffix.lower()
     return suffix in ALLOWED_ATTACHMENT_EXTENSIONS
+
+
+def is_office_attachment_filename(filename: str) -> bool:
+    suffix = Path(filename or "").suffix.lower()
+    return suffix in OFFICE_ATTACHMENT_EXTENSIONS
+
+
+def is_unreadable_attachment_filename(filename: str) -> bool:
+    return not is_allowed_attachment_filename(filename)
 
 
 def sanitize_attachment_filename(filename: str) -> str:

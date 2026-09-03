@@ -243,6 +243,50 @@ async def send_email_notification(
         return False
 
 
+async def send_job_supplement_request_email(
+    *,
+    database_path: Path | str | None,
+    to_address: str,
+    original_subject: str,
+    body: str,
+    cc_addresses: list[str] | None = None,
+) -> bool:
+    """Reply asking the sender for missing job materials (decision_type=5)."""
+    config = load_email_settings_from_db(database_path)
+    if config is None:
+        logger.warning("Supplement email skipped: mailserver_config missing")
+        return False
+    validation_error = _validate_email_settings(config)
+    if validation_error:
+        logger.warning("Supplement email skipped: %s", validation_error)
+        return False
+
+    recipient = (to_address or "").strip()
+    if "@" not in recipient:
+        logger.warning("Supplement email skipped: invalid to_address=%s", to_address)
+        return False
+
+    original = (original_subject or "").strip() or "(제목 없음)"
+    subject = f"[자료보완] {original}"
+    markdown_body = (body or "").strip() or "작업 처리를 위해 추가 자료가 필요합니다."
+    cc_list = [address.strip() for address in (cc_addresses or []) if address.strip()]
+    cc_list = [address for address in cc_list if address.lower() != recipient.lower()]
+
+    try:
+        await send_markdown_email(
+            settings=config,
+            to_addresses=[recipient],
+            cc_addresses=cc_list,
+            subject=subject,
+            markdown_body=markdown_body,
+        )
+        logger.info("Supplement email sent to=%s cc=%s subject=%s", recipient, cc_list, subject)
+        return True
+    except Exception as exc:
+        logger.exception("Supplement email failed to=%s: %s", recipient, exc)
+        return False
+
+
 async def send_markdown_email(
     *,
     settings: EmailNotificationSettings,

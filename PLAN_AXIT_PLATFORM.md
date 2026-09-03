@@ -1627,92 +1627,96 @@ JOB_DECISION_AGENT 정의 (완료)
   - 백엔드에서 received_mail 로 들어온 레코드를 JOB_DECISION_AGENT로 문의할 것이다. (`POST /api/job-decision-agent/evaluate`)
   - jobs 에서 처리를 할 내용인지 아닌지를 판단하고, jobs에서 처리할 내용이라면 작업에 필요한 정보(본문의 내용 또는 첨부)가 최소한으로 주어졌는지를 판단한다.
   - decision_type: 10 작업 / 5 자료부족 / 11 비작업
-  - 판단에 필요한 실제 작업의 범위는 다음과 같다. 이 내용은 SKILL 로 정의/관리한다. (`skills/job_scope.md`)
-    - 대상 인프라는 kubernetes, kubevirt, vSphere, Ansible
-    - 작업의 종류
-      1. 대상 인프라의 구성 정보제공, 아키텍처 분석, 현황 파악(비파괴성 인벤토리 Read)
-      2. 변경 작업(TBD)
-        2.1. Kubernetes
-          - Requirements
-            - 대상 manifests : RoleBinding, Group/Users(OKD only), Namespace(Project), Deployments(Deployment, Statefulset, DaemonSet, DeploymentConfig(OKD Only)), ServiceAccount, ConfigMap/Secret, PersistentVolumeClaim, Service, Route/Ingress, EgressIP(OKD 버전에 따라, 4.15 이하(ovs) : netnamespace, hostsubnet, 4.18 이상(ovn) : EgressIP)
-            - 대상 manifests 별 하위 Requirements
-              - Namespace
-                - 변경 대상 값 : ex) DisplayName, ResourceQuota, EgressIP 지정 등
-                - ResourceQuota 정보
-                  - CPU/MEM capacity
-                  - Pod 개수 Limit(옵션)
-              - Group/Users(OKD only)
-                - 그룹에 할당할 그룹명/사용자
-              - RoleBinding
-                - role 할당(OKD 인 경우 ["admin", "cru-damin", "view", "edit"], 일반 K8S 인 경우 ["admin", "view", "edit"])
-              - Deployments
-                - 변경 대상 값 : ex) 이미지 경로, Resources, Replicas, updateStrategy, serviceAccount 등
-                - sidecar/initcontainer 추가의 경우 이미지 경로 및 컨테이너 이름
-              - ServiceAccount SCC | rolebinding
-                - scc 의 종류 및 할당할 serviceAccount 정보 또는 할당하고자 하는 rolebinding 정보
-              - ConfigMap/Secret
-                - 변경할 내용(manifest 의 이름과 config, env 값등)
-              - PersistentVolumeClaim
-                - 변경하고자 하는 pvc 이름, capacity
-              - Service
-                - type 변경 정보(ClusterIP, NodePort)
-              - Route/Ingress 인증서 갱신(OKD 인 경우 Route 만)
-                - 인증서 원본, 반영 시각
-        2.2. KubeVirt
-          - Requirements
-            - 2.2.1. 포함
-            - 변경이 필요한 VM 정보와 변경할 자원의 종류와 capacity
-        2.3. vSphere
-          - Requitements
-            - 변경 대상 VM과 변경 대상 자원(CPU/MEM/DISK)
-            - Power On/Off/재시작(VM state/phase 변경) 할 VM 정보
+  - 판단에 필요한 실제 작업의 범위는 다음과 같다. 이 내용은 SKILL 로 정의/관리한다. (`docs/skill/job_scope.md`)
+    - 260902 스킬(docs/skill/job_scope.md) 내용을 단순하게 변경한다.
 
-      3. 생성 작업(TBD)
-        3.1. Kubernetes
-          - Requirements
-            - 대상 manifests : RoleBinding, Group/Users(OKD only), Namespace(Project), Deployments(Deployment, Statefulset, DaemonSet, DeploymentConfig(OKD Only)), ServiceAccount, ConfigMap/Secret, PersistentVolumeClaim, Service, Route/Ingress, EgressIP(OKD 버전에 따라, 4.15 이하(ovs) : netnamespace, hostsubnet, 4.18 이상(ovn) : EgressIP)
-            - 대상 manifests 별 하위 Requirements
-              - Namespace
-                - 이름, DisplayName, ResourceQuota 등
-                - ResourceQuota 정보
-                  - CPU/MEM capacity
-                  - Pod 개수 Limit(옵션)
-              - Group/Users(OKD only)
-                - 신규 생성할 그룹, 할당할 사용자
-              - RoleBinding
-                - role 할당(OKD 인 경우 ["admin", "cru-damin", "view", "edit"], 일반 K8S 인 경우 ["admin", "view", "edit"])
-              - Deployments
-                - 이름, 이미지, replicas, updateStrategy, serviceAccount 정보 등
-              - ServiceAccount 
-                - 이름, 할당할 scc, rolebinding
-              - ConfigMap/Secret
-                - 이름, config, env 값을 정의한 파일 내용
-              - PersistentVolumeClaim
-                - 이름, capacity, storageclass
-              - Service
-                - expose 대상 deployment
-                - port
-                - target-port(옵션)
-              - Route/Ingress(OKD 인 경우 Route 만)
-                - 이름, 서비스도메인(hostname), forward service, forward path
-                - insecure 여부, secure인 경우 인증서 정보
-        3.2. KubeVirt
-          - Requirements
-            - 3.2.1. 포함
-            - 생성할 VM 정보
-              - hostname
-              - IP
-              - OS(베이스이미지)
-              - CPU/MEM/DISK
-        3.3. vSphere
-          - Requitements
-            - 생성할 VM 정보
-              - hostname
-              - IP
-              - OS(베이스이미지)
-              - CPU/MEM/DISK
-        
+```
+# 메일 제목과 본문을 기준으로 내용을 파악
+- 메일 제목보다는 본문을 우선 판단한다.
 
+## decision_type 의 기준
+1. decision_type = 11 의 기준
+  - 메일 제목과 본문의 내용이 부재중 응답(ex. AUTOREPLY 등)인 경우
+  - 발신인의 메일 도메인이 다음이 아닌 경우
+    - @lguplus.co.kr, @lgupluspartners.co.kr
+  - 안내성 메일이거나 본문에 텍스트가 없고 이미지 등으로만 구성된 경우
+  - 메일 제목과 본문의 내용이 다음 주제에서 벗어나는 경우
+    1. kubernetes 클러스터
+    2. kubevirt 클러스터
+    3. ansible playbook 또는 AWX
+    4. vsphere VM, NSX
+    5. 그 외 인프라의 형태가 명시되지는 않았으나 인프라 서비스에 대한 위치, 아키텍처 구성, ansible playbook 생성에 대한 요청 또는 문의
+2. decision_type = 5 의 기준
+  2.1. 대상 인프라의 구성 정보제공, 아키텍처 분석, 현황 파악(비파괴성 인벤토리 Read) 인 경우 정보 요청시 각 인프라 별로 최소 다음 정보가 제공되어야 한다.
+    2.1.1. Kubernetes
+      - cluster 명 | namespace(project) 명 | deploy 명 | project 의 display 명
+    2.1.2. Kubevirt
+      - cluster 명 | namespace(project) 명 | deploy 명 | project 의 display 명 | VM 명
+    2.1.3. ansible / awx
+      - ansible/awx는 해당 없음
+    2.1.4. vsphere VM, NSX
+      - VM명 | 호스트명 | 호스트명에 포함된 시스템코드(일반적으로 영소문자 4개) | IP주소
+  2.2. 대상 인프라의 구성을 변경하거나 생성, 삭제(CUD) 작업의 경우 최소 다음 정보가 제공되어야 한다.
+    2.2.1. Kubernetes
+      - Requirements
+        - 대상 manifests : RoleBinding, Group/Users(OKD only), Namespace(Project), Deployments(Deployment, Statefulset, DaemonSet, DeploymentConfig(OKD Only)), ServiceAccount, ConfigMap/Secret, PersistentVolumeClaim, Service, Route/Ingress
+        - 대상 manifests 별 하위 Requirements
+          - Namespace
+            - 변경 대상 값 : ex) DisplayName, ResourceQuota 등
+          - ResourceQuota 정보
+            - CPU/MEM capacity
+            - Pod 개수 Limit(옵션)
+          - Group/Users(OKD only)
+            - 그룹에 할당할 그룹명/사용자
+          - RoleBinding
+            - role 할당(OKD 인 경우 ["admin", "cru-damin", "view", "edit"], 일반 K8S 인 경우 ["admin", "view", "edit"])
+          - Deployments
+            - 변경 대상 값 : ex) 이미지 경로, Resources, Replicas, updateStrategy, serviceAccount 등
+            - sidecar/initcontainer 추가의 경우 이미지 경로 및 컨테이너 이름
+          - ServiceAccount SCC | rolebinding
+            - scc 의 종류 및 할당할 serviceAccount 정보 또는 할당하고자 하는 rolebinding 정보
+          - ConfigMap/Secret
+            - 변경할 내용(manifest 의 이름과 config, env 값등)
+          - PersistentVolumeClaim
+            - 변경하고자 하는 pvc 이름, capacity
+          - Service
+            - type 변경 정보(ClusterIP, NodePort)
+          - Route/Ingress 인증서 갱신(OKD 인 경우 Route 만)
+            - 인증서 원본, 반영 시각
+    2.2.2. KubeVirt
+      - Requirements
+        - 2.2.1. 포함
+        - 변경이 필요한 VM 정보와 변경할 자원의 종류와 capacity
+    2.2.3. vSphere
+      - Requitements
+        - 변경 대상 VM과 변경 대상 자원(CPU/MEM/DISK)
+        - Power On/Off/재시작(VM state/phase 변경) 할 VM 정보
+3. decision_type = 10 의 기준
+  - 위 1, 2 에 해당하지 않는 경우
+
+```
+    
+# received_mail 적재후 JOB_DECISION_AGENT 호출을 위한 동작 연결 (완료)
+received_mail 에 레코드가 적재되면, decision_type = 0 인 레코드에 대해 다음 동작을 수행한다.
+1. 순차적으로 메일의 다음 컨텐트를 전달하여 JOB_DECISION_AGENT를 호출하여 문의한다.
+  - 메일 제목
+  - 메일 본문
+  - 첨부 파일 : 첨부는 반드시 텍스트 포맷으로 받는다. office 문서(docs, xlsx, pptx 등, 단 csv는 제외) 또는 read가 불가능한 첨부의 경우 decision_type = 5 로 판단한다.
+2. 에이전트의 응답 json을 포맷을 확인하고 결과에 따라 
+  2.1. decision_type = 10 (job)
+    - jobs 테이블에 신규 작업으로 추가한다.
+    - email 발신자의 주소는 명확하다. 다만 이름/조직 명은 없을 수 있다. 이 경우 조직(requester_depart)는 테이블 컬럼이 nullable 이면 공백으로 넣고 null 을 허용하지 않을 경우 확인 불가로 padding 한다. requester_name 은 email 주소로 대체한다. madang_id 는 이메일 주소의 계정 부분이다. job_type 은 1이다.
+    - recevied_mail 테이블의 레코드는 decision_type = 10 으로 업데이트한다.
+  2.2. decision_type = 11 (not a job, drop)
+    - received_mail 테이블의 레코드는 decision_type = 11 로 업데이트한다.
+  2.3. decision_type = 5 (more information needed)
+    - received_mail 테이블의 레코드는 decision_type = 5 로 업데이트한다.
+    - 발신자에게 부족한 부분을 추가 요청하는 회신 메일을 발송한다. 회신 메일 제목에는 다음 헤더를 넣는다.
+      회신 메일 제목 양식 : [자료보완] {기존 메일 제목}
+      회신 메일의 본문 내용 : 에이전트에서 판단한 추가 요청 사항을 넣는다. 이 과정을 처리하기 위해 JOB_DECISION_AGENT의 응답에 보환이 필요한 부분이 있다면 시스템 프롬프트를 보완한다.
+    - 메일 참조자로  users.role = 0, 2 인 사용자를 추가한다.
+
+ 
 
 
 

@@ -12,6 +12,7 @@ from backend.app.job_decision_agent.agent import job_decision_agent_service
 from backend.app.job_decision_agent.settings import STATIC_CONFIG
 from backend.app.logging.agent_logger import log_agent_error, log_agent_interaction
 from backend.app.middleware.session_auth import get_request_auth_user
+from backend.app.services.job_decision_pipeline import process_received_mail_decision
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +46,9 @@ class JobDecisionEvaluateResponse(BaseModel):
     input_tokens: int = 0
     output_tokens: int = 0
     record: dict[str, Any] | None = None
+    job_idx: int | None = None
+    job_srnum: str | None = None
+    email_sent: bool = False
 
 
 @router.get("/job-decision-agent/status")
@@ -98,10 +102,10 @@ async def job_decision_agent_evaluate(
     body: JobDecisionEvaluateRequest,
     request: Request,
 ) -> JobDecisionEvaluateResponse:
-    """Classify a received_mail uuid and optionally persist decision_type."""
+    """Classify a received_mail uuid; persist applies jobs insert / supplement email."""
     auth_user = get_request_auth_user(request)
     try:
-        outcome = await job_decision_agent_service.evaluate_received_mail(
+        outcome = await process_received_mail_decision(
             request.app.state.database_path,
             body.uuid,
             persist=body.persist,
@@ -140,4 +144,7 @@ async def job_decision_agent_evaluate(
         input_tokens=int(outcome.get("input_tokens") or 0),
         output_tokens=int(outcome.get("output_tokens") or 0),
         record=outcome.get("record"),
+        job_idx=outcome.get("job_idx"),
+        job_srnum=outcome.get("job_srnum"),
+        email_sent=bool(outcome.get("email_sent")),
     )

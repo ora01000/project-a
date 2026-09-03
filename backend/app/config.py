@@ -122,6 +122,14 @@ class ReceivedMailSettings(BaseModel):
     attachment_home: Path = Path("data/received_mail_attachments")
 
 
+class JobDecisionLoopSettings(BaseModel):
+    """Pending received_mail → JOB_DECISION_AGENT (independent of mail receive)."""
+
+    enabled: bool = True
+    poll_interval_seconds: int = 30
+    initial_delay_seconds: int = 5
+
+
 class K8sCollectorSettings(BaseModel):
     # Deployed (http) mount path; mock/local may omit and use ~/.kube/config
     kubeconfig: str = "/etc/k8s/kubeconfig"
@@ -247,6 +255,19 @@ class AppSettings(BaseSettings):
     received_mail_attachment_home: str | None = Field(
         default=None,
         alias="RECEIVED_MAIL_ATTACHMENT_HOME",
+    )
+
+    job_decision_loop_enabled: bool | None = Field(
+        default=None,
+        alias="JOB_DECISION_LOOP_ENABLED",
+    )
+    job_decision_poll_interval_seconds: int | None = Field(
+        default=None,
+        alias="JOB_DECISION_POLL_INTERVAL_SECONDS",
+    )
+    job_decision_poll_initial_delay_seconds: int | None = Field(
+        default=None,
+        alias="JOB_DECISION_POLL_INITIAL_DELAY_SECONDS",
     )
 
     k8s_collector_kubeconfig: str | None = Field(default=None, alias="K8S_COLLECTOR_KUBECONFIG")
@@ -686,6 +707,42 @@ def load_received_mail_settings() -> ReceivedMailSettings:
         poll_interval_seconds=max(5, poll_interval_seconds),
         initial_delay_seconds=max(0, initial_delay_seconds),
         attachment_home=home_path,
+    )
+
+
+def load_job_decision_loop_settings() -> JobDecisionLoopSettings:
+    yaml_settings = _load_yaml(CONFIG_DIR / "settings.yaml")
+    loop_yaml = yaml_settings.get("job_decision", {})
+    env_settings = AppSettings()
+
+    if env_settings.job_decision_loop_enabled is not None:
+        enabled = env_settings.job_decision_loop_enabled
+    else:
+        enabled = _as_bool(loop_yaml.get("enabled"), True)
+
+    if env_settings.job_decision_poll_interval_seconds is not None:
+        interval_raw = env_settings.job_decision_poll_interval_seconds
+    else:
+        interval_raw = loop_yaml.get("poll_interval_seconds", 30)
+
+    if env_settings.job_decision_poll_initial_delay_seconds is not None:
+        delay_raw = env_settings.job_decision_poll_initial_delay_seconds
+    else:
+        delay_raw = loop_yaml.get("initial_delay_seconds", 5)
+
+    try:
+        poll_interval_seconds = int(interval_raw)
+    except (TypeError, ValueError):
+        poll_interval_seconds = 30
+    try:
+        initial_delay_seconds = int(delay_raw)
+    except (TypeError, ValueError):
+        initial_delay_seconds = 5
+
+    return JobDecisionLoopSettings(
+        enabled=enabled,
+        poll_interval_seconds=max(5, poll_interval_seconds),
+        initial_delay_seconds=max(0, initial_delay_seconds),
     )
 
 
