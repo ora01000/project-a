@@ -148,19 +148,25 @@ export function WorkflowPage({
   }, [loadWorkflows, loadWorkNodes]);
 
   const handleSaved = async (item: WorkflowItem) => {
-    await loadWorkflows();
+    await Promise.all([loadWorkflows(), loadWorkNodes()]);
     setSelectedIdx(item.idx);
     setMode("edit");
   };
 
   const handleCheckedIn = async (item: WorkflowItem) => {
-    await loadWorkflows();
+    await Promise.all([loadWorkflows(), loadWorkNodes()]);
     setSelectedIdx(item.idx);
     setMode("edit");
   };
 
   const handleCheckedOut = async (item: WorkflowItem) => {
-    await loadWorkflows();
+    await Promise.all([loadWorkflows(), loadWorkNodes()]);
+    setSelectedIdx(item.idx);
+    setMode("edit");
+  };
+
+  const handleRestored = async (item: WorkflowItem) => {
+    await Promise.all([loadWorkflows(), loadWorkNodes()]);
     setSelectedIdx(item.idx);
     setMode("edit");
   };
@@ -232,11 +238,16 @@ export function WorkflowPage({
               selected={selected}
               workNodes={workNodes}
               user={user}
-              editorKey={mode === "create" ? `create-${createKey}` : `wf-${selectedIdx ?? "none"}`}
+              editorKey={
+                mode === "create"
+                  ? `create-${createKey}`
+                  : `wf-${selectedIdx ?? "none"}-${selected?.checkin_time || "out"}-${selected?.is_draft ? "d" : "c"}`
+              }
               onSaved={handleSaved}
               onWorkNodesChanged={loadWorkNodes}
               onCheckedIn={handleCheckedIn}
               onCheckedOut={handleCheckedOut}
+              onRestored={handleRestored}
             />
           </div>
 

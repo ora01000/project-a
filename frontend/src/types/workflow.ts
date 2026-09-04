@@ -19,6 +19,7 @@ export interface WorkNodeItem {
   files: string;
   create_date?: string;
   validate_date?: string;
+  is_draft?: boolean;
 }
 
 export interface WorkflowApprover {
@@ -65,4 +66,6 @@ export interface WorkflowItem {
   test_result?: boolean;
   validate_date?: string;
   graph: WorkflowGraph;
+  is_draft?: boolean;
+  draft_dirty?: boolean;
 }

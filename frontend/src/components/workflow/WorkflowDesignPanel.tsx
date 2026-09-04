@@ -14,6 +14,7 @@ interface WorkflowDesignPanelProps {
   onWorkNodesChanged: () => Promise<void> | void;
   onCheckedIn: (item: WorkflowItem) => Promise<void> | void;
   onCheckedOut: (item: WorkflowItem) => Promise<void> | void;
+  onRestored: (item: WorkflowItem) => Promise<void> | void;
 }
 
 async function parseError(response: Response, fallback: string): Promise<string> {
@@ -39,6 +40,7 @@ export function WorkflowDesignPanel({
   onWorkNodesChanged,
   onCheckedIn,
   onCheckedOut,
+  onRestored,
 }: WorkflowDesignPanelProps) {
   const [lockError, setLockError] = useState<string | null>(null);
   const [isLockBusy, setIsLockBusy] = useState(false);
@@ -56,51 +58,38 @@ export function WorkflowDesignPanel({
   if (mode === "create" || (mode === "edit" && selected)) {
     const checkedIn = hasActiveCheckin(selected);
     const mine = isMyCheckin(selected, user);
-    // 신규 생성은 편집 가능. 기존 선택은 본인 체크인일 때만 편집.
     const readOnly = mode === "edit" ? !(checkedIn && mine) : false;
     const showCheckinButton = mode === "edit" && !checkedIn;
     const showCheckoutButton = mode === "edit" && checkedIn && mine;
     const checkedInByOther = mode === "edit" && checkedIn && !mine;
+    const draftHint =
+      mode === "edit" && checkedIn && mine
+        ? selected?.draft_dirty
+          ? "드래프트 저장됨 · 체크아웃 시 DB 반영"
+          : "체크인됨 · 저장은 Redis 드래프트에만 기록"
+        : null;
 
-    const handleCheckin = async () => {
+    const runLockAction = async (
+      path: "checkin" | "checkout" | "restore",
+      onDone: (item: WorkflowItem) => Promise<void> | void,
+      failMessage: string,
+    ) => {
       if (!selected) {
         return;
       }
       setIsLockBusy(true);
       setLockError(null);
       try {
-        const response = await fetch(`/api/workflows/${selected.idx}/checkin`, {
+        const response = await fetch(`/api/workflows/${selected.idx}/${path}`, {
           method: "POST",
         });
         if (!response.ok) {
-          throw new Error(await parseError(response, "체크인에 실패했습니다."));
+          throw new Error(await parseError(response, failMessage));
         }
         const item = (await response.json()) as WorkflowItem;
-        await onCheckedIn(item);
+        await onDone(item);
       } catch (err) {
-        setLockError(err instanceof Error ? err.message : "체크인에 실패했습니다.");
-      } finally {
-        setIsLockBusy(false);
-      }
-    };
-
-    const handleCheckout = async () => {
-      if (!selected) {
-        return;
-      }
-      setIsLockBusy(true);
-      setLockError(null);
-      try {
-        const response = await fetch(`/api/workflows/${selected.idx}/checkout`, {
-          method: "POST",
-        });
-        if (!response.ok) {
-          throw new Error(await parseError(response, "체크아웃에 실패했습니다."));
-        }
-        const item = (await response.json()) as WorkflowItem;
-        await onCheckedOut(item);
-      } catch (err) {
-        setLockError(err instanceof Error ? err.message : "체크아웃에 실패했습니다.");
+        setLockError(err instanceof Error ? err.message : failMessage);
       } finally {
         setIsLockBusy(false);
       }
@@ -120,32 +109,47 @@ export function WorkflowDesignPanel({
                   : "읽기 모드 · 편집하려면 체크인하세요"}
               </p>
             ) : null}
+            {draftHint ? <p className="mt-0.5 text-[11px] text-amber-200/90">{draftHint}</p> : null}
             {lockError ? <p className="mt-0.5 text-[11px] text-rose-300">{lockError}</p> : null}
           </div>
-          {showCheckinButton ? (
-            <button
-              type="button"
-              disabled={isLockBusy}
-              onClick={() => {
-                void handleCheckin();
-              }}
-              className="shrink-0 rounded-md border border-sky-700 bg-sky-950/50 px-3 py-1.5 text-sm font-medium text-sky-100 hover:bg-sky-900/60 disabled:opacity-50"
-            >
-              {isLockBusy ? "체크인 중…" : "체크인"}
-            </button>
-          ) : null}
-          {showCheckoutButton ? (
-            <button
-              type="button"
-              disabled={isLockBusy}
-              onClick={() => {
-                void handleCheckout();
-              }}
-              className="shrink-0 rounded-md border border-slate-600 bg-slate-900/70 px-3 py-1.5 text-sm font-medium text-slate-100 hover:bg-slate-800 disabled:opacity-50"
-            >
-              {isLockBusy ? "체크아웃 중…" : "체크아웃"}
-            </button>
-          ) : null}
+          <div className="flex shrink-0 items-center gap-1.5">
+            {showCheckinButton ? (
+              <button
+                type="button"
+                disabled={isLockBusy}
+                onClick={() => {
+                  void runLockAction("checkin", onCheckedIn, "체크인에 실패했습니다.");
+                }}
+                className="rounded-md border border-sky-700 bg-sky-950/50 px-3 py-1.5 text-sm font-medium text-sky-100 hover:bg-sky-900/60 disabled:opacity-50"
+              >
+                {isLockBusy ? "처리 중…" : "체크인"}
+              </button>
+            ) : null}
+            {showCheckoutButton ? (
+              <>
+                <button
+                  type="button"
+                  disabled={isLockBusy}
+                  onClick={() => {
+                    void runLockAction("restore", onRestored, "원복에 실패했습니다.");
+                  }}
+                  className="rounded-md border border-amber-700/80 bg-amber-950/40 px-3 py-1.5 text-sm font-medium text-amber-100 hover:bg-amber-900/50 disabled:opacity-50"
+                >
+                  원복
+                </button>
+                <button
+                  type="button"
+                  disabled={isLockBusy}
+                  onClick={() => {
+                    void runLockAction("checkout", onCheckedOut, "체크아웃에 실패했습니다.");
+                  }}
+                  className="rounded-md border border-slate-600 bg-slate-900/70 px-3 py-1.5 text-sm font-medium text-slate-100 hover:bg-slate-800 disabled:opacity-50"
+                >
+                  체크아웃
+                </button>
+              </>
+            ) : null}
+          </div>
         </header>
         <WorkflowEditor
           key={editorKey}
