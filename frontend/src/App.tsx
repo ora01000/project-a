@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { DashboardPage } from "./components/DashboardPage";
+import { WorkflowPage } from "./components/workflow/WorkflowPage";
 import { LoginPage } from "./components/LoginPage";
 import { MenuBar } from "./components/MenuBar";
 import { TeamsInboundDebugWatcher } from "./components/TeamsInboundDebugWatcher";
@@ -245,14 +246,7 @@ export default function App() {
 
   return (
     <>
-      <div className="flex h-screen flex-col overflow-hidden bg-slate-950 px-6 py-6">
-        <header className="mb-4 shrink-0">
-          <h1 className="text-2xl font-bold text-slate-100">AX 인프라 운영 콘솔</h1>
-          <p className="mt-1 text-sm text-slate-400">
-            에이전트 노드와 오른쪽 대화형 터미널로 멀티 에이전트를 관리합니다.
-          </p>
-        </header>
-
+      <div className="flex h-screen flex-col overflow-hidden bg-slate-950 px-2 py-1">
         <MenuBar
           activeView={activeView}
           user={user}
@@ -261,14 +255,24 @@ export default function App() {
           onUserUpdated={handleUserUpdated}
         />
 
-        <DashboardPage
-          agents={agents}
-          error={error}
-          user={user}
-          integratedChatFullscreen={integratedChatFullscreen}
-          onToggleIntegratedChatFullscreen={toggleIntegratedChatFullscreen}
-          onChatComplete={loadDashboardData}
-        />
+        {activeView === "workflow" ? (
+          <WorkflowPage
+            agents={agents}
+            user={user}
+            integratedChatFullscreen={integratedChatFullscreen}
+            onToggleIntegratedChatFullscreen={toggleIntegratedChatFullscreen}
+            onChatComplete={loadDashboardData}
+          />
+        ) : (
+          <DashboardPage
+            agents={agents}
+            error={error}
+            user={user}
+            integratedChatFullscreen={integratedChatFullscreen}
+            onToggleIntegratedChatFullscreen={toggleIntegratedChatFullscreen}
+            onChatComplete={loadDashboardData}
+          />
+        )}
 
         {activeView === "user-list" ? (
           <UserListPage

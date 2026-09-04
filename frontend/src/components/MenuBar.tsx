@@ -152,7 +152,7 @@ export function MenuBar({ activeView, user, onNavigate, onLogout, onUserUpdated 
 
   return (
     <>
-      <nav className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-800 bg-slate-900/80 px-4 py-3">
+      <nav className="mb-1 flex shrink-0 flex-wrap items-center justify-between gap-2 px-1 py-1">
         <div className="flex flex-wrap items-center gap-1 text-sm">
           <button
             type="button"
@@ -160,6 +160,14 @@ export function MenuBar({ activeView, user, onNavigate, onLogout, onUserUpdated 
             className={menuButtonClass(activeView === "dashboard")}
           >
             대시보드
+          </button>
+          <span className="text-slate-600">|</span>
+          <button
+            type="button"
+            onClick={() => onNavigate("workflow")}
+            className={menuButtonClass(activeView === "workflow")}
+          >
+            워크플로우
           </button>
           <span className="text-slate-600">|</span>
 

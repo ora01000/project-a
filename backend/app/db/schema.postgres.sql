@@ -161,3 +161,58 @@ CREATE INDEX IF NOT EXISTS ix_received_mail_fetched_at
 
 ALTER TABLE received_mail
     ADD COLUMN IF NOT EXISTS unreadable_attachment_names TEXT NOT NULL DEFAULT '[]';
+
+-- Workflow designer (PLAN 260903)
+CREATE TABLE IF NOT EXISTS work_node (
+    idx BIGSERIAL PRIMARY KEY,
+    uuid VARCHAR(36) NOT NULL UNIQUE,
+    work_name VARCHAR(100) NOT NULL,
+    work_description VARCHAR(500) NOT NULL DEFAULT '',
+    target_agent INTEGER NOT NULL DEFAULT 0,
+    user_prompt TEXT NOT NULL DEFAULT '',
+    agent_response TEXT NOT NULL DEFAULT '',
+    script_type VARCHAR(20) NOT NULL DEFAULT '',
+    test_result INTEGER NOT NULL DEFAULT 0,
+    files VARCHAR(300) NOT NULL DEFAULT '',
+    create_date TEXT NOT NULL DEFAULT '',
+    validate_date TEXT NOT NULL DEFAULT ''
+);
+
+ALTER TABLE work_node
+    ADD COLUMN IF NOT EXISTS uuid VARCHAR(36) NOT NULL DEFAULT '';
+ALTER TABLE work_node
+    ADD COLUMN IF NOT EXISTS work_description VARCHAR(500) NOT NULL DEFAULT '';
+ALTER TABLE work_node
+    ADD COLUMN IF NOT EXISTS script_type VARCHAR(20) NOT NULL DEFAULT '';
+ALTER TABLE work_node
+    ADD COLUMN IF NOT EXISTS create_date TEXT NOT NULL DEFAULT '';
+ALTER TABLE work_node
+    ADD COLUMN IF NOT EXISTS validate_date TEXT NOT NULL DEFAULT '';
+CREATE UNIQUE INDEX IF NOT EXISTS work_node_uuid_uidx ON work_node (uuid);
+
+CREATE TABLE IF NOT EXISTS workflow (
+    idx BIGSERIAL PRIMARY KEY,
+    uuid VARCHAR(36) NOT NULL UNIQUE,
+    checkin_user INTEGER NOT NULL DEFAULT 0,
+    checkin_time TEXT NOT NULL DEFAULT '',
+    workflow_name VARCHAR(100) NOT NULL,
+    workflow_description VARCHAR(500) NOT NULL DEFAULT '',
+    workflow TEXT NOT NULL DEFAULT '',
+    create_date TEXT NOT NULL DEFAULT '',
+    test_result INTEGER NOT NULL DEFAULT 0,
+    validate_date TEXT NOT NULL DEFAULT ''
+);
+
+ALTER TABLE workflow
+    ADD COLUMN IF NOT EXISTS uuid VARCHAR(36) NOT NULL DEFAULT '';
+ALTER TABLE workflow
+    ADD COLUMN IF NOT EXISTS checkin_user INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE workflow
+    ADD COLUMN IF NOT EXISTS checkin_time TEXT NOT NULL DEFAULT '';
+ALTER TABLE workflow
+    ADD COLUMN IF NOT EXISTS create_date TEXT NOT NULL DEFAULT '';
+ALTER TABLE workflow
+    ADD COLUMN IF NOT EXISTS test_result INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE workflow
+    ADD COLUMN IF NOT EXISTS validate_date TEXT NOT NULL DEFAULT '';
+CREATE UNIQUE INDEX IF NOT EXISTS workflow_uuid_uidx ON workflow (uuid);

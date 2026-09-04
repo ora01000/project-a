@@ -1,0 +1,174 @@
+import { useState } from "react";
+
+import type { AuthUser } from "../../types/auth";
+import type { WorkNodeItem, WorkflowItem } from "../../types/workflow";
+import { WorkflowEditor } from "./WorkflowEditor";
+
+interface WorkflowDesignPanelProps {
+  mode: "idle" | "create" | "edit";
+  selected: WorkflowItem | null;
+  workNodes: WorkNodeItem[];
+  user: AuthUser;
+  editorKey: string;
+  onSaved: (item: WorkflowItem) => Promise<void> | void;
+  onWorkNodesChanged: () => Promise<void> | void;
+  onCheckedIn: (item: WorkflowItem) => Promise<void> | void;
+  onCheckedOut: (item: WorkflowItem) => Promise<void> | void;
+}
+
+async function parseError(response: Response, fallback: string): Promise<string> {
+  const payload = (await response.json().catch(() => null)) as { detail?: string } | null;
+  return typeof payload?.detail === "string" ? payload.detail : fallback;
+}
+
+function hasActiveCheckin(item: WorkflowItem | null): boolean {
+  return Boolean(item && (item.checkin_user ?? 0) > 0);
+}
+
+function isMyCheckin(item: WorkflowItem | null, user: AuthUser): boolean {
+  return Boolean(item && (item.checkin_user ?? 0) === user.idx);
+}
+
+export function WorkflowDesignPanel({
+  mode,
+  selected,
+  workNodes,
+  user,
+  editorKey,
+  onSaved,
+  onWorkNodesChanged,
+  onCheckedIn,
+  onCheckedOut,
+}: WorkflowDesignPanelProps) {
+  const [lockError, setLockError] = useState<string | null>(null);
+  const [isLockBusy, setIsLockBusy] = useState(false);
+
+  if (mode === "idle") {
+    return (
+      <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-xl border border-slate-700 bg-slate-900/50 shadow-inner">
+        <div className="flex h-full items-center justify-center text-sm text-slate-500">
+          워크플로우를 선택하거나 새로 만드세요.
+        </div>
+      </section>
+    );
+  }
+
+  if (mode === "create" || (mode === "edit" && selected)) {
+    const checkedIn = hasActiveCheckin(selected);
+    const mine = isMyCheckin(selected, user);
+    // 신규 생성은 편집 가능. 기존 선택은 본인 체크인일 때만 편집.
+    const readOnly = mode === "edit" ? !(checkedIn && mine) : false;
+    const showCheckinButton = mode === "edit" && !checkedIn;
+    const showCheckoutButton = mode === "edit" && checkedIn && mine;
+    const checkedInByOther = mode === "edit" && checkedIn && !mine;
+
+    const handleCheckin = async () => {
+      if (!selected) {
+        return;
+      }
+      setIsLockBusy(true);
+      setLockError(null);
+      try {
+        const response = await fetch(`/api/workflows/${selected.idx}/checkin`, {
+          method: "POST",
+        });
+        if (!response.ok) {
+          throw new Error(await parseError(response, "체크인에 실패했습니다."));
+        }
+        const item = (await response.json()) as WorkflowItem;
+        await onCheckedIn(item);
+      } catch (err) {
+        setLockError(err instanceof Error ? err.message : "체크인에 실패했습니다.");
+      } finally {
+        setIsLockBusy(false);
+      }
+    };
+
+    const handleCheckout = async () => {
+      if (!selected) {
+        return;
+      }
+      setIsLockBusy(true);
+      setLockError(null);
+      try {
+        const response = await fetch(`/api/workflows/${selected.idx}/checkout`, {
+          method: "POST",
+        });
+        if (!response.ok) {
+          throw new Error(await parseError(response, "체크아웃에 실패했습니다."));
+        }
+        const item = (await response.json()) as WorkflowItem;
+        await onCheckedOut(item);
+      } catch (err) {
+        setLockError(err instanceof Error ? err.message : "체크아웃에 실패했습니다.");
+      } finally {
+        setIsLockBusy(false);
+      }
+    };
+
+    return (
+      <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-xl border border-slate-700 bg-slate-900/50 shadow-inner">
+        <header className="flex shrink-0 items-start justify-between gap-3 border-b border-slate-700/80 px-4 py-3">
+          <div className="min-w-0">
+            <h2 className="truncate text-sm font-semibold text-slate-200">
+              {mode === "create" ? "새로운 워크플로우" : selected?.workflow_name ?? "워크플로우 편집"}
+            </h2>
+            {mode === "edit" && readOnly ? (
+              <p className="mt-0.5 text-[11px] text-slate-500">
+                {checkedInByOther
+                  ? `읽기 모드 · ${(selected?.checkin_username || "다른 사용자").trim()} 체크인 중`
+                  : "읽기 모드 · 편집하려면 체크인하세요"}
+              </p>
+            ) : null}
+            {lockError ? <p className="mt-0.5 text-[11px] text-rose-300">{lockError}</p> : null}
+          </div>
+          {showCheckinButton ? (
+            <button
+              type="button"
+              disabled={isLockBusy}
+              onClick={() => {
+                void handleCheckin();
+              }}
+              className="shrink-0 rounded-md border border-sky-700 bg-sky-950/50 px-3 py-1.5 text-sm font-medium text-sky-100 hover:bg-sky-900/60 disabled:opacity-50"
+            >
+              {isLockBusy ? "체크인 중…" : "체크인"}
+            </button>
+          ) : null}
+          {showCheckoutButton ? (
+            <button
+              type="button"
+              disabled={isLockBusy}
+              onClick={() => {
+                void handleCheckout();
+              }}
+              className="shrink-0 rounded-md border border-slate-600 bg-slate-900/70 px-3 py-1.5 text-sm font-medium text-slate-100 hover:bg-slate-800 disabled:opacity-50"
+            >
+              {isLockBusy ? "체크아웃 중…" : "체크아웃"}
+            </button>
+          ) : null}
+        </header>
+        <WorkflowEditor
+          key={editorKey}
+          user={user}
+          workNodes={workNodes}
+          initialName={mode === "edit" ? selected?.workflow_name ?? "" : ""}
+          initialExpression={mode === "edit" ? selected?.workflow ?? "" : ""}
+          initialDescription={mode === "edit" ? selected?.workflow_description ?? "" : ""}
+          workflowIdx={mode === "edit" ? selected?.idx : undefined}
+          saveLabel="저장"
+          readOnly={readOnly}
+          onSaved={onSaved}
+          onWorkNodesChanged={onWorkNodesChanged}
+        />
+      </section>
+    );
+  }
+
+  return (
+    <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-xl border border-slate-700 bg-slate-900/50 shadow-inner">
+      <div className="flex h-full items-center justify-center text-sm text-slate-500">
+        워크플로우를 선택하거나 새로 만드세요.
+      </div>
+    </section>
+  );
+}

@@ -33,6 +33,7 @@ from backend.app.api.users import router as users_router
 from backend.app.api.teams_inbound_debug import router as teams_inbound_debug_router
 from backend.app.api.whatap_test import router as whatap_test_router
 from backend.app.api.whatap_webhook import router as whatap_webhook_router
+from backend.app.api.workflow import router as workflow_router
 from backend.app.api.axit_mock import router as axit_mock_router
 from backend.app.api.k8s_infra import router as k8s_infra_router
 from backend.app.api.mailserver import router as mailserver_router
@@ -583,6 +584,7 @@ def create_app() -> FastAPI:
     app.include_router(received_mail_router, prefix="/api")
     app.include_router(infra_gap_analysis_router, prefix="/api")
     app.include_router(job_decision_agent_router, prefix="/api")
+    app.include_router(workflow_router, prefix="/api")
     app.include_router(axit_mock_router)
     return app
 
