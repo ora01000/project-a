@@ -80,7 +80,6 @@ function parseValidationPayload(raw: string): { valid: boolean; message: string 
   } catch {
     // fall through — treat raw text as message
   }
-  const lower = raw.toLowerCase();
   const looksFailed = /\b(fail|error|invalid|오류|실패)\b/i.test(raw) && !/\b(pass|valid|성공|통과)\b/i.test(raw);
   return {
     valid: !looksFailed,
