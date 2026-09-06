@@ -21,6 +21,17 @@ interface IntegratedChatPanelProps {
   onToggleFullscreen: () => void;
   onChatComplete?: () => void;
   onCopyToNote?: (content: string, noteName?: string) => Promise<void>;
+  /** When set, only these agent IDs appear (ignores chat_enabled / assignment filters). */
+  allowedAgentIds?: string[];
+  /** Fill the composer and submit once (nonce must change each request). */
+  externalSubmitRequest?: { nonce: number; message: string } | null;
+  onExternalSubmitHandled?: () => void;
+  /** Fired after a successful assistant reply (not abort/error). */
+  onAssistantResponse?: (payload: { agentId: string; content: string }) => void;
+  /** Expand user message input height for workflow terminal (fixed px; dashboard keeps default). */
+  expandUserInput?: boolean;
+  /** Fixed user input height when expandUserInput is true. Default 300. */
+  userInputHeightPx?: number;
 }
 
 function createResponseId(): string {
@@ -93,6 +104,12 @@ export function IntegratedChatPanel({
   onToggleFullscreen,
   onChatComplete,
   onCopyToNote,
+  allowedAgentIds,
+  externalSubmitRequest = null,
+  onExternalSubmitHandled,
+  onAssistantResponse,
+  expandUserInput = false,
+  userInputHeightPx = 300,
 }: IntegratedChatPanelProps) {
   const [selectedAgentId, setSelectedAgentId] = useState("");
   const [input, setInput] = useState("");
@@ -108,6 +125,8 @@ export function IntegratedChatPanel({
   const conversationScrollRef = useRef<HTMLDivElement>(null);
   const layoutRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const processedExternalNonceRef = useRef<number | null>(null);
+  const sendChatMessageRef = useRef<(trimmed: string) => Promise<void>>(async () => {});
   const [agentListHeight, setAgentListHeight] = useState(DEFAULT_AGENT_LIST_HEIGHT);
   const isResizingRef = useRef(false);
   const resizeStartYRef = useRef(0);
@@ -184,6 +203,16 @@ export function IntegratedChatPanel({
   };
 
   const chatAgents = useMemo(() => {
+    if (allowedAgentIds && allowedAgentIds.length > 0) {
+      const allowed = new Set(allowedAgentIds.map((id) => id.trim()).filter(Boolean));
+      const matched = agents.filter((agent) => allowed.has(agent.id));
+      // Preserve allowedAgentIds order when possible
+      const byId = new Map(matched.map((agent) => [agent.id, agent]));
+      const ordered = allowedAgentIds
+        .map((id) => byId.get(id.trim()))
+        .filter((agent): agent is AgentInfo => Boolean(agent));
+      return ordered;
+    }
     const assignedIds = new Set(
       (user.agent_ids ?? []).map((id) => id.trim()).filter(Boolean),
     );
@@ -194,7 +223,7 @@ export function IntegratedChatPanel({
       return assignedIds.has(agent.id);
     });
     return [...enabled].sort((left, right) => left.name.localeCompare(right.name, "ko"));
-  }, [agents, user.agent_ids]);
+  }, [agents, allowedAgentIds, user.agent_ids]);
 
   const selectedAgent = useMemo(
     () => chatAgents.find((agent) => agent.id === selectedAgentId) ?? null,
@@ -350,7 +379,8 @@ export function IntegratedChatPanel({
       return;
     }
 
-    const nextHistory = await appendInputHistory(selectedAgent.id, trimmed);
+    const agentId = selectedAgent.id;
+    const nextHistory = await appendInputHistory(agentId, trimmed);
     setInputHistory(nextHistory);
     setHistoryIndex(-1);
     setInput("");
@@ -363,7 +393,7 @@ export function IntegratedChatPanel({
         ...prev,
         {
           id: responseId,
-          agentId: selectedAgent.id,
+          agentId,
           agentName: selectedAgent.name,
           userContent: trimmed,
           assistantContent: "",
@@ -378,9 +408,10 @@ export function IntegratedChatPanel({
 
     let assistantText = "";
     let toolsUsed: ToolUsage[] = [];
+    let completedOk = false;
 
     try {
-      const response = await fetch(`/api/agents/${selectedAgent.id}/chat`, {
+      const response = await fetch(`/api/agents/${agentId}/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -446,6 +477,7 @@ export function IntegratedChatPanel({
           break;
         }
       }
+      completedOk = Boolean(assistantText.trim());
     } catch (err) {
       if (isAbortError(err)) {
         updateLastResponse("요청이 취소되었습니다.", toolsUsed);
@@ -457,8 +489,13 @@ export function IntegratedChatPanel({
       abortControllerRef.current = null;
       setIsLoading(false);
       onChatComplete?.();
+      if (completedOk) {
+        onAssistantResponse?.({ agentId, content: assistantText.trim() });
+      }
     }
   };
+
+  sendChatMessageRef.current = sendChatMessage;
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -480,6 +517,45 @@ export function IntegratedChatPanel({
 
     await sendChatMessage(trimmed);
   };
+
+  useEffect(() => {
+    if (!externalSubmitRequest) {
+      return;
+    }
+    if (processedExternalNonceRef.current === externalSubmitRequest.nonce) {
+      return;
+    }
+    if (!selectedAgent || isLoading) {
+      return;
+    }
+
+    const trimmed = externalSubmitRequest.message.trim();
+    processedExternalNonceRef.current = externalSubmitRequest.nonce;
+    onExternalSubmitHandled?.();
+
+    if (!trimmed) {
+      return;
+    }
+
+    setContentTab("chat");
+    setInput(trimmed);
+
+    const submitExternal = async () => {
+      try {
+        const billingStatus = await fetchLlmBillingStatus();
+        if (billingStatus.requires_confirmation) {
+          setBillingConfirmModel(billingStatus.model);
+          setBillingConfirmPrompt(trimmed);
+          return;
+        }
+      } catch {
+        // keep going
+      }
+      await sendChatMessageRef.current(trimmed);
+    };
+
+    void submitExternal();
+  }, [externalSubmitRequest, selectedAgent, isLoading, onExternalSubmitHandled]);
 
   const handleBillingConfirm = () => {
     if (!billingConfirmPrompt) {
@@ -641,8 +717,12 @@ export function IntegratedChatPanel({
 
         <form onSubmit={handleSubmit} className="flex shrink-0 flex-col gap-2 p-3">
           <div
-            className="flex min-h-0 shrink-0 flex-col gap-1 text-xs text-slate-400"
-            style={{ height: agentListHeight }}
+            className={
+              expandUserInput
+                ? "flex shrink-0 flex-col gap-1 text-xs text-slate-400"
+                : "flex min-h-0 shrink-0 flex-col gap-1 text-xs text-slate-400"
+            }
+            style={expandUserInput ? undefined : { height: agentListHeight }}
           >
             <span>에이전트</span>
             {chatAgents.length === 0 ? (
@@ -651,7 +731,11 @@ export function IntegratedChatPanel({
               </p>
             ) : (
               <div
-                className="min-h-0 flex-1 overflow-y-auto rounded-md border border-slate-800 bg-slate-950/40 p-2"
+                className={
+                  expandUserInput
+                    ? "rounded-md border border-slate-800 bg-slate-950/40 p-2"
+                    : "min-h-0 flex-1 overflow-y-auto rounded-md border border-slate-800 bg-slate-950/40 p-2"
+                }
                 role="radiogroup"
                 aria-label="에이전트 선택"
               >
@@ -684,7 +768,9 @@ export function IntegratedChatPanel({
 
           <div
             className="flex shrink-0 gap-2"
-            style={{ height: FIXED_USER_INPUT_HEIGHT }}
+            style={{
+              height: expandUserInput ? userInputHeightPx : FIXED_USER_INPUT_HEIGHT,
+            }}
           >
             <div className="flex h-full shrink-0 flex-col gap-1">
               <button
@@ -744,7 +830,7 @@ export function IntegratedChatPanel({
                 onClick={handleStop}
                 title="응답 중단"
                 aria-label="응답 중단"
-                className="flex items-center justify-center rounded-md bg-rose-600 px-3 py-2 text-white hover:bg-rose-500"
+                className="flex items-center justify-center self-stretch rounded-md bg-rose-600 px-3 py-2 text-white hover:bg-rose-500"
               >
                 <StopIcon />
               </button>
@@ -752,7 +838,7 @@ export function IntegratedChatPanel({
               <button
                 type="submit"
                 disabled={isDisabled || !input.trim()}
-                className="rounded-md bg-sky-600 px-3 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-slate-700"
+                className="self-stretch rounded-md bg-sky-600 px-3 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-slate-700"
               >
                 전송
               </button>

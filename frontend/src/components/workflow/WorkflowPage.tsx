@@ -4,6 +4,7 @@ import type { AgentInfo } from "../../types/agent";
 import type { AuthUser } from "../../types/auth";
 import type { WorkflowItem, WorkNodeItem } from "../../types/workflow";
 import { IntegratedChatPanel } from "../IntegratedChatPanel";
+import { parseAiWorkflowDesignResponse } from "./aiWorkflowParse";
 import { WorkflowDesignPanel } from "./WorkflowDesignPanel";
 import { WorkflowListPanel } from "./WorkflowListPanel";
 
@@ -47,8 +48,52 @@ export function WorkflowPage({
   const [mode, setMode] = useState<"idle" | "create" | "edit">("idle");
   const [createKey, setCreateKey] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [aiImportRequest, setAiImportRequest] = useState<{
+    nonce: number;
+    assistantText: string;
+  } | null>(null);
 
   const selected = items.find((item) => item.idx === selectedIdx) ?? null;
+
+  const handleAssistantResponse = useCallback((payload: { agentId: string; content: string }) => {
+    const agentId = payload.agentId.trim();
+    const isWorkflowAgent =
+      agentId === "WORKFLOW_AGENT" || agentId.toUpperCase().includes("WORKFLOW_AGENT");
+    if (!isWorkflowAgent) {
+      return;
+    }
+    try {
+      parseAiWorkflowDesignResponse(payload.content);
+    } catch (err) {
+      const looksLikeJson = payload.content.trim().startsWith("{");
+      if (looksLikeJson) {
+        setError(
+          err instanceof Error
+            ? `AI 워크플로우 파싱 실패: ${err.message}`
+            : "AI 워크플로우 파싱에 실패했습니다.",
+        );
+      }
+      // 보충 질문(비 JSON)이면 무시
+      return;
+    }
+    setError(null);
+    setMode((current) => {
+      if (current === "idle") {
+        setSelectedIdx(null);
+        setCreateKey((key) => key + 1);
+        return "create";
+      }
+      return current;
+    });
+    setAiImportRequest((current) => ({
+      nonce: (current?.nonce ?? 0) + 1,
+      assistantText: payload.content,
+    }));
+  }, []);
+
+  const handleAiImportHandled = useCallback(() => {
+    setAiImportRequest(null);
+  }, []);
 
   const minCenterPanelWidth =
     (isListCollapsed ? LIST_COLLAPSED_WIDTH : LIST_PANEL_WIDTH) + MIN_DESIGN_PANEL_WIDTH;
@@ -248,6 +293,8 @@ export function WorkflowPage({
               onCheckedIn={handleCheckedIn}
               onCheckedOut={handleCheckedOut}
               onRestored={handleRestored}
+              aiImportRequest={aiImportRequest}
+              onAiImportHandled={handleAiImportHandled}
             />
           </div>
 
@@ -269,6 +316,10 @@ export function WorkflowPage({
         panelWidth={chatPanelWidth}
         onToggleFullscreen={onToggleIntegratedChatFullscreen}
         onChatComplete={onChatComplete}
+        allowedAgentIds={["WORKFLOW_AGENT"]}
+        expandUserInput
+        userInputHeightPx={300}
+        onAssistantResponse={handleAssistantResponse}
       />
     </div>
   );

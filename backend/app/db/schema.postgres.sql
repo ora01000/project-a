@@ -169,8 +169,7 @@ CREATE TABLE IF NOT EXISTS work_node (
     work_name VARCHAR(100) NOT NULL,
     work_description VARCHAR(500) NOT NULL DEFAULT '',
     target_agent INTEGER NOT NULL DEFAULT 0,
-    user_prompt TEXT NOT NULL DEFAULT '',
-    agent_response TEXT NOT NULL DEFAULT '',
+    work_script TEXT NOT NULL DEFAULT '',
     script_type VARCHAR(20) NOT NULL DEFAULT '',
     test_result INTEGER NOT NULL DEFAULT 0,
     files VARCHAR(300) NOT NULL DEFAULT '',
@@ -183,11 +182,37 @@ ALTER TABLE work_node
 ALTER TABLE work_node
     ADD COLUMN IF NOT EXISTS work_description VARCHAR(500) NOT NULL DEFAULT '';
 ALTER TABLE work_node
+    ADD COLUMN IF NOT EXISTS work_script TEXT NOT NULL DEFAULT '';
+ALTER TABLE work_node
     ADD COLUMN IF NOT EXISTS script_type VARCHAR(20) NOT NULL DEFAULT '';
 ALTER TABLE work_node
     ADD COLUMN IF NOT EXISTS create_date TEXT NOT NULL DEFAULT '';
 ALTER TABLE work_node
     ADD COLUMN IF NOT EXISTS validate_date TEXT NOT NULL DEFAULT '';
+-- Legacy column cleanup (agent_response → work_script, drop user_prompt)
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = current_schema()
+          AND table_name = 'work_node'
+          AND column_name = 'agent_response'
+    ) THEN
+        UPDATE work_node
+        SET work_script = agent_response
+        WHERE btrim(COALESCE(work_script, '')) = ''
+          AND btrim(COALESCE(agent_response, '')) <> '';
+        ALTER TABLE work_node DROP COLUMN IF EXISTS agent_response;
+    END IF;
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = current_schema()
+          AND table_name = 'work_node'
+          AND column_name = 'user_prompt'
+    ) THEN
+        ALTER TABLE work_node DROP COLUMN IF EXISTS user_prompt;
+    END IF;
+END $$;
 CREATE UNIQUE INDEX IF NOT EXISTS work_node_uuid_uidx ON work_node (uuid);
 
 CREATE TABLE IF NOT EXISTS workflow (

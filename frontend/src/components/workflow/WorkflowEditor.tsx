@@ -19,6 +19,10 @@ import { assignableAgentId } from "../../types/agentruntime";
 import type { WorkNodeItem, WorkflowApprover, WorkflowItem } from "../../types/workflow";
 import { WorkNodeEditPanel } from "./WorkNodeEditPanel";
 import {
+  parseAiWorkflowDesignResponse,
+  remapWorkflowExpression,
+} from "./aiWorkflowParse";
+import {
   emptyEditorModel,
   hydrateEditor,
   insertAfter,
@@ -47,6 +51,8 @@ interface WorkflowEditorProps {
   onSaved: (item: WorkflowItem) => Promise<void> | void;
   onWorkNodesChanged: () => Promise<void> | void;
   workflowIdx?: number;
+  aiImportRequest?: { nonce: number; assistantText: string } | null;
+  onAiImportHandled?: () => void;
 }
 
 type BalloonField = "approver";
@@ -157,8 +163,12 @@ export function WorkflowEditor({
   onSaved,
   onWorkNodesChanged,
   workflowIdx,
+  aiImportRequest = null,
+  onAiImportHandled,
 }: WorkflowEditorProps) {
   const [name, setName] = useState(initialName);
+  const [description, setDescription] = useState(initialDescription);
+  const processedAiImportNonceRef = useRef<number | null>(null);
   const [model, setModel] = useState<EditorModel>(() => emptyEditorModel());
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
@@ -323,12 +333,138 @@ export function WorkflowEditor({
   }, [initialName]);
 
   useEffect(() => {
+    setDescription(initialDescription);
+  }, [initialDescription]);
+
+  useEffect(() => {
     if (readOnly) {
       setSelectedNodeId(null);
       setOpenMenuId(null);
       setOpenBalloon(null);
     }
   }, [readOnly]);
+
+  const resolveTargetAgentIdx = useCallback(
+    (raw: string): { idx: number; name: string } => {
+      const value = raw.trim();
+      if (!value) {
+        return { idx: 0, name: "" };
+      }
+      if (/^\d+$/.test(value)) {
+        const idx = Number(value);
+        const hit = runtimes.find((item) => item.idx === idx);
+        return { idx, name: hit?.agent_name ?? "" };
+      }
+      const lowered = value.toLowerCase();
+      const hit =
+        runtimes.find((item) => item.agent_name.trim().toLowerCase() === lowered) ||
+        runtimes.find((item) => item.local_agent_id.trim().toLowerCase() === lowered) ||
+        runtimes.find((item) => item.agent_id.trim().toLowerCase() === lowered);
+      if (hit) {
+        return { idx: hit.idx, name: hit.agent_name };
+      }
+      return { idx: 0, name: value };
+    },
+    [runtimes],
+  );
+
+  useEffect(() => {
+    if (!aiImportRequest) {
+      return;
+    }
+    if (processedAiImportNonceRef.current === aiImportRequest.nonce) {
+      return;
+    }
+    if (readOnly) {
+      processedAiImportNonceRef.current = aiImportRequest.nonce;
+      onAiImportHandled?.();
+      setError("읽기 전용 상태에서는 AI 워크플로우를 삽입할 수 없습니다. 체크인 후 다시 시도하세요.");
+      return;
+    }
+
+    processedAiImportNonceRef.current = aiImportRequest.nonce;
+    onAiImportHandled?.();
+
+    const applyImport = async () => {
+      setIsSaving(true);
+      setError(null);
+      try {
+        const payload = parseAiWorkflowDesignResponse(aiImportRequest.assistantText);
+        const logicalToDbIdx: Record<string, number> = {};
+        const createdItems: WorkNodeItem[] = [];
+
+        for (const draft of payload.work_nodes) {
+          const target = resolveTargetAgentIdx(draft.target_agent);
+          const response = await fetch("/api/work-nodes", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              work_name: draft.work_name,
+              work_description: draft.work_description,
+              target_agent: target.idx,
+              work_script: draft.work_script,
+              script_type: draft.script_type || "",
+              test_result: false,
+              files: "",
+            }),
+          });
+          if (!response.ok) {
+            throw new Error(await parseError(response, `작업노드 '${draft.logicalId}' 생성 실패`));
+          }
+          const item = (await response.json()) as WorkNodeItem;
+          logicalToDbIdx[draft.logicalId] = item.idx;
+          createdItems.push({
+            ...item,
+            target_agent_name: item.target_agent_name || target.name,
+          });
+        }
+
+        const remapped = remapWorkflowExpression(payload.workflow, logicalToDbIdx);
+        const mergedNodes = [...workNodes.filter((n) => !createdItems.some((c) => c.idx === n.idx)), ...createdItems];
+        setName(payload.workflow_name);
+        setDescription(payload.workflow_description);
+        setModel(hydrateEditor(remapped, mergedNodes, userNames));
+        setSelectedNodeId(null);
+        await onWorkNodesChanged();
+
+        const isCreate = workflowIdx == null;
+        const saveResponse = await fetch(
+          isCreate ? "/api/workflows" : `/api/workflows/${workflowIdx}`,
+          {
+            method: isCreate ? "POST" : "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              workflow_name: payload.workflow_name,
+              workflow_description: payload.workflow_description,
+              workflow: remapped,
+            }),
+          },
+        );
+        if (!saveResponse.ok) {
+          throw new Error(
+            await parseError(saveResponse, "작업노드는 생성됐지만 워크플로우 저장에 실패했습니다."),
+          );
+        }
+        await onSaved((await saveResponse.json()) as WorkflowItem);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "AI 워크플로우 삽입에 실패했습니다.");
+      } finally {
+        setIsSaving(false);
+      }
+    };
+
+    void applyImport();
+  }, [
+    aiImportRequest,
+    readOnly,
+    onAiImportHandled,
+    resolveTargetAgentIdx,
+    workNodes,
+    userNames,
+    onWorkNodesChanged,
+    workflowIdx,
+    onSaved,
+  ]);
 
   useEffect(() => {
     let cancelled = false;
@@ -462,7 +598,7 @@ export function WorkflowEditor({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           workflow_name: trimmed,
-          workflow_description: initialDescription,
+          workflow_description: description,
           workflow: expression,
         }),
       });
@@ -691,7 +827,7 @@ export function WorkflowEditor({
   const isSelected = (clientId: string) => selectedNodeId === clientId;
 
   const renderWorkCard = (node: WorkEditorNode, failBranch = false) => {
-    const hasScript = Boolean(node.agentResponse.trim());
+    const hasScript = Boolean(node.workScript.trim());
     const hasFile = Boolean(node.files.trim());
     return (
       <div

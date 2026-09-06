@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
+from backend.app.agents.mock_platform_agents import WORKFLOW_AGENT_LOCAL_AGENT_ID
 from backend.app.agents.base import AgentInvokeResult, ToolUsage
 from backend.app.db.roles import is_admin_role
 from backend.app.db.users import parse_agent_ids
@@ -25,6 +26,9 @@ from backend.app.services.chat_input_history_store import (
 router = APIRouter(tags=["chat"])
 
 logger = logging.getLogger(__name__)
+
+# Feature terminals may expose these without user agent assignment.
+_CHAT_WITHOUT_ASSIGNMENT_AGENT_IDS = frozenset({WORKFLOW_AGENT_LOCAL_AGENT_ID})
 
 
 class ChatRequest(BaseModel):
@@ -61,6 +65,9 @@ def _ensure_chat_agent_access(request: Request, agent_id: str) -> None:
     manager = request.app.state.agent_manager
     if agent_id not in manager.agents:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
+
+    if agent_id in _CHAT_WITHOUT_ASSIGNMENT_AGENT_IDS:
+        return
 
     user = get_request_auth_user(request)
     allowed = set(parse_agent_ids(user.agents))
@@ -150,9 +157,10 @@ async def chat_with_agent(agent_id: str, payload: ChatRequest, request: Request)
     if payload.userid and payload.userid.strip() != auth_user.userid:
         raise HTTPException(status_code=403, detail="요청 사용자와 세션 사용자가 일치하지 않습니다.")
 
-    allowed = set(parse_agent_ids(auth_user.agents))
-    if agent_id not in allowed:
-        raise HTTPException(status_code=403, detail="할당되지 않은 에이전트입니다.")
+    if agent_id not in _CHAT_WITHOUT_ASSIGNMENT_AGENT_IDS:
+        allowed = set(parse_agent_ids(auth_user.agents))
+        if agent_id not in allowed:
+            raise HTTPException(status_code=403, detail="할당되지 않은 에이전트입니다.")
 
     async def event_generator() -> AsyncIterator[dict[str, str]]:
         chat_task_id = manager.mark_agent_working(agent_id, "채팅 응답", task_id=uuid4().hex)

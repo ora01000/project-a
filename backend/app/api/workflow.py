@@ -39,8 +39,7 @@ class WorkNodeResponse(BaseModel):
     work_description: str = ""
     target_agent: int
     target_agent_name: str = ""
-    user_prompt: str
-    agent_response: str
+    work_script: str
     script_type: str = ""
     test_result: bool
     files: str
@@ -63,8 +62,7 @@ class WorkNodeResponse(BaseModel):
             work_description=record.work_description,
             target_agent=record.target_agent,
             target_agent_name=agent_name,
-            user_prompt=record.user_prompt,
-            agent_response=record.agent_response,
+            work_script=record.work_script,
             script_type=record.script_type,
             test_result=record.test_result,
             files=record.files,
@@ -78,8 +76,7 @@ class WorkNodeWriteRequest(BaseModel):
     work_name: str = Field(default="새 작업노드", max_length=100)
     work_description: str = Field(default="", max_length=500)
     target_agent: int = Field(default=0, ge=0)
-    user_prompt: str = ""
-    agent_response: str = ""
+    work_script: str = ""
     script_type: str = Field(default="", max_length=20)
     test_result: bool = False
     files: str = Field(default="", max_length=300)
@@ -370,8 +367,7 @@ async def api_create_work_node(body: WorkNodeWriteRequest, request: Request) -> 
         work_name=body.work_name,
         work_description=body.work_description,
         target_agent=body.target_agent,
-        user_prompt=body.user_prompt,
-        agent_response=body.agent_response,
+        work_script=body.work_script,
         script_type=script_type,
         test_result=body.test_result,
         files=body.files,
@@ -420,8 +416,7 @@ async def api_update_work_node(
         work_name=body.work_name.strip() or "새 작업노드",
         work_description=(body.work_description or "").strip()[:500],
         target_agent=int(body.target_agent),
-        user_prompt=body.user_prompt,
-        agent_response=body.agent_response,
+        work_script=body.work_script,
         script_type=script_type,
         test_result=bool(body.test_result),
         files=(body.files or "").strip()[:300],
@@ -454,8 +449,7 @@ async def api_update_work_node(
         work_name=next_node.work_name,
         work_description=next_node.work_description,
         target_agent=next_node.target_agent,
-        user_prompt=next_node.user_prompt,
-        agent_response=next_node.agent_response,
+        work_script=next_node.work_script,
         script_type=next_node.script_type,
         test_result=next_node.test_result,
         files=next_node.files,
@@ -525,8 +519,7 @@ async def api_upload_work_node_file(
         work_name=record.work_name,
         work_description=record.work_description,
         target_agent=record.target_agent,
-        user_prompt=record.user_prompt,
-        agent_response=record.agent_response,
+        work_script=record.work_script,
         script_type=record.script_type,
         test_result=record.test_result,
         files=relative,
@@ -547,8 +540,7 @@ async def api_upload_work_node_file(
         work_name=next_node.work_name,
         work_description=next_node.work_description,
         target_agent=next_node.target_agent,
-        user_prompt=next_node.user_prompt,
-        agent_response=next_node.agent_response,
+        work_script=next_node.work_script,
         script_type=next_node.script_type,
         test_result=next_node.test_result,
         files=relative,
@@ -697,8 +689,7 @@ async def _commit_draft_to_db(database_path, payload: dict) -> WorkflowRecord:
             work_name=node.work_name,
             work_description=node.work_description,
             target_agent=node.target_agent,
-            user_prompt=node.user_prompt,
-            agent_response=node.agent_response,
+            work_script=node.work_script,
             script_type=node.script_type,
             test_result=node.test_result,
             files=node.files,

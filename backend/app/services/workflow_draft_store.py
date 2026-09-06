@@ -61,8 +61,7 @@ def work_node_to_dict(record: WorkNodeRecord) -> dict[str, Any]:
         "work_name": record.work_name,
         "work_description": record.work_description,
         "target_agent": record.target_agent,
-        "user_prompt": record.user_prompt,
-        "agent_response": record.agent_response,
+        "work_script": record.work_script,
         "script_type": record.script_type,
         "test_result": record.test_result,
         "files": record.files,
@@ -72,14 +71,16 @@ def work_node_to_dict(record: WorkNodeRecord) -> dict[str, Any]:
 
 
 def work_node_from_dict(data: dict[str, Any]) -> WorkNodeRecord:
+    work_script = data.get("work_script")
+    if work_script is None:
+        work_script = data.get("agent_response") or ""
     return WorkNodeRecord(
         idx=int(data.get("idx") or 0),
         uuid=str(data.get("uuid") or ""),
         work_name=str(data.get("work_name") or ""),
         work_description=str(data.get("work_description") or ""),
         target_agent=int(data.get("target_agent") or 0),
-        user_prompt=str(data.get("user_prompt") or ""),
-        agent_response=str(data.get("agent_response") or ""),
+        work_script=str(work_script or ""),
         script_type=str(data.get("script_type") or "").strip().lower(),
         test_result=bool(data.get("test_result")),
         files=str(data.get("files") or ""),

@@ -18,13 +18,13 @@ MOCKUP_CLIENT_ID = "mock-client-id"
 MOCKUP_CLIENT_SECRET = "mock-client-secret"
 DEFAULT_SERVICE_ID = "prvops"
 
-NON_TALKABLE_LOCAL_AGENT_IDS: frozenset[str] = frozenset({"job-scheduler", "job_auditor"})
+NON_TALKABLE_LOCAL_AGENT_IDS: frozenset[str] = frozenset({"job_auditor", "WORKFLOW_AGENT"})
 
 ORCHESTRATOR_LOCAL_AGENT_IDS: frozenset[str] = frozenset({
     "helpdesk",
-    "job-scheduler",
     "archi-analysis",
     "job_auditor",
+    "WORKFLOW_AGENT",
 })
 
 _AXIT_AGENT_ID_NAMESPACE = uuid.UUID("00000000-0000-4000-8000-000000000000")
@@ -492,4 +492,36 @@ def ensure_mock_ansible_lint_agentruntime(database_path: str | Path) -> StoredAg
         service_id=DEFAULT_SERVICE_ID,
         talkable=True,
         is_orchestrator=False,
+    )
+
+
+def ensure_mock_workflow_agent_agentruntime(database_path: str | Path) -> StoredAgentRuntime | None:
+    """Insert mock-only WORKFLOW_AGENT agentruntime row if missing."""
+    from backend.app.agents.mock_platform_agents import (
+        WORKFLOW_AGENT_LOCAL_AGENT_ID,
+        get_mock_platform_agent_spec,
+    )
+
+    existing = get_agentruntime_by_local_agent_id(
+        database_path,
+        WORKFLOW_AGENT_LOCAL_AGENT_ID,
+        runtime_mode="mock",
+    )
+    if existing is not None:
+        return existing
+
+    spec = get_mock_platform_agent_spec(WORKFLOW_AGENT_LOCAL_AGENT_ID)
+    if spec is None:
+        return None
+
+    return create_agentruntime_record(
+        database_path,
+        runtime_type=AGENTRUNTIME_TYPE_MOCKUP,
+        agent_name=spec.agent_name,
+        agent_id=build_axit_agent_id(WORKFLOW_AGENT_LOCAL_AGENT_ID),
+        local_agent_id=WORKFLOW_AGENT_LOCAL_AGENT_ID,
+        description=spec.description,
+        service_id=DEFAULT_SERVICE_ID,
+        talkable=default_talkable_for_local_agent_id(WORKFLOW_AGENT_LOCAL_AGENT_ID),
+        is_orchestrator=default_is_orchestrator_for_local_agent_id(WORKFLOW_AGENT_LOCAL_AGENT_ID),
     )

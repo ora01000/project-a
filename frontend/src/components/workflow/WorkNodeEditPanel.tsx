@@ -17,11 +17,12 @@ interface WorkNodeEditPanelProps {
   onUploadFile: (file: File) => Promise<void>;
 }
 
-const ALLOWED_SCRIPT_TYPES = new Set(["yaml", "ansible"]);
+const ALLOWED_SCRIPT_TYPES = new Set(["yaml", "ansible", "cli"]);
+const VALIDATABLE_SCRIPT_TYPES = new Set(["yaml", "ansible"]);
 
 const SCRIPT_GENERATION_REQUIREMENTS = [
   "질의 요청사항에 대한 답변시 반드시 스크립트 결과물만 응답하며 스크립트의 내용 설명은 2줄 이내의 스크립트 주석으로 표현한다.",
-  '다음 JSON 형식으로만 응답한다(다른 설명 문장 없이 JSON만 출력): {"script_type":"yaml 또는 ansible 중 1","agent_response":"스크립트 내용(스크립트 설명에 대한 주석을 포함)"}',
+  '다음 JSON 형식으로만 응답한다(다른 설명 문장 없이 JSON만 출력): {"script_type":"yaml 또는 ansible 또는 cli 중 1","work_script":"스크립트 내용(스크립트 설명에 대한 주석을 포함)"}',
 ].join("\n");
 
 function buildScriptGenerationMessage(userPrompt: string): string {
@@ -46,23 +47,24 @@ function extractJsonText(raw: string): string {
 
 function parseScriptGenerationPayload(raw: string): {
   scriptType: WorkScriptType;
-  agentResponse: string;
+  workScript: string;
 } {
   const parsed = JSON.parse(extractJsonText(raw)) as {
     script_type?: unknown;
+    work_script?: unknown;
     agent_response?: unknown;
   };
   const scriptType = String(parsed.script_type || "")
     .trim()
     .toLowerCase() as WorkScriptType;
-  const agentResponse = String(parsed.agent_response || "").trim();
+  const workScript = String(parsed.work_script || parsed.agent_response || "").trim();
   if (!ALLOWED_SCRIPT_TYPES.has(scriptType)) {
-    throw new Error("응답의 script_type이 yaml 또는 ansible이 아닙니다.");
+    throw new Error("응답의 script_type이 yaml, ansible, cli 중 하나가 아닙니다.");
   }
-  if (!agentResponse) {
-    throw new Error("응답에 agent_response 스크립트 내용이 없습니다.");
+  if (!workScript) {
+    throw new Error("응답에 work_script 스크립트 내용이 없습니다.");
   }
-  return { scriptType, agentResponse };
+  return { scriptType, workScript };
 }
 
 function parseValidationPayload(raw: string): { valid: boolean; message: string } {
@@ -206,7 +208,7 @@ export function WorkNodeEditPanel({
   const [generateError, setGenerateError] = useState<string | null>(null);
   const [validateMessage, setValidateMessage] = useState<string | null>(null);
 
-  const hasGeneratedScript = Boolean(node.agentResponse.trim());
+  const hasGeneratedScript = Boolean(node.workScript.trim());
 
   const requestScriptGeneration = async () => {
     const prompt = node.userPrompt.trim();
@@ -241,7 +243,7 @@ export function WorkNodeEditPanel({
       const parsed = parseScriptGenerationPayload(raw);
       await onPersistPatch({
         scriptType: parsed.scriptType,
-        agentResponse: parsed.agentResponse,
+        workScript: parsed.workScript,
         testResult: false,
       });
     } catch (err) {
@@ -255,14 +257,14 @@ export function WorkNodeEditPanel({
     setValidateMessage(null);
     setGenerateError(null);
     await onPersistPatch({
-      agentResponse: "",
+      workScript: "",
       scriptType: "",
       testResult: false,
     });
   };
 
   const handleValidateScript = async () => {
-    const script = node.agentResponse.trim();
+    const script = node.workScript.trim();
     const scriptType = String(node.scriptType || "")
       .trim()
       .toLowerCase();
@@ -270,7 +272,11 @@ export function WorkNodeEditPanel({
       setValidateMessage("검증할 스크립트가 없습니다.");
       return;
     }
-    if (!ALLOWED_SCRIPT_TYPES.has(scriptType)) {
+    if (scriptType === "cli") {
+      setValidateMessage("cli 스크립트 자동 검증은 아직 지원하지 않습니다.");
+      return;
+    }
+    if (!VALIDATABLE_SCRIPT_TYPES.has(scriptType)) {
       setValidateMessage("script_type이 yaml 또는 ansible이 아닙니다.");
       return;
     }
@@ -458,7 +464,7 @@ export function WorkNodeEditPanel({
             </div>
           </header>
           <pre className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap px-3 py-2 text-[11px] text-slate-200">
-            {node.agentResponse}
+            {node.workScript}
           </pre>
           {validateMessage ? (
             <p

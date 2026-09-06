@@ -61,7 +61,7 @@ Postgres (SQLite `agents` 테이블·`/api/agent-records` 없음).
 관리 API: `/api/agentruntime` (`backend/app/api/agentruntime_records.py`).  
 목록·타일용 메타는 `/api/agents` (`AgentManager`).
 
-mock 오케스트레이터 로컬 ID 예: `helpdesk`, `job-scheduler`, `archi-analysis`, `job_auditor` (`ORCHESTRATOR_LOCAL_AGENT_IDS`).
+mock 오케스트레이터 로컬 ID 예: `helpdesk`, `archi-analysis`, `job_auditor`, `WORKFLOW_AGENT` (`ORCHESTRATOR_LOCAL_AGENT_IDS`).
 
 ---
 

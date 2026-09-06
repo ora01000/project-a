@@ -63,7 +63,10 @@ from backend.app.services.agent_runtime_client import (
     normalize_runtime_mode,
 )
 from backend.app.db import init_database
-from backend.app.db.agentruntime import ensure_mock_ansible_lint_agentruntime
+from backend.app.db.agentruntime import (
+    ensure_mock_ansible_lint_agentruntime,
+    ensure_mock_workflow_agent_agentruntime,
+)
 from backend.app.disabled_features import filter_agent_definitions
 from backend.app.logging.prompt_debug import bind_token_tracker
 from backend.app.logging.agent_logger import ensure_agent_logs_dir, log_agent_error
@@ -143,6 +146,7 @@ class AgentManager:
 
         if not self.uses_remote_runtime():
             ensure_mock_ansible_lint_agentruntime(database_path)
+            ensure_mock_workflow_agent_agentruntime(database_path)
 
         self.agent_definitions = self._load_runtime_definitions(database_path)
         self.agent_definitions_by_id = {

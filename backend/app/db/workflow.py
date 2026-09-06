@@ -9,10 +9,10 @@ from pathlib import Path
 from backend.app.db.database import get_connection
 from backend.app.db.job_datetime import now_job_datetime
 
-SCRIPT_TYPES = frozenset({"yaml", "ansible"})
+SCRIPT_TYPES = frozenset({"yaml", "ansible", "cli"})
 
 _WORK_NODE_SELECT = """
-    idx, uuid, work_name, work_description, target_agent, user_prompt, agent_response,
+    idx, uuid, work_name, work_description, target_agent, work_script,
     script_type, test_result, files, create_date, validate_date
 """
 
@@ -27,7 +27,7 @@ def normalize_script_type(value: str | None) -> str:
     if not normalized:
         return ""
     if normalized not in SCRIPT_TYPES:
-        raise ValueError("script_type은 yaml, ansible 중 하나여야 합니다.")
+        raise ValueError("script_type은 yaml, ansible, cli 중 하나여야 합니다.")
     return normalized
 
 
@@ -51,6 +51,45 @@ def _ensure_uuid_unique_index(connection, table: str, index_name: str) -> None:
     connection.execute(f"CREATE UNIQUE INDEX IF NOT EXISTS {index_name} ON {table} (uuid)")
 
 
+def _work_node_column_names(connection) -> set[str]:
+    rows = connection.execute(
+        """
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_schema = current_schema() AND table_name = 'work_node'
+        """
+    ).fetchall()
+    names: set[str] = set()
+    for row in rows:
+        if hasattr(row, "keys"):
+            names.add(str(row["column_name"]).lower())
+        else:
+            names.add(str(row[0]).lower())
+    return names
+
+
+def _migrate_work_node_script_columns(connection) -> None:
+    connection.execute(
+        """
+        ALTER TABLE work_node
+            ADD COLUMN IF NOT EXISTS work_script TEXT NOT NULL DEFAULT ''
+        """
+    )
+    columns = _work_node_column_names(connection)
+    if "agent_response" in columns:
+        connection.execute(
+            """
+            UPDATE work_node
+            SET work_script = agent_response
+            WHERE btrim(COALESCE(work_script, '')) = ''
+              AND btrim(COALESCE(agent_response, '')) <> ''
+            """
+        )
+        connection.execute("ALTER TABLE work_node DROP COLUMN IF EXISTS agent_response")
+    if "user_prompt" in columns:
+        connection.execute("ALTER TABLE work_node DROP COLUMN IF EXISTS user_prompt")
+
+
 def ensure_workflow_tables(connection) -> None:
     connection.execute(
         """
@@ -60,8 +99,7 @@ def ensure_workflow_tables(connection) -> None:
             work_name VARCHAR(100) NOT NULL,
             work_description VARCHAR(500) NOT NULL DEFAULT '',
             target_agent INTEGER NOT NULL DEFAULT 0,
-            user_prompt TEXT NOT NULL DEFAULT '',
-            agent_response TEXT NOT NULL DEFAULT '',
+            work_script TEXT NOT NULL DEFAULT '',
             script_type VARCHAR(20) NOT NULL DEFAULT '',
             test_result INTEGER NOT NULL DEFAULT 0,
             files VARCHAR(300) NOT NULL DEFAULT '',
@@ -100,6 +138,7 @@ def ensure_workflow_tables(connection) -> None:
             ADD COLUMN IF NOT EXISTS validate_date TEXT NOT NULL DEFAULT ''
         """
     )
+    _migrate_work_node_script_columns(connection)
     _ensure_uuid_unique_index(connection, "work_node", "work_node_uuid_uidx")
 
     connection.execute(
@@ -164,8 +203,7 @@ class WorkNodeRecord:
     work_name: str
     work_description: str
     target_agent: int
-    user_prompt: str
-    agent_response: str
+    work_script: str
     script_type: str
     test_result: bool
     files: str
@@ -200,8 +238,7 @@ def _row_to_work_node(row) -> WorkNodeRecord:
         work_name=str(row["work_name"] or ""),
         work_description=str(description or ""),
         target_agent=int(row["target_agent"] or 0),
-        user_prompt=str(row["user_prompt"] or ""),
-        agent_response=str(row["agent_response"] or ""),
+        work_script=str(row["work_script"] or ""),
         script_type=str(script_type or "").strip().lower(),
         test_result=bool(int(row["test_result"] or 0)),
         files=str(row["files"] or ""),
@@ -257,8 +294,7 @@ def create_work_node(
     work_name: str,
     target_agent: int = 0,
     work_description: str = "",
-    user_prompt: str = "",
-    agent_response: str = "",
+    work_script: str = "",
     script_type: str = "",
     test_result: bool = False,
     files: str = "",
@@ -272,9 +308,9 @@ def create_work_node(
         row = connection.execute(
             f"""
             INSERT INTO work_node (
-                uuid, work_name, work_description, target_agent, user_prompt, agent_response,
+                uuid, work_name, work_description, target_agent, work_script,
                 script_type, test_result, files, create_date, validate_date
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             RETURNING {_WORK_NODE_SELECT}
             """,
             (
@@ -282,8 +318,7 @@ def create_work_node(
                 work_name.strip() or "새 작업노드",
                 (work_description or "").strip()[:500],
                 int(target_agent),
-                user_prompt,
-                agent_response,
+                work_script or "",
                 normalized_script_type,
                 1 if test_result else 0,
                 (files or "").strip()[:300],
@@ -301,8 +336,7 @@ def update_work_node(
     work_name: str,
     work_description: str,
     target_agent: int,
-    user_prompt: str,
-    agent_response: str,
+    work_script: str,
     script_type: str,
     test_result: bool,
     files: str,
@@ -320,16 +354,15 @@ def update_work_node(
         connection.execute(
             """
             UPDATE work_node
-            SET work_name = ?, work_description = ?, target_agent = ?, user_prompt = ?,
-                agent_response = ?, script_type = ?, test_result = ?, files = ?, validate_date = ?
+            SET work_name = ?, work_description = ?, target_agent = ?, work_script = ?,
+                script_type = ?, test_result = ?, files = ?, validate_date = ?
             WHERE idx = ?
             """,
             (
                 work_name.strip() or "새 작업노드",
                 (work_description or "").strip()[:500],
                 int(target_agent),
-                user_prompt,
-                agent_response,
+                work_script or "",
                 normalized_script_type,
                 1 if test_result else 0,
                 (files or "").strip()[:300],

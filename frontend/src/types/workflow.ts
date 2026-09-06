@@ -1,8 +1,9 @@
-export type WorkScriptType = "" | "yaml" | "ansible";
+export type WorkScriptType = "" | "yaml" | "ansible" | "cli";
 
 export const WORK_SCRIPT_TYPE_OPTIONS: { value: Exclude<WorkScriptType, "">; label: string }[] = [
   { value: "yaml", label: "yaml" },
   { value: "ansible", label: "ansible" },
+  { value: "cli", label: "cli" },
 ];
 
 export interface WorkNodeItem {
@@ -12,8 +13,7 @@ export interface WorkNodeItem {
   work_description?: string;
   target_agent: number;
   target_agent_name: string;
-  user_prompt: string;
-  agent_response: string;
+  work_script: string;
   script_type?: WorkScriptType | string;
   test_result: boolean;
   files: string;

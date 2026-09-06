@@ -53,6 +53,7 @@ class MockPlatformAgentSpec:
 
 JOB_AUDITOR_LOCAL_AGENT_ID = "job_auditor"
 JOB_AUDITOR_AXIT_LOCAL_AGENT_ID = "JOB_AUDITOR_AGENT"
+WORKFLOW_AGENT_LOCAL_AGENT_ID = "WORKFLOW_AGENT"
 
 
 def _mock_platform_system_prompt(agent_id: str) -> str:
@@ -60,12 +61,6 @@ def _mock_platform_system_prompt(agent_id: str) -> str:
 
 
 MOCK_PLATFORM_AGENT_SPECS: tuple[MockPlatformAgentSpec, ...] = (
-    MockPlatformAgentSpec(
-        agent_id="job-scheduler",
-        agent_name="작업 접수/계획",
-        description="채널을 통해 작업 요청을 수신/계획 수립",
-        system_prompt=_mock_platform_system_prompt("job-scheduler"),
-    ),
     MockPlatformAgentSpec(
         agent_id="archi-analysis",
         agent_name="아키텍처 분석",
@@ -83,6 +78,13 @@ MOCK_PLATFORM_AGENT_SPECS: tuple[MockPlatformAgentSpec, ...] = (
         agent_name="작업검토",
         description="작업 내용에 대한 검토를 수행하고 필요시 작업 계획서를 작성",
         system_prompt=_mock_platform_system_prompt(JOB_AUDITOR_LOCAL_AGENT_ID),
+        callable_agent_ids=(),
+    ),
+    MockPlatformAgentSpec(
+        agent_id=WORKFLOW_AGENT_LOCAL_AGENT_ID,
+        agent_name="워크플로우 생성",
+        description="사용자 요청을 분석해 워크플로우와 작업노드 JSON을 생성",
+        system_prompt=_mock_platform_system_prompt(WORKFLOW_AGENT_LOCAL_AGENT_ID),
         callable_agent_ids=(),
     ),
 )

@@ -156,47 +156,34 @@ AGENT_RUNTIME_MODE = http 인 경우 agentruntime 의 type = 1 을 참조한다.
     설명 : Whatap 에서 이벤트를 수신하고 처리
     service id : prvops
 
-  2. 에이전트 이름 : 작업 접수/계획
-    타입 : 목업
-    agent_id : 랜덤 생성
-    local agent id : job-scheduler
-    설명 : 채널을 통해 작업 요청을 수신/계획 수립
-    service id : prvops
-
-  3. 에이전트 이름 : 아키텍처 분석
+  2. 에이전트 이름 : 아키텍처 분석
     타입 : 목업
     agent_id : 랜덤 생성
     local agent id : archi-analysis
     설명 : 인프라의 설계 구성 분석/도식화
     service id : prvops
 
-  4. 에이전트 이름 : 헬프데스크
+  3. 에이전트 이름 : 헬프데스크
     타입 : 목업
     agent_id : 랜덤 생성
     local agent id : helpdesk
     설명 : 문의응대
     service id : prvops
 
-- 위 네 개의 에이전트는 목업 테스트시만 에이전트로 등록되며 다음 정보를 목업 정의 코드에 정적으로  적용한다.
+- 위 에이전트는 목업 테스트시만 에이전트로 등록되며 다음 정보를 목업 정의 코드에 정적으로  적용한다.
   1. whatap-event
     - 도구 : 없음
     - 다음 에이전트를 호출할 수 있다.
       - dprv-k8s, dprv6-k8s, pcicd-k8s, dprmn-k8s, dtest-k8s, dpvs-k8s, dprsv-k8s, dprrt-k8s, dkvrt-k8s
     - 시스템 프롬프트
       - 당신은 Whatap APM 으로부터 이상징후 발생시 webhook를 통해 이벤트를 수신받을 수 있다. 수신받은 이벤트의 인프라를 찾아 적절한 에이전트에 분석을 요청한다.
-  2. job-scheduler
-    - 도구 : 없음
-    - 다음 에이전트를 호출할 수 있다.
-      - dprv-k8s, dprv6-k8s, pcicd-k8s, dprmn-k8s, dtest-k8s, dpvs-k8s, dprsv-k8s, dprrt-k8s, dkvrt-k8s
-    - 시스템 프롬프트
-      - 당신은 요청받은 사용자 요청을 분석하고 작업 계획을 수립합니다.
-  3. archi-analysis
+  2. archi-analysis
     - 도구 : 없음
     - 다음 에이전트를 호출할 수 있다.
       - dprv-k8s, dprv6-k8s, pcicd-k8s, dprmn-k8s, dtest-k8s, dpvs-k8s, dprsv-k8s, dprrt-k8s, dkvrt-k8s
     - 시스템 프롬프트
       - 당신은 인프라 아키텍처를 분석하고 도식화하는 에이전트입니다. 인프라의 구조도를 mermaid 차트로 출력합니다.
-  4. helpdesk
+  3. helpdesk
     - 도구 : 없음
     - 다음 에이전트를 호출할 수 있다.
       - dprv-k8s, dprv6-k8s, pcicd-k8s, dprmn-k8s, dtest-k8s, dpvs-k8s, dprsv-k8s, dprrt-k8s, dkvrt-k8s
@@ -207,12 +194,12 @@ AGENT_RUNTIME_MODE = http 인 경우 agentruntime 의 type = 1 을 참조한다.
   - agentruntime 에 다음 컬럼을 추가한다.
     - talkable boolean : default true
   - 테이블에서 다음을 제외하고 모두 talkable 을  true 로 설정한다.
-    - whatap-event, job-scheduler
+    - whatap-event
   - talkable 이 true 인 경우에만 대화식 터미널의 에이전트 선택창에 표시한다(즉 UI를 통해 사용자가 메시지를 보낼 수 있다)
 
 - agentruntime 테이블에 컬럼 추가
   - is_orchestrator boolean : default false
-  - helpdesk, whatap-event, job-scheduler, achi-analysis 는 true 이다.
+  - helpdesk, whatap-event, archi-analysis 는 true 이다.
   
 
 - archi-analysis 에이전트의 system prompt 에 다음 내용을 보완한다
@@ -2076,9 +2063,8 @@ Your sole task is to write high-quality, production-ready, and syntactically cor
     - work_name varchar(100)
     - work_description varchar(500)
     - target_agent int <- agentruntime.idx
-    - user_prompt text <- 사용자의 지시사항(작업 스크립트를 요청하는 명령)
-    - agent_response text <- 에이전트의 결과(생성된 작업 스크립트)
-    - script_type varchar <- 에이전트의 결과 스크립트의 종료 [ yaml | ansible ]
+    - work_script text <- 에이전트의 결과(생성된 작업 스크립트) : 구 agent_response
+    - script_type varchar <- 에이전트의 결과 스크립트의 종료 [ yaml | ansible | cli ]
     - test_result boolean <- 에이전트의 결과가 정상인지를 기록
     - files varchar(300) <- 작업에 필요한 부가 파일 업로드 경로
     - create_date datetime
@@ -2117,12 +2103,60 @@ Your sole task is to write high-quality, production-ready, and syntactically cor
       - 워크플로우 편집모드
       - 워크플로우 작성은 GUI로 작성한다.
         1. 워크플로우 명 : 최상단에 텍스트필드로 입력 받는다
-        2. 시작(S) 노드만 있다. 시작 노드 오른쪽에는 + 버튼이 동그라미로 표시된다. + 버튼 을 클릭하면 오른쪽에 작업 노드 다이어그램이 생성되고 화살표로 연결된다.
-        3. 작업노드 다이어그램 자체는 선택(노드영역 클릭)/삭제(X버튼) 만 가능하고 아래 내용을 표시한다.
+        2. AI워크플로우 설계 : 
+          - 워크플로우 draft를 프롬프트를 통해 AI가 만들도록 한다.
+          - "AI워크플로우 설계" 레이블 아래 TextArea를 배치한다. 레이블과 동일한 열의 오른쪽 끝에 생성 버튼을 배치한다. 생성 버튼의 레이블을 "AI워크플로우생성" 으로 변경
+            - 버튼을 클릭하면 내용을 대화형 터미널에서 메시지 입력 창으로 넘기고 이를 전송한다.
+            - AI워크플로우생성 버튼을 통해 자동으로 전달하고 받은 답변을 parsing 한다. json format은 다음과 같다
+              ''' response json
+              {
+                "work_node": [
+                  {
+                    "work_name": "작업명#1",
+                    "work_description" : "작업설명#1",
+                    "idx": "작업ID#1",
+                    "target_agent": "대상에이전트#1",
+                    "work_script": "스크립트#1",
+                    "script_type": "스크립트 종류#1"
+                  },
+                  {
+                    "work_name": "작업명#2",
+                    "work_description" : "작업설명#2",
+                    "idx": "작업ID#2",
+                    "target_agent": "대상에이전트#2",
+                    "work_script": "스크립트#2",
+                    "script_type": "스크립트 종류#2"
+                  }
+                ],
+                "workflow": {
+                  "workflow_name": "워크플로우명",
+                  "workflow_description": "워크플로우설명",
+                  "workflow": "작업흐름"
+                }
+              }
+              ...
+            - parsing 한 work_node, workflow 를 기반으로 편잽모드에서 워크플로우를 자동 생성, 삽입한다.
+              - parsing 시 주의사항
+                - json 의 work_node.idx, workflow.idx 는 실제 DB 스키마의 컬럼에 맞지 않는다. 실제 DB로 입력을 위해서는 integer 로 변경해야 한다.
+
+
+          - 설계에 필요한 설명을 입력받는다. - 설계에 사용될 설명은 별도로 저장하지는 않는다.
+            - TextArea 내 사전에 가이드용 템플릿을 넣는다. 가이드 내용은 아래와 같다
+            ''' 가이드 샘플
+            설명 : 작업 플로우의 간략한 설명을 적어주세요.
+            작업 단계 : 각 작업을 순서대로 나열해 주세요. 각 단계별 제목과 설명으로 묘사하면 좋습니다!
+            1. 정보 확인 : {대상 인프라} 에 구성된 정보를 추출
+            2. 리포트 작성 : 추출한 정보를 취합하여 리포트를 작성
+            3. 리포트 제출 : {운영 담당자} 에게 리포트 전송 및 감토 요청
+            4. 승인 : {운영 담당자} 의 승인 필요
+            '''
+
+        3. 시작(S) 노드만 있다. 시작 노드 오른쪽에는 + 버튼이 동그라미로 표시된다. + 버튼 을 클릭하면 오른쪽에 작업 노드 다이어그램이 생성되고 화살표로 연결된다.
+        4. 작업노드 다이어그램 자체는 선택(노드영역 클릭)/삭제(X버튼) 만 가능하고 아래 내용을 표시한다.
           - "작업명" 레이블(작은 폰트), 다음줄에 work_name(텍스트 레이블 버튼 스타일, 대시보드>작업노트>작업검토>작업목록 의 스타일을 참조)
           - "에이전트" 레이블(작은 폰트), 다음줄에 target_agent(에이전트 이름, 텍스트 레이블 버튼 스타일, 대시보드>작업노트>작업검토>작업목록 의 스타일을 참조)
           - "작업 스크립트" 레이블(작은 폰트)
-            - agent_response 에 값이 있는 경우 "check" 이모지를, 아직 없는 경우 "미실행"이라고 텍스트로 표시하고 텍스트 레이블 버튼 스타일 표시, 대시보드>작업노트>작업검토>작업목록 의 스타일을 참조
+            - work_script 에 값이 있는 경우 "check" 이모지를, 아직 없는 경우 "미실행"이라고 텍스트로 표시하고 텍스트 레이블 버튼 스타일 표시, 대시보드>작업노트>작업검토>작업목록 의 스타일을 참조
           - files 값이 있을 경우에만 "첨부 유무" 레이블(작은 폰트)
             - files 에 값이 있는 경우 "check" 이모지
           - 워크노드의 오른쪽에도 + 버튼을 동그라미로 표시된다. + 버튼을 누르면 팝업메뉴가 발생하고, 네 개 중 하나를 선택할 수 있다.
@@ -2130,7 +2164,7 @@ Your sole task is to write high-quality, production-ready, and syntactically cor
             2. 승인자 지정
             3. 실패시 워크노드
             4. 종료
-        4. 승인자 다이어그램
+        5. 승인자 다이어그램
           - 오른쪽 끝에 "햄버거" 버튼 배치, 버튼 클릭시 users.role = 0, 2 인 사용자를 선택할 수 있다록 말풍선을 띄우고 users.username 에서 선택할 수 있다(1명). 사용자 이름은 텍스트 레이블 버튼 스타일로 표현한다.
           - 승인자 다이어그램의 오른쪽에도 + 버튼을 동그라미로 표시된다. + 버튼을 누르면 팝업메뉴가 발생하고, 다음을 선택할 수 있다.
             1. 다음 작업노드
@@ -2145,23 +2179,25 @@ Your sole task is to write high-quality, production-ready, and syntactically cor
           - 작업명(work_name)
           - 대상 에이전트(target_agent)
           - 작업 설명(work_desription)
-          - 작업 스크립트 생성(user_prompt) : 프롬프트를 실행하는 실행 버튼은 "삼각형 플레이" 버튼에서 "작성요청"으로 변경
-            - "작성요청" 버튼 클릭시 target_agent로 user_prompt 를 전송한다. 이 때 user_prompt 내용 외 제반되어야 할 사항을 붙여서 보낸다.
+          - 작업 스크립트 생성(프롬프트, DB 미저장) : 프롬프트를 실행하는 실행 버튼은 "삼각형 플레이" 버튼에서 "작성요청"으로 변경
+            - "작성요청" 버튼 클릭시 target_agent로 프롬프트를 전송한다. 이 때 프롬프트 내용 외 제반되어야 할 사항을 붙여서 보낸다.
               - 제반사항
                 - 질의 요청사항에 대한 답변시 반드시 스크립트 결과물만 응답하며 스크립트의 내용 설명은 2줄 이내의 스크립트 주석으로 표현한다. 다음 json 형식으로 응답한다.
                 '''
                 {
-                  script_type: "스크립트 종류 [ yaml | ansible ] 중 1",
-                  agent_response: "스크립트 내용(스크립트 설명에 대한 주석을 포함)"
+                  script_type: "스크립트 종류 [ yaml | ansible | cli ] 중 1",
+                  work_script: "스크립트 내용(스크립트 설명에 대한 주석을 포함)"
                 }
                 '''
-            - json 응답에 따라 script_type 과 agent_response 컬럼에 업데이트
-          - agent_reponse 가 있는 경우, 작업 편집 패널의 오른쪽에 "생성된 스크립트" 패널을 만들고 agent_reponse를 출력한다. "생성된 스크립트" 패널의 상단 오른쪽에 "삭제" "검증" 버튼을 둔다.
+            - json 응답에 따라 script_type 과 work_script 컬럼에 업데이트
+          - work_script 가 있는 경우, 작업 편집 패널의 오른쪽에 "생성된 스크립트" 패널을 만들고 work_script를 출력한다. "생성된 스크립트" 패널의 상단 오른쪽에 "삭제" "검증" 버튼을 둔다.
             - 검증 버튼을 클릭시 script_type 에 따라 검증을 수행
-              1. kubernetes yaml 의 경우
+              1. kubectl yaml 의 경우
                 - 대상 에이전트로 dry-run 을 요청
               2. ansible 
                 - 대상 에이전트로 lint 테스트를 수행하고 가능하면 dry-run 을 요청 : 이경우 대상 에이전트는 ansible-lint 가 가능한 에이전트가 될 것이다.
+              3. cli
+                - 자동 검증은 아직 미지원
 
           - 파일 업로드(files)
         
@@ -2176,7 +2212,7 @@ Your sole task is to write high-quality, production-ready, and syntactically cor
 
     - checkIn / 저장 / checkout 의 동작에 대한 개선안
       - 동작의 정의
-        - checkIn 한 상태에서 저장되는 모든 workflow, work_node 는 실제 DB에 저장되는 것이 아니다. Checkout 을 하면 실제 반영된다. 현재 구현되지는 않았으나, CheckIn 상태에서 Restore
+        - checkIn 한 상태에서 저장되는 모든 workflow, work_node 는 실제 DB에 저장되는 것이 아니다. Checkout 을 하면 실제 반영된다. 현재 구현되지는 않았으나, CheckIn 상태에서 Restore 버튼을 두고 저장을 했더라도 CheckIn 이전 상태로 원복하고 CheckOut 을 할 계획이다
         - 이러한 동작을 위해 redis 활용등 어떤 아키텍처 설계가 적절한지를 제안
 
 
@@ -2187,8 +2223,74 @@ Your sole task is to write high-quality, production-ready, and syntactically cor
         - 워크 노드 : round rectangle(가로 50, 세로 50), 이름 표시
           - 실패시 워크노드가 정의된 경우 연결선을 branch로 빼낸다. 실패시 워크노드도 표현
         - HITL 승인자 : rectangle(가로 50, 세로 20), 승인자의 이름 표시
-  - right : 대시보드의 대화형 터미널을 동일하게 표시한다.
+  - right : 대시보드의 대화형 터미널을 동일하게 표시한다. 단 "WORKFLOW_AGENT" 만 선택할 수 있다
   - bottom : 없음
+
+# 워크플로우 생성 에이전트 작성
+- 목업용 워크플로우 생성 에이전트를 작성한다. http 모드에서는 AX(에이전트 제공 플랫폼)의 에이전트를 붙일 계획이다.
+  - 에이전트 명 : WORKFLOW_AGENT
+  - system prompt : 아래 내용을 구체화하고 md 형태로 `docs/system-prompt/WORKFLOW_AGENT_PROMPT.md` 로 작성하고 에이전트가 참조하도록 한다.
+    당신은 사용자의 작업을 이해하고 작업을 순차적으로 처리하기 위해 워크플로우를 작성하는 에이전트입니다.
+    워크플로우는 시작부터 종료까지 단위 작업으로 연결되며 필요할 경우 관리자의 승인 을 받도록 작업 순서를 구성할 수 있습니다.
+    
+    반드시 지켜야 할 사항 : 질의에 없는 내용을 유추해서 채워넣지 마십시오. 부족한 부분은 반드시 다시 물어보고 요청자의 답을 반영해야 합니다.
+  
+    주요 미션은 아래와 같습니다.
+    1. 요청을 분석해서 각 단계별 작업(work_node)를 생성합니다. 질의에서 유추하여 작성합니다. 괄호 안의 이름은 label 입니다.
+      - 작업명(work_name)
+      - 작업설명(work_description)
+      - 작업ID(idx) : 각 작업별로 중복되지 않도록 생성(/^[a-zA-Z0-9_-]{4,64}$/)
+      - 대상에이전트(target_agent) : 대상 에이전트는 유추하지 말고 정보가 없을 경우 반드시 요청자에게 피드백하고 보충 답변을 받아야 합니다.
+      - 스크립트(work_script) 및 스크립트 종류(script_type): 인프라의 형태에 따라 스크립트 종류와 스크립트를 생성
+        - kubernetes 대상인 경우 manifest yaml 을 생성하는 작업과 kubectl(cli)를 사용하는 작업을 분리해서 생성합니다.
+          - manifest yaml을 사용해야 하는 작업은 script_type : yaml 입니다.
+          - kubectl(cli)를 사용해야 하는 작업은 script_type : cli 입니다.
+        - ansbile playbook으로 작업 스크립트를 만들수 있습니다. 이 경우 script_type 은 ansible 입니다.
+    2. 요청에 따라 워크플로우를 생성하고 각 작업을 연결합니다.
+      - 워크플로우명(workflow_name)
+      - 워크플로우설명(workflow_description)
+      - 작업흐름(workflow)
+          - "S" : workflow 시작
+          - "E" : workflow 종료
+          - "작업ID:{실패시 작업ID}" : 워크노드 수행 후 실패시 수행할 워크노드, 실패시 수행하는 워크노드도 실패할 경우 종료한다.
+          - "{작업ID}:E : 워커노드 수행 후 실패시 종료함
+          - "->" : 이전 워크노드 성공시 다음 워크노드
+        - 연결 표현(예시)
+          - S->work_1->work_2:work_3->work4->E
+    
+    요청자의 추가 답변이 필요한 경우를 제외하면 응답은 json 포맷으로만 합니다. 다음 포맷으로 응답합니다.
+    ''' response json
+    {
+      "work_node": [
+        {
+          "work_name": "작업명#1",
+          "work_description" : "작업설명#1",
+          "idx": "작업ID#1",
+          "target_agent": "대상에이전트#1",
+          "work_script": "스크립트#1",
+          "script_type": "스크립트 종류#1"
+        },
+        {
+          "work_name": "작업명#2",
+          "work_description" : "작업설명#2",
+          "idx": "작업ID#2",
+          "target_agent": "대상에이전트#2",
+          "work_script": "스크립트#2",
+          "script_type": "스크립트 종류#2"
+        }
+      ],
+      "workflow": {
+        "workflow_name": "워크플로우명",
+        "workflow_description": "워크플로우설명",
+        "workflow": "작업흐름"
+      }
+    }
+    ...
+
+
+
+
+
 
 
 # 전체 프레임 조정

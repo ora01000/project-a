@@ -15,6 +15,8 @@ interface WorkflowDesignPanelProps {
   onCheckedIn: (item: WorkflowItem) => Promise<void> | void;
   onCheckedOut: (item: WorkflowItem) => Promise<void> | void;
   onRestored: (item: WorkflowItem) => Promise<void> | void;
+  aiImportRequest?: { nonce: number; assistantText: string } | null;
+  onAiImportHandled?: () => void;
 }
 
 async function parseError(response: Response, fallback: string): Promise<string> {
@@ -41,6 +43,8 @@ export function WorkflowDesignPanel({
   onCheckedIn,
   onCheckedOut,
   onRestored,
+  aiImportRequest = null,
+  onAiImportHandled,
 }: WorkflowDesignPanelProps) {
   const [lockError, setLockError] = useState<string | null>(null);
   const [isLockBusy, setIsLockBusy] = useState(false);
@@ -163,6 +167,8 @@ export function WorkflowDesignPanel({
           readOnly={readOnly}
           onSaved={onSaved}
           onWorkNodesChanged={onWorkNodesChanged}
+          aiImportRequest={aiImportRequest}
+          onAiImportHandled={onAiImportHandled}
         />
       </section>
     );

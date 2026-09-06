@@ -14,8 +14,9 @@ export type WorkEditorNode = {
   description: string;
   targetAgent: number;
   targetAgentName: string;
+  /** UI-only: not persisted (DB user_prompt removed). */
   userPrompt: string;
-  agentResponse: string;
+  workScript: string;
   scriptType: WorkScriptType | string;
   testResult: boolean;
   files: string;
@@ -62,8 +63,8 @@ export function workFieldsFromItem(
     description: item.work_description || "",
     targetAgent: item.target_agent,
     targetAgentName: item.target_agent_name || "",
-    userPrompt: item.user_prompt,
-    agentResponse: item.agent_response,
+    userPrompt: "",
+    workScript: item.work_script || "",
     scriptType: item.script_type || "",
     testResult: item.test_result,
     files: item.files,
@@ -89,8 +90,7 @@ export function workNodeWriteBody(node: WorkEditorNode) {
     work_name: node.name,
     work_description: node.description,
     target_agent: node.targetAgent,
-    user_prompt: node.userPrompt,
-    agent_response: node.agentResponse,
+    work_script: node.workScript,
     script_type: node.scriptType || "",
     test_result: node.testResult,
     files: node.files,
@@ -171,7 +171,7 @@ export function hydrateEditor(
       targetAgent: 0,
       targetAgentName: "",
       userPrompt: "",
-      agentResponse: "",
+      workScript: "",
       scriptType: "",
       testResult: false,
       files: "",
