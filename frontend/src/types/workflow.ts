@@ -7,8 +7,7 @@ export const WORK_SCRIPT_TYPE_OPTIONS: { value: Exclude<WorkScriptType, "">; lab
 ];
 
 export interface WorkNodeItem {
-  idx: number;
-  uuid?: string;
+  uuid: string;
   work_name: string;
   work_description?: string;
   target_agent: number;
@@ -32,7 +31,7 @@ export interface WorkflowGraphNode {
   id: string;
   kind: "start" | "end" | "work" | "hitl" | string;
   label: string;
-  work_idx: number | null;
+  work_uuid: string | null;
   userid: string | null;
   cx: number;
   cy: number;
@@ -54,8 +53,7 @@ export interface WorkflowGraph {
 }
 
 export interface WorkflowItem {
-  idx: number;
-  uuid?: string;
+  uuid: string;
   checkin_user?: number;
   checkin_username?: string;
   checkin_time?: string;

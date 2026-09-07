@@ -163,9 +163,12 @@ ALTER TABLE received_mail
     ADD COLUMN IF NOT EXISTS unreadable_attachment_names TEXT NOT NULL DEFAULT '[]';
 
 -- Workflow designer (PLAN 260903)
+-- work_node / workflow are keyed by uuid. Converting a legacy idx-keyed table
+-- (backfill uuids, rewrite workflow expressions, drop idx, repoint the primary
+-- key) happens in ensure_workflow_tables() because the expression rewrite needs
+-- the idx -> uuid mapping in Python.
 CREATE TABLE IF NOT EXISTS work_node (
-    idx BIGSERIAL PRIMARY KEY,
-    uuid VARCHAR(36) NOT NULL UNIQUE,
+    uuid VARCHAR(36) PRIMARY KEY,
     work_name VARCHAR(100) NOT NULL,
     work_description VARCHAR(500) NOT NULL DEFAULT '',
     target_agent INTEGER NOT NULL DEFAULT 0,
@@ -213,11 +216,9 @@ BEGIN
         ALTER TABLE work_node DROP COLUMN IF EXISTS user_prompt;
     END IF;
 END $$;
-CREATE UNIQUE INDEX IF NOT EXISTS work_node_uuid_uidx ON work_node (uuid);
 
 CREATE TABLE IF NOT EXISTS workflow (
-    idx BIGSERIAL PRIMARY KEY,
-    uuid VARCHAR(36) NOT NULL UNIQUE,
+    uuid VARCHAR(36) PRIMARY KEY,
     checkin_user INTEGER NOT NULL DEFAULT 0,
     checkin_time TEXT NOT NULL DEFAULT '',
     workflow_name VARCHAR(100) NOT NULL,
@@ -240,4 +241,3 @@ ALTER TABLE workflow
     ADD COLUMN IF NOT EXISTS test_result INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE workflow
     ADD COLUMN IF NOT EXISTS validate_date TEXT NOT NULL DEFAULT '';
-CREATE UNIQUE INDEX IF NOT EXISTS workflow_uuid_uidx ON workflow (uuid);

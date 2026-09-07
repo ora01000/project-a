@@ -8,7 +8,6 @@ export type FailSpec =
 export type WorkEditorNode = {
   clientId: string;
   type: "work";
-  idx: number;
   uuid: string;
   name: string;
   description: string;
@@ -36,11 +35,18 @@ export type EditorModel = {
   extras: Record<string, WorkEditorNode>;
 };
 
+const UUID_RE =
+  /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+
 let clientSeq = 0;
 
 export function nextClientId(prefix: string): string {
   clientSeq += 1;
   return `${prefix}-${clientSeq}`;
+}
+
+export function isUuidToken(value: string): boolean {
+  return UUID_RE.test((value || "").trim());
 }
 
 export function emptyEditorModel(): EditorModel {
@@ -57,7 +63,6 @@ export function workFieldsFromItem(
   item: WorkNodeItem,
 ): Omit<WorkEditorNode, "clientId" | "type" | "fail"> {
   return {
-    idx: item.idx,
     uuid: item.uuid || "",
     name: item.work_name,
     description: item.work_description || "",
@@ -78,7 +83,7 @@ export function workNodeFromItem(
   fail: FailSpec = { kind: "none" },
 ): WorkEditorNode {
   return {
-    clientId: nextClientId(`W${item.idx}`),
+    clientId: nextClientId(`W${item.uuid}`),
     type: "work",
     ...workFieldsFromItem(item),
     fail,
@@ -101,7 +106,7 @@ type ParsedToken =
   | { kind: "start" }
   | { kind: "end" }
   | { kind: "hitl"; userid: string }
-  | { kind: "work"; workIdx: number; failWorkIdx?: number; failEnd?: boolean };
+  | { kind: "work"; workUuid: string; failWorkUuid?: string; failEnd?: boolean };
 
 function parseToken(raw: string): ParsedToken {
   const token = raw.trim();
@@ -117,15 +122,21 @@ function parseToken(raw: string): ParsedToken {
   }
   if (token.includes(":")) {
     const splitAt = token.indexOf(":");
-    const workIdx = Number(token.slice(0, splitAt));
+    const workUuid = token.slice(0, splitAt).trim();
     const fail = token.slice(splitAt + 1).trim();
-    if (fail.toUpperCase() === "E") {
-      return { kind: "work", workIdx, failEnd: true };
+    if (!isUuidToken(workUuid)) {
+      throw new Error(`알 수 없는 워크플로우 토큰: ${token}`);
     }
-    return { kind: "work", workIdx, failWorkIdx: Number(fail) };
+    if (fail.toUpperCase() === "E") {
+      return { kind: "work", workUuid, failEnd: true };
+    }
+    if (!isUuidToken(fail)) {
+      throw new Error(`알 수 없는 실패 토큰: ${token}`);
+    }
+    return { kind: "work", workUuid, failWorkUuid: fail.toLowerCase() };
   }
-  if (/^\d+$/.test(token)) {
-    return { kind: "work", workIdx: Number(token) };
+  if (isUuidToken(token)) {
+    return { kind: "work", workUuid: token.toLowerCase() };
   }
   throw new Error(`알 수 없는 워크플로우 토큰: ${token}`);
 }
@@ -151,22 +162,22 @@ export function hydrateEditor(
   if (tokens.length === 0) {
     return emptyEditorModel();
   }
-  const byIdx = new Map(workNodes.map((item) => [item.idx, item]));
+  const byUuid = new Map(workNodes.map((item) => [item.uuid.toLowerCase(), item]));
   const extras: Record<string, WorkEditorNode> = {};
-  const extraByWorkIdx = new Map<number, string>();
+  const extraByWorkUuid = new Map<string, string>();
   const main: EditorStep[] = [];
 
-  const toWork = (idx: number, fail: FailSpec = { kind: "none" }): WorkEditorNode => {
-    const item = byIdx.get(idx);
+  const toWork = (workUuid: string, fail: FailSpec = { kind: "none" }): WorkEditorNode => {
+    const key = workUuid.toLowerCase();
+    const item = byUuid.get(key);
     if (item) {
       return workNodeFromItem(item, fail);
     }
     return {
-      clientId: nextClientId(`W${idx}`),
+      clientId: nextClientId(`W${key}`),
       type: "work",
-      idx,
-      uuid: "",
-      name: String(idx),
+      uuid: key,
+      name: key,
       description: "",
       targetAgent: 0,
       targetAgentName: "",
@@ -202,17 +213,18 @@ export function hydrateEditor(
     let fail: FailSpec = { kind: "none" };
     if (token.failEnd) {
       fail = { kind: "end" };
-    } else if (token.failWorkIdx != null && Number.isFinite(token.failWorkIdx)) {
-      let extraId = extraByWorkIdx.get(token.failWorkIdx);
+    } else if (token.failWorkUuid) {
+      const failKey = token.failWorkUuid.toLowerCase();
+      let extraId = extraByWorkUuid.get(failKey);
       if (!extraId) {
-        const extra = toWork(token.failWorkIdx);
+        const extra = toWork(failKey);
         extraId = extra.clientId;
         extras[extraId] = extra;
-        extraByWorkIdx.set(token.failWorkIdx, extraId);
+        extraByWorkUuid.set(failKey, extraId);
       }
       fail = { kind: "work", clientId: extraId };
     }
-    main.push(toWork(token.workIdx, fail));
+    main.push(toWork(token.workUuid, fail));
   }
 
   if (main.length === 0 || main[0].type !== "start") {
@@ -244,13 +256,14 @@ export function serializeEditor(model: EditorModel): string {
       tokens.push(`H:${step.userid}`);
       continue;
     }
+    const uuid = step.uuid.toLowerCase();
     if (step.fail.kind === "end") {
-      tokens.push(`${step.idx}:E`);
+      tokens.push(`${uuid}:E`);
     } else if (step.fail.kind === "work") {
       const failNode = workByClient(step.fail.clientId);
-      tokens.push(failNode ? `${step.idx}:${failNode.idx}` : `${step.idx}:E`);
+      tokens.push(failNode ? `${uuid}:${failNode.uuid.toLowerCase()}` : `${uuid}:E`);
     } else {
-      tokens.push(String(step.idx));
+      tokens.push(uuid);
     }
   }
   if (tokens.length === 0) {
@@ -269,6 +282,9 @@ export function validateEditor(model: EditorModel): string | null {
   for (const step of model.main) {
     if (step.type === "hitl" && !step.userid.trim()) {
       return "승인자를 지정하세요.";
+    }
+    if (step.type === "work" && !step.uuid.trim()) {
+      return "작업노드 uuid가 없습니다.";
     }
     if (step.type === "work" && step.fail.kind === "work" && !model.extras[step.fail.clientId]) {
       return "실패시 작업노드가 올바르지 않습니다.";

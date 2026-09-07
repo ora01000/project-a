@@ -50,7 +50,7 @@ interface WorkflowEditorProps {
   readOnly?: boolean;
   onSaved: (item: WorkflowItem) => Promise<void> | void;
   onWorkNodesChanged: () => Promise<void> | void;
-  workflowIdx?: number;
+  workflowUuid?: string;
   aiImportRequest?: { nonce: number; assistantText: string } | null;
   onAiImportHandled?: () => void;
 }
@@ -162,7 +162,7 @@ export function WorkflowEditor({
   readOnly = false,
   onSaved,
   onWorkNodesChanged,
-  workflowIdx,
+  workflowUuid,
   aiImportRequest = null,
   onAiImportHandled,
 }: WorkflowEditorProps) {
@@ -315,7 +315,7 @@ export function WorkflowEditor({
     }
     // 노드 목록 갱신으로 편집중 그래프가 초기화되지 않도록 workNodes는 의존성에서 제외한다.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialExpression, workflowIdx]);
+  }, [initialExpression, workflowUuid]);
 
   useEffect(() => {
     setModel((current) => ({
@@ -390,7 +390,7 @@ export function WorkflowEditor({
       setError(null);
       try {
         const payload = parseAiWorkflowDesignResponse(aiImportRequest.assistantText);
-        const logicalToDbIdx: Record<string, number> = {};
+        const idToUuid: Record<string, string> = {};
         const createdItems: WorkNodeItem[] = [];
 
         for (const draft of payload.work_nodes) {
@@ -399,6 +399,7 @@ export function WorkflowEditor({
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
+              uuid: draft.uuid,
               work_name: draft.work_name,
               work_description: draft.work_description,
               target_agent: target.idx,
@@ -409,35 +410,42 @@ export function WorkflowEditor({
             }),
           });
           if (!response.ok) {
-            throw new Error(await parseError(response, `작업노드 '${draft.logicalId}' 생성 실패`));
+            throw new Error(await parseError(response, `작업노드 '${draft.uuid}' 생성 실패`));
           }
           const item = (await response.json()) as WorkNodeItem;
-          logicalToDbIdx[draft.logicalId] = item.idx;
+          idToUuid[draft.uuid] = item.uuid;
           createdItems.push({
             ...item,
             target_agent_name: item.target_agent_name || target.name,
           });
         }
 
-        const remapped = remapWorkflowExpression(payload.workflow, logicalToDbIdx);
-        const mergedNodes = [...workNodes.filter((n) => !createdItems.some((c) => c.idx === n.idx)), ...createdItems];
+        const remapped = remapWorkflowExpression(payload.workflow, idToUuid);
+        const mergedNodes = [
+          ...workNodes.filter((n) => !createdItems.some((c) => c.uuid === n.uuid)),
+          ...createdItems,
+        ];
         setName(payload.workflow_name);
         setDescription(payload.workflow_description);
         setModel(hydrateEditor(remapped, mergedNodes, userNames));
         setSelectedNodeId(null);
         await onWorkNodesChanged();
 
-        const isCreate = workflowIdx == null;
+        const isCreate = !workflowUuid;
+        const saveBody: Record<string, string> = {
+          workflow_name: payload.workflow_name,
+          workflow_description: payload.workflow_description,
+          workflow: remapped,
+        };
+        if (isCreate && payload.workflow_uuid) {
+          saveBody.uuid = payload.workflow_uuid;
+        }
         const saveResponse = await fetch(
-          isCreate ? "/api/workflows" : `/api/workflows/${workflowIdx}`,
+          isCreate ? "/api/workflows" : `/api/workflows/${workflowUuid}`,
           {
             method: isCreate ? "POST" : "PUT",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              workflow_name: payload.workflow_name,
-              workflow_description: payload.workflow_description,
-              workflow: remapped,
-            }),
+            body: JSON.stringify(saveBody),
           },
         );
         if (!saveResponse.ok) {
@@ -462,7 +470,7 @@ export function WorkflowEditor({
     workNodes,
     userNames,
     onWorkNodesChanged,
-    workflowIdx,
+    workflowUuid,
     onSaved,
   ]);
 
@@ -525,7 +533,7 @@ export function WorkflowEditor({
 
   const persistWork = async (node: WorkEditorNode) => {
     try {
-      const response = await fetch(`/api/work-nodes/${node.idx}`, {
+      const response = await fetch(`/api/work-nodes/${node.uuid}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(workNodeWriteBody(node)),
@@ -592,8 +600,8 @@ export function WorkflowEditor({
     setError(null);
     try {
       const expression = serializeEditor(model);
-      const isCreate = workflowIdx == null;
-      const response = await fetch(isCreate ? "/api/workflows" : `/api/workflows/${workflowIdx}`, {
+      const isCreate = !workflowUuid;
+      const response = await fetch(isCreate ? "/api/workflows" : `/api/workflows/${workflowUuid}`, {
         method: isCreate ? "POST" : "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -811,7 +819,7 @@ export function WorkflowEditor({
     }
     const body = new FormData();
     body.append("file", file);
-    const response = await fetch(`/api/work-nodes/${selectedWorkNode.idx}/file`, {
+    const response = await fetch(`/api/work-nodes/${selectedWorkNode.uuid}/file`, {
       method: "POST",
       body,
     });
@@ -911,6 +919,19 @@ export function WorkflowEditor({
               </button>
             )}
           </div>
+        </label>
+        <label className="mt-3 grid gap-1 text-xs text-slate-400">
+          워크플로우 설명
+          <textarea
+            value={description}
+            onChange={(event) => setDescription(event.target.value)}
+            maxLength={500}
+            rows={2}
+            readOnly={readOnly}
+            disabled={readOnly}
+            placeholder="워크플로우 메타 설명"
+            className="resize-y rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 disabled:opacity-80"
+          />
         </label>
       </div>
 

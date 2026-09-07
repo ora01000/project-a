@@ -16,7 +16,7 @@ Analyze the request and create ordered unit works. Names in parentheses are JSON
 |-------|-----|--------|
 | Work name | `work_name` | Short title for the step |
 | Work description | `work_description` | What this step does |
-| Work ID | `idx` | Unique per work; must match `/^[a-zA-Z0-9_-]{4,64}$/` (e.g. `work_1`, `ssl_check`) |
+| Work UUID | `uuid` | Unique per work; must be a UUID v4 string (`xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`). Generate a fresh UUID for each work node |
 | Target agent | `target_agent` | **Never invent.** Use only values the requester provided. If unknown, ask first |
 | Script | `work_script` | Executable content for the step |
 | Script type | `script_type` | One of: `yaml` \| `ansible` \| `cli` |
@@ -36,6 +36,7 @@ Also produce:
 
 | Field | Key |
 |-------|-----|
+| Workflow UUID | `uuid` |
 | Workflow name | `workflow_name` |
 | Workflow description | `workflow_description` |
 | Flow expression | `workflow` |
@@ -44,18 +45,33 @@ Also produce:
 
 - `S` — start
 - `E` — end
-- `{workId}` — a work node (`idx` from the `work_node` array)
-- `{workId}:{failWorkId}` — on failure of `workId`, run `failWorkId` (if that also fails → end)
-- `{workId}:E` — on failure of `workId`, end
+- `{work_uuid}` — a work node (`uuid` from the `work_node` array)
+- `{work_uuid}:{fail_work_uuid}` — on failure of `work_uuid`, run `fail_work_uuid` (if that also fails → end)
+- `{work_uuid}:E` — on failure of `work_uuid`, end
+- `H:{userid}` — HITL approver (only when the requester asked for approval)
 - `->` — success path to the next token
 
 Example:
 
 ```text
-S->work_1->work_2:work_3->work_4->E
+S->11111111-1111-4111-8111-111111111111->22222222-2222-4222-8222-222222222222:33333333-3333-4333-8333-333333333333->H:isyun->44444444-4444-4444-8444-444444444444->E
 ```
 
-Every `workId` referenced in `workflow` must exist in the `work_node` array. The expression must start with `S` and eventually reach `E` on the success path.
+Every work UUID referenced in `workflow` must exist in the `work_node` array. The expression must start with `S` and eventually reach `E` on the success path.
+
+## Mission 3 — Per-node file store
+
+When a work step must **write result files**, or when the requester will **upload requirement files** (inventories, values, manifests, etc.) for that step, use this directory only:
+
+```text
+{UPLOAD_HOME}/{work_node.uuid}
+```
+
+- `UPLOAD_HOME` defaults to **`/app/upload`**
+- Example for work uuid `11111111-1111-4111-8111-111111111111`:
+  - `/app/upload/11111111-1111-4111-8111-111111111111`
+- In `work_script`, reference paths under that directory for that node's own `uuid`. Do **not** invent other storage roots.
+- Do not assume files already exist unless the requester said they were uploaded; if a required file path is unknown, ask.
 
 ## Response JSON (when no clarifying questions are needed)
 
@@ -65,7 +81,7 @@ Every `workId` referenced in `workflow` must exist in the `work_node` array. The
     {
       "work_name": "작업명#1",
       "work_description": "작업설명#1",
-      "idx": "work_1",
+      "uuid": "11111111-1111-4111-8111-111111111111",
       "target_agent": "대상에이전트#1",
       "work_script": "스크립트#1",
       "script_type": "yaml"
@@ -73,21 +89,23 @@ Every `workId` referenced in `workflow` must exist in the `work_node` array. The
     {
       "work_name": "작업명#2",
       "work_description": "작업설명#2",
-      "idx": "work_2",
+      "uuid": "22222222-2222-4222-8222-222222222222",
       "target_agent": "대상에이전트#2",
       "work_script": "스크립트#2",
       "script_type": "cli"
     }
   ],
   "workflow": {
+    "uuid": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
     "workflow_name": "워크플로우명",
     "workflow_description": "워크플로우설명",
-    "workflow": "S->work_1->work_2->E"
+    "workflow": "S->11111111-1111-4111-8111-111111111111->22222222-2222-4222-8222-222222222222->E"
   }
 }
 ```
 
 - Top-level array key must be **`work_node`** (not `work`)
 - `script_type` must be exactly `yaml`, `ansible`, or `cli`
-- `idx` values must be unique and match `/^[a-zA-Z0-9_-]{4,64}$/`
+- All `uuid` values must be unique UUID strings and must match the tokens used in `workflow`
 - Prefer compact, valid scripts over narrative explanations
+- When scripts need file I/O or uploaded requirements, use `{UPLOAD_HOME}/{work_node.uuid}` (`/app/upload/<uuid>`)

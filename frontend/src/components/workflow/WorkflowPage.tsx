@@ -44,7 +44,7 @@ export function WorkflowPage({
 
   const [items, setItems] = useState<WorkflowItem[]>([]);
   const [workNodes, setWorkNodes] = useState<WorkNodeItem[]>([]);
-  const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
+  const [selectedUuid, setSelectedUuid] = useState<string | null>(null);
   const [mode, setMode] = useState<"idle" | "create" | "edit">("idle");
   const [createKey, setCreateKey] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -53,7 +53,7 @@ export function WorkflowPage({
     assistantText: string;
   } | null>(null);
 
-  const selected = items.find((item) => item.idx === selectedIdx) ?? null;
+  const selected = items.find((item) => item.uuid === selectedUuid) ?? null;
 
   const handleAssistantResponse = useCallback((payload: { agentId: string; content: string }) => {
     const agentId = payload.agentId.trim();
@@ -79,7 +79,7 @@ export function WorkflowPage({
     setError(null);
     setMode((current) => {
       if (current === "idle") {
-        setSelectedIdx(null);
+        setSelectedUuid(null);
         setCreateKey((key) => key + 1);
         return "create";
       }
@@ -194,25 +194,25 @@ export function WorkflowPage({
 
   const handleSaved = async (item: WorkflowItem) => {
     await Promise.all([loadWorkflows(), loadWorkNodes()]);
-    setSelectedIdx(item.idx);
+    setSelectedUuid(item.uuid);
     setMode("edit");
   };
 
   const handleCheckedIn = async (item: WorkflowItem) => {
     await Promise.all([loadWorkflows(), loadWorkNodes()]);
-    setSelectedIdx(item.idx);
+    setSelectedUuid(item.uuid);
     setMode("edit");
   };
 
   const handleCheckedOut = async (item: WorkflowItem) => {
     await Promise.all([loadWorkflows(), loadWorkNodes()]);
-    setSelectedIdx(item.idx);
+    setSelectedUuid(item.uuid);
     setMode("edit");
   };
 
   const handleRestored = async (item: WorkflowItem) => {
     await Promise.all([loadWorkflows(), loadWorkNodes()]);
-    setSelectedIdx(item.idx);
+    setSelectedUuid(item.uuid);
     setMode("edit");
   };
 
@@ -225,7 +225,7 @@ export function WorkflowPage({
               collapsed={isListCollapsed}
               onCollapsedChange={setIsListCollapsed}
               onCreate={() => {
-                setSelectedIdx(null);
+                setSelectedUuid(null);
                 setCreateKey((current) => current + 1);
                 setMode("create");
               }}
@@ -236,16 +236,16 @@ export function WorkflowPage({
                   <p className="text-xs text-slate-500">등록된 워크플로우가 없습니다.</p>
                 ) : null}
                 {items.map((item) => {
-                  const isActive = selectedIdx === item.idx && mode === "edit";
+                  const isActive = selectedUuid === item.uuid && mode === "edit";
                   const tested = Boolean(item.test_result);
                   const checkinName = (item.checkin_username || "").trim();
                   const hasCheckin = Boolean(item.checkin_user && item.checkin_user > 0 && checkinName);
                   return (
                     <button
-                      key={item.idx}
+                      key={item.uuid}
                       type="button"
                       onClick={() => {
-                        setSelectedIdx(item.idx);
+                        setSelectedUuid(item.uuid);
                         setMode("edit");
                       }}
                       className={`flex min-h-[76px] w-full flex-col justify-center gap-1 overflow-hidden rounded-xl border bg-slate-900/90 px-3 py-2 text-left shadow-lg ${
@@ -286,7 +286,7 @@ export function WorkflowPage({
               editorKey={
                 mode === "create"
                   ? `create-${createKey}`
-                  : `wf-${selectedIdx ?? "none"}-${selected?.checkin_time || "out"}-${selected?.is_draft ? "d" : "c"}`
+                  : `wf-${selectedUuid ?? "none"}-${selected?.checkin_time || "out"}-${selected?.is_draft ? "d" : "c"}`
               }
               onSaved={handleSaved}
               onWorkNodesChanged={loadWorkNodes}

@@ -24,9 +24,11 @@ services:
       MCP_ANSIBLE_URL: ${MCP_ANSIBLE_URL:-}
       MCP_ANSIBLE_ENABLED: ${MCP_ANSIBLE_ENABLED:-false}
       REDIS_URL: ${REDIS_URL:-redis://host.docker.internal:6379/0}
+      UPLOAD_HOME: ${UPLOAD_HOME:-/app/upload}
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs
+      - ./upload:/app/upload
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped

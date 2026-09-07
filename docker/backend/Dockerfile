@@ -32,7 +32,7 @@ ENV PATH="/app/.venv/bin:${PATH}" \
     PYTHONPATH=/app
 
 # OKD restricted SCC: arbitrary UID with GID 0 must write SQLite/logs under /app/data.
-RUN mkdir -p /app/data /app/logs/agents /app/data/user_comm_logs \
+RUN mkdir -p /app/data /app/logs/agents /app/data/user_comm_logs /app/upload \
     && chgrp -R 0 /app \
     && chmod -R g+rwX /app
 

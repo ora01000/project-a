@@ -25,23 +25,22 @@ def user_index_key(user_idx: int) -> str:
     return f"{DRAFT_USER_INDEX_PREFIX}{int(user_idx)}"
 
 
-def work_idxs_from_expression(expression: str) -> set[int]:
-    idxs: set[int] = set()
+def work_uuids_from_expression(expression: str) -> set[str]:
+    uuids: set[str] = set()
     try:
         tokens = parse_workflow_tokens(expression)
     except ValueError:
-        return idxs
+        return uuids
     for token in tokens:
-        if token.work_idx is not None:
-            idxs.add(int(token.work_idx))
-        if token.fail_work_idx is not None:
-            idxs.add(int(token.fail_work_idx))
-    return idxs
+        if token.work_uuid:
+            uuids.add(str(token.work_uuid))
+        if token.fail_work_uuid:
+            uuids.add(str(token.fail_work_uuid))
+    return uuids
 
 
 def workflow_to_dict(record: WorkflowRecord) -> dict[str, Any]:
     return {
-        "idx": record.idx,
         "uuid": record.uuid,
         "checkin_user": record.checkin_user,
         "checkin_time": record.checkin_time,
@@ -56,7 +55,6 @@ def workflow_to_dict(record: WorkflowRecord) -> dict[str, Any]:
 
 def work_node_to_dict(record: WorkNodeRecord) -> dict[str, Any]:
     return {
-        "idx": record.idx,
         "uuid": record.uuid,
         "work_name": record.work_name,
         "work_description": record.work_description,
@@ -75,7 +73,6 @@ def work_node_from_dict(data: dict[str, Any]) -> WorkNodeRecord:
     if work_script is None:
         work_script = data.get("agent_response") or ""
     return WorkNodeRecord(
-        idx=int(data.get("idx") or 0),
         uuid=str(data.get("uuid") or ""),
         work_name=str(data.get("work_name") or ""),
         work_description=str(data.get("work_description") or ""),
@@ -91,7 +88,6 @@ def work_node_from_dict(data: dict[str, Any]) -> WorkNodeRecord:
 
 def workflow_from_dict(data: dict[str, Any]) -> WorkflowRecord:
     return WorkflowRecord(
-        idx=int(data.get("idx") or 0),
         uuid=str(data.get("uuid") or ""),
         checkin_user=int(data.get("checkin_user") or 0),
         checkin_time=str(data.get("checkin_time") or ""),
@@ -110,14 +106,13 @@ def build_draft_payload(
     workflow: WorkflowRecord,
     nodes: list[WorkNodeRecord],
 ) -> dict[str, Any]:
-    node_map = {str(node.idx): work_node_to_dict(node) for node in nodes}
+    node_map = {node.uuid: work_node_to_dict(node) for node in nodes if node.uuid}
     workflow_dict = workflow_to_dict(workflow)
     return {
         "meta": {
-            "workflow_idx": workflow.idx,
             "workflow_uuid": workflow.uuid,
             "user_idx": int(user_idx),
-            "created_node_idxs": [],
+            "created_node_uuids": [],
             "dirty": False,
         },
         "baseline": {
@@ -195,21 +190,21 @@ def working_workflow(payload: dict[str, Any]) -> WorkflowRecord:
     return workflow_from_dict(payload["working"]["workflow"])
 
 
-def working_nodes(payload: dict[str, Any]) -> dict[int, WorkNodeRecord]:
+def working_nodes(payload: dict[str, Any]) -> dict[str, WorkNodeRecord]:
     nodes = payload.get("working", {}).get("nodes") or {}
-    result: dict[int, WorkNodeRecord] = {}
+    result: dict[str, WorkNodeRecord] = {}
     for key, value in nodes.items():
         if not isinstance(value, dict):
             continue
         node = work_node_from_dict(value)
-        result[node.idx] = node
+        result[node.uuid or str(key)] = node
     return result
 
 
-def baseline_created_cleanup_idxs(payload: dict[str, Any]) -> list[int]:
+def baseline_created_cleanup_uuids(payload: dict[str, Any]) -> list[str]:
     meta = payload.get("meta") or {}
-    raw = meta.get("created_node_idxs") or []
-    return [int(item) for item in raw if int(item) > 0]
+    raw = meta.get("created_node_uuids") or []
+    return [str(item).strip() for item in raw if str(item).strip()]
 
 
 def mark_dirty(payload: dict[str, Any]) -> dict[str, Any]:
@@ -233,19 +228,20 @@ def set_working_node(payload: dict[str, Any], node: WorkNodeRecord) -> dict[str,
     next_payload = mark_dirty(payload)
     working = dict(next_payload.get("working") or {})
     nodes = dict(working.get("nodes") or {})
-    nodes[str(node.idx)] = work_node_to_dict(node)
+    nodes[node.uuid] = work_node_to_dict(node)
     working["nodes"] = nodes
     next_payload["working"] = working
     return next_payload
 
 
-def track_created_node(payload: dict[str, Any], node_idx: int) -> dict[str, Any]:
+def track_created_node(payload: dict[str, Any], node_uuid: str) -> dict[str, Any]:
     next_payload = mark_dirty(payload)
     meta = dict(next_payload.get("meta") or {})
-    created = [int(item) for item in (meta.get("created_node_idxs") or [])]
-    if int(node_idx) not in created:
-        created.append(int(node_idx))
-    meta["created_node_idxs"] = created
+    created = [str(item) for item in (meta.get("created_node_uuids") or [])]
+    key = str(node_uuid).strip()
+    if key and key not in created:
+        created.append(key)
+    meta["created_node_uuids"] = created
     next_payload["meta"] = meta
     return next_payload
 
@@ -259,6 +255,6 @@ def restore_working_from_baseline(payload: dict[str, Any]) -> dict[str, Any]:
     }
     meta = dict(next_payload.get("meta") or {})
     meta["dirty"] = False
-    # Keep created_node_idxs for cleanup on discard/restore-checkout.
+    # Keep created_node_uuids for cleanup on discard/restore-checkout.
     next_payload["meta"] = meta
     return next_payload

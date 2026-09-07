@@ -185,12 +185,8 @@ function buildValidationMessage(scriptType: string, script: string): string {
   ].join("\n");
 }
 
-function fileLabel(path: string): string {
-  const trimmed = path.trim();
-  if (!trimmed) {
-    return "";
-  }
-  return trimmed.split("/").pop() || trimmed;
+function fileLabel(name: string): string {
+  return name.trim().split(/[/\\]/).pop() || "";
 }
 
 export function WorkNodeEditPanel({

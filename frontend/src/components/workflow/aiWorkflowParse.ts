@@ -1,7 +1,7 @@
 import type { WorkScriptType } from "../../types/workflow";
 
 export type AiWorkNodeDraft = {
-  logicalId: string;
+  uuid: string;
   work_name: string;
   work_description: string;
   target_agent: string;
@@ -11,14 +11,15 @@ export type AiWorkNodeDraft = {
 
 export type AiWorkflowDesignPayload = {
   work_nodes: AiWorkNodeDraft[];
+  workflow_uuid: string;
   workflow_name: string;
   workflow_description: string;
   workflow: string;
 };
 
 const SCRIPT_TYPES = new Set(["yaml", "ansible", "cli"]);
-/** Logical work IDs in AI JSON (mapped to DB integer idx on import). */
-const LOGICAL_ID_RE = /^[a-zA-Z0-9_-]{4,64}$/;
+const UUID_RE =
+  /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 
 function extractJsonText(raw: string): string {
   const trimmed = raw.trim();
@@ -36,6 +37,14 @@ function extractJsonText(raw: string): string {
 
 function asString(value: unknown): string {
   return String(value ?? "").trim();
+}
+
+function asUuid(value: unknown, label: string): string {
+  const text = asString(value);
+  if (!UUID_RE.test(text)) {
+    throw new Error(`${label}('${text || "(빈 값)"}')는 UUID 형식이어야 합니다.`);
+  }
+  return text.toLowerCase();
 }
 
 export function parseAiWorkflowDesignResponse(raw: string): AiWorkflowDesignPayload {
@@ -70,16 +79,11 @@ export function parseAiWorkflowDesignResponse(raw: string): AiWorkflowDesignPayl
       throw new Error(`work_node[${index}] 형식이 올바르지 않습니다.`);
     }
     const row = item as Record<string, unknown>;
-    const logicalId = asString(row.idx);
-    if (!LOGICAL_ID_RE.test(logicalId)) {
-      throw new Error(
-        `work_node.idx('${logicalId || "(빈 값)"}')는 /^[a-zA-Z0-9_-]{4,64}$/ 형식이어야 합니다.`,
-      );
+    const uuid = asUuid(row.uuid ?? row.idx, `work_node[${index}].uuid`);
+    if (seen.has(uuid)) {
+      throw new Error(`중복된 work_node.uuid: ${uuid}`);
     }
-    if (seen.has(logicalId)) {
-      throw new Error(`중복된 work_node.idx: ${logicalId}`);
-    }
-    seen.add(logicalId);
+    seen.add(uuid);
 
     const scriptType = asString(row.script_type).toLowerCase();
     if (scriptType && !SCRIPT_TYPES.has(scriptType)) {
@@ -87,8 +91,8 @@ export function parseAiWorkflowDesignResponse(raw: string): AiWorkflowDesignPayl
     }
 
     return {
-      logicalId,
-      work_name: asString(row.work_name) || logicalId,
+      uuid,
+      work_name: asString(row.work_name) || uuid,
       work_description: asString(row.work_description),
       target_agent: asString(row.target_agent),
       work_script: asString(row.work_script),
@@ -101,17 +105,23 @@ export function parseAiWorkflowDesignResponse(raw: string): AiWorkflowDesignPayl
     throw new Error("workflow.workflow 표현식이 비어 있습니다.");
   }
 
+  const workflow_uuid = asString(workflowObj.uuid)
+    ? asUuid(workflowObj.uuid, "workflow.uuid")
+    : "";
+
   return {
     work_nodes,
+    workflow_uuid,
     workflow_name: asString(workflowObj.workflow_name) || "AI 생성 워크플로우",
     workflow_description: asString(workflowObj.workflow_description),
     workflow,
   };
 }
 
+/** Map expression work-token ids to persisted work_node.uuid values. */
 export function remapWorkflowExpression(
   expression: string,
-  logicalToDbIdx: Record<string, number>,
+  idToUuid: Record<string, string>,
 ): string {
   const parts = expression
     .split("->")
@@ -123,14 +133,17 @@ export function remapWorkflowExpression(
     if (!key) {
       throw new Error("빈 작업 ID가 표현식에 있습니다.");
     }
-    if (Object.prototype.hasOwnProperty.call(logicalToDbIdx, key)) {
-      return String(logicalToDbIdx[key]);
+    const lowered = key.toLowerCase();
+    if (Object.prototype.hasOwnProperty.call(idToUuid, key)) {
+      return idToUuid[key].toLowerCase();
     }
-    // Already a DB integer
-    if (/^\d+$/.test(key)) {
-      return key;
+    if (Object.prototype.hasOwnProperty.call(idToUuid, lowered)) {
+      return idToUuid[lowered].toLowerCase();
     }
-    throw new Error(`표현식의 작업 ID '${key}'를 DB idx로 매핑하지 못했습니다.`);
+    if (UUID_RE.test(key)) {
+      return lowered;
+    }
+    throw new Error(`표현식의 작업 ID '${key}'를 work_node.uuid로 매핑하지 못했습니다.`);
   };
 
   return parts

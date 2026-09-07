@@ -257,6 +257,8 @@ class AppSettings(BaseSettings):
         alias="RECEIVED_MAIL_ATTACHMENT_HOME",
     )
 
+    upload_home: str = Field(default="/app/upload", alias="UPLOAD_HOME")
+
     job_decision_loop_enabled: bool | None = Field(
         default=None,
         alias="JOB_DECISION_LOOP_ENABLED",
@@ -1030,3 +1032,39 @@ def resolve_control_plane_base_url(server: ServerSettings) -> str:
     host = (server.backend_api_host or "localhost").strip()
     port = server.backend_api_port
     return f"http://{host}:{port}".rstrip("/")
+
+
+def resolve_upload_home() -> Path:
+    """Workflow work_node file upload root (``UPLOAD_HOME``, default ``/app/upload``)."""
+    raw = (AppSettings().upload_home or "/app/upload").strip() or "/app/upload"
+    path = Path(raw).expanduser()
+    if not path.is_absolute():
+        path = PROJECT_ROOT / path
+    return path
+
+
+def work_node_upload_dir(node_uuid: str) -> Path:
+    """Per-node upload directory: ``{UPLOAD_HOME}/{work_node.uuid}``."""
+    key = (node_uuid or "").strip().lower()
+    if not key:
+        raise ValueError("work_node uuid가 비어 있습니다.")
+    return resolve_upload_home() / key
+
+
+def normalize_work_node_filename(value: str | None) -> str:
+    """Persist ``work_node.files`` as a bare filename (no directories)."""
+    text = (value or "").strip().replace("\\", "/")
+    if not text:
+        return ""
+    name = Path(text).name.strip()
+    if name in {"", ".", ".."}:
+        return ""
+    return name[:300]
+
+
+def work_node_file_path(node_uuid: str, filename: str | None) -> Path | None:
+    """Absolute path: ``{UPLOAD_HOME}/{work_node.uuid}/{filename}``."""
+    name = normalize_work_node_filename(filename)
+    if not name:
+        return None
+    return work_node_upload_dir(node_uuid) / name

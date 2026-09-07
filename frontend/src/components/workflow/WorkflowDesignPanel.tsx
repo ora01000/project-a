@@ -84,7 +84,7 @@ export function WorkflowDesignPanel({
       setIsLockBusy(true);
       setLockError(null);
       try {
-        const response = await fetch(`/api/workflows/${selected.idx}/${path}`, {
+        const response = await fetch(`/api/workflows/${selected.uuid}/${path}`, {
           method: "POST",
         });
         if (!response.ok) {
@@ -162,7 +162,7 @@ export function WorkflowDesignPanel({
           initialName={mode === "edit" ? selected?.workflow_name ?? "" : ""}
           initialExpression={mode === "edit" ? selected?.workflow ?? "" : ""}
           initialDescription={mode === "edit" ? selected?.workflow_description ?? "" : ""}
-          workflowIdx={mode === "edit" ? selected?.idx : undefined}
+          workflowUuid={mode === "edit" ? selected?.uuid : undefined}
           saveLabel="저장"
           readOnly={readOnly}
           onSaved={onSaved}
