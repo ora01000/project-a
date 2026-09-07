@@ -1,6 +1,9 @@
 import type { WorkScriptType } from "../../types/workflow";
 
 export type AiWorkNodeDraft = {
+  /** Opaque link token from AI (`work_id` / `idx` / ignored `uuid`); used only for expression remap. */
+  logicalId: string;
+  /** Platform-assigned UUID (AI `uuid` is ignored). */
   uuid: string;
   work_name: string;
   work_description: string;
@@ -18,8 +21,8 @@ export type AiWorkflowDesignPayload = {
 };
 
 const SCRIPT_TYPES = new Set(["yaml", "ansible", "cli"]);
-const UUID_RE =
-  /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+/** Prefer short logical ids from the agent; also accept opaque tokens (incl. guardrail-masked text). */
+const LOGICAL_ID_RE = /^[^\s]{1,200}$/;
 
 function extractJsonText(raw: string): string {
   const trimmed = raw.trim();
@@ -39,12 +42,41 @@ function asString(value: unknown): string {
   return String(value ?? "").trim();
 }
 
-function asUuid(value: unknown, label: string): string {
-  const text = asString(value);
-  if (!UUID_RE.test(text)) {
-    throw new Error(`${label}('${text || "(빈 값)"}')는 UUID 형식이어야 합니다.`);
+function newUuid(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
   }
-  return text.toLowerCase();
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (ch) => {
+    const n = (Math.random() * 16) | 0;
+    const v = ch === "x" ? n : (n & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
+
+function resolveLogicalId(row: Record<string, unknown>, index: number): string {
+  const candidates = [row.work_id, row.idx, row.uuid];
+  for (const candidate of candidates) {
+    const text = asString(candidate);
+    if (text && LOGICAL_ID_RE.test(text)) {
+      return text;
+    }
+  }
+  return `work_${index + 1}`;
+}
+
+function rewriteLogicalTokens(text: string, idToUuid: Record<string, string>): string {
+  if (!text) {
+    return text;
+  }
+  const keys = Object.keys(idToUuid).sort((left, right) => right.length - left.length);
+  let out = text;
+  for (const key of keys) {
+    if (!key) {
+      continue;
+    }
+    out = out.split(key).join(idToUuid[key]);
+  }
+  return out;
 }
 
 export function parseAiWorkflowDesignResponse(raw: string): AiWorkflowDesignPayload {
@@ -74,47 +106,62 @@ export function parseAiWorkflowDesignResponse(raw: string): AiWorkflowDesignPayl
   }
 
   const seen = new Set<string>();
-  const work_nodes: AiWorkNodeDraft[] = workList.map((item, index) => {
+  const idToUuid: Record<string, string> = {};
+  const drafts: Array<{
+    logicalId: string;
+    uuid: string;
+    work_name: string;
+    work_description: string;
+    target_agent: string;
+    work_script: string;
+    script_type: string;
+  }> = [];
+
+  workList.forEach((item, index) => {
     if (!item || typeof item !== "object") {
       throw new Error(`work_node[${index}] 형식이 올바르지 않습니다.`);
     }
     const row = item as Record<string, unknown>;
-    const uuid = asUuid(row.uuid ?? row.idx, `work_node[${index}].uuid`);
-    if (seen.has(uuid)) {
-      throw new Error(`중복된 work_node.uuid: ${uuid}`);
+    const logicalId = resolveLogicalId(row, index);
+    if (seen.has(logicalId)) {
+      throw new Error(`중복된 work_node 식별자: ${logicalId}`);
     }
-    seen.add(uuid);
+    seen.add(logicalId);
 
     const scriptType = asString(row.script_type).toLowerCase();
     if (scriptType && !SCRIPT_TYPES.has(scriptType)) {
       throw new Error(`script_type은 yaml|ansible|cli 중 하나여야 합니다: ${scriptType}`);
     }
 
-    return {
+    const uuid = newUuid();
+    idToUuid[logicalId] = uuid;
+    drafts.push({
+      logicalId,
       uuid,
-      work_name: asString(row.work_name) || uuid,
+      work_name: asString(row.work_name) || logicalId,
       work_description: asString(row.work_description),
       target_agent: asString(row.target_agent),
       work_script: asString(row.work_script),
       script_type: scriptType,
-    };
+    });
   });
 
-  const workflow = asString(workflowObj.workflow);
-  if (!workflow) {
+  const workflowRaw = asString(workflowObj.workflow);
+  if (!workflowRaw) {
     throw new Error("workflow.workflow 표현식이 비어 있습니다.");
   }
 
-  const workflow_uuid = asString(workflowObj.uuid)
-    ? asUuid(workflowObj.uuid, "workflow.uuid")
-    : "";
+  const work_nodes: AiWorkNodeDraft[] = drafts.map((draft) => ({
+    ...draft,
+    work_script: rewriteLogicalTokens(draft.work_script, idToUuid),
+  }));
 
   return {
     work_nodes,
-    workflow_uuid,
+    workflow_uuid: newUuid(),
     workflow_name: asString(workflowObj.workflow_name) || "AI 생성 워크플로우",
     workflow_description: asString(workflowObj.workflow_description),
-    workflow,
+    workflow: remapWorkflowExpression(workflowRaw, idToUuid),
   };
 }
 
@@ -133,17 +180,15 @@ export function remapWorkflowExpression(
     if (!key) {
       throw new Error("빈 작업 ID가 표현식에 있습니다.");
     }
-    const lowered = key.toLowerCase();
     if (Object.prototype.hasOwnProperty.call(idToUuid, key)) {
-      return idToUuid[key].toLowerCase();
+      return idToUuid[key];
     }
-    if (Object.prototype.hasOwnProperty.call(idToUuid, lowered)) {
-      return idToUuid[lowered].toLowerCase();
+    const lowered = key.toLowerCase();
+    const hit = Object.entries(idToUuid).find(([logical]) => logical.toLowerCase() === lowered);
+    if (hit) {
+      return hit[1];
     }
-    if (UUID_RE.test(key)) {
-      return lowered;
-    }
-    throw new Error(`표현식의 작업 ID '${key}'를 work_node.uuid로 매핑하지 못했습니다.`);
+    throw new Error(`표현식의 작업 ID '${key}'를 work_node 식별자로 매핑하지 못했습니다.`);
   };
 
   return parts

@@ -20,7 +20,6 @@ import type { WorkNodeItem, WorkflowApprover, WorkflowItem } from "../../types/w
 import { WorkNodeEditPanel } from "./WorkNodeEditPanel";
 import {
   parseAiWorkflowDesignResponse,
-  remapWorkflowExpression,
 } from "./aiWorkflowParse";
 import {
   emptyEditorModel,
@@ -390,7 +389,6 @@ export function WorkflowEditor({
       setError(null);
       try {
         const payload = parseAiWorkflowDesignResponse(aiImportRequest.assistantText);
-        const idToUuid: Record<string, string> = {};
         const createdItems: WorkNodeItem[] = [];
 
         for (const draft of payload.work_nodes) {
@@ -410,17 +408,18 @@ export function WorkflowEditor({
             }),
           });
           if (!response.ok) {
-            throw new Error(await parseError(response, `작업노드 '${draft.uuid}' 생성 실패`));
+            throw new Error(
+              await parseError(response, `작업노드 '${draft.logicalId}' 생성 실패`),
+            );
           }
           const item = (await response.json()) as WorkNodeItem;
-          idToUuid[draft.uuid] = item.uuid;
           createdItems.push({
             ...item,
             target_agent_name: item.target_agent_name || target.name,
           });
         }
 
-        const remapped = remapWorkflowExpression(payload.workflow, idToUuid);
+        const remapped = payload.workflow;
         const mergedNodes = [
           ...workNodes.filter((n) => !createdItems.some((c) => c.uuid === n.uuid)),
           ...createdItems,
@@ -437,7 +436,7 @@ export function WorkflowEditor({
           workflow_description: payload.workflow_description,
           workflow: remapped,
         };
-        if (isCreate && payload.workflow_uuid) {
+        if (isCreate) {
           saveBody.uuid = payload.workflow_uuid;
         }
         const saveResponse = await fetch(
