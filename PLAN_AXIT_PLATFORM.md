@@ -2068,12 +2068,23 @@ Your sole task is to write high-quality, production-ready, and syntactically cor
     - files varchar(300) <- 작업에 필요한 부가 파일 업로드 경로
     - create_date datetime
     - validate_date datetime <- 에이전트의 결과가 정상으로 판단된 시각
+    - last_start_date datetime <- workflow 수행에 따른 마지막 시작 시각
+    - last_end_date datetime <- workflow 수행에 따른 마지막 종료 시각
+    - last_success boolean <- 마지막 성공/실패 여부
+    - last_fail_reason varchar(200) <- 마지막 실패 이유
+    - use_previous_work_result boolean <- 이전 작업의 결과를 사용
   2. workflow
     - uuid varchar primary key
     - checkin_user int <- checkin 사용자 users.idx, checkout 시 0
     - checkin_time datetime <- checkin 시각, checkout 시 공백
     - workflow_name varchar(100)
     - workflow_description varchar(500)
+    - last_start_date datetime <- 마지막 workflow 시작 시각
+    - last_end_date datetime <- 마지막 workflow 종료 시각
+    - run_count int <- 수행 회수
+    - sucess_count int <- 성공 회수
+    - fail_count int <- 실패 회수
+    - last_success boolean <- 마지막 성공/실패 여부
     - workflow text <- work_node 의 연계 플로우 구조를 텍스트로 저장
       - 표시자 정의
         - "S" : workflow 시작
@@ -2198,7 +2209,16 @@ Your sole task is to write high-quality, production-ready, and syntactically cor
           - work_script 가 있는 경우, 작업 편집 패널의 오른쪽에 "생성된 스크립트" 패널을 만들고 work_script를 출력한다. "생성된 스크립트" 패널의 상단 오른쪽에 "삭제" "검증" 버튼을 두고, script_type 을 변경할 수 있는 선택 박스를 배치한다(표시 레이블은 "스크립트 종류" 이며 선택 값은 [ "자연어(프롬프트)" | "kubectl(Kubernetes)" | "playbook" | "cli(kubectl/bash)" ] 중 1).
             - 검증 버튼을 클릭시 script_type 에 따라 검증을 수행
               1. kubectl 의 경우
-                - 대상 에이전트로 dry-run 을 요청
+                - 대상 에이전트로 명령을 요청할 때 반드시 다음 구문을 요청문 앞에 넣어 수행한다.
+                "선제 조건문 : kubectl 명령어를 수행하기 전 get(ReadOnly) 인 경우는 바로 수행 가능하나 delete, edit, create, apply, patch 등 CUD 인 경우는 반드시 --dry-run 으로 수행 테스트만 진행한다. 결과는 다음 JSON만 출력한다.
+                '''
+                {
+                  "valid": true | false,
+                  "message": "실행결과"
+                }
+                '''
+                "
+                
               2. ansible 
                 - 대상 에이전트로 lint 테스트를 수행하고 가능하면 dry-run 을 요청 : 이경우 대상 에이전트는 ansible-lint 가 가능한 에이전트가 될 것이다.
               3. cli
@@ -2207,10 +2227,15 @@ Your sole task is to write high-quality, production-ready, and syntactically cor
                 - 대상 에이전트로 자연어 질의와 응답을 받는다.
             - 검증 수행 결과 출력
               - 검증 이후 결과가 반환되면 하단에 응답 결과 패널을 생성하고 출력한다.
+              - 결과 json 에서 "valid" : true 인 경우 "message" 값을 파일로 저장한다.
+                - work_node 의 upload 디렉토리에 파일명 : "result_{validate_date 의 타임스탬프 값}.out" 으로 저장
+              - 검증 결과 파일이 저장되면 이후 편집시 스크립트 결과 파일을 로드하여 하단 패널에 출력한다. 로드할 파일은 검증시각을 기준으로 찾는다.
+            - 검증이 성공한 경우 "검증" 버튼을 비활성화 한다. -> 비활성화 하지 않는다(다시 검증할 수 있다).
+              - 대신, check 이모지와 validation_date 를 삭제 버튼 왼쪽에 출력하여 언제 검증이 이루어졌는지를 확인하게 한다.
 
           - 파일 업로드(files)
             - 업로드 홈디렉토리는 다음과 같다.
-              - /app/upload
+              - /app/upload (환경변수 UPLOAD_HOME, 로컬 폴백 가능)
             - 각 work_node에서 사용할 업로드 경로는 다음과 같다.
               - {UPLOAD_HOME}/{work_node.uuid}
         
@@ -2308,6 +2333,34 @@ Your sole task is to write high-quality, production-ready, and syntactically cor
 
 
 
+
+
+# 워크플로우 실행
+left "워크플로우 목록" 패널의 생성된 워크플로우 목록의 오른쪽 하단에 "실행"버튼을 배치한다. 실행을 클릭시 확인(confirm)을 하고 실행한다. 실행은 checkout 상태인 워크플로우만 가능하다.
+  - workflow 시작과 종료, 성공, 실패 여부에 따라 컬럼의 last_start_date, last_end_date, sucess_count, fail_count, run_count 를 기록한다.
+  - workflow 에 등록된 work_node를 순차 수행한다. 마찬가지로 last_start_date, last_end_date, last_success, last_fail_reason 을 기록한다.
+- work_node 순서대로 수행한다.
+- 다음 워크노드는 이전 워크노드의 결과를 참조할 수 있다(use_previous_work_result). true 인 경우 워크노드의 질의를 수행시 이전 워크노드의 마지막 결과파일 내용을 덧붙여 전송한다.
+- 승인 단계 처리
+  - 두 가지 noti를 한다.
+    1. 메일 발송
+      - 승인자의 이메일로 이전 작업의 결과물을 메일로 전송한다. 내용은 아래와 같다.
+        제목 : [워크플로우] {워크플로우명} - 승인을 요청합니다.
+        내용 : {워크플로우 단계를 도식화}
+              {이전 work_node 의 결과}
+
+    2. jobs 에 입력
+      - job_type = 3 : 상수명 : JOB_TYPE_WORKFLOW / 용도 : 워크플로우 승인요청
+      - requester는 workflow 를 시작한 사용자이다.
+      - 승인시 워크플로우의 다음 작업으로 넘어간다. 만약 종료인 경우 종료 처리한다.
+
+- 종료에 다다르면 workflow 는 성공으로 처리된다.
+  - 종료 앞에 승인이 있는 경우 승인자가 승인하면 종료로 넘어가고 완료된다.
+
+- 실행중인 워크플로우와 작업 노드에 애니메이션을 추가하여 실행중임을 표시한다. 실행중이라는 것은 DB 컬럼을 통해 확인이 가능하다.
+  1. 최초 실행시 last_start_date 는 있으나 last_end_date 가 없으면 실행중이다.
+  2. 이후 last_start_date 가 last_end_date 보다 미래이면 실행중이다.
+- 승인 대기 상태인 경우도 다이어그램에 실행중인 애니메이션 효과를 work_node 와 동일하게 넣는다
 
 
 # 전체 프레임 조정

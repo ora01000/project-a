@@ -1,7 +1,12 @@
 import type { WorkflowGraph, WorkflowGraphNode } from "../../types/workflow";
+import { isRunInProgress } from "./workflowModel";
 
 interface WorkflowDiagramProps {
   graph: WorkflowGraph;
+  /** work_uuid → { last_start_date, last_end_date } */
+  workRunDates?: Record<string, { last_start_date?: string; last_end_date?: string }>;
+  /** Graph node id of HITL waiting for approval (e.g. H:userid@3) */
+  awaitingHitlNodeId?: string | null;
 }
 
 function nodeById(graph: WorkflowGraph, id: string): WorkflowGraphNode | undefined {
@@ -28,7 +33,11 @@ function edgePath(from: WorkflowGraphNode, to: WorkflowGraphNode, kind: string):
   return `M ${x1} ${y1} L ${x2} ${y2}`;
 }
 
-export function WorkflowDiagram({ graph }: WorkflowDiagramProps) {
+export function WorkflowDiagram({
+  graph,
+  workRunDates = {},
+  awaitingHitlNodeId = null,
+}: WorkflowDiagramProps) {
   if (graph.nodes.length === 0) {
     return (
       <div className="flex h-full items-center justify-center text-sm text-slate-500">
@@ -57,7 +66,7 @@ export function WorkflowDiagram({ graph }: WorkflowDiagramProps) {
           markerHeight="7"
           orient="auto"
         >
-          <path d="M 0 0 L 10 5 L 0 10 z" fill="#94a3b8" />
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--wf-diagram-edge)" />
         </marker>
         <marker
           id="wf-arrow-fail"
@@ -68,7 +77,7 @@ export function WorkflowDiagram({ graph }: WorkflowDiagramProps) {
           markerHeight="7"
           orient="auto"
         >
-          <path d="M 0 0 L 10 5 L 0 10 z" fill="#fb7185" />
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--wf-diagram-edge-fail)" />
         </marker>
       </defs>
       {graph.edges.map((edge, index) => {
@@ -83,7 +92,7 @@ export function WorkflowDiagram({ graph }: WorkflowDiagramProps) {
             key={`${edge.source}-${edge.target}-${index}`}
             d={edgePath(from, to, edge.kind)}
             fill="none"
-            stroke={isFail ? "#fb7185" : "#94a3b8"}
+            stroke={isFail ? "var(--wf-diagram-edge-fail)" : "var(--wf-diagram-edge)"}
             strokeWidth={1.5}
             strokeDasharray={isFail ? "5 4" : undefined}
             markerEnd={isFail ? "url(#wf-arrow-fail)" : "url(#wf-arrow-success)"}
@@ -99,15 +108,15 @@ export function WorkflowDiagram({ graph }: WorkflowDiagramProps) {
                 cx={node.cx}
                 cy={node.cy}
                 r={22}
-                fill="#0f172a"
-                stroke="#7dd3fc"
+                fill="var(--wf-diagram-node-fill)"
+                stroke="var(--wf-diagram-start-stroke)"
                 strokeWidth={1.5}
               />
               <text
                 x={node.cx}
                 y={node.cy + 4}
                 textAnchor="middle"
-                fill="#e2e8f0"
+                fill="var(--wf-diagram-node-text)"
                 fontSize="11"
                 fontWeight="600"
               >
@@ -119,24 +128,62 @@ export function WorkflowDiagram({ graph }: WorkflowDiagramProps) {
         const x = node.cx - node.width / 2;
         const y = node.cy - node.height / 2;
         const isHitl = node.kind === "hitl";
+        const dates = node.work_uuid ? workRunDates[node.work_uuid] : undefined;
+        const isWorkRunning =
+          !isHitl &&
+          Boolean(node.work_uuid) &&
+          isRunInProgress(dates?.last_start_date, dates?.last_end_date);
+        const isHitlAwaiting =
+          isHitl &&
+          Boolean(awaitingHitlNodeId) &&
+          node.id === awaitingHitlNodeId;
+        const isRunning = isWorkRunning || isHitlAwaiting;
+        const pad = 5;
         return (
-          <g key={node.id}>
+          <g key={node.id} aria-busy={isRunning || undefined}>
+            {isRunning ? (
+              <rect
+                x={x - pad}
+                y={y - pad}
+                width={node.width + pad * 2}
+                height={node.height + pad * 2}
+                rx={isHitl ? 4 : 10}
+                className="wf-run-halo"
+              />
+            ) : null}
             <rect
               x={x}
               y={y}
               width={node.width}
               height={node.height}
               rx={isHitl ? 2 : 8}
-              fill={isHitl ? "#1e293b" : "#0f172a"}
-              stroke={isHitl ? "#fbbf24" : "#38bdf8"}
-              strokeWidth={1.5}
+              fill={isHitl ? "var(--wf-diagram-hitl-fill)" : "var(--wf-diagram-node-fill)"}
+              stroke={
+                isRunning
+                  ? "var(--wf-run-accent)"
+                  : isHitl
+                    ? "var(--wf-diagram-hitl-stroke)"
+                    : "var(--wf-diagram-work-stroke)"
+              }
+              strokeWidth={isRunning ? 2.5 : 1.5}
             />
+            {isRunning ? (
+              <rect
+                x={x}
+                y={y}
+                width={node.width}
+                height={node.height}
+                rx={isHitl ? 2 : 8}
+                className="wf-run-stroke"
+              />
+            ) : null}
             <text
               x={node.cx}
               y={node.cy + 4}
               textAnchor="middle"
-              fill="#e2e8f0"
+              fill="var(--wf-diagram-node-text)"
               fontSize={isHitl ? 9 : 10}
+              fontWeight={isRunning ? 700 : undefined}
             >
               {node.label.length > 8 ? `${node.label.slice(0, 7)}…` : node.label}
             </text>

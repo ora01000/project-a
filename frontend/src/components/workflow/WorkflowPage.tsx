@@ -7,6 +7,7 @@ import { IntegratedChatPanel } from "../IntegratedChatPanel";
 import { parseAiWorkflowDesignResponse } from "./aiWorkflowParse";
 import { WorkflowDesignPanel } from "./WorkflowDesignPanel";
 import { WorkflowListPanel } from "./WorkflowListPanel";
+import { isRunInProgress } from "./workflowModel";
 
 const DEFAULT_CHAT_PANEL_WIDTH = 650;
 const MIN_CHAT_PANEL_WIDTH = 360;
@@ -195,6 +196,25 @@ export function WorkflowPage({
     };
   }, [loadWorkflows, loadWorkNodes]);
 
+  const hasDbRunning =
+    items.some(
+      (item) =>
+        Boolean(item.awaiting_approval) ||
+        isRunInProgress(item.last_start_date, item.last_end_date),
+    ) || workNodes.some((node) => isRunInProgress(node.last_start_date, node.last_end_date));
+
+  useEffect(() => {
+    if (!hasDbRunning && runningUuid == null) {
+      return;
+    }
+    const timer = window.setInterval(() => {
+      void Promise.all([loadWorkflows(), loadWorkNodes()]).catch(() => {
+        /* 폴링 중 일시 오류는 무시 */
+      });
+    }, 3000);
+    return () => window.clearInterval(timer);
+  }, [hasDbRunning, runningUuid, loadWorkflows, loadWorkNodes]);
+
   const handleSaved = async (item: WorkflowItem) => {
     await Promise.all([loadWorkflows(), loadWorkNodes()]);
     setSelectedUuid(item.uuid);
@@ -282,14 +302,20 @@ export function WorkflowPage({
                   const tested = Boolean(item.test_result);
                   const checkinName = (item.checkin_username || "").trim();
                   const hasCheckin = Boolean(item.checkin_user && item.checkin_user > 0 && checkinName);
-                  const canRun = !Boolean(item.checkin_user && item.checkin_user > 0);
-                  const isRunning = runningUuid === item.uuid;
+                  const dbRunning = isRunInProgress(item.last_start_date, item.last_end_date);
+                  const isAwaitingApproval = Boolean(item.awaiting_approval);
+                  const isRunning = runningUuid === item.uuid || dbRunning || isAwaitingApproval;
+                  const canRun =
+                    !Boolean(item.checkin_user && item.checkin_user > 0) &&
+                    !dbRunning &&
+                    !isAwaitingApproval;
                   return (
                     <div
                       key={item.uuid}
                       className={`flex min-h-[76px] w-full flex-col justify-center gap-1 overflow-hidden rounded-xl border bg-slate-900/90 px-3 py-2 text-left shadow-lg ${
                         isActive ? "border-sky-500" : "border-slate-700"
-                      }`}
+                      } ${isRunning ? "wf-run-pulse" : ""}`}
+                      aria-busy={isRunning || undefined}
                     >
                       <button
                         type="button"
@@ -310,6 +336,11 @@ export function WorkflowPage({
                           <span className="min-w-0 flex-1 truncate">
                             {tested ? item.validate_date || "검증됨" : "테스트 미실행"}
                           </span>
+                          {isRunning ? (
+                            <span className="shrink-0 rounded-full border border-rose-500/80 bg-rose-950/70 px-2 py-0.5 text-[10px] font-semibold text-rose-100">
+                              {isAwaitingApproval ? "승인 대기" : "실행 중"}
+                            </span>
+                          ) : null}
                           {hasCheckin ? (
                             <span
                               title={`Check-In: ${checkinName}`}

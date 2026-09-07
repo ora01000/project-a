@@ -75,6 +75,9 @@ export interface WorkflowItem {
   sucess_count?: number;
   fail_count?: number;
   last_success?: boolean;
+  awaiting_approval?: boolean;
+  awaiting_hitl_node_id?: string;
+  awaiting_hitl_userid?: string;
   graph: WorkflowGraph;
   is_draft?: boolean;
   draft_dirty?: boolean;

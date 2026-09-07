@@ -13,6 +13,7 @@ import type { UserRecord } from "../../types/user";
 import { AssistantMessageContent } from "../AssistantMessageContent";
 import { JobAiAuditCommentBlock } from "./JobAiAuditCommentBlock";
 import { JobBlockField, JobInlineField } from "./JobFieldLabel";
+import { JobContentView } from "./JobContentView";
 import { ListPaginationControls } from "./ListPaginationControls";
 import { useClientPagination } from "./useClientPagination";
 
@@ -562,10 +563,7 @@ export function JobMgmtTab({ active, currentUser }: JobMgmtTabProps) {
                     </JobBlockField>
                   ) : null}
                   <JobBlockField label="작업 내용" bullet="📝">
-                    <div
-                      className="job-content-html rounded-md border border-slate-700 bg-slate-950/60 p-3 text-sm text-slate-200"
-                      dangerouslySetInnerHTML={{ __html: panelJob.job_content || "" }}
-                    />
+                    <JobContentView content={panelJob.job_content || ""} jobType={panelJob.job_type} />
                   </JobBlockField>
 
                   {isLoadingResult ? (

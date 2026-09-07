@@ -35,6 +35,7 @@ import {
   workNodeFromItem,
   workFieldsFromItem,
   workNodeWriteBody,
+  isRunInProgress,
   type EditorModel,
   type WorkEditorNode,
 } from "./workflowModel";
@@ -50,6 +51,7 @@ interface WorkflowEditorProps {
   onSaved: (item: WorkflowItem) => Promise<void> | void;
   onWorkNodesChanged: () => Promise<void> | void;
   workflowUuid?: string;
+  awaitingHitlUserid?: string;
   aiImportRequest?: { nonce: number; assistantText: string } | null;
   onAiImportHandled?: () => void;
 }
@@ -162,6 +164,7 @@ export function WorkflowEditor({
   onSaved,
   onWorkNodesChanged,
   workflowUuid,
+  awaitingHitlUserid = "",
   aiImportRequest = null,
   onAiImportHandled,
 }: WorkflowEditorProps) {
@@ -735,8 +738,21 @@ export function WorkflowEditor({
 
   const renderApproverCard = (clientId: string, username: string, userid: string) => {
     const display = username || userid || "미지정";
+    const isAwaiting =
+      Boolean(awaitingHitlUserid) &&
+      userid.trim().toLowerCase() === awaitingHitlUserid.trim().toLowerCase();
     return (
-      <div className="relative w-[180px] rounded-sm border border-amber-400 bg-slate-950 px-2.5 py-2 pt-6">
+      <div
+        aria-busy={isAwaiting || undefined}
+        className={`relative w-[180px] rounded-sm border border-amber-400 bg-slate-950 px-2.5 py-2 pt-6 ${
+          isAwaiting ? "wf-run-pulse" : ""
+        }`}
+      >
+        {isAwaiting ? (
+          <span className="absolute left-1.5 top-1.5 rounded-full border border-rose-500/80 bg-rose-950/80 px-1.5 py-0.5 text-[9px] font-semibold text-rose-100">
+            승인 대기
+          </span>
+        ) : null}
         {readOnly ? null : <DeleteBox onClick={() => handleRemoveNode(clientId)} label="승인자 삭제" />}
         <div className="flex items-center gap-1">
           <span className="min-w-0 flex-1 truncate">
@@ -847,6 +863,11 @@ export function WorkflowEditor({
   const renderWorkCard = (node: WorkEditorNode, failBranch = false) => {
     const hasScript = Boolean(node.workScript.trim());
     const hasFile = Boolean(node.files.trim());
+    const live = workNodes.find((item) => item.uuid === node.uuid);
+    const isNodeRunning = isRunInProgress(
+      live?.last_start_date ?? node.lastStartDate,
+      live?.last_end_date ?? node.lastEndDate,
+    );
     return (
       <div
         role="button"
@@ -861,12 +882,18 @@ export function WorkflowEditor({
             selectWorkNode(node.clientId);
           }
         }}
+        aria-busy={isNodeRunning || undefined}
         className={`relative w-[160px] rounded-lg border px-2.5 pb-2.5 pt-6 text-left ${
           failBranch ? "border-rose-400/80 bg-slate-950" : "border-sky-400/80 bg-slate-950"
         } ${readOnly ? "cursor-default" : "cursor-pointer"} ${
           isSelected(node.clientId) ? "ring-2 ring-sky-300 ring-offset-1 ring-offset-slate-900" : ""
-        }`}
+        } ${isNodeRunning ? "wf-run-pulse" : ""}`}
       >
+        {isNodeRunning ? (
+          <span className="absolute left-1.5 top-1.5 rounded-full border border-rose-500/80 bg-rose-950/80 px-1.5 py-0.5 text-[9px] font-semibold text-rose-100">
+            실행 중
+          </span>
+        ) : null}
         {readOnly ? null : (
           <DeleteBox onClick={() => handleRemoveNode(node.clientId)} label="작업노드 삭제" />
         )}

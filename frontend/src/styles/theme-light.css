@@ -156,6 +156,9 @@
 [data-theme="light"] .bg-rose-950\/70 {
   background-color: rgb(254 205 211);
 }
+[data-theme="light"] .bg-rose-950\/80 {
+  background-color: rgb(254 205 211);
+}
 [data-theme="light"] .bg-rose-900\/40 {
   background-color: rgb(255 228 230 / 0.8);
 }
@@ -377,6 +380,9 @@
   border-color: rgb(146 64 14 / 0.4);
 }
 
+[data-theme="light"] .border-rose-500\/80 {
+  border-color: rgb(190 18 60 / 0.9);
+}
 [data-theme="light"] .border-rose-600\/50 {
   border-color: rgb(225 29 72 / 0.5);
 }

@@ -1,8 +1,10 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
 import type { AuthUser } from "../../types/auth";
 import type { WorkNodeItem, WorkflowItem } from "../../types/workflow";
+import { WorkflowDiagram } from "./WorkflowDiagram";
 import { WorkflowEditor } from "./WorkflowEditor";
+import { isRunInProgress } from "./workflowModel";
 
 interface WorkflowDesignPanelProps {
   mode: "idle" | "create" | "edit";
@@ -48,6 +50,32 @@ export function WorkflowDesignPanel({
 }: WorkflowDesignPanelProps) {
   const [lockError, setLockError] = useState<string | null>(null);
   const [isLockBusy, setIsLockBusy] = useState(false);
+
+  const workRunDates = useMemo(() => {
+    const map: Record<string, { last_start_date?: string; last_end_date?: string }> = {};
+    for (const node of workNodes) {
+      map[node.uuid] = {
+        last_start_date: node.last_start_date,
+        last_end_date: node.last_end_date,
+      };
+    }
+    return map;
+  }, [workNodes]);
+
+  const diagramHasRunning = useMemo(
+    () =>
+      Boolean(selected?.awaiting_approval) ||
+      Boolean(
+        selected?.graph?.nodes.some((node) => {
+          if (!node.work_uuid) {
+            return false;
+          }
+          const dates = workRunDates[node.work_uuid];
+          return isRunInProgress(dates?.last_start_date, dates?.last_end_date);
+        }),
+      ),
+    [selected?.awaiting_approval, selected?.graph, workRunDates],
+  );
 
   if (mode === "idle") {
     return (
@@ -155,10 +183,25 @@ export function WorkflowDesignPanel({
             ) : null}
           </div>
         </header>
+        {mode === "edit" && selected?.graph && selected.graph.nodes.length > 0 ? (
+          <div
+            className={`shrink-0 border-b border-slate-700/80 px-3 py-2 ${
+              diagramHasRunning ? "bg-rose-950/20" : "bg-slate-950/40"
+            }`}
+            style={{ height: 148 }}
+          >
+            <WorkflowDiagram
+              graph={selected.graph}
+              workRunDates={workRunDates}
+              awaitingHitlNodeId={selected.awaiting_hitl_node_id || null}
+            />
+          </div>
+        ) : null}
         <WorkflowEditor
           key={editorKey}
           user={user}
           workNodes={workNodes}
+          awaitingHitlUserid={selected?.awaiting_hitl_userid || ""}
           initialName={mode === "edit" ? selected?.workflow_name ?? "" : ""}
           initialExpression={mode === "edit" ? selected?.workflow ?? "" : ""}
           initialDescription={mode === "edit" ? selected?.workflow_description ?? "" : ""}

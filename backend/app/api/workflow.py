@@ -32,10 +32,19 @@ from backend.app.db.workflow import (
     update_work_node_validation,
     update_workflow,
 )
+from backend.app.db.jobs import (
+    JobRecord,
+    find_pending_workflow_approval_job,
+    map_pending_workflow_approval_jobs,
+)
 from backend.app.middleware.session_auth import get_request_auth_user
 from backend.app.services import workflow_draft_store as draft_store
 from backend.app.services.workflow_graph import build_workflow_graph, validate_workflow_expression
-from backend.app.services.workflow_runner import WorkflowRunResult, run_workflow
+from backend.app.services.workflow_runner import (
+    WorkflowRunResult,
+    resolve_awaiting_hitl_from_job,
+    run_workflow,
+)
 
 router = APIRouter(tags=["workflow"])
 
@@ -149,6 +158,9 @@ class WorkflowResponse(BaseModel):
     sucess_count: int = 0
     fail_count: int = 0
     last_success: bool = False
+    awaiting_approval: bool = False
+    awaiting_hitl_node_id: str = ""
+    awaiting_hitl_userid: str = ""
     graph: WorkflowGraph
     is_draft: bool = False
     draft_dirty: bool = False
@@ -162,6 +174,9 @@ class WorkflowResponse(BaseModel):
         checkin_username: str = "",
         is_draft: bool = False,
         draft_dirty: bool = False,
+        awaiting_approval: bool = False,
+        awaiting_hitl_node_id: str = "",
+        awaiting_hitl_userid: str = "",
     ) -> "WorkflowResponse":
         return cls(
             uuid=record.uuid,
@@ -180,6 +195,9 @@ class WorkflowResponse(BaseModel):
             sucess_count=record.sucess_count,
             fail_count=record.fail_count,
             last_success=record.last_success,
+            awaiting_approval=awaiting_approval,
+            awaiting_hitl_node_id=awaiting_hitl_node_id,
+            awaiting_hitl_userid=awaiting_hitl_userid,
             graph=WorkflowGraph.model_validate(graph),
             is_draft=is_draft,
             draft_dirty=draft_dirty,
@@ -304,6 +322,22 @@ def _validate_expression(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+def _awaiting_hitl_fields(
+    record: WorkflowRecord,
+    pending_job: JobRecord | None,
+) -> tuple[bool, str, str]:
+    if pending_job is None:
+        return False, "", ""
+    resolved = resolve_awaiting_hitl_from_job(
+        workflow_expression=record.workflow,
+        message_id=pending_job.message_id,
+    )
+    if resolved is None:
+        return True, "", ""
+    node_id, userid = resolved
+    return True, node_id, userid
+
+
 def _workflow_response(
     database_path,
     record: WorkflowRecord,
@@ -311,13 +345,23 @@ def _workflow_response(
     is_draft: bool = False,
     draft_dirty: bool = False,
     extra_work_names: dict[str, str] | None = None,
+    pending_job: JobRecord | None = None,
 ) -> WorkflowResponse:
+    job = pending_job
+    if job is None and record.uuid:
+        job = find_pending_workflow_approval_job(database_path, record.uuid)
+    awaiting_approval, awaiting_hitl_node_id, awaiting_hitl_userid = _awaiting_hitl_fields(
+        record, job
+    )
     return WorkflowResponse.from_record(
         record,
         graph=_graph_for(database_path, record.workflow, extra_work_names=extra_work_names),
         checkin_username=_checkin_username(database_path, record.checkin_user),
         is_draft=is_draft,
         draft_dirty=draft_dirty,
+        awaiting_approval=awaiting_approval,
+        awaiting_hitl_node_id=awaiting_hitl_node_id,
+        awaiting_hitl_userid=awaiting_hitl_userid,
     )
 
 
@@ -325,6 +369,8 @@ async def _overlay_workflow_for_user(
     database_path,
     record: WorkflowRecord,
     user_idx: int,
+    *,
+    pending_job: JobRecord | None = None,
 ) -> WorkflowResponse:
     if record.checkin_user == user_idx and record.uuid:
         payload = await draft_store.get_draft(record.uuid)
@@ -357,8 +403,9 @@ async def _overlay_workflow_for_user(
                 is_draft=True,
                 draft_dirty=dirty,
                 extra_work_names=extra_names,
+                pending_job=pending_job,
             )
-    return _workflow_response(database_path, record)
+    return _workflow_response(database_path, record, pending_job=pending_job)
 
 
 async def _find_user_draft_for_node(user_idx: int, node_uuid: str) -> dict | None:
@@ -696,8 +743,14 @@ async def api_upload_work_node_file(
 async def api_list_workflows(request: Request) -> list[WorkflowResponse]:
     auth_user = get_request_auth_user(request)
     database_path = request.app.state.database_path
+    pending_by_uuid = map_pending_workflow_approval_jobs(database_path)
     return [
-        await _overlay_workflow_for_user(database_path, record, auth_user.idx)
+        await _overlay_workflow_for_user(
+            database_path,
+            record,
+            auth_user.idx,
+            pending_job=pending_by_uuid.get((record.uuid or "").strip().lower()),
+        )
         for record in list_workflows(database_path)
     ]
 

@@ -1,5 +1,21 @@
 import type { WorkNodeItem, WorkScriptType } from "../../types/workflow";
 
+/** DB last_start_date / last_end_date 로 실행중 여부 판별 */
+export function isRunInProgress(
+  lastStartDate?: string | null,
+  lastEndDate?: string | null,
+): boolean {
+  const start = (lastStartDate || "").trim();
+  const end = (lastEndDate || "").trim();
+  if (!start) {
+    return false;
+  }
+  if (!end) {
+    return true;
+  }
+  return start > end;
+}
+
 export type FailSpec =
   | { kind: "none" }
   | { kind: "end" }

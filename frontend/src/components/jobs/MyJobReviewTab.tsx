@@ -7,6 +7,7 @@ import { ConfirmDialog } from "../ConfirmDialog";
 import { JobBlockField, JobInlineField } from "./JobFieldLabel";
 import { JobAiAuditCommentBlock } from "./JobAiAuditCommentBlock";
 import { JobAiReviewButton } from "./JobAiReviewButton";
+import { JobContentView } from "./JobContentView";
 import { JobRejectReasonModal } from "./JobRejectReasonModal";
 import { ListPaginationControls } from "./ListPaginationControls";
 import { useClientPagination } from "./useClientPagination";
@@ -222,10 +223,7 @@ export function MyJobReviewTab({ active, currentUser, onCopyToNote }: MyJobRevie
                   {formatJobDate(selectedJob.request_date)}
                 </JobInlineField>
                 <JobBlockField label="작업 내용" bullet="📝">
-                  <div
-                    className="job-content-html rounded-md border border-slate-700 bg-slate-950/60 p-3 text-sm text-slate-200"
-                    dangerouslySetInnerHTML={{ __html: selectedJob.job_content }}
-                  />
+                  <JobContentView content={selectedJob.job_content} jobType={selectedJob.job_type} />
                 </JobBlockField>
                 <JobAiAuditCommentBlock
                   comment={selectedJob.ai_audit_comment}

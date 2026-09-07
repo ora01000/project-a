@@ -85,3 +85,86 @@ body {
   width: auto;
   height: auto;
 }
+
+:root {
+  --wf-run-accent: #f43f5e;
+  --wf-run-glow: rgba(244, 63, 94, 0.75);
+  --wf-run-glow-soft: rgba(244, 63, 94, 0.28);
+  --wf-diagram-node-fill: #0f172a;
+  --wf-diagram-hitl-fill: #1e293b;
+  --wf-diagram-node-text: #f8fafc;
+  --wf-diagram-work-stroke: #38bdf8;
+  --wf-diagram-hitl-stroke: #fbbf24;
+  --wf-diagram-start-stroke: #7dd3fc;
+  --wf-diagram-edge: #94a3b8;
+  --wf-diagram-edge-fail: #fb7185;
+}
+
+[data-theme="light"] {
+  --wf-run-accent: #9f1239;
+  --wf-run-glow: rgba(159, 18, 57, 0.65);
+  --wf-run-glow-soft: rgba(190, 18, 60, 0.28);
+  --wf-diagram-node-fill: #ffffff;
+  --wf-diagram-hitl-fill: #fff7ed;
+  --wf-diagram-node-text: #0f172a;
+  --wf-diagram-work-stroke: #0369a1;
+  --wf-diagram-hitl-stroke: #b45309;
+  --wf-diagram-start-stroke: #0284c7;
+  --wf-diagram-edge: #64748b;
+  --wf-diagram-edge-fail: #e11d48;
+}
+
+@keyframes wf-run-pulse {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 1px var(--wf-run-accent),
+      0 0 0 0 var(--wf-run-glow);
+  }
+  50% {
+    box-shadow:
+      0 0 0 1px var(--wf-run-accent),
+      0 0 0 7px var(--wf-run-glow-soft);
+  }
+}
+
+.wf-run-pulse {
+  border-color: var(--wf-run-accent) !important;
+  animation: wf-run-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes wf-run-stroke-dash {
+  to {
+    stroke-dashoffset: -36;
+  }
+}
+
+@keyframes wf-run-halo-pulse {
+  0%,
+  100% {
+    stroke-opacity: 0.95;
+    filter: drop-shadow(0 0 1px var(--wf-run-accent)) drop-shadow(0 0 4px var(--wf-run-glow));
+  }
+  50% {
+    stroke-opacity: 0.55;
+    filter: drop-shadow(0 0 2px var(--wf-run-accent)) drop-shadow(0 0 10px var(--wf-run-glow));
+  }
+}
+
+.wf-run-stroke {
+  fill: none !important;
+  stroke: var(--wf-run-accent) !important;
+  stroke-width: 3 !important;
+  stroke-dasharray: 10 6;
+  stroke-linecap: round;
+  animation: wf-run-stroke-dash 0.85s linear infinite;
+  pointer-events: none;
+}
+
+.wf-run-halo {
+  fill: none !important;
+  stroke: var(--wf-run-accent) !important;
+  stroke-width: 2 !important;
+  animation: wf-run-halo-pulse 1.2s ease-in-out infinite;
+  pointer-events: none;
+}

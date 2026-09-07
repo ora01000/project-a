@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import type { JobRecord } from "../../types/job";
 import { JobBlockField, JobInlineField } from "./JobFieldLabel";
+import { JobContentView } from "./JobContentView";
 import { JobReportEmailModal } from "./JobReportEmailModal";
 import { ListPaginationControls } from "./ListPaginationControls";
 import { useClientPagination } from "./useClientPagination";
@@ -173,10 +174,7 @@ export function RejectedJobsTab({ active }: RejectedJobsTabProps) {
               </JobInlineField>
             ) : null}
             <JobBlockField label="작업 내용" bullet="📝">
-              <div
-                className="job-content-html rounded-md border border-slate-700 bg-slate-950/60 p-3 text-sm text-slate-200"
-                dangerouslySetInnerHTML={{ __html: selectedJob.job_content }}
-              />
+              <JobContentView content={selectedJob.job_content} jobType={selectedJob.job_type} />
             </JobBlockField>
             <JobBlockField label="반려 사유" bullet="⛔">
               <div className="rounded-md border border-amber-700/80 bg-amber-950/40 p-3 text-sm text-amber-100">

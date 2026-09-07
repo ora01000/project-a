@@ -223,6 +223,71 @@ def list_jobs(
     return [_row_to_job(row) for row in rows]
 
 
+def find_pending_workflow_approval_job(
+    database_path: str | Path,
+    workflow_uuid: str,
+) -> JobRecord | None:
+    """Latest open HITL approval job for a workflow (status 0 or 1)."""
+    prefix = f"workflow:{workflow_uuid.strip().lower()}:"
+    if len(prefix) <= len("workflow:"):
+        return None
+    with get_connection(database_path) as connection:
+        row = connection.execute(
+            f"""
+            SELECT {JOB_SELECT_COLUMNS}
+            FROM jobs
+            WHERE job_type = ?
+              AND status_code IN (?, ?)
+              AND message_id LIKE ?
+            ORDER BY idx DESC
+            LIMIT 1
+            """,
+            (
+                JOB_TYPE_WORKFLOW,
+                JOB_STATUS_RECEIVED,
+                JOB_STATUS_APPROVER_ASSIGNED,
+                f"{prefix}%",
+            ),
+        ).fetchone()
+    return _row_to_job(row) if row is not None else None
+
+
+def map_pending_workflow_approval_jobs(
+    database_path: str | Path,
+) -> dict[str, JobRecord]:
+    """workflow_uuid(lower) → latest pending HITL approval job."""
+    with get_connection(database_path) as connection:
+        rows = connection.execute(
+            f"""
+            SELECT {JOB_SELECT_COLUMNS}
+            FROM jobs
+            WHERE job_type = ?
+              AND status_code IN (?, ?)
+              AND message_id LIKE 'workflow:%'
+            ORDER BY idx DESC
+            """,
+            (
+                JOB_TYPE_WORKFLOW,
+                JOB_STATUS_RECEIVED,
+                JOB_STATUS_APPROVER_ASSIGNED,
+            ),
+        ).fetchall()
+    result: dict[str, JobRecord] = {}
+    for row in rows:
+        job = _row_to_job(row)
+        message_id = (job.message_id or "").strip()
+        if not message_id.startswith("workflow:"):
+            continue
+        parts = message_id.split(":")
+        if len(parts) < 3:
+            continue
+        workflow_uuid = parts[1].strip().lower()
+        if not workflow_uuid or workflow_uuid in result:
+            continue
+        result[workflow_uuid] = job
+    return result
+
+
 def list_jobs_for_workflow(
     database_path: str | Path,
     *,
