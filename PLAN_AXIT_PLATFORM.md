@@ -2058,8 +2058,8 @@ Your sole task is to write high-quality, production-ready, and syntactically cor
 메인 매뉴 에 "워크플로우" 를 추가한다
 - 추가 테이블
   1. work_node
-    - idx int primary key, auto increment
-    - uuid varchar
+    - idx int primary key, auto increment <- 삭제
+    - uuid varchar primary key
     - work_name varchar(100)
     - work_description varchar(500)
     - target_agent int <- agentruntime.idx
@@ -2070,8 +2070,8 @@ Your sole task is to write high-quality, production-ready, and syntactically cor
     - create_date datetime
     - validate_date datetime <- 에이전트의 결과가 정상으로 판단된 시각
   2. workflow
-    - idx int primary key, auto increment
-    - uuid varchar
+    - idx int primary key, auto increment <- 삭제
+    - uuid varchar primary key
     - checkin_user int <- checkin 사용자 users.idx, checkout 시 0
     - checkin_time datetime <- checkin 시각, checkout 시 공백
     - workflow_name varchar(100)
@@ -2080,12 +2080,12 @@ Your sole task is to write high-quality, production-ready, and syntactically cor
       - 표시자 정의
         - "S" : workflow 시작
         - "E" : workflow 종료
-        - "{work_node.idx}:{실패시 work_node.idx}" : 워크노드 수행 후 실패시 수행할 워크노드, 실패시 수행하는 워크노드도 실패할 경우 종료한다.
-        - "{work_node.idx}:E : 워커노드 수행 후 실패시 종료함
+        - "{work_node.uuid}:{실패시 work_node.uuid}" : 워크노드 수행 후 실패시 수행할 워크노드, 실패시 수행하는 워크노드도 실패할 경우 종료한다.
+        - "{work_node.uuid}:E : 워커노드 수행 후 실패시 종료함
         - "->" : 이전 워크노드 성공시 다음 워크노드
         - "H:{users.userid}" : HITL 승인자
       - 연결 표현(예시)
-        - S->5->6:4->H:isyun->7->E
+        - S->{uuid}->{uuid}}:{uuid}}->H:isyun->{uuid}}->E
 
 - 전체 화면의 패널 구조가 신규로 생성되고 다음과 같이 배열된다.
   - left : "워크플로우 목록 패널"
@@ -2114,7 +2114,7 @@ Your sole task is to write high-quality, production-ready, and syntactically cor
                   {
                     "work_name": "작업명#1",
                     "work_description" : "작업설명#1",
-                    "idx": "작업ID#1",
+                    "uuid": "작업#1 uuid",
                     "target_agent": "대상에이전트#1",
                     "work_script": "스크립트#1",
                     "script_type": "스크립트 종류#1"
@@ -2122,13 +2122,14 @@ Your sole task is to write high-quality, production-ready, and syntactically cor
                   {
                     "work_name": "작업명#2",
                     "work_description" : "작업설명#2",
-                    "idx": "작업ID#2",
+                    "uuid": "작업#2 uuid",
                     "target_agent": "대상에이전트#2",
                     "work_script": "스크립트#2",
                     "script_type": "스크립트 종류#2"
                   }
                 ],
                 "workflow": {
+                  "uuid": "워크플로우 uuid",
                   "workflow_name": "워크플로우명",
                   "workflow_description": "워크플로우설명",
                   "workflow": "작업흐름"
@@ -2136,20 +2137,13 @@ Your sole task is to write high-quality, production-ready, and syntactically cor
               }
               ...
             - parsing 한 work_node, workflow 를 기반으로 편잽모드에서 워크플로우를 자동 생성, 삽입한다.
-              - parsing 시 주의사항
+              - parsing 시 주의사항 -> idx 를 uuid 로 변경한다. 따라서 아래 사항은 더이상 고려하지 않는다.
                 - json 의 work_node.idx, workflow.idx 는 실제 DB 스키마의 컬럼에 맞지 않는다. 실제 DB로 입력을 위해서는 integer 로 변경해야 한다.
 
 
-          - 설계에 필요한 설명을 입력받는다. - 설계에 사용될 설명은 별도로 저장하지는 않는다.
-            - TextArea 내 사전에 가이드용 템플릿을 넣는다. 가이드 내용은 아래와 같다
-            ''' 가이드 샘플
-            설명 : 작업 플로우의 간략한 설명을 적어주세요.
-            작업 단계 : 각 작업을 순서대로 나열해 주세요. 각 단계별 제목과 설명으로 묘사하면 좋습니다!
-            1. 정보 확인 : {대상 인프라} 에 구성된 정보를 추출
-            2. 리포트 작성 : 추출한 정보를 취합하여 리포트를 작성
-            3. 리포트 제출 : {운영 담당자} 에게 리포트 전송 및 감토 요청
-            4. 승인 : {운영 담당자} 의 승인 필요
-            '''
+          - 설계에 필요한 설명을 입력받는다.
+            - 이전 변경에서 삭제했으나 다시 입력을 받는다. 에이전트를 통해 생성하는 경우 에이전트의 응답에서 받아서 채운다.
+            - 워크플로우 설명을 위한 메타 정보이다.
 
         3. 시작(S) 노드만 있다. 시작 노드 오른쪽에는 + 버튼이 동그라미로 표시된다. + 버튼 을 클릭하면 오른쪽에 작업 노드 다이어그램이 생성되고 화살표로 연결된다.
         4. 작업노드 다이어그램 자체는 선택(노드영역 클릭)/삭제(X버튼) 만 가능하고 아래 내용을 표시한다.
@@ -2200,6 +2194,10 @@ Your sole task is to write high-quality, production-ready, and syntactically cor
                 - 자동 검증은 아직 미지원
 
           - 파일 업로드(files)
+            - 업로드 홈디렉토리는 다음과 같다.
+              - /app/upload
+            - 각 work_node에서 사용할 업로드 경로는 다음과 같다.
+              - {UPLOAD_HOME}/{work_node.uuid}
         
       - 새로운 워크플로우 생성시 "시작" 과 "종료"는 워크플로우에 반드시 있어야 하므로 default 로 표시한다.
     - 워크플로우 목록에서 선택시
@@ -2239,7 +2237,7 @@ Your sole task is to write high-quality, production-ready, and syntactically cor
     1. 요청을 분석해서 각 단계별 작업(work_node)를 생성합니다. 질의에서 유추하여 작성합니다. 괄호 안의 이름은 label 입니다.
       - 작업명(work_name)
       - 작업설명(work_description)
-      - 작업ID(idx) : 각 작업별로 중복되지 않도록 생성(/^[a-zA-Z0-9_-]{4,64}$/)
+      - 작업 UUID(uuid)
       - 대상에이전트(target_agent) : 대상 에이전트는 유추하지 말고 정보가 없을 경우 반드시 요청자에게 피드백하고 보충 답변을 받아야 합니다.
       - 스크립트(work_script) 및 스크립트 종류(script_type): 인프라의 형태에 따라 스크립트 종류와 스크립트를 생성
         - kubernetes 대상인 경우 manifest yaml 을 생성하는 작업과 kubectl(cli)를 사용하는 작업을 분리해서 생성합니다.
@@ -2252,11 +2250,13 @@ Your sole task is to write high-quality, production-ready, and syntactically cor
       - 작업흐름(workflow)
           - "S" : workflow 시작
           - "E" : workflow 종료
-          - "작업ID:{실패시 작업ID}" : 워크노드 수행 후 실패시 수행할 워크노드, 실패시 수행하는 워크노드도 실패할 경우 종료한다.
-          - "{작업ID}:E : 워커노드 수행 후 실패시 종료함
+          - "작업 UUID:{실패시 작업 UUID}" : 워크노드 수행 후 실패시 수행할 워크노드, 실패시 수행하는 워크노드도 실패할 경우 종료한다.
+          - "{작업 UUID}:E : 워커노드 수행 후 실패시 종료함
           - "->" : 이전 워크노드 성공시 다음 워크노드
         - 연결 표현(예시)
-          - S->work_1->work_2:work_3->work4->E
+          - S->work_1 UUID->work_2 UUID:work_3 UUID->work4 UUID->E
+    3. 각 작업이 스크립트를 생성할 때 결과를 파일로 저장해야 할 경우 사용하는 저장소는 다음과 같습니다. 또는 요청자가 요청한 작업 수행에 필요한 requirement 파일도 이곳에 업로드하고 사용합니다.
+      - {UPLOAD_HOME}/{work_node.uuid}
     
     요청자의 추가 답변이 필요한 경우를 제외하면 응답은 json 포맷으로만 합니다. 다음 포맷으로 응답합니다.
     ''' response json
@@ -2265,7 +2265,7 @@ Your sole task is to write high-quality, production-ready, and syntactically cor
         {
           "work_name": "작업명#1",
           "work_description" : "작업설명#1",
-          "idx": "작업ID#1",
+          "uuid": "작업#1 UUID",
           "target_agent": "대상에이전트#1",
           "work_script": "스크립트#1",
           "script_type": "스크립트 종류#1"
@@ -2273,13 +2273,14 @@ Your sole task is to write high-quality, production-ready, and syntactically cor
         {
           "work_name": "작업명#2",
           "work_description" : "작업설명#2",
-          "idx": "작업ID#2",
+          "uuid": "작업#2 UUID",
           "target_agent": "대상에이전트#2",
           "work_script": "스크립트#2",
           "script_type": "스크립트 종류#2"
         }
       ],
       "workflow": {
+        "uuid": "워크플로우 uuid",
         "workflow_name": "워크플로우명",
         "workflow_description": "워크플로우설명",
         "workflow": "작업흐름"
