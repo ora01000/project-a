@@ -169,6 +169,7 @@ ALTER TABLE received_mail
 -- the idx -> uuid mapping in Python.
 CREATE TABLE IF NOT EXISTS work_node (
     uuid VARCHAR(36) PRIMARY KEY,
+    owner INTEGER NOT NULL DEFAULT 1,
     work_name VARCHAR(100) NOT NULL,
     work_description VARCHAR(500) NOT NULL DEFAULT '',
     target_agent INTEGER NOT NULL DEFAULT 0,
@@ -182,6 +183,8 @@ CREATE TABLE IF NOT EXISTS work_node (
 
 ALTER TABLE work_node
     ADD COLUMN IF NOT EXISTS uuid VARCHAR(36) NOT NULL DEFAULT '';
+ALTER TABLE work_node
+    ADD COLUMN IF NOT EXISTS owner INTEGER NOT NULL DEFAULT 1;
 ALTER TABLE work_node
     ADD COLUMN IF NOT EXISTS work_description VARCHAR(500) NOT NULL DEFAULT '';
 ALTER TABLE work_node
@@ -219,8 +222,8 @@ END $$;
 
 CREATE TABLE IF NOT EXISTS workflow (
     uuid VARCHAR(36) PRIMARY KEY,
-    checkin_user INTEGER NOT NULL DEFAULT 0,
-    checkin_time TEXT NOT NULL DEFAULT '',
+    owner INTEGER NOT NULL DEFAULT 1,
+    distribute BOOLEAN NOT NULL DEFAULT FALSE,
     workflow_name VARCHAR(100) NOT NULL,
     workflow_description VARCHAR(500) NOT NULL DEFAULT '',
     workflow TEXT NOT NULL DEFAULT '',
@@ -232,12 +235,15 @@ CREATE TABLE IF NOT EXISTS workflow (
 ALTER TABLE workflow
     ADD COLUMN IF NOT EXISTS uuid VARCHAR(36) NOT NULL DEFAULT '';
 ALTER TABLE workflow
-    ADD COLUMN IF NOT EXISTS checkin_user INTEGER NOT NULL DEFAULT 0;
+    ADD COLUMN IF NOT EXISTS owner INTEGER NOT NULL DEFAULT 1;
 ALTER TABLE workflow
-    ADD COLUMN IF NOT EXISTS checkin_time TEXT NOT NULL DEFAULT '';
+    ADD COLUMN IF NOT EXISTS distribute BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE workflow
     ADD COLUMN IF NOT EXISTS create_date TEXT NOT NULL DEFAULT '';
 ALTER TABLE workflow
     ADD COLUMN IF NOT EXISTS test_result INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE workflow
     ADD COLUMN IF NOT EXISTS validate_date TEXT NOT NULL DEFAULT '';
+-- Legacy checkin columns (owner/distribute model); drop if present
+ALTER TABLE workflow DROP COLUMN IF EXISTS checkin_user;
+ALTER TABLE workflow DROP COLUMN IF EXISTS checkin_time;

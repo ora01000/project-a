@@ -221,30 +221,20 @@ export function WorkflowPage({
     setMode("edit");
   };
 
-  const handleCheckedIn = async (item: WorkflowItem) => {
+  const handleDistributed = async (item: WorkflowItem) => {
     await Promise.all([loadWorkflows(), loadWorkNodes()]);
     setSelectedUuid(item.uuid);
     setMode("edit");
   };
 
-  const handleCheckedOut = async (item: WorkflowItem) => {
+  const handleCloned = async (item: WorkflowItem) => {
     await Promise.all([loadWorkflows(), loadWorkNodes()]);
     setSelectedUuid(item.uuid);
     setMode("edit");
-  };
-
-  const handleRestored = async (item: WorkflowItem) => {
-    await Promise.all([loadWorkflows(), loadWorkNodes()]);
-    setSelectedUuid(item.uuid);
-    setMode("edit");
+    setRunMessage(`"${item.workflow_name}" 으로 복제되었습니다.`);
   };
 
   const handleRunWorkflow = async (item: WorkflowItem) => {
-    const checkedIn = Boolean(item.checkin_user && item.checkin_user > 0);
-    if (checkedIn) {
-      setError("체크인 중인 워크플로우는 실행할 수 없습니다. 체크아웃 후 실행하세요.");
-      return;
-    }
     const confirmed = window.confirm(
       `"${item.workflow_name}" 워크플로우를 실행하시겠습니까?`,
     );
@@ -300,15 +290,13 @@ export function WorkflowPage({
                 {items.map((item) => {
                   const isActive = selectedUuid === item.uuid && mode === "edit";
                   const tested = Boolean(item.test_result);
-                  const checkinName = (item.checkin_username || "").trim();
-                  const hasCheckin = Boolean(item.checkin_user && item.checkin_user > 0 && checkinName);
+                  const ownerName = (item.owner_username || "").trim();
+                  const isMine = (item.owner ?? 0) === user.idx;
+                  const isDistributed = Boolean(item.distribute);
                   const dbRunning = isRunInProgress(item.last_start_date, item.last_end_date);
                   const isAwaitingApproval = Boolean(item.awaiting_approval);
                   const isRunning = runningUuid === item.uuid || dbRunning || isAwaitingApproval;
-                  const canRun =
-                    !Boolean(item.checkin_user && item.checkin_user > 0) &&
-                    !dbRunning &&
-                    !isAwaitingApproval;
+                  const canRun = !dbRunning && !isAwaitingApproval;
                   return (
                     <div
                       key={item.uuid}
@@ -341,12 +329,20 @@ export function WorkflowPage({
                               {isAwaitingApproval ? "승인 대기" : "실행 중"}
                             </span>
                           ) : null}
-                          {hasCheckin ? (
+                          {isDistributed ? (
                             <span
-                              title={`Check-In: ${checkinName}`}
+                              title="배포됨"
+                              className="shrink-0 rounded-full border border-sky-600/70 bg-sky-950/60 px-2 py-0.5 text-[10px] font-medium text-sky-100"
+                            >
+                              배포
+                            </span>
+                          ) : null}
+                          {ownerName ? (
+                            <span
+                              title={isMine ? "내 워크플로우" : `소유자: ${ownerName}`}
                               className="inline-block max-w-[40%] shrink-0 truncate rounded-full border border-slate-600 bg-slate-900/80 px-2.5 py-1 text-center text-[11px] font-medium text-slate-200"
                             >
-                              {checkinName}
+                              {isMine ? "나" : ownerName}
                             </span>
                           ) : null}
                         </div>
@@ -355,11 +351,7 @@ export function WorkflowPage({
                         <button
                           type="button"
                           disabled={!canRun || isRunning || runningUuid != null}
-                          title={
-                            canRun
-                              ? "워크플로우 실행"
-                              : "체크아웃 상태에서만 실행할 수 있습니다"
-                          }
+                          title={canRun ? "워크플로우 실행" : "실행할 수 없는 상태입니다"}
                           onClick={(event) => {
                             event.stopPropagation();
                             void handleRunWorkflow(item);
@@ -383,13 +375,12 @@ export function WorkflowPage({
               editorKey={
                 mode === "create"
                   ? `create-${createKey}`
-                  : `wf-${selectedUuid ?? "none"}-${selected?.checkin_time || "out"}-${selected?.is_draft ? "d" : "c"}`
+                  : `wf-${selectedUuid ?? "none"}-${selected?.owner ?? 0}-${selected?.distribute ? "d" : "p"}`
               }
               onSaved={handleSaved}
               onWorkNodesChanged={loadWorkNodes}
-              onCheckedIn={handleCheckedIn}
-              onCheckedOut={handleCheckedOut}
-              onRestored={handleRestored}
+              onDistributed={handleDistributed}
+              onCloned={handleCloned}
               aiImportRequest={aiImportRequest}
               onAiImportHandled={handleAiImportHandled}
             />

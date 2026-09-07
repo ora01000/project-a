@@ -1,4 +1,4 @@
-"""CRUD APIs for work_node and workflow designer (Redis draft working set)."""
+"""CRUD APIs for work_node and workflow designer (owner / distribute model)."""
 
 from __future__ import annotations
 
@@ -13,32 +13,33 @@ from backend.app.config import (
 )
 from backend.app.db.agentruntime import get_agentruntime_by_idx
 from backend.app.db.job_datetime import now_job_datetime
+from backend.app.db.jobs import (
+    JobRecord,
+    find_pending_workflow_approval_job,
+    map_pending_workflow_approval_jobs,
+)
 from backend.app.db.roles import ROLE_ADMIN, ROLE_INFRAADMIN
 from backend.app.db.users import get_user_by_idx, list_users
 from backend.app.db.workflow import (
     WorkNodeRecord,
     WorkflowRecord,
+    clone_workflow,
     create_work_node,
     create_workflow,
     delete_work_node,
     delete_workflow,
     get_work_node_by_uuid,
     get_workflow_by_uuid,
-    list_work_nodes,
-    list_workflows,
+    list_work_nodes_visible,
+    list_workflows_visible,
     normalize_script_type,
-    set_workflow_checkin_user,
+    set_workflow_distribute,
     update_work_node,
-    update_work_node_validation,
     update_workflow,
-)
-from backend.app.db.jobs import (
-    JobRecord,
-    find_pending_workflow_approval_job,
-    map_pending_workflow_approval_jobs,
+    user_can_view_workflow,
+    user_owns_workflow,
 )
 from backend.app.middleware.session_auth import get_request_auth_user
-from backend.app.services import workflow_draft_store as draft_store
 from backend.app.services.workflow_graph import build_workflow_graph, validate_workflow_expression
 from backend.app.services.workflow_runner import (
     WorkflowRunResult,
@@ -51,6 +52,7 @@ router = APIRouter(tags=["workflow"])
 
 class WorkNodeResponse(BaseModel):
     uuid: str
+    owner: int = 0
     work_name: str
     work_description: str = ""
     target_agent: int
@@ -74,10 +76,12 @@ class WorkNodeResponse(BaseModel):
         record: WorkNodeRecord,
         *,
         agent_name: str = "",
-        is_draft: bool = False,
+        is_draft: bool = False,  # retained for response shape; always False
     ) -> "WorkNodeResponse":
+        _ = is_draft
         return cls(
             uuid=record.uuid,
+            owner=int(getattr(record, "owner", 0) or 0),
             work_name=record.work_name,
             work_description=record.work_description,
             target_agent=record.target_agent,
@@ -93,7 +97,7 @@ class WorkNodeResponse(BaseModel):
             last_success=record.last_success,
             last_fail_reason=record.last_fail_reason,
             use_previous_work_result=record.use_previous_work_result,
-            is_draft=is_draft,
+            is_draft=False,
         )
 
 
@@ -143,9 +147,10 @@ class WorkflowGraph(BaseModel):
 
 class WorkflowResponse(BaseModel):
     uuid: str
-    checkin_user: int = 0
-    checkin_username: str = ""
-    checkin_time: str = ""
+    owner: int = 0
+    owner_username: str = ""
+    distribute: bool = False
+    can_edit: bool = False
     workflow_name: str
     workflow_description: str
     workflow: str
@@ -162,8 +167,6 @@ class WorkflowResponse(BaseModel):
     awaiting_hitl_node_id: str = ""
     awaiting_hitl_userid: str = ""
     graph: WorkflowGraph
-    is_draft: bool = False
-    draft_dirty: bool = False
 
     @classmethod
     def from_record(
@@ -171,18 +174,18 @@ class WorkflowResponse(BaseModel):
         record: WorkflowRecord,
         *,
         graph: dict,
-        checkin_username: str = "",
-        is_draft: bool = False,
-        draft_dirty: bool = False,
+        owner_username: str = "",
+        can_edit: bool = False,
         awaiting_approval: bool = False,
         awaiting_hitl_node_id: str = "",
         awaiting_hitl_userid: str = "",
     ) -> "WorkflowResponse":
         return cls(
             uuid=record.uuid,
-            checkin_user=record.checkin_user,
-            checkin_username=checkin_username,
-            checkin_time=record.checkin_time,
+            owner=int(getattr(record, "owner", 0) or 0),
+            owner_username=owner_username,
+            distribute=bool(getattr(record, "distribute", False)),
+            can_edit=can_edit,
             workflow_name=record.workflow_name,
             workflow_description=record.workflow_description,
             workflow=record.workflow,
@@ -199,8 +202,6 @@ class WorkflowResponse(BaseModel):
             awaiting_hitl_node_id=awaiting_hitl_node_id,
             awaiting_hitl_userid=awaiting_hitl_userid,
             graph=WorkflowGraph.model_validate(graph),
-            is_draft=is_draft,
-            draft_dirty=draft_dirty,
         )
 
 
@@ -209,6 +210,10 @@ class WorkflowWriteRequest(BaseModel):
     workflow_name: str = Field(min_length=1, max_length=100)
     workflow_description: str = Field(default="", max_length=500)
     workflow: str = ""
+
+
+class WorkflowDistributeRequest(BaseModel):
+    distribute: bool
 
 
 class WorkflowRunStepResponse(BaseModel):
@@ -257,8 +262,11 @@ def _require_agent(database_path, target_agent: int) -> None:
         raise HTTPException(status_code=400, detail="대상 에이전트를 찾을 수 없습니다.")
 
 
-def _db_work_names(database_path) -> dict[str, str]:
-    return {node.uuid: node.work_name for node in list_work_nodes(database_path)}
+def _visible_work_names(database_path, user_idx: int) -> dict[str, str]:
+    return {
+        node.uuid: node.work_name
+        for node in list_work_nodes_visible(database_path, user_idx)
+    }
 
 
 def _user_names(database_path) -> dict[str, str]:
@@ -272,10 +280,10 @@ def _known_userids(database_path) -> set[str]:
     return set(_user_names(database_path).keys())
 
 
-def _checkin_username(database_path, checkin_user: int) -> str:
-    if int(checkin_user or 0) <= 0:
+def _owner_username(database_path, owner: int) -> str:
+    if int(owner or 0) <= 0:
         return ""
-    user = get_user_by_idx(database_path, int(checkin_user))
+    user = get_user_by_idx(database_path, int(owner))
     if user is None:
         return ""
     return (user.username or user.userid or "").strip()
@@ -285,9 +293,10 @@ def _graph_for(
     database_path,
     expression: str,
     *,
+    user_idx: int,
     extra_work_names: dict[str, str] | None = None,
 ) -> dict:
-    names = _db_work_names(database_path)
+    names = _visible_work_names(database_path, user_idx)
     if extra_work_names:
         names.update(extra_work_names)
     try:
@@ -304,12 +313,13 @@ def _validate_expression(
     database_path,
     expression: str,
     *,
+    user_idx: int,
     extra_work_uuids: set[str] | None = None,
 ) -> None:
     text = (expression or "").strip()
     if not text:
         return
-    known = set(_db_work_names(database_path).keys())
+    known = set(_visible_work_names(database_path, user_idx).keys())
     if extra_work_uuids:
         known |= extra_work_uuids
     try:
@@ -338,13 +348,26 @@ def _awaiting_hitl_fields(
     return True, node_id, userid
 
 
+def _require_view_workflow(record: WorkflowRecord, user_idx: int) -> None:
+    if not user_can_view_workflow(record, user_idx):
+        raise HTTPException(status_code=403, detail="이 워크플로우를 조회할 권한이 없습니다.")
+
+
+def _require_own_workflow(record: WorkflowRecord, user_idx: int) -> None:
+    if not user_owns_workflow(record, user_idx):
+        raise HTTPException(status_code=403, detail="소유자만 수정할 수 있습니다.")
+
+
+def _require_own_work_node(record: WorkNodeRecord, user_idx: int) -> None:
+    if int(getattr(record, "owner", 0) or 0) != int(user_idx):
+        raise HTTPException(status_code=403, detail="소유자만 수정할 수 있습니다.")
+
+
 def _workflow_response(
     database_path,
     record: WorkflowRecord,
     *,
-    is_draft: bool = False,
-    draft_dirty: bool = False,
-    extra_work_names: dict[str, str] | None = None,
+    user_idx: int,
     pending_job: JobRecord | None = None,
 ) -> WorkflowResponse:
     job = pending_job
@@ -355,114 +378,26 @@ def _workflow_response(
     )
     return WorkflowResponse.from_record(
         record,
-        graph=_graph_for(database_path, record.workflow, extra_work_names=extra_work_names),
-        checkin_username=_checkin_username(database_path, record.checkin_user),
-        is_draft=is_draft,
-        draft_dirty=draft_dirty,
+        graph=_graph_for(database_path, record.workflow, user_idx=user_idx),
+        owner_username=_owner_username(database_path, int(getattr(record, "owner", 0) or 0)),
+        can_edit=user_owns_workflow(record, user_idx),
         awaiting_approval=awaiting_approval,
         awaiting_hitl_node_id=awaiting_hitl_node_id,
         awaiting_hitl_userid=awaiting_hitl_userid,
     )
 
 
-async def _overlay_workflow_for_user(
-    database_path,
-    record: WorkflowRecord,
-    user_idx: int,
-    *,
-    pending_job: JobRecord | None = None,
-) -> WorkflowResponse:
-    if record.checkin_user == user_idx and record.uuid:
-        payload = await draft_store.get_draft(record.uuid)
-        if payload is not None and int(payload.get("meta", {}).get("user_idx") or 0) == user_idx:
-            working = draft_store.working_workflow(payload)
-            # Keep live checkin lock fields from DB.
-            working = WorkflowRecord(
-                uuid=working.uuid or record.uuid,
-                checkin_user=record.checkin_user,
-                checkin_time=record.checkin_time,
-                workflow_name=working.workflow_name,
-                workflow_description=working.workflow_description,
-                workflow=working.workflow,
-                create_date=working.create_date or record.create_date,
-                test_result=working.test_result,
-                validate_date=working.validate_date,
-                last_start_date=record.last_start_date,
-                last_end_date=record.last_end_date,
-                run_count=record.run_count,
-                sucess_count=record.sucess_count,
-                fail_count=record.fail_count,
-                last_success=record.last_success,
-            )
-            nodes = draft_store.working_nodes(payload)
-            extra_names = {node_uuid: node.work_name for node_uuid, node in nodes.items()}
-            dirty = bool(payload.get("meta", {}).get("dirty"))
-            return _workflow_response(
-                database_path,
-                working,
-                is_draft=True,
-                draft_dirty=dirty,
-                extra_work_names=extra_names,
-                pending_job=pending_job,
-            )
-    return _workflow_response(database_path, record, pending_job=pending_job)
-
-
-async def _find_user_draft_for_node(user_idx: int, node_uuid: str) -> dict | None:
-    key = (node_uuid or "").strip()
-    drafts = await draft_store.get_user_drafts(user_idx)
-    for payload in drafts:
-        if key in draft_store.working_nodes(payload):
-            return payload
-        # Also allow updating nodes newly created in this session.
-        if key in draft_store.baseline_created_cleanup_uuids(payload):
-            return payload
-    # If user has exactly one active draft, attach node updates there.
-    if len(drafts) == 1:
-        return drafts[0]
-    return None
-
-
-async def _active_user_draft(user_idx: int) -> dict | None:
-    drafts = await draft_store.get_user_drafts(user_idx)
-    if not drafts:
-        return None
-    if len(drafts) == 1:
-        return drafts[0]
-    # Prefer dirty draft, else first.
-    for payload in drafts:
-        if payload.get("meta", {}).get("dirty"):
-            return payload
-    return drafts[0]
-
-
-def _snapshot_nodes_for_workflow(database_path, workflow: WorkflowRecord) -> list[WorkNodeRecord]:
-    uuids = draft_store.work_uuids_from_expression(workflow.workflow)
-    nodes: list[WorkNodeRecord] = []
-    for node_uuid in sorted(uuids):
-        record = get_work_node_by_uuid(database_path, node_uuid)
-        if record is not None:
-            nodes.append(record)
-    return nodes
-
-
 @router.get("/work-nodes", response_model=list[WorkNodeResponse])
 async def api_list_work_nodes(request: Request) -> list[WorkNodeResponse]:
     auth_user = get_request_auth_user(request)
     database_path = request.app.state.database_path
-    by_uuid = {record.uuid: record for record in list_work_nodes(database_path)}
-    draft_uuids: set[str] = set()
-    for payload in await draft_store.get_user_drafts(auth_user.idx):
-        for node_uuid, node in draft_store.working_nodes(payload).items():
-            by_uuid[node_uuid] = node
-            draft_uuids.add(node_uuid)
+    records = list_work_nodes_visible(database_path, auth_user.idx)
     return [
         WorkNodeResponse.from_record(
             record,
             agent_name=_agent_name(database_path, record.target_agent),
-            is_draft=record.uuid in draft_uuids,
         )
-        for record in sorted(by_uuid.values(), key=lambda item: (item.create_date, item.uuid))
+        for record in sorted(records, key=lambda item: (item.create_date, item.uuid))
     ]
 
 
@@ -487,19 +422,11 @@ async def api_create_work_node(body: WorkNodeWriteRequest, request: Request) -> 
             files=normalize_work_node_filename(body.files),
             use_previous_work_result=body.use_previous_work_result,
             uuid=body.uuid,
+            owner=auth_user.idx,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    draft = await _active_user_draft(auth_user.idx)
-    if draft is not None:
-        next_payload = draft_store.set_working_node(draft, record)
-        next_payload = draft_store.track_created_node(next_payload, record.uuid)
-        await draft_store.save_draft(next_payload)
-        return WorkNodeResponse.from_record(
-            record,
-            agent_name=_agent_name(database_path, record.target_agent),
-            is_draft=True,
-        )
+    _write_validation_output_if_needed(record, body.validation_message)
     return WorkNodeResponse.from_record(
         record, agent_name=_agent_name(database_path, record.target_agent)
     )
@@ -515,99 +442,25 @@ async def api_update_work_node(
     database_path = request.app.state.database_path
     existing = get_work_node_by_uuid(database_path, node_uuid)
     if existing is None:
-        # May exist only in draft (should not happen with current create path).
-        draft = await _find_user_draft_for_node(auth_user.idx, node_uuid)
-        if draft is None:
-            raise HTTPException(status_code=404, detail="워크 노드를 찾을 수 없습니다.")
-        existing = draft_store.working_nodes(draft).get(node_uuid)
-        if existing is None:
-            raise HTTPException(status_code=404, detail="워크 노드를 찾을 수 없습니다.")
+        raise HTTPException(status_code=404, detail="워크 노드를 찾을 수 없습니다.")
+    _require_own_work_node(existing, auth_user.idx)
     _require_agent(database_path, body.target_agent)
     try:
         script_type = normalize_script_type(body.script_type)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    test_result = bool(body.test_result)
-    validate_date = now_job_datetime() if test_result else ""
-    next_node = WorkNodeRecord(
-        uuid=existing.uuid,
+    record = update_work_node(
+        database_path,
+        existing.uuid,
         work_name=body.work_name.strip() or "새 작업노드",
         work_description=(body.work_description or "").strip()[:500],
         target_agent=int(body.target_agent),
         work_script=body.work_script,
         script_type=script_type,
-        test_result=test_result,
+        test_result=bool(body.test_result),
         files=normalize_work_node_filename(body.files),
-        create_date=existing.create_date,
-        validate_date=validate_date,
-        last_start_date=existing.last_start_date,
-        last_end_date=existing.last_end_date,
-        last_success=existing.last_success,
-        last_fail_reason=existing.last_fail_reason,
         use_previous_work_result=bool(body.use_previous_work_result),
-    )
-
-    draft = await _find_user_draft_for_node(auth_user.idx, node_uuid)
-    if draft is not None:
-        next_payload = draft_store.set_working_node(draft, next_node)
-        await draft_store.save_draft(next_payload)
-        # Validation flags are also written to DB so test_result/validate_date
-        # are visible without waiting for checkout.
-        db_node = get_work_node_by_uuid(database_path, existing.uuid)
-        if db_node is not None:
-            updated = update_work_node_validation(
-                database_path,
-                existing.uuid,
-                test_result=test_result,
-            )
-            if updated is not None:
-                next_node = WorkNodeRecord(
-                    uuid=next_node.uuid,
-                    work_name=next_node.work_name,
-                    work_description=next_node.work_description,
-                    target_agent=next_node.target_agent,
-                    work_script=next_node.work_script,
-                    script_type=next_node.script_type,
-                    test_result=updated.test_result,
-                    files=next_node.files,
-                    create_date=next_node.create_date,
-                    validate_date=updated.validate_date,
-                    last_start_date=next_node.last_start_date,
-                    last_end_date=next_node.last_end_date,
-                    last_success=next_node.last_success,
-                    last_fail_reason=next_node.last_fail_reason,
-                    use_previous_work_result=next_node.use_previous_work_result,
-                )
-                next_payload = draft_store.set_working_node(draft, next_node)
-                await draft_store.save_draft(next_payload)
-        _write_validation_output_if_needed(next_node, body.validation_message)
-        return WorkNodeResponse.from_record(
-            next_node,
-            agent_name=_agent_name(database_path, next_node.target_agent),
-            is_draft=True,
-        )
-
-    # No active draft: block if any workflow is checked in by someone else referencing this node.
-    for workflow in list_workflows(database_path):
-        if workflow.checkin_user > 0 and workflow.checkin_user != auth_user.idx:
-            if existing.uuid in draft_store.work_uuids_from_expression(workflow.workflow):
-                raise HTTPException(
-                    status_code=409,
-                    detail="다른 사용자가 체크인한 워크플로우의 작업노드입니다.",
-                )
-
-    record = update_work_node(
-        database_path,
-        existing.uuid,
-        work_name=next_node.work_name,
-        work_description=next_node.work_description,
-        target_agent=next_node.target_agent,
-        work_script=next_node.work_script,
-        script_type=next_node.script_type,
-        test_result=next_node.test_result,
-        files=next_node.files,
-        use_previous_work_result=next_node.use_previous_work_result,
     )
     if record is None:
         raise HTTPException(status_code=404, detail="워크 노드를 찾을 수 없습니다.")
@@ -620,13 +473,12 @@ async def api_update_work_node(
 @router.delete("/work-nodes/{node_uuid}")
 async def api_delete_work_node(node_uuid: str, request: Request) -> dict[str, bool]:
     auth_user = get_request_auth_user(request)
-    draft = await _find_user_draft_for_node(auth_user.idx, node_uuid)
-    if draft is not None:
-        raise HTTPException(
-            status_code=409,
-            detail="체크인 세션의 작업노드는 체크아웃 전에 삭제할 수 없습니다. 다이어그램에서 제거하세요.",
-        )
-    if not delete_work_node(request.app.state.database_path, node_uuid):
+    database_path = request.app.state.database_path
+    existing = get_work_node_by_uuid(database_path, node_uuid)
+    if existing is None:
+        raise HTTPException(status_code=404, detail="워크 노드를 찾을 수 없습니다.")
+    _require_own_work_node(existing, auth_user.idx)
+    if not delete_work_node(database_path, node_uuid):
         raise HTTPException(status_code=404, detail="워크 노드를 찾을 수 없습니다.")
     return {"ok": True}
 
@@ -651,11 +503,11 @@ async def api_get_work_node_validation_result(
     auth_user = get_request_auth_user(request)
     database_path = request.app.state.database_path
     record = get_work_node_by_uuid(database_path, node_uuid)
-    draft = await _find_user_draft_for_node(auth_user.idx, node_uuid)
-    if record is None and draft is not None:
-        record = draft_store.working_nodes(draft).get(node_uuid)
     if record is None:
         raise HTTPException(status_code=404, detail="워크 노드를 찾을 수 없습니다.")
+    visible = {node.uuid for node in list_work_nodes_visible(database_path, auth_user.idx)}
+    if record.uuid not in visible:
+        raise HTTPException(status_code=403, detail="이 작업노드를 조회할 권한이 없습니다.")
     if not record.test_result or not (record.validate_date or "").strip():
         raise HTTPException(status_code=404, detail="저장된 검증 결과가 없습니다.")
     try:
@@ -679,11 +531,9 @@ async def api_upload_work_node_file(
     auth_user = get_request_auth_user(request)
     database_path = request.app.state.database_path
     record = get_work_node_by_uuid(database_path, node_uuid)
-    draft = await _find_user_draft_for_node(auth_user.idx, node_uuid)
-    if record is None and draft is not None:
-        record = draft_store.working_nodes(draft).get(node_uuid)
     if record is None:
         raise HTTPException(status_code=404, detail="워크 노드를 찾을 수 없습니다.")
+    _require_own_work_node(record, auth_user.idx)
     raw_name = (file.filename or "upload.bin").replace("/", "_").replace("\\", "_")
     safe_name = raw_name.strip()[:180] or "upload.bin"
     try:
@@ -695,8 +545,9 @@ async def api_upload_work_node_file(
     payload = await file.read()
     target.write_bytes(payload)
     stored_name = normalize_work_node_filename(safe_name)
-    next_node = WorkNodeRecord(
-        uuid=record.uuid,
+    updated = update_work_node(
+        database_path,
+        record.uuid,
         work_name=record.work_name,
         work_description=record.work_description,
         target_agent=record.target_agent,
@@ -704,33 +555,7 @@ async def api_upload_work_node_file(
         script_type=record.script_type,
         test_result=record.test_result,
         files=stored_name,
-        create_date=record.create_date,
-        validate_date=record.validate_date,
-        last_start_date=record.last_start_date,
-        last_end_date=record.last_end_date,
-        last_success=record.last_success,
-        last_fail_reason=record.last_fail_reason,
         use_previous_work_result=record.use_previous_work_result,
-    )
-    if draft is not None:
-        next_payload = draft_store.set_working_node(draft, next_node)
-        await draft_store.save_draft(next_payload)
-        return WorkNodeResponse.from_record(
-            next_node,
-            agent_name=_agent_name(database_path, next_node.target_agent),
-            is_draft=True,
-        )
-    updated = update_work_node(
-        database_path,
-        record.uuid,
-        work_name=next_node.work_name,
-        work_description=next_node.work_description,
-        target_agent=next_node.target_agent,
-        work_script=next_node.work_script,
-        script_type=next_node.script_type,
-        test_result=next_node.test_result,
-        files=stored_name,
-        use_previous_work_result=next_node.use_previous_work_result,
     )
     if updated is None:
         raise HTTPException(status_code=404, detail="워크 노드를 찾을 수 없습니다.")
@@ -745,13 +570,13 @@ async def api_list_workflows(request: Request) -> list[WorkflowResponse]:
     database_path = request.app.state.database_path
     pending_by_uuid = map_pending_workflow_approval_jobs(database_path)
     return [
-        await _overlay_workflow_for_user(
+        _workflow_response(
             database_path,
             record,
-            auth_user.idx,
+            user_idx=auth_user.idx,
             pending_job=pending_by_uuid.get((record.uuid or "").strip().lower()),
         )
-        for record in list_workflows(database_path)
+        for record in list_workflows_visible(database_path, auth_user.idx)
     ]
 
 
@@ -762,15 +587,16 @@ async def api_get_workflow(workflow_uuid: str, request: Request) -> WorkflowResp
     record = get_workflow_by_uuid(database_path, workflow_uuid)
     if record is None:
         raise HTTPException(status_code=404, detail="워크플로우를 찾을 수 없습니다.")
-    return await _overlay_workflow_for_user(database_path, record, auth_user.idx)
+    _require_view_workflow(record, auth_user.idx)
+    return _workflow_response(database_path, record, user_idx=auth_user.idx)
 
 
 @router.post("/workflows", response_model=WorkflowResponse, status_code=201)
 async def api_create_workflow(body: WorkflowWriteRequest, request: Request) -> WorkflowResponse:
-    get_request_auth_user(request)
+    auth_user = get_request_auth_user(request)
     database_path = request.app.state.database_path
     try:
-        _validate_expression(database_path, body.workflow)
+        _validate_expression(database_path, body.workflow, user_idx=auth_user.idx)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     try:
@@ -780,10 +606,12 @@ async def api_create_workflow(body: WorkflowWriteRequest, request: Request) -> W
             workflow_description=body.workflow_description,
             workflow=body.workflow,
             uuid=body.uuid,
+            owner=auth_user.idx,
+            distribute=False,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return _workflow_response(database_path, record)
+    return _workflow_response(database_path, record, user_idx=auth_user.idx)
 
 
 @router.put("/workflows/{workflow_uuid}", response_model=WorkflowResponse)
@@ -797,192 +625,77 @@ async def api_update_workflow(
     existing = get_workflow_by_uuid(database_path, workflow_uuid)
     if existing is None:
         raise HTTPException(status_code=404, detail="워크플로우를 찾을 수 없습니다.")
-    if existing.checkin_user > 0 and existing.checkin_user != auth_user.idx:
-        raise HTTPException(status_code=409, detail="다른 사용자가 체크인한 워크플로우입니다.")
-    if existing.checkin_user <= 0:
-        raise HTTPException(status_code=409, detail="체크인 후 편집할 수 있습니다.")
+    _require_own_workflow(existing, auth_user.idx)
 
-    payload = await draft_store.get_draft(existing.uuid)
-    if payload is None or int(payload.get("meta", {}).get("user_idx") or 0) != auth_user.idx:
-        raise HTTPException(status_code=409, detail="체크인 드래프트를 찾을 수 없습니다. 다시 체크인하세요.")
-
-    draft_nodes = draft_store.working_nodes(payload)
     try:
-        _validate_expression(
-            database_path,
-            body.workflow,
-            extra_work_uuids=set(draft_nodes.keys()),
-        )
+        _validate_expression(database_path, body.workflow, user_idx=auth_user.idx)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    current = draft_store.working_workflow(payload)
-    next_record = WorkflowRecord(
-        uuid=existing.uuid,
-        checkin_user=existing.checkin_user,
-        checkin_time=existing.checkin_time,
+    record = update_workflow(
+        database_path,
+        existing.uuid,
         workflow_name=body.workflow_name.strip(),
         workflow_description=(body.workflow_description or "").strip()[:500],
         workflow=(body.workflow or "").strip(),
-        create_date=current.create_date or existing.create_date,
-        test_result=current.test_result,
-        validate_date=current.validate_date,
-        last_start_date=existing.last_start_date,
-        last_end_date=existing.last_end_date,
-        run_count=existing.run_count,
-        sucess_count=existing.sucess_count,
-        fail_count=existing.fail_count,
-        last_success=existing.last_success,
     )
-    next_payload = draft_store.set_working_workflow(payload, next_record)
-    await draft_store.save_draft(next_payload)
-    return await _overlay_workflow_for_user(database_path, existing, auth_user.idx)
+    if record is None:
+        raise HTTPException(status_code=404, detail="워크플로우를 찾을 수 없습니다.")
+    return _workflow_response(database_path, record, user_idx=auth_user.idx)
 
 
-@router.post("/workflows/{workflow_uuid}/checkin", response_model=WorkflowResponse)
-async def api_checkin_workflow(workflow_uuid: str, request: Request) -> WorkflowResponse:
+@router.post("/workflows/{workflow_uuid}/distribute", response_model=WorkflowResponse)
+async def api_set_workflow_distribute(
+    workflow_uuid: str,
+    body: WorkflowDistributeRequest,
+    request: Request,
+) -> WorkflowResponse:
     auth_user = get_request_auth_user(request)
     database_path = request.app.state.database_path
     existing = get_workflow_by_uuid(database_path, workflow_uuid)
     if existing is None:
         raise HTTPException(status_code=404, detail="워크플로우를 찾을 수 없습니다.")
-    if existing.checkin_user > 0 and existing.checkin_user != auth_user.idx:
-        raise HTTPException(
-            status_code=409,
-            detail="이미 다른 사용자가 체크인한 워크플로우입니다.",
-        )
-    if existing.checkin_user == auth_user.idx and (existing.checkin_time or "").strip():
-        # Ensure draft exists (recover if Redis lost).
-        payload = await draft_store.get_draft(existing.uuid)
-        if payload is None:
-            nodes = _snapshot_nodes_for_workflow(database_path, existing)
-            payload = draft_store.build_draft_payload(
-                user_idx=auth_user.idx,
-                workflow=existing,
-                nodes=nodes,
-            )
-            await draft_store.save_draft(payload)
-        return await _overlay_workflow_for_user(database_path, existing, auth_user.idx)
-
-    record = set_workflow_checkin_user(database_path, existing.uuid, auth_user.idx)
+    _require_own_workflow(existing, auth_user.idx)
+    record = set_workflow_distribute(database_path, existing.uuid, bool(body.distribute))
     if record is None:
         raise HTTPException(status_code=404, detail="워크플로우를 찾을 수 없습니다.")
-    nodes = _snapshot_nodes_for_workflow(database_path, record)
-    payload = draft_store.build_draft_payload(
-        user_idx=auth_user.idx,
-        workflow=record,
-        nodes=nodes,
-    )
-    await draft_store.save_draft(payload)
-    return await _overlay_workflow_for_user(database_path, record, auth_user.idx)
+    return _workflow_response(database_path, record, user_idx=auth_user.idx)
 
 
-async def _commit_draft_to_db(database_path, payload: dict) -> WorkflowRecord:
-    working_wf = draft_store.working_workflow(payload)
-    working_nodes = draft_store.working_nodes(payload)
-    for node in working_nodes.values():
-        existing = get_work_node_by_uuid(database_path, node.uuid)
-        if existing is None:
-            # Should have been created during session; skip orphan.
-            continue
-        updated = update_work_node(
+@router.post("/workflows/{workflow_uuid}/clone", response_model=WorkflowResponse, status_code=201)
+async def api_clone_workflow(workflow_uuid: str, request: Request) -> WorkflowResponse:
+    auth_user = get_request_auth_user(request)
+    database_path = request.app.state.database_path
+    existing = get_workflow_by_uuid(database_path, workflow_uuid)
+    if existing is None:
+        raise HTTPException(status_code=404, detail="워크플로우를 찾을 수 없습니다.")
+    _require_view_workflow(existing, auth_user.idx)
+    try:
+        record = clone_workflow(
             database_path,
-            node.uuid,
-            work_name=node.work_name,
-            work_description=node.work_description,
-            target_agent=node.target_agent,
-            work_script=node.work_script,
-            script_type=node.script_type,
-            test_result=node.test_result,
-            files=node.files,
-            use_previous_work_result=node.use_previous_work_result,
+            existing.uuid,
+            new_owner=auth_user.idx,
         )
-        if updated is None:
-            raise HTTPException(status_code=500, detail=f"작업노드 {node.uuid} 커밋에 실패했습니다.")
-    record = update_workflow(
-        database_path,
-        working_wf.uuid,
-        workflow_name=working_wf.workflow_name,
-        workflow_description=working_wf.workflow_description,
-        workflow=working_wf.workflow,
-    )
-    if record is None:
-        raise HTTPException(status_code=500, detail="워크플로우 커밋에 실패했습니다.")
-    return record
-
-
-@router.post("/workflows/{workflow_uuid}/checkout", response_model=WorkflowResponse)
-async def api_checkout_workflow(workflow_uuid: str, request: Request) -> WorkflowResponse:
-    auth_user = get_request_auth_user(request)
-    database_path = request.app.state.database_path
-    existing = get_workflow_by_uuid(database_path, workflow_uuid)
-    if existing is None:
-        raise HTTPException(status_code=404, detail="워크플로우를 찾을 수 없습니다.")
-    if existing.checkin_user <= 0:
-        return _workflow_response(database_path, existing)
-    if existing.checkin_user != auth_user.idx:
-        raise HTTPException(status_code=403, detail="본인이 체크인한 워크플로우만 체크아웃할 수 있습니다.")
-
-    payload = await draft_store.get_draft(existing.uuid)
-    if payload is not None:
-        working = draft_store.working_workflow(payload)
-        draft_nodes = draft_store.working_nodes(payload)
-        try:
-            _validate_expression(
-                database_path,
-                working.workflow,
-                extra_work_uuids=set(draft_nodes.keys()),
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        await _commit_draft_to_db(database_path, payload)
-        await draft_store.delete_draft(existing.uuid, auth_user.idx)
-
-    record = set_workflow_checkin_user(database_path, existing.uuid, 0)
-    if record is None:
-        raise HTTPException(status_code=404, detail="워크플로우를 찾을 수 없습니다.")
-    return _workflow_response(database_path, record)
-
-
-@router.post("/workflows/{workflow_uuid}/restore", response_model=WorkflowResponse)
-async def api_restore_workflow(workflow_uuid: str, request: Request) -> WorkflowResponse:
-    """Discard draft changes, delete session-created nodes, and check out."""
-    auth_user = get_request_auth_user(request)
-    database_path = request.app.state.database_path
-    existing = get_workflow_by_uuid(database_path, workflow_uuid)
-    if existing is None:
-        raise HTTPException(status_code=404, detail="워크플로우를 찾을 수 없습니다.")
-    if existing.checkin_user <= 0:
-        return _workflow_response(database_path, existing)
-    if existing.checkin_user != auth_user.idx:
-        raise HTTPException(status_code=403, detail="본인이 체크인한 워크플로우만 복원할 수 있습니다.")
-
-    payload = await draft_store.get_draft(existing.uuid)
-    created_uuids = draft_store.baseline_created_cleanup_uuids(payload) if payload else []
-    for created_uuid in created_uuids:
-        delete_work_node(database_path, created_uuid)
-    if payload is not None:
-        await draft_store.delete_draft(existing.uuid, auth_user.idx)
-
-    record = set_workflow_checkin_user(database_path, existing.uuid, 0)
-    if record is None:
-        raise HTTPException(status_code=404, detail="워크플로우를 찾을 수 없습니다.")
-    # DB workflow body never changed during draft saves — committed state remains baseline.
-    return _workflow_response(database_path, record)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _workflow_response(database_path, record, user_idx=auth_user.idx)
 
 
 @router.post("/workflows/{workflow_uuid}/run", response_model=WorkflowRunResponse)
 async def api_run_workflow(workflow_uuid: str, request: Request) -> WorkflowRunResponse:
-    """Execute a checked-out workflow sequentially (work nodes + HITL notifications)."""
+    """Execute a workflow sequentially (work nodes + HITL notifications)."""
     auth_user = get_request_auth_user(request)
     database_path = request.app.state.database_path
     existing = get_workflow_by_uuid(database_path, workflow_uuid)
     if existing is None:
         raise HTTPException(status_code=404, detail="워크플로우를 찾을 수 없습니다.")
-    if existing.checkin_user > 0:
+    if not (
+        user_owns_workflow(existing, auth_user.idx)
+        or bool(getattr(existing, "distribute", False))
+    ):
         raise HTTPException(
-            status_code=409,
-            detail="체크인 중인 워크플로우는 실행할 수 없습니다. 체크아웃 후 실행하세요.",
+            status_code=403,
+            detail="소유자이거나 배포된 워크플로우만 실행할 수 있습니다.",
         )
     try:
         result: WorkflowRunResult = await run_workflow(
@@ -996,8 +709,8 @@ async def api_run_workflow(workflow_uuid: str, request: Request) -> WorkflowRunR
 
     workflow_payload = None
     if result.workflow is not None:
-        workflow_payload = await _overlay_workflow_for_user(
-            database_path, result.workflow, auth_user.idx
+        workflow_payload = _workflow_response(
+            database_path, result.workflow, user_idx=auth_user.idx
         )
     return WorkflowRunResponse(
         status=result.status,
@@ -1024,10 +737,7 @@ async def api_delete_workflow(workflow_uuid: str, request: Request) -> dict[str,
     existing = get_workflow_by_uuid(database_path, workflow_uuid)
     if existing is None:
         raise HTTPException(status_code=404, detail="워크플로우를 찾을 수 없습니다.")
-    if existing.checkin_user > 0:
-        raise HTTPException(status_code=409, detail="체크인된 워크플로우는 삭제할 수 없습니다.")
-    if existing.uuid:
-        await draft_store.delete_draft(existing.uuid, auth_user.idx)
+    _require_own_workflow(existing, auth_user.idx)
     if not delete_workflow(database_path, existing.uuid):
         raise HTTPException(status_code=404, detail="워크플로우를 찾을 수 없습니다.")
     return {"ok": True}

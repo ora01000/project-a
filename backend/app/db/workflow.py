@@ -3,24 +3,27 @@
 from __future__ import annotations
 
 import re
+import shutil
 import uuid as uuid_lib
 from dataclasses import dataclass
 from pathlib import Path
 
+from backend.app.config import work_node_upload_dir
 from backend.app.db.database import get_connection
 from backend.app.db.job_datetime import now_job_datetime
+from backend.app.services.workflow_graph import parse_workflow_tokens
 
 SCRIPT_TYPES = frozenset({"kubectl", "ansible", "cli", "prompt"})
 
 _WORK_NODE_SELECT = """
-    uuid, work_name, work_description, target_agent, work_script,
+    uuid, owner, work_name, work_description, target_agent, work_script,
     script_type, test_result, files, create_date, validate_date,
     last_start_date, last_end_date, last_success, last_fail_reason,
     use_previous_work_result
 """
 
 _WORKFLOW_SELECT = """
-    uuid, checkin_user, checkin_time, workflow_name, workflow_description, workflow,
+    uuid, owner, distribute, workflow_name, workflow_description, workflow,
     create_date, test_result, validate_date,
     last_start_date, last_end_date, run_count, sucess_count, fail_count, last_success
 """
@@ -112,15 +115,26 @@ def _backfill_missing_uuids(connection, table: str) -> None:
         )
 
 
-def rewrite_expression_idx_to_uuid(expression: str, mapping: dict[str, str]) -> str:
-    """Replace legacy integer work_node tokens with their uuid equivalents.
+def work_uuids_from_expression(expression: str) -> set[str]:
+    """Collect work_node uuids referenced by a workflow expression."""
+    uuids: set[str] = set()
+    try:
+        tokens = parse_workflow_tokens(expression)
+    except ValueError:
+        return uuids
+    for token in tokens:
+        if token.work_uuid:
+            uuids.add(str(token.work_uuid))
+        if token.fail_work_uuid:
+            uuids.add(str(token.fail_work_uuid))
+    return uuids
 
-    Only used while migrating stored ``workflow.workflow`` expressions; the
-    runtime parser accepts uuid tokens exclusively.
-    """
+
+def rewrite_expression_uuid_map(expression: str, mapping: dict[str, str]) -> str:
+    """Remap work_node uuid tokens in a workflow expression."""
     text = (expression or "").strip()
-    if not text:
-        return ""
+    if not text or not mapping:
+        return text
     rewritten: list[str] = []
     for part in text.split("->"):
         token = part.strip()
@@ -137,6 +151,15 @@ def rewrite_expression_idx_to_uuid(expression: str, mapping: dict[str, str]) -> 
             continue
         rewritten.append(mapping.get(token, token))
     return "->".join(rewritten)
+
+
+def rewrite_expression_idx_to_uuid(expression: str, mapping: dict[str, str]) -> str:
+    """Replace legacy integer work_node tokens with their uuid equivalents.
+
+    Only used while migrating stored ``workflow.workflow`` expressions; the
+    runtime parser accepts uuid tokens exclusively.
+    """
+    return rewrite_expression_uuid_map(expression, mapping)
 
 
 def _migrate_workflow_expressions_to_uuid(connection) -> None:
@@ -199,6 +222,7 @@ def ensure_workflow_tables(connection) -> None:
         """
         CREATE TABLE IF NOT EXISTS work_node (
             uuid VARCHAR(36) PRIMARY KEY,
+            owner INTEGER NOT NULL DEFAULT 1,
             work_name VARCHAR(100) NOT NULL,
             work_description VARCHAR(500) NOT NULL DEFAULT '',
             target_agent INTEGER NOT NULL DEFAULT 0,
@@ -220,6 +244,12 @@ def ensure_workflow_tables(connection) -> None:
         """
         ALTER TABLE work_node
             ADD COLUMN IF NOT EXISTS uuid VARCHAR(36) NOT NULL DEFAULT ''
+        """
+    )
+    connection.execute(
+        """
+        ALTER TABLE work_node
+            ADD COLUMN IF NOT EXISTS owner INTEGER NOT NULL DEFAULT 1
         """
     )
     connection.execute(
@@ -282,8 +312,8 @@ def ensure_workflow_tables(connection) -> None:
         """
         CREATE TABLE IF NOT EXISTS workflow (
             uuid VARCHAR(36) PRIMARY KEY,
-            checkin_user INTEGER NOT NULL DEFAULT 0,
-            checkin_time TEXT NOT NULL DEFAULT '',
+            owner INTEGER NOT NULL DEFAULT 1,
+            distribute BOOLEAN NOT NULL DEFAULT FALSE,
             workflow_name VARCHAR(100) NOT NULL,
             workflow_description VARCHAR(500) NOT NULL DEFAULT '',
             workflow TEXT NOT NULL DEFAULT '',
@@ -308,13 +338,13 @@ def ensure_workflow_tables(connection) -> None:
     connection.execute(
         """
         ALTER TABLE workflow
-            ADD COLUMN IF NOT EXISTS checkin_user INTEGER NOT NULL DEFAULT 0
+            ADD COLUMN IF NOT EXISTS owner INTEGER NOT NULL DEFAULT 1
         """
     )
     connection.execute(
         """
         ALTER TABLE workflow
-            ADD COLUMN IF NOT EXISTS checkin_time TEXT NOT NULL DEFAULT ''
+            ADD COLUMN IF NOT EXISTS distribute BOOLEAN NOT NULL DEFAULT FALSE
         """
     )
     connection.execute(
@@ -371,6 +401,11 @@ def ensure_workflow_tables(connection) -> None:
             ADD COLUMN IF NOT EXISTS last_success INTEGER NOT NULL DEFAULT 0
         """
     )
+    connection.execute("ALTER TABLE work_node ALTER COLUMN owner SET DEFAULT 1")
+    connection.execute("ALTER TABLE workflow ALTER COLUMN owner SET DEFAULT 1")
+    # Migrate away from checkin model when upgrading existing DBs.
+    connection.execute("ALTER TABLE workflow DROP COLUMN IF EXISTS checkin_user")
+    connection.execute("ALTER TABLE workflow DROP COLUMN IF EXISTS checkin_time")
 
     _backfill_missing_uuids(connection, "work_node")
     _backfill_missing_uuids(connection, "workflow")
@@ -399,13 +434,12 @@ class WorkNodeRecord:
     last_success: bool = False
     last_fail_reason: str = ""
     use_previous_work_result: bool = False
+    owner: int = 0
 
 
 @dataclass(frozen=True)
 class WorkflowRecord:
     uuid: str
-    checkin_user: int
-    checkin_time: str
     workflow_name: str
     workflow_description: str
     workflow: str
@@ -418,6 +452,18 @@ class WorkflowRecord:
     sucess_count: int = 0
     fail_count: int = 0
     last_success: bool = False
+    owner: int = 0
+    distribute: bool = False
+
+
+def user_owns_workflow(record: WorkflowRecord, user_idx: int) -> bool:
+    return int(record.owner or 0) == int(user_idx) and int(user_idx) > 0
+
+
+def user_can_view_workflow(record: WorkflowRecord, user_idx: int) -> bool:
+    if int(user_idx) <= 0:
+        return False
+    return user_owns_workflow(record, user_idx) or bool(record.distribute)
 
 
 def _row_to_work_node(row) -> WorkNodeRecord:
@@ -433,8 +479,10 @@ def _row_to_work_node(row) -> WorkNodeRecord:
     use_previous_work_result = (
         row["use_previous_work_result"] if "use_previous_work_result" in keys else 0
     )
+    owner = row["owner"] if "owner" in keys else 0
     return WorkNodeRecord(
         uuid=str(row["uuid"] or ""),
+        owner=int(owner or 0),
         work_name=str(row["work_name"] or ""),
         work_description=str(description or ""),
         target_agent=int(row["target_agent"] or 0),
@@ -454,8 +502,8 @@ def _row_to_work_node(row) -> WorkNodeRecord:
 
 def _row_to_workflow(row) -> WorkflowRecord:
     keys = row.keys() if hasattr(row, "keys") else []
-    checkin_user = row["checkin_user"] if "checkin_user" in keys else 0
-    checkin_time = row["checkin_time"] if "checkin_time" in keys else ""
+    owner = row["owner"] if "owner" in keys else 0
+    distribute = row["distribute"] if "distribute" in keys else False
     create_date = row["create_date"] if "create_date" in keys else ""
     validate_date = row["validate_date"] if "validate_date" in keys else ""
     test_result = row["test_result"] if "test_result" in keys else 0
@@ -467,8 +515,8 @@ def _row_to_workflow(row) -> WorkflowRecord:
     last_success = row["last_success"] if "last_success" in keys else 0
     return WorkflowRecord(
         uuid=str(row["uuid"] or ""),
-        checkin_user=int(checkin_user or 0),
-        checkin_time=str(checkin_time or ""),
+        owner=int(owner or 0),
+        distribute=bool(distribute),
         workflow_name=str(row["workflow_name"] or ""),
         workflow_description=str(row["workflow_description"] or ""),
         workflow=str(row["workflow"] or ""),
@@ -491,6 +539,47 @@ def list_work_nodes(database_path: str | Path) -> list[WorkNodeRecord]:
             f"SELECT {_WORK_NODE_SELECT} FROM work_node ORDER BY create_date ASC, uuid ASC"
         ).fetchall()
     return [_row_to_work_node(row) for row in rows]
+
+
+def list_work_nodes_visible(database_path: str | Path, user_idx: int) -> list[WorkNodeRecord]:
+    """Owned nodes, or nodes referenced by workflows the user can view."""
+    uid = int(user_idx or 0)
+    with get_connection(database_path) as connection:
+        ensure_workflow_tables(connection)
+        owned_rows = connection.execute(
+            f"""
+            SELECT {_WORK_NODE_SELECT}
+            FROM work_node
+            WHERE owner = ?
+            ORDER BY create_date ASC, uuid ASC
+            """,
+            (uid,),
+        ).fetchall()
+        visible_workflows = connection.execute(
+            f"""
+            SELECT {_WORKFLOW_SELECT}
+            FROM workflow
+            WHERE owner = ? OR distribute = TRUE
+            """,
+            (uid,),
+        ).fetchall()
+    by_uuid = {row["uuid"]: _row_to_work_node(row) for row in owned_rows}
+    referenced: set[str] = set()
+    for wf_row in visible_workflows:
+        record = _row_to_workflow(wf_row)
+        referenced |= work_uuids_from_expression(record.workflow)
+    missing = [key for key in referenced if key not in by_uuid]
+    if missing:
+        with get_connection(database_path) as connection:
+            ensure_workflow_tables(connection)
+            for node_uuid in missing:
+                row = connection.execute(
+                    f"SELECT {_WORK_NODE_SELECT} FROM work_node WHERE uuid = ?",
+                    (node_uuid,),
+                ).fetchone()
+                if row is not None:
+                    by_uuid[node_uuid] = _row_to_work_node(row)
+    return sorted(by_uuid.values(), key=lambda item: (item.create_date, item.uuid))
 
 
 def get_work_node_by_uuid(database_path: str | Path, node_uuid: str) -> WorkNodeRecord | None:
@@ -518,6 +607,7 @@ def create_work_node(
     files: str = "",
     use_previous_work_result: bool = False,
     uuid: str | None = None,
+    owner: int = 0,
 ) -> WorkNodeRecord:
     created_at = now_job_datetime()
     validate_at = created_at if test_result else ""
@@ -528,15 +618,16 @@ def create_work_node(
         row = connection.execute(
             f"""
             INSERT INTO work_node (
-                uuid, work_name, work_description, target_agent, work_script,
+                uuid, owner, work_name, work_description, target_agent, work_script,
                 script_type, test_result, files, create_date, validate_date,
                 last_start_date, last_end_date, last_success, last_fail_reason,
                 use_previous_work_result
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', '', 0, '', ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', '', 0, '', ?)
             RETURNING {_WORK_NODE_SELECT}
             """,
             (
                 node_uuid,
+                int(owner or 0),
                 work_name.strip() or "새 작업노드",
                 (work_description or "").strip()[:500],
                 int(target_agent),
@@ -605,7 +696,7 @@ def update_work_node_validation(
     *,
     test_result: bool,
 ) -> WorkNodeRecord | None:
-    """Update only validation flags (used during check-in draft sessions)."""
+    """Update only validation flags."""
     existing = get_work_node_by_uuid(database_path, node_uuid)
     if existing is None:
         return None
@@ -642,6 +733,22 @@ def list_workflows(database_path: str | Path) -> list[WorkflowRecord]:
     return [_row_to_workflow(row) for row in rows]
 
 
+def list_workflows_visible(database_path: str | Path, user_idx: int) -> list[WorkflowRecord]:
+    uid = int(user_idx or 0)
+    with get_connection(database_path) as connection:
+        ensure_workflow_tables(connection)
+        rows = connection.execute(
+            f"""
+            SELECT {_WORKFLOW_SELECT}
+            FROM workflow
+            WHERE owner = ? OR distribute = TRUE
+            ORDER BY create_date DESC, uuid DESC
+            """,
+            (uid,),
+        ).fetchall()
+    return [_row_to_workflow(row) for row in rows]
+
+
 def get_workflow_by_uuid(database_path: str | Path, workflow_uuid: str) -> WorkflowRecord | None:
     key = (workflow_uuid or "").strip()
     if not key:
@@ -661,19 +768,18 @@ def create_workflow(
     workflow_name: str,
     workflow_description: str = "",
     workflow: str = "",
-    checkin_user: int = 0,
+    owner: int = 0,
+    distribute: bool = False,
     uuid: str | None = None,
 ) -> WorkflowRecord:
     created_at = now_job_datetime()
     workflow_uuid = _normalize_uuid(uuid)
-    next_checkin = int(checkin_user or 0)
-    checkin_time = now_job_datetime() if next_checkin > 0 else ""
     with get_connection(database_path) as connection:
         ensure_workflow_tables(connection)
         row = connection.execute(
             f"""
             INSERT INTO workflow (
-                uuid, checkin_user, checkin_time, workflow_name, workflow_description, workflow,
+                uuid, owner, distribute, workflow_name, workflow_description, workflow,
                 create_date, test_result, validate_date,
                 last_start_date, last_end_date, run_count, sucess_count, fail_count, last_success
             )
@@ -682,8 +788,8 @@ def create_workflow(
             """,
             (
                 workflow_uuid,
-                next_checkin,
-                checkin_time,
+                int(owner or 0),
+                bool(distribute),
                 workflow_name.strip(),
                 (workflow_description or "").strip()[:500],
                 (workflow or "").strip(),
@@ -700,60 +806,100 @@ def update_workflow(
     workflow_name: str,
     workflow_description: str,
     workflow: str,
-    checkin_user: int | None = None,
+    distribute: bool | None = None,
 ) -> WorkflowRecord | None:
     existing = get_workflow_by_uuid(database_path, workflow_uuid)
     if existing is None:
         return None
-    if checkin_user is None:
-        next_checkin = existing.checkin_user
-        next_checkin_time = existing.checkin_time
-    else:
-        next_checkin = int(checkin_user)
-        if next_checkin > 0:
-            next_checkin_time = existing.checkin_time or now_job_datetime()
-            if next_checkin != existing.checkin_user:
-                next_checkin_time = now_job_datetime()
-        else:
-            next_checkin_time = ""
+    next_distribute = existing.distribute if distribute is None else bool(distribute)
     with get_connection(database_path) as connection:
         ensure_workflow_tables(connection)
         connection.execute(
             """
             UPDATE workflow
-            SET workflow_name = ?, workflow_description = ?, workflow = ?,
-                checkin_user = ?, checkin_time = ?
+            SET workflow_name = ?, workflow_description = ?, workflow = ?, distribute = ?
             WHERE uuid = ?
             """,
             (
                 workflow_name.strip(),
                 (workflow_description or "").strip()[:500],
                 (workflow or "").strip(),
-                next_checkin,
-                next_checkin_time,
+                next_distribute,
                 existing.uuid,
             ),
         )
     return get_workflow_by_uuid(database_path, existing.uuid)
 
 
-def set_workflow_checkin_user(
+def set_workflow_distribute(
     database_path: str | Path,
     workflow_uuid: str,
-    checkin_user: int,
+    distribute: bool,
 ) -> WorkflowRecord | None:
     existing = get_workflow_by_uuid(database_path, workflow_uuid)
     if existing is None:
         return None
-    next_checkin = int(checkin_user)
-    checkin_time = now_job_datetime() if next_checkin > 0 else ""
     with get_connection(database_path) as connection:
         ensure_workflow_tables(connection)
         connection.execute(
-            "UPDATE workflow SET checkin_user = ?, checkin_time = ? WHERE uuid = ?",
-            (next_checkin, checkin_time, existing.uuid),
+            "UPDATE workflow SET distribute = ? WHERE uuid = ?",
+            (bool(distribute), existing.uuid),
         )
     return get_workflow_by_uuid(database_path, existing.uuid)
+
+
+def clone_workflow(
+    database_path: str | Path,
+    source_uuid: str,
+    *,
+    new_owner: int,
+) -> WorkflowRecord:
+    """Deep-copy a workflow and all referenced work_nodes for ``new_owner``."""
+    source = get_workflow_by_uuid(database_path, source_uuid)
+    if source is None:
+        raise ValueError("워크플로우를 찾을 수 없습니다.")
+    owner_idx = int(new_owner or 0)
+    if owner_idx <= 0:
+        raise ValueError("복제 소유자가 올바르지 않습니다.")
+
+    referenced = sorted(work_uuids_from_expression(source.workflow))
+    uuid_map: dict[str, str] = {}
+    for old_uuid in referenced:
+        node = get_work_node_by_uuid(database_path, old_uuid)
+        if node is None:
+            continue
+        new_uuid = _new_uuid()
+        uuid_map[old_uuid] = new_uuid
+        create_work_node(
+            database_path,
+            work_name=node.work_name,
+            work_description=node.work_description,
+            target_agent=node.target_agent,
+            work_script=node.work_script,
+            script_type=node.script_type,
+            test_result=node.test_result,
+            files=node.files,
+            use_previous_work_result=node.use_previous_work_result,
+            uuid=new_uuid,
+            owner=owner_idx,
+        )
+        source_dir = work_node_upload_dir(old_uuid)
+        if source_dir.is_dir():
+            target_dir = work_node_upload_dir(new_uuid)
+            shutil.copytree(source_dir, target_dir, dirs_exist_ok=True)
+
+    remapped = rewrite_expression_uuid_map(source.workflow, uuid_map)
+    cloned_name = f"{source.workflow_name} (복제)".strip()
+    if len(cloned_name) > 100:
+        cloned_name = f"{source.workflow_name[:90]}…(복제)"
+    return create_workflow(
+        database_path,
+        workflow_name=cloned_name,
+        workflow_description=source.workflow_description,
+        workflow=remapped,
+        owner=owner_idx,
+        distribute=False,
+    )
 
 
 def delete_workflow(database_path: str | Path, workflow_uuid: str) -> bool:

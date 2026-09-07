@@ -9,6 +9,7 @@ export const WORK_SCRIPT_TYPE_OPTIONS: { value: Exclude<WorkScriptType, "">; lab
 
 export interface WorkNodeItem {
   uuid: string;
+  owner?: number;
   work_name: string;
   work_description?: string;
   target_agent: number;
@@ -24,7 +25,6 @@ export interface WorkNodeItem {
   last_success?: boolean;
   last_fail_reason?: string;
   use_previous_work_result?: boolean;
-  is_draft?: boolean;
 }
 
 export interface WorkflowApprover {
@@ -60,9 +60,10 @@ export interface WorkflowGraph {
 
 export interface WorkflowItem {
   uuid: string;
-  checkin_user?: number;
-  checkin_username?: string;
-  checkin_time?: string;
+  owner?: number;
+  owner_username?: string;
+  distribute?: boolean;
+  can_edit?: boolean;
   workflow_name: string;
   workflow_description: string;
   workflow: string;
@@ -79,6 +80,4 @@ export interface WorkflowItem {
   awaiting_hitl_node_id?: string;
   awaiting_hitl_userid?: string;
   graph: WorkflowGraph;
-  is_draft?: boolean;
-  draft_dirty?: boolean;
 }

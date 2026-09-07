@@ -14,9 +14,8 @@ interface WorkflowDesignPanelProps {
   editorKey: string;
   onSaved: (item: WorkflowItem) => Promise<void> | void;
   onWorkNodesChanged: () => Promise<void> | void;
-  onCheckedIn: (item: WorkflowItem) => Promise<void> | void;
-  onCheckedOut: (item: WorkflowItem) => Promise<void> | void;
-  onRestored: (item: WorkflowItem) => Promise<void> | void;
+  onDistributed: (item: WorkflowItem) => Promise<void> | void;
+  onCloned: (item: WorkflowItem) => Promise<void> | void;
   aiImportRequest?: { nonce: number; assistantText: string } | null;
   onAiImportHandled?: () => void;
 }
@@ -24,14 +23,6 @@ interface WorkflowDesignPanelProps {
 async function parseError(response: Response, fallback: string): Promise<string> {
   const payload = (await response.json().catch(() => null)) as { detail?: string } | null;
   return typeof payload?.detail === "string" ? payload.detail : fallback;
-}
-
-function hasActiveCheckin(item: WorkflowItem | null): boolean {
-  return Boolean(item && (item.checkin_user ?? 0) > 0);
-}
-
-function isMyCheckin(item: WorkflowItem | null, user: AuthUser): boolean {
-  return Boolean(item && (item.checkin_user ?? 0) === user.idx);
 }
 
 export function WorkflowDesignPanel({
@@ -42,14 +33,13 @@ export function WorkflowDesignPanel({
   editorKey,
   onSaved,
   onWorkNodesChanged,
-  onCheckedIn,
-  onCheckedOut,
-  onRestored,
+  onDistributed,
+  onCloned,
   aiImportRequest = null,
   onAiImportHandled,
 }: WorkflowDesignPanelProps) {
-  const [lockError, setLockError] = useState<string | null>(null);
-  const [isLockBusy, setIsLockBusy] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [isBusy, setIsBusy] = useState(false);
 
   const workRunDates = useMemo(() => {
     const map: Record<string, { last_start_date?: string; last_end_date?: string }> = {};
@@ -88,42 +78,68 @@ export function WorkflowDesignPanel({
   }
 
   if (mode === "create" || (mode === "edit" && selected)) {
-    const checkedIn = hasActiveCheckin(selected);
-    const mine = isMyCheckin(selected, user);
-    const readOnly = mode === "edit" ? !(checkedIn && mine) : false;
-    const showCheckinButton = mode === "edit" && !checkedIn;
-    const showCheckoutButton = mode === "edit" && checkedIn && mine;
-    const checkedInByOther = mode === "edit" && checkedIn && !mine;
-    const draftHint =
-      mode === "edit" && checkedIn && mine
-        ? selected?.draft_dirty
-          ? "드래프트 저장됨 · 체크아웃 시 DB 반영"
-          : "체크인됨 · 저장은 Redis 드래프트에만 기록"
-        : null;
+    const canEdit = mode === "create" || Boolean(selected?.can_edit);
+    const isOwner = mode === "edit" && (selected?.owner ?? 0) === user.idx;
+    const isDistributed = Boolean(selected?.distribute);
+    const ownerLabel = (selected?.owner_username || "").trim() || "소유자";
 
-    const runLockAction = async (
-      path: "checkin" | "checkout" | "restore",
-      onDone: (item: WorkflowItem) => Promise<void> | void,
-      failMessage: string,
-    ) => {
+    const handleDistribute = async (next: boolean) => {
       if (!selected) {
         return;
       }
-      setIsLockBusy(true);
-      setLockError(null);
+      const confirmed = window.confirm(
+        next
+          ? `"${selected.workflow_name}" 워크플로우를 배포하시겠습니까?\n다른 사용자가 조회·실행·복제할 수 있습니다.`
+          : `"${selected.workflow_name}" 배포를 취소하시겠습니까?`,
+      );
+      if (!confirmed) {
+        return;
+      }
+      setIsBusy(true);
+      setActionError(null);
       try {
-        const response = await fetch(`/api/workflows/${selected.uuid}/${path}`, {
+        const response = await fetch(`/api/workflows/${selected.uuid}/distribute`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ distribute: next }),
+        });
+        if (!response.ok) {
+          throw new Error(await parseError(response, "배포 상태 변경에 실패했습니다."));
+        }
+        const item = (await response.json()) as WorkflowItem;
+        await onDistributed(item);
+      } catch (err) {
+        setActionError(err instanceof Error ? err.message : "배포 상태 변경에 실패했습니다.");
+      } finally {
+        setIsBusy(false);
+      }
+    };
+
+    const handleClone = async () => {
+      if (!selected) {
+        return;
+      }
+      const confirmed = window.confirm(
+        `"${selected.workflow_name}" 워크플로우를 복제하시겠습니까?\n하위 작업노드도 함께 복제됩니다.`,
+      );
+      if (!confirmed) {
+        return;
+      }
+      setIsBusy(true);
+      setActionError(null);
+      try {
+        const response = await fetch(`/api/workflows/${selected.uuid}/clone`, {
           method: "POST",
         });
         if (!response.ok) {
-          throw new Error(await parseError(response, failMessage));
+          throw new Error(await parseError(response, "복제에 실패했습니다."));
         }
         const item = (await response.json()) as WorkflowItem;
-        await onDone(item);
+        await onCloned(item);
       } catch (err) {
-        setLockError(err instanceof Error ? err.message : failMessage);
+        setActionError(err instanceof Error ? err.message : "복제에 실패했습니다.");
       } finally {
-        setIsLockBusy(false);
+        setIsBusy(false);
       }
     };
 
@@ -134,52 +150,43 @@ export function WorkflowDesignPanel({
             <h2 className="truncate text-sm font-semibold text-slate-200">
               {mode === "create" ? "새로운 워크플로우" : selected?.workflow_name ?? "워크플로우 편집"}
             </h2>
-            {mode === "edit" && readOnly ? (
+            {mode === "edit" ? (
               <p className="mt-0.5 text-[11px] text-slate-500">
-                {checkedInByOther
-                  ? `읽기 모드 · ${(selected?.checkin_username || "다른 사용자").trim()} 체크인 중`
-                  : "읽기 모드 · 편집하려면 체크인하세요"}
+                {canEdit
+                  ? `소유자 · ${ownerLabel}${isDistributed ? " · 배포됨" : " · 미배포"}`
+                  : `읽기 모드 · ${ownerLabel} 소유${isDistributed ? " · 배포됨" : ""}`}
               </p>
             ) : null}
-            {draftHint ? <p className="mt-0.5 text-[11px] text-amber-200/90">{draftHint}</p> : null}
-            {lockError ? <p className="mt-0.5 text-[11px] text-rose-300">{lockError}</p> : null}
+            {actionError ? <p className="mt-0.5 text-[11px] text-rose-300">{actionError}</p> : null}
           </div>
           <div className="flex shrink-0 items-center gap-1.5">
-            {showCheckinButton ? (
+            {mode === "edit" && isOwner ? (
               <button
                 type="button"
-                disabled={isLockBusy}
+                disabled={isBusy}
                 onClick={() => {
-                  void runLockAction("checkin", onCheckedIn, "체크인에 실패했습니다.");
+                  void handleDistribute(!isDistributed);
                 }}
-                className="rounded-md border border-sky-700 bg-sky-950/50 px-3 py-1.5 text-sm font-medium text-sky-100 hover:bg-sky-900/60 disabled:opacity-50"
+                className={`rounded-md border px-3 py-1.5 text-sm font-medium disabled:opacity-50 ${
+                  isDistributed
+                    ? "border-amber-700/80 bg-amber-950/40 text-amber-100 hover:bg-amber-900/50"
+                    : "border-sky-700 bg-sky-950/50 text-sky-100 hover:bg-sky-900/60"
+                }`}
               >
-                {isLockBusy ? "처리 중…" : "체크인"}
+                {isBusy ? "처리 중…" : isDistributed ? "배포 취소" : "배포"}
               </button>
             ) : null}
-            {showCheckoutButton ? (
-              <>
-                <button
-                  type="button"
-                  disabled={isLockBusy}
-                  onClick={() => {
-                    void runLockAction("restore", onRestored, "원복에 실패했습니다.");
-                  }}
-                  className="rounded-md border border-amber-700/80 bg-amber-950/40 px-3 py-1.5 text-sm font-medium text-amber-100 hover:bg-amber-900/50 disabled:opacity-50"
-                >
-                  원복
-                </button>
-                <button
-                  type="button"
-                  disabled={isLockBusy}
-                  onClick={() => {
-                    void runLockAction("checkout", onCheckedOut, "체크아웃에 실패했습니다.");
-                  }}
-                  className="rounded-md border border-slate-600 bg-slate-900/70 px-3 py-1.5 text-sm font-medium text-slate-100 hover:bg-slate-800 disabled:opacity-50"
-                >
-                  체크아웃
-                </button>
-              </>
+            {mode === "edit" && selected ? (
+              <button
+                type="button"
+                disabled={isBusy}
+                onClick={() => {
+                  void handleClone();
+                }}
+                className="rounded-md border border-slate-600 bg-slate-900/70 px-3 py-1.5 text-sm font-medium text-slate-100 hover:bg-slate-800 disabled:opacity-50"
+              >
+                복제
+              </button>
             ) : null}
           </div>
         </header>
@@ -207,7 +214,7 @@ export function WorkflowDesignPanel({
           initialDescription={mode === "edit" ? selected?.workflow_description ?? "" : ""}
           workflowUuid={mode === "edit" ? selected?.uuid : undefined}
           saveLabel="저장"
-          readOnly={readOnly}
+          readOnly={!canEdit}
           onSaved={onSaved}
           onWorkNodesChanged={onWorkNodesChanged}
           aiImportRequest={aiImportRequest}
