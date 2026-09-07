@@ -23,6 +23,7 @@ JOB_STATUS_CANCELLED = 13
 
 JOB_TYPE_AX_INFRA = 1
 JOB_TYPE_WHATAP = 2
+JOB_TYPE_WORKFLOW = 3
 JOB_TYPE_SIGNUP = 10
 
 SIGNUP_ACCESS_REQUEST_JOB_TITLE = "[신규사용자] 접속 권한 신청서"
@@ -415,8 +416,8 @@ def create_user_access_request_job(database_path: str | Path, user: User) -> Job
 
 
 def approval_target_status_code(job: JobRecord) -> int:
-    """Signup access requests complete without agent delegation."""
-    if job.job_type == JOB_TYPE_SIGNUP:
+    """Signup / workflow approval jobs complete without helpdesk delegation."""
+    if job.job_type in {JOB_TYPE_SIGNUP, JOB_TYPE_WORKFLOW}:
         return JOB_STATUS_COMPLETED_SUCCESS
     return JOB_STATUS_DIRECT_APPROVED
 

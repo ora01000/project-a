@@ -16,6 +16,7 @@ from backend.app.db.jobs import (
     JOB_STATUS_REJECTED,
     JOB_TYPE_AX_INFRA,
     JOB_TYPE_SIGNUP,
+    JOB_TYPE_WORKFLOW,
     JobRecord,
     approve_assigned_job,
     assign_job_approver,
@@ -46,6 +47,10 @@ from backend.app.notifications.email_sender import (
 )
 from backend.app.db.users import get_user_by_userid
 from backend.app.services.user_signup import notify_signup_approved
+from backend.app.services.workflow_runner import (
+    fail_workflow_after_rejection,
+    resume_workflow_after_approval,
+)
 from backend.app.services.agent_runtime_client import AgentInvokeRequest
 from backend.app.services.job_auditor import (
     build_job_review_message,
@@ -71,6 +76,45 @@ async def _notify_signup_job_approved(database_path, job: JobRecord) -> None:
         logger.warning("Signup approval email skipped: user not found for madang_id=%s", userid)
         return
     await notify_signup_approved(database_path, user)
+
+
+async def _resume_workflow_job_if_needed(request: Request, job: JobRecord) -> None:
+    if int(job.job_type) != JOB_TYPE_WORKFLOW:
+        return
+    database_path = request.app.state.database_path
+    try:
+        result = await resume_workflow_after_approval(
+            database_path=database_path,
+            agent_runtime=request.app.state.agent_runtime,
+            job=job,
+        )
+        if result is None:
+            logger.warning("workflow resume skipped (no cursor) job=%s", job.idx)
+            fail_workflow_after_rejection(database_path, job)
+            return
+        logger.info(
+            "workflow resumed after approval job=%s status=%s message=%s",
+            job.idx,
+            result.status,
+            result.message,
+        )
+        if result.status == "failed":
+            logger.warning("workflow continued but failed job=%s: %s", job.idx, result.message)
+    except Exception:
+        logger.exception("workflow resume after approval failed job=%s", job.idx)
+        try:
+            fail_workflow_after_rejection(database_path, job)
+        except Exception:
+            logger.exception("workflow fail fallback after resume error failed job=%s", job.idx)
+
+
+def _fail_workflow_job_if_needed(database_path, job: JobRecord) -> None:
+    if int(job.job_type) != JOB_TYPE_WORKFLOW:
+        return
+    try:
+        fail_workflow_after_rejection(database_path, job)
+    except Exception:
+        logger.exception("workflow fail after rejection failed job=%s", job.idx)
 
 
 class JobIntakeRequest(BaseModel):
@@ -472,6 +516,7 @@ async def direct_approve_job_endpoint(
         logger.exception("Job direct approve failed")
         raise HTTPException(status_code=500, detail="Failed to direct approve job") from exc
     await _notify_signup_job_approved(database_path, record)
+    await _resume_workflow_job_if_needed(request, record)
     return JobRecordResponse.from_record(record)
 
 
@@ -502,6 +547,7 @@ async def approve_job_review(
         logger.exception("Job approve failed")
         raise HTTPException(status_code=500, detail="Failed to approve job") from exc
     await _notify_signup_job_approved(database_path, record)
+    await _resume_workflow_job_if_needed(request, record)
     return JobRecordResponse.from_record(record)
 
 
@@ -540,6 +586,7 @@ async def reject_job_review(
     except Exception as exc:
         logger.exception("Job reject failed")
         raise HTTPException(status_code=500, detail="Failed to reject job") from exc
+    _fail_workflow_job_if_needed(database_path, record)
     await _notify_ax_infra_reject_or_cancel(database_path, record)
     return JobRecordResponse.from_record(record)
 

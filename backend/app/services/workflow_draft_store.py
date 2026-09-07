@@ -6,7 +6,7 @@ import json
 import logging
 from typing import Any
 
-from backend.app.db.workflow import WorkNodeRecord, WorkflowRecord
+from backend.app.db.workflow import WorkNodeRecord, WorkflowRecord, normalize_script_type
 from backend.app.services.redis_client import get_redis
 from backend.app.services.workflow_graph import parse_workflow_tokens
 
@@ -50,6 +50,12 @@ def workflow_to_dict(record: WorkflowRecord) -> dict[str, Any]:
         "create_date": record.create_date,
         "test_result": record.test_result,
         "validate_date": record.validate_date,
+        "last_start_date": record.last_start_date,
+        "last_end_date": record.last_end_date,
+        "run_count": record.run_count,
+        "sucess_count": record.sucess_count,
+        "fail_count": record.fail_count,
+        "last_success": record.last_success,
     }
 
 
@@ -65,6 +71,11 @@ def work_node_to_dict(record: WorkNodeRecord) -> dict[str, Any]:
         "files": record.files,
         "create_date": record.create_date,
         "validate_date": record.validate_date,
+        "last_start_date": record.last_start_date,
+        "last_end_date": record.last_end_date,
+        "last_success": record.last_success,
+        "last_fail_reason": record.last_fail_reason,
+        "use_previous_work_result": record.use_previous_work_result,
     }
 
 
@@ -78,11 +89,16 @@ def work_node_from_dict(data: dict[str, Any]) -> WorkNodeRecord:
         work_description=str(data.get("work_description") or ""),
         target_agent=int(data.get("target_agent") or 0),
         work_script=str(work_script or ""),
-        script_type=str(data.get("script_type") or "").strip().lower(),
+        script_type=normalize_script_type(str(data.get("script_type") or "")),
         test_result=bool(data.get("test_result")),
         files=str(data.get("files") or ""),
         create_date=str(data.get("create_date") or ""),
         validate_date=str(data.get("validate_date") or ""),
+        last_start_date=str(data.get("last_start_date") or ""),
+        last_end_date=str(data.get("last_end_date") or ""),
+        last_success=bool(data.get("last_success")),
+        last_fail_reason=str(data.get("last_fail_reason") or "")[:200],
+        use_previous_work_result=bool(data.get("use_previous_work_result")),
     )
 
 
@@ -97,6 +113,12 @@ def workflow_from_dict(data: dict[str, Any]) -> WorkflowRecord:
         create_date=str(data.get("create_date") or ""),
         test_result=bool(data.get("test_result")),
         validate_date=str(data.get("validate_date") or ""),
+        last_start_date=str(data.get("last_start_date") or ""),
+        last_end_date=str(data.get("last_end_date") or ""),
+        run_count=int(data.get("run_count") or 0),
+        sucess_count=int(data.get("sucess_count") or 0),
+        fail_count=int(data.get("fail_count") or 0),
+        last_success=bool(data.get("last_success")),
     )
 
 

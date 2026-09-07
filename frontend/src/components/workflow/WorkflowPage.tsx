@@ -53,6 +53,9 @@ export function WorkflowPage({
     assistantText: string;
   } | null>(null);
 
+  const [runningUuid, setRunningUuid] = useState<string | null>(null);
+  const [runMessage, setRunMessage] = useState<string | null>(null);
+
   const selected = items.find((item) => item.uuid === selectedUuid) ?? null;
 
   const handleAssistantResponse = useCallback((payload: { agentId: string; content: string }) => {
@@ -216,6 +219,44 @@ export function WorkflowPage({
     setMode("edit");
   };
 
+  const handleRunWorkflow = async (item: WorkflowItem) => {
+    const checkedIn = Boolean(item.checkin_user && item.checkin_user > 0);
+    if (checkedIn) {
+      setError("체크인 중인 워크플로우는 실행할 수 없습니다. 체크아웃 후 실행하세요.");
+      return;
+    }
+    const confirmed = window.confirm(
+      `"${item.workflow_name}" 워크플로우를 실행하시겠습니까?`,
+    );
+    if (!confirmed) {
+      return;
+    }
+    setRunningUuid(item.uuid);
+    setError(null);
+    setRunMessage(null);
+    try {
+      const response = await fetch(`/api/workflows/${item.uuid}/run`, { method: "POST" });
+      if (!response.ok) {
+        throw new Error(await parseError(response, "워크플로우 실행에 실패했습니다."));
+      }
+      const payload = (await response.json()) as {
+        status?: string;
+        message?: string;
+        workflow?: WorkflowItem;
+      };
+      await Promise.all([loadWorkflows(), loadWorkNodes()]);
+      setRunMessage(payload.message || "실행이 완료되었습니다.");
+      if (payload.workflow) {
+        setSelectedUuid(payload.workflow.uuid);
+        setMode("edit");
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "워크플로우 실행에 실패했습니다.");
+    } finally {
+      setRunningUuid(null);
+    }
+  };
+
   return (
     <div ref={splitLayoutRef} className="flex min-h-0 flex-1 items-stretch gap-4">
       {!integratedChatFullscreen ? (
@@ -231,6 +272,7 @@ export function WorkflowPage({
               }}
             >
               {error ? <p className="text-xs text-rose-300">{error}</p> : null}
+              {runMessage ? <p className="text-xs text-emerald-300">{runMessage}</p> : null}
               <div className="flex w-full flex-col gap-3">
                 {items.length === 0 && !error ? (
                   <p className="text-xs text-slate-500">등록된 워크플로우가 없습니다.</p>
@@ -240,39 +282,63 @@ export function WorkflowPage({
                   const tested = Boolean(item.test_result);
                   const checkinName = (item.checkin_username || "").trim();
                   const hasCheckin = Boolean(item.checkin_user && item.checkin_user > 0 && checkinName);
+                  const canRun = !Boolean(item.checkin_user && item.checkin_user > 0);
+                  const isRunning = runningUuid === item.uuid;
                   return (
-                    <button
+                    <div
                       key={item.uuid}
-                      type="button"
-                      onClick={() => {
-                        setSelectedUuid(item.uuid);
-                        setMode("edit");
-                      }}
                       className={`flex min-h-[76px] w-full flex-col justify-center gap-1 overflow-hidden rounded-xl border bg-slate-900/90 px-3 py-2 text-left shadow-lg ${
                         isActive ? "border-sky-500" : "border-slate-700"
                       }`}
                     >
-                      <h2 className="truncate text-sm font-semibold text-slate-100" title={item.workflow_name}>
-                        {item.workflow_name}
-                      </h2>
-                      <p className="truncate text-[11px] text-slate-400" title={item.create_date || undefined}>
-                        {item.create_date || "생성일 없음"}
-                      </p>
-                      <div className="flex min-w-0 items-center gap-1.5 text-[11px] text-slate-300">
-                        <span aria-hidden="true">{tested ? "✅" : "⬜"}</span>
-                        <span className="min-w-0 flex-1 truncate">
-                          {tested ? item.validate_date || "검증됨" : "테스트 미실행"}
-                        </span>
-                        {hasCheckin ? (
-                          <span
-                            title={`Check-In: ${checkinName}`}
-                            className="inline-block max-w-[40%] shrink-0 truncate rounded-full border border-slate-600 bg-slate-900/80 px-2.5 py-1 text-center text-[11px] font-medium text-slate-200"
-                          >
-                            {checkinName}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedUuid(item.uuid);
+                          setMode("edit");
+                        }}
+                        className="flex w-full flex-col gap-1 text-left"
+                      >
+                        <h2 className="truncate text-sm font-semibold text-slate-100" title={item.workflow_name}>
+                          {item.workflow_name}
+                        </h2>
+                        <p className="truncate text-[11px] text-slate-400" title={item.create_date || undefined}>
+                          {item.create_date || "생성일 없음"}
+                        </p>
+                        <div className="flex min-w-0 items-center gap-1.5 text-[11px] text-slate-300">
+                          <span aria-hidden="true">{tested ? "✅" : "⬜"}</span>
+                          <span className="min-w-0 flex-1 truncate">
+                            {tested ? item.validate_date || "검증됨" : "테스트 미실행"}
                           </span>
-                        ) : null}
+                          {hasCheckin ? (
+                            <span
+                              title={`Check-In: ${checkinName}`}
+                              className="inline-block max-w-[40%] shrink-0 truncate rounded-full border border-slate-600 bg-slate-900/80 px-2.5 py-1 text-center text-[11px] font-medium text-slate-200"
+                            >
+                              {checkinName}
+                            </span>
+                          ) : null}
+                        </div>
+                      </button>
+                      <div className="flex justify-end pt-1">
+                        <button
+                          type="button"
+                          disabled={!canRun || isRunning || runningUuid != null}
+                          title={
+                            canRun
+                              ? "워크플로우 실행"
+                              : "체크아웃 상태에서만 실행할 수 있습니다"
+                          }
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void handleRunWorkflow(item);
+                          }}
+                          className="rounded-md border border-emerald-700 bg-emerald-950/50 px-2.5 py-1 text-[11px] font-medium text-emerald-100 hover:bg-emerald-900/60 disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                          {isRunning ? "실행 중…" : "실행"}
+                        </button>
                       </div>
-                    </button>
+                    </div>
                   );
                 })}
               </div>

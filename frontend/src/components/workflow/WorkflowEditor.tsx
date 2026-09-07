@@ -530,12 +530,15 @@ export function WorkflowEditor({
     return workNodeFromItem(item);
   };
 
-  const persistWork = async (node: WorkEditorNode) => {
+  const persistWork = async (
+    node: WorkEditorNode,
+    extras?: { validation_message?: string },
+  ) => {
     try {
       const response = await fetch(`/api/work-nodes/${node.uuid}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(workNodeWriteBody(node)),
+        body: JSON.stringify(workNodeWriteBody(node, extras)),
       });
       if (!response.ok) {
         throw new Error(await parseError(response, "작업노드를 저장하지 못했습니다."));
@@ -799,7 +802,10 @@ export function WorkflowEditor({
     }
   };
 
-  const handlePersistSelectedPatch = async (patch: Partial<WorkEditorNode>) => {
+  const handlePersistSelectedPatch = async (
+    patch: Partial<WorkEditorNode>,
+    extras?: { validationMessage?: string },
+  ) => {
     if (!selectedWorkNode) {
       return;
     }
@@ -809,7 +815,12 @@ export function WorkflowEditor({
     }
     const next = { ...node, ...patch };
     setModel((current) => updateWork(current, selectedWorkNode.clientId, patch));
-    await persistWork(next);
+    await persistWork(
+      next,
+      extras?.validationMessage != null
+        ? { validation_message: extras.validationMessage }
+        : undefined,
+    );
   };
 
   const handleUploadSelectedFile = async (file: File) => {

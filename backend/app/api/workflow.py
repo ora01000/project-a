@@ -5,8 +5,14 @@ from __future__ import annotations
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 from pydantic import BaseModel, Field
 
-from backend.app.config import normalize_work_node_filename, work_node_upload_dir
+from backend.app.config import (
+    normalize_work_node_filename,
+    read_work_node_validation_output,
+    work_node_upload_dir,
+    write_work_node_validation_output,
+)
 from backend.app.db.agentruntime import get_agentruntime_by_idx
+from backend.app.db.job_datetime import now_job_datetime
 from backend.app.db.roles import ROLE_ADMIN, ROLE_INFRAADMIN
 from backend.app.db.users import get_user_by_idx, list_users
 from backend.app.db.workflow import (
@@ -23,11 +29,13 @@ from backend.app.db.workflow import (
     normalize_script_type,
     set_workflow_checkin_user,
     update_work_node,
+    update_work_node_validation,
     update_workflow,
 )
 from backend.app.middleware.session_auth import get_request_auth_user
 from backend.app.services import workflow_draft_store as draft_store
 from backend.app.services.workflow_graph import build_workflow_graph, validate_workflow_expression
+from backend.app.services.workflow_runner import WorkflowRunResult, run_workflow
 
 router = APIRouter(tags=["workflow"])
 
@@ -44,6 +52,11 @@ class WorkNodeResponse(BaseModel):
     files: str
     create_date: str = ""
     validate_date: str = ""
+    last_start_date: str = ""
+    last_end_date: str = ""
+    last_success: bool = False
+    last_fail_reason: str = ""
+    use_previous_work_result: bool = False
     is_draft: bool = False
 
     @classmethod
@@ -66,6 +79,11 @@ class WorkNodeResponse(BaseModel):
             files=record.files,
             create_date=record.create_date,
             validate_date=record.validate_date,
+            last_start_date=record.last_start_date,
+            last_end_date=record.last_end_date,
+            last_success=record.last_success,
+            last_fail_reason=record.last_fail_reason,
+            use_previous_work_result=record.use_previous_work_result,
             is_draft=is_draft,
         )
 
@@ -79,6 +97,8 @@ class WorkNodeWriteRequest(BaseModel):
     script_type: str = Field(default="", max_length=20)
     test_result: bool = False
     files: str = Field(default="", max_length=300)
+    use_previous_work_result: bool = False
+    validation_message: str | None = None
 
 
 class WorkflowApproverResponse(BaseModel):
@@ -123,6 +143,12 @@ class WorkflowResponse(BaseModel):
     create_date: str = ""
     test_result: bool = False
     validate_date: str = ""
+    last_start_date: str = ""
+    last_end_date: str = ""
+    run_count: int = 0
+    sucess_count: int = 0
+    fail_count: int = 0
+    last_success: bool = False
     graph: WorkflowGraph
     is_draft: bool = False
     draft_dirty: bool = False
@@ -148,6 +174,12 @@ class WorkflowResponse(BaseModel):
             create_date=record.create_date,
             test_result=record.test_result,
             validate_date=record.validate_date,
+            last_start_date=record.last_start_date,
+            last_end_date=record.last_end_date,
+            run_count=record.run_count,
+            sucess_count=record.sucess_count,
+            fail_count=record.fail_count,
+            last_success=record.last_success,
             graph=WorkflowGraph.model_validate(graph),
             is_draft=is_draft,
             draft_dirty=draft_dirty,
@@ -161,11 +193,43 @@ class WorkflowWriteRequest(BaseModel):
     workflow: str = ""
 
 
+class WorkflowRunStepResponse(BaseModel):
+    kind: str
+    label: str
+    status: str
+    detail: str = ""
+    work_uuid: str | None = None
+
+
+class WorkflowRunResponse(BaseModel):
+    status: str
+    message: str
+    job_idx: int | None = None
+    steps: list[WorkflowRunStepResponse] = Field(default_factory=list)
+    workflow: WorkflowResponse | None = None
+
+
 def _agent_name(database_path, target_agent: int) -> str:
     if int(target_agent) <= 0:
         return ""
     record = get_agentruntime_by_idx(database_path, target_agent)
     return record.agent_name if record is not None else ""
+
+
+def _write_validation_output_if_needed(record: WorkNodeRecord, message: str | None) -> None:
+    if not record.test_result:
+        return
+    text = (message or "").strip()
+    if not text:
+        return
+    try:
+        write_work_node_validation_output(
+            record.uuid,
+            validate_date=record.validate_date or now_job_datetime(),
+            message=text,
+        )
+    except (ValueError, OSError):
+        return
 
 
 def _require_agent(database_path, target_agent: int) -> None:
@@ -277,6 +341,12 @@ async def _overlay_workflow_for_user(
                 create_date=working.create_date or record.create_date,
                 test_result=working.test_result,
                 validate_date=working.validate_date,
+                last_start_date=record.last_start_date,
+                last_end_date=record.last_end_date,
+                run_count=record.run_count,
+                sucess_count=record.sucess_count,
+                fail_count=record.fail_count,
+                last_success=record.last_success,
             )
             nodes = draft_store.working_nodes(payload)
             extra_names = {node_uuid: node.work_name for node_uuid, node in nodes.items()}
@@ -368,6 +438,7 @@ async def api_create_work_node(body: WorkNodeWriteRequest, request: Request) -> 
             script_type=script_type,
             test_result=body.test_result,
             files=normalize_work_node_filename(body.files),
+            use_previous_work_result=body.use_previous_work_result,
             uuid=body.uuid,
         )
     except ValueError as exc:
@@ -410,6 +481,8 @@ async def api_update_work_node(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    test_result = bool(body.test_result)
+    validate_date = now_job_datetime() if test_result else ""
     next_node = WorkNodeRecord(
         uuid=existing.uuid,
         work_name=body.work_name.strip() or "새 작업노드",
@@ -417,16 +490,51 @@ async def api_update_work_node(
         target_agent=int(body.target_agent),
         work_script=body.work_script,
         script_type=script_type,
-        test_result=bool(body.test_result),
+        test_result=test_result,
         files=normalize_work_node_filename(body.files),
         create_date=existing.create_date,
-        validate_date=existing.validate_date if body.test_result else "",
+        validate_date=validate_date,
+        last_start_date=existing.last_start_date,
+        last_end_date=existing.last_end_date,
+        last_success=existing.last_success,
+        last_fail_reason=existing.last_fail_reason,
+        use_previous_work_result=bool(body.use_previous_work_result),
     )
 
     draft = await _find_user_draft_for_node(auth_user.idx, node_uuid)
     if draft is not None:
         next_payload = draft_store.set_working_node(draft, next_node)
         await draft_store.save_draft(next_payload)
+        # Validation flags are also written to DB so test_result/validate_date
+        # are visible without waiting for checkout.
+        db_node = get_work_node_by_uuid(database_path, existing.uuid)
+        if db_node is not None:
+            updated = update_work_node_validation(
+                database_path,
+                existing.uuid,
+                test_result=test_result,
+            )
+            if updated is not None:
+                next_node = WorkNodeRecord(
+                    uuid=next_node.uuid,
+                    work_name=next_node.work_name,
+                    work_description=next_node.work_description,
+                    target_agent=next_node.target_agent,
+                    work_script=next_node.work_script,
+                    script_type=next_node.script_type,
+                    test_result=updated.test_result,
+                    files=next_node.files,
+                    create_date=next_node.create_date,
+                    validate_date=updated.validate_date,
+                    last_start_date=next_node.last_start_date,
+                    last_end_date=next_node.last_end_date,
+                    last_success=next_node.last_success,
+                    last_fail_reason=next_node.last_fail_reason,
+                    use_previous_work_result=next_node.use_previous_work_result,
+                )
+                next_payload = draft_store.set_working_node(draft, next_node)
+                await draft_store.save_draft(next_payload)
+        _write_validation_output_if_needed(next_node, body.validation_message)
         return WorkNodeResponse.from_record(
             next_node,
             agent_name=_agent_name(database_path, next_node.target_agent),
@@ -452,9 +560,11 @@ async def api_update_work_node(
         script_type=next_node.script_type,
         test_result=next_node.test_result,
         files=next_node.files,
+        use_previous_work_result=next_node.use_previous_work_result,
     )
     if record is None:
         raise HTTPException(status_code=404, detail="워크 노드를 찾을 수 없습니다.")
+    _write_validation_output_if_needed(record, body.validation_message)
     return WorkNodeResponse.from_record(
         record, agent_name=_agent_name(database_path, record.target_agent)
     )
@@ -483,6 +593,34 @@ async def api_list_workflow_approvers(request: Request) -> list[WorkflowApprover
         for user in users
         if user.role in {ROLE_ADMIN, ROLE_INFRAADMIN} and user.userid.strip()
     ]
+
+
+@router.get("/work-nodes/{node_uuid}/validation-result")
+async def api_get_work_node_validation_result(
+    node_uuid: str,
+    request: Request,
+) -> dict[str, str]:
+    """Return saved validation output text located by work_node.validate_date."""
+    auth_user = get_request_auth_user(request)
+    database_path = request.app.state.database_path
+    record = get_work_node_by_uuid(database_path, node_uuid)
+    draft = await _find_user_draft_for_node(auth_user.idx, node_uuid)
+    if record is None and draft is not None:
+        record = draft_store.working_nodes(draft).get(node_uuid)
+    if record is None:
+        raise HTTPException(status_code=404, detail="워크 노드를 찾을 수 없습니다.")
+    if not record.test_result or not (record.validate_date or "").strip():
+        raise HTTPException(status_code=404, detail="저장된 검증 결과가 없습니다.")
+    try:
+        content = read_work_node_validation_output(
+            record.uuid,
+            validate_date=record.validate_date,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if content is None:
+        raise HTTPException(status_code=404, detail="검증 결과 파일을 찾을 수 없습니다.")
+    return {"content": content, "validate_date": record.validate_date}
 
 
 @router.post("/work-nodes/{node_uuid}/file", response_model=WorkNodeResponse)
@@ -521,6 +659,11 @@ async def api_upload_work_node_file(
         files=stored_name,
         create_date=record.create_date,
         validate_date=record.validate_date,
+        last_start_date=record.last_start_date,
+        last_end_date=record.last_end_date,
+        last_success=record.last_success,
+        last_fail_reason=record.last_fail_reason,
+        use_previous_work_result=record.use_previous_work_result,
     )
     if draft is not None:
         next_payload = draft_store.set_working_node(draft, next_node)
@@ -540,6 +683,7 @@ async def api_upload_work_node_file(
         script_type=next_node.script_type,
         test_result=next_node.test_result,
         files=stored_name,
+        use_previous_work_result=next_node.use_previous_work_result,
     )
     if updated is None:
         raise HTTPException(status_code=404, detail="워크 노드를 찾을 수 없습니다.")
@@ -630,6 +774,12 @@ async def api_update_workflow(
         create_date=current.create_date or existing.create_date,
         test_result=current.test_result,
         validate_date=current.validate_date,
+        last_start_date=existing.last_start_date,
+        last_end_date=existing.last_end_date,
+        run_count=existing.run_count,
+        sucess_count=existing.sucess_count,
+        fail_count=existing.fail_count,
+        last_success=existing.last_success,
     )
     next_payload = draft_store.set_working_workflow(payload, next_record)
     await draft_store.save_draft(next_payload)
@@ -692,6 +842,7 @@ async def _commit_draft_to_db(database_path, payload: dict) -> WorkflowRecord:
             script_type=node.script_type,
             test_result=node.test_result,
             files=node.files,
+            use_previous_work_result=node.use_previous_work_result,
         )
         if updated is None:
             raise HTTPException(status_code=500, detail=f"작업노드 {node.uuid} 커밋에 실패했습니다.")
@@ -765,6 +916,52 @@ async def api_restore_workflow(workflow_uuid: str, request: Request) -> Workflow
         raise HTTPException(status_code=404, detail="워크플로우를 찾을 수 없습니다.")
     # DB workflow body never changed during draft saves — committed state remains baseline.
     return _workflow_response(database_path, record)
+
+
+@router.post("/workflows/{workflow_uuid}/run", response_model=WorkflowRunResponse)
+async def api_run_workflow(workflow_uuid: str, request: Request) -> WorkflowRunResponse:
+    """Execute a checked-out workflow sequentially (work nodes + HITL notifications)."""
+    auth_user = get_request_auth_user(request)
+    database_path = request.app.state.database_path
+    existing = get_workflow_by_uuid(database_path, workflow_uuid)
+    if existing is None:
+        raise HTTPException(status_code=404, detail="워크플로우를 찾을 수 없습니다.")
+    if existing.checkin_user > 0:
+        raise HTTPException(
+            status_code=409,
+            detail="체크인 중인 워크플로우는 실행할 수 없습니다. 체크아웃 후 실행하세요.",
+        )
+    try:
+        result: WorkflowRunResult = await run_workflow(
+            database_path=database_path,
+            agent_runtime=request.app.state.agent_runtime,
+            workflow_uuid=existing.uuid,
+            requester=auth_user,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    workflow_payload = None
+    if result.workflow is not None:
+        workflow_payload = await _overlay_workflow_for_user(
+            database_path, result.workflow, auth_user.idx
+        )
+    return WorkflowRunResponse(
+        status=result.status,
+        message=result.message,
+        job_idx=result.job_idx,
+        steps=[
+            WorkflowRunStepResponse(
+                kind=step.kind,
+                label=step.label,
+                status=step.status,
+                detail=step.detail,
+                work_uuid=step.work_uuid,
+            )
+            for step in result.steps
+        ],
+        workflow=workflow_payload,
+    )
 
 
 @router.delete("/workflows/{workflow_uuid}")

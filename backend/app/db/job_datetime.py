@@ -39,11 +39,14 @@ def next_sr_sequence(connection, request_date: str) -> int:
     """Next 5-digit sequence for the request date; resets to 1 when YYYYMMDD changes."""
     yyyymmdd = request_date_yyyymmdd(request_date)
     prefix = f"SR{yyyymmdd}_"
+    # PostgreSQL: SUBSTR(s, -5) does NOT mean "last 5 chars" (negative start → 1).
     row = connection.execute(
         """
-        SELECT MAX(CAST(SUBSTR(srnum, -5) AS INTEGER)) AS max_seq
+        SELECT MAX(CAST(RIGHT(srnum, 5) AS INTEGER)) AS max_seq
         FROM jobs
         WHERE srnum LIKE ?
+          AND LENGTH(srnum) >= 5
+          AND RIGHT(srnum, 5) ~ '^[0-9]{5}$'
         """,
         (f"{prefix}%",),
     ).fetchone()

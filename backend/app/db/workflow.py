@@ -10,16 +10,19 @@ from pathlib import Path
 from backend.app.db.database import get_connection
 from backend.app.db.job_datetime import now_job_datetime
 
-SCRIPT_TYPES = frozenset({"yaml", "ansible", "cli"})
+SCRIPT_TYPES = frozenset({"kubectl", "ansible", "cli", "prompt"})
 
 _WORK_NODE_SELECT = """
     uuid, work_name, work_description, target_agent, work_script,
-    script_type, test_result, files, create_date, validate_date
+    script_type, test_result, files, create_date, validate_date,
+    last_start_date, last_end_date, last_success, last_fail_reason,
+    use_previous_work_result
 """
 
 _WORKFLOW_SELECT = """
     uuid, checkin_user, checkin_time, workflow_name, workflow_description, workflow,
-    create_date, test_result, validate_date
+    create_date, test_result, validate_date,
+    last_start_date, last_end_date, run_count, sucess_count, fail_count, last_success
 """
 
 
@@ -27,8 +30,11 @@ def normalize_script_type(value: str | None) -> str:
     normalized = (value or "").strip().lower()
     if not normalized:
         return ""
+    # Legacy alias from earlier schema drafts.
+    if normalized == "yaml":
+        normalized = "kubectl"
     if normalized not in SCRIPT_TYPES:
-        raise ValueError("script_type은 yaml, ansible, cli 중 하나여야 합니다.")
+        raise ValueError("script_type은 kubectl, ansible, cli, prompt 중 하나여야 합니다.")
     return normalized
 
 
@@ -201,7 +207,12 @@ def ensure_workflow_tables(connection) -> None:
             test_result INTEGER NOT NULL DEFAULT 0,
             files VARCHAR(300) NOT NULL DEFAULT '',
             create_date TEXT NOT NULL DEFAULT '',
-            validate_date TEXT NOT NULL DEFAULT ''
+            validate_date TEXT NOT NULL DEFAULT '',
+            last_start_date TEXT NOT NULL DEFAULT '',
+            last_end_date TEXT NOT NULL DEFAULT '',
+            last_success INTEGER NOT NULL DEFAULT 0,
+            last_fail_reason VARCHAR(200) NOT NULL DEFAULT '',
+            use_previous_work_result INTEGER NOT NULL DEFAULT 0
         )
         """
     )
@@ -235,6 +246,36 @@ def ensure_workflow_tables(connection) -> None:
             ADD COLUMN IF NOT EXISTS validate_date TEXT NOT NULL DEFAULT ''
         """
     )
+    connection.execute(
+        """
+        ALTER TABLE work_node
+            ADD COLUMN IF NOT EXISTS last_start_date TEXT NOT NULL DEFAULT ''
+        """
+    )
+    connection.execute(
+        """
+        ALTER TABLE work_node
+            ADD COLUMN IF NOT EXISTS last_end_date TEXT NOT NULL DEFAULT ''
+        """
+    )
+    connection.execute(
+        """
+        ALTER TABLE work_node
+            ADD COLUMN IF NOT EXISTS last_success INTEGER NOT NULL DEFAULT 0
+        """
+    )
+    connection.execute(
+        """
+        ALTER TABLE work_node
+            ADD COLUMN IF NOT EXISTS last_fail_reason VARCHAR(200) NOT NULL DEFAULT ''
+        """
+    )
+    connection.execute(
+        """
+        ALTER TABLE work_node
+            ADD COLUMN IF NOT EXISTS use_previous_work_result INTEGER NOT NULL DEFAULT 0
+        """
+    )
     _migrate_work_node_script_columns(connection)
 
     connection.execute(
@@ -248,7 +289,13 @@ def ensure_workflow_tables(connection) -> None:
             workflow TEXT NOT NULL DEFAULT '',
             create_date TEXT NOT NULL DEFAULT '',
             test_result INTEGER NOT NULL DEFAULT 0,
-            validate_date TEXT NOT NULL DEFAULT ''
+            validate_date TEXT NOT NULL DEFAULT '',
+            last_start_date TEXT NOT NULL DEFAULT '',
+            last_end_date TEXT NOT NULL DEFAULT '',
+            run_count INTEGER NOT NULL DEFAULT 0,
+            sucess_count INTEGER NOT NULL DEFAULT 0,
+            fail_count INTEGER NOT NULL DEFAULT 0,
+            last_success INTEGER NOT NULL DEFAULT 0
         )
         """
     )
@@ -288,6 +335,42 @@ def ensure_workflow_tables(connection) -> None:
             ADD COLUMN IF NOT EXISTS validate_date TEXT NOT NULL DEFAULT ''
         """
     )
+    connection.execute(
+        """
+        ALTER TABLE workflow
+            ADD COLUMN IF NOT EXISTS last_start_date TEXT NOT NULL DEFAULT ''
+        """
+    )
+    connection.execute(
+        """
+        ALTER TABLE workflow
+            ADD COLUMN IF NOT EXISTS last_end_date TEXT NOT NULL DEFAULT ''
+        """
+    )
+    connection.execute(
+        """
+        ALTER TABLE workflow
+            ADD COLUMN IF NOT EXISTS run_count INTEGER NOT NULL DEFAULT 0
+        """
+    )
+    connection.execute(
+        """
+        ALTER TABLE workflow
+            ADD COLUMN IF NOT EXISTS sucess_count INTEGER NOT NULL DEFAULT 0
+        """
+    )
+    connection.execute(
+        """
+        ALTER TABLE workflow
+            ADD COLUMN IF NOT EXISTS fail_count INTEGER NOT NULL DEFAULT 0
+        """
+    )
+    connection.execute(
+        """
+        ALTER TABLE workflow
+            ADD COLUMN IF NOT EXISTS last_success INTEGER NOT NULL DEFAULT 0
+        """
+    )
 
     _backfill_missing_uuids(connection, "work_node")
     _backfill_missing_uuids(connection, "workflow")
@@ -311,6 +394,11 @@ class WorkNodeRecord:
     files: str
     create_date: str
     validate_date: str
+    last_start_date: str = ""
+    last_end_date: str = ""
+    last_success: bool = False
+    last_fail_reason: str = ""
+    use_previous_work_result: bool = False
 
 
 @dataclass(frozen=True)
@@ -324,6 +412,12 @@ class WorkflowRecord:
     create_date: str
     test_result: bool
     validate_date: str
+    last_start_date: str = ""
+    last_end_date: str = ""
+    run_count: int = 0
+    sucess_count: int = 0
+    fail_count: int = 0
+    last_success: bool = False
 
 
 def _row_to_work_node(row) -> WorkNodeRecord:
@@ -332,17 +426,29 @@ def _row_to_work_node(row) -> WorkNodeRecord:
     script_type = row["script_type"] if "script_type" in keys else ""
     create_date = row["create_date"] if "create_date" in keys else ""
     validate_date = row["validate_date"] if "validate_date" in keys else ""
+    last_start_date = row["last_start_date"] if "last_start_date" in keys else ""
+    last_end_date = row["last_end_date"] if "last_end_date" in keys else ""
+    last_success = row["last_success"] if "last_success" in keys else 0
+    last_fail_reason = row["last_fail_reason"] if "last_fail_reason" in keys else ""
+    use_previous_work_result = (
+        row["use_previous_work_result"] if "use_previous_work_result" in keys else 0
+    )
     return WorkNodeRecord(
         uuid=str(row["uuid"] or ""),
         work_name=str(row["work_name"] or ""),
         work_description=str(description or ""),
         target_agent=int(row["target_agent"] or 0),
         work_script=str(row["work_script"] or ""),
-        script_type=str(script_type or "").strip().lower(),
+        script_type=normalize_script_type(str(script_type or "")),
         test_result=bool(int(row["test_result"] or 0)),
         files=str(row["files"] or ""),
         create_date=str(create_date or ""),
         validate_date=str(validate_date or ""),
+        last_start_date=str(last_start_date or ""),
+        last_end_date=str(last_end_date or ""),
+        last_success=bool(int(last_success or 0)),
+        last_fail_reason=str(last_fail_reason or "")[:200],
+        use_previous_work_result=bool(int(use_previous_work_result or 0)),
     )
 
 
@@ -353,6 +459,12 @@ def _row_to_workflow(row) -> WorkflowRecord:
     create_date = row["create_date"] if "create_date" in keys else ""
     validate_date = row["validate_date"] if "validate_date" in keys else ""
     test_result = row["test_result"] if "test_result" in keys else 0
+    last_start_date = row["last_start_date"] if "last_start_date" in keys else ""
+    last_end_date = row["last_end_date"] if "last_end_date" in keys else ""
+    run_count = row["run_count"] if "run_count" in keys else 0
+    sucess_count = row["sucess_count"] if "sucess_count" in keys else 0
+    fail_count = row["fail_count"] if "fail_count" in keys else 0
+    last_success = row["last_success"] if "last_success" in keys else 0
     return WorkflowRecord(
         uuid=str(row["uuid"] or ""),
         checkin_user=int(checkin_user or 0),
@@ -363,6 +475,12 @@ def _row_to_workflow(row) -> WorkflowRecord:
         create_date=str(create_date or ""),
         test_result=bool(int(test_result or 0)),
         validate_date=str(validate_date or ""),
+        last_start_date=str(last_start_date or ""),
+        last_end_date=str(last_end_date or ""),
+        run_count=int(run_count or 0),
+        sucess_count=int(sucess_count or 0),
+        fail_count=int(fail_count or 0),
+        last_success=bool(int(last_success or 0)),
     )
 
 
@@ -398,6 +516,7 @@ def create_work_node(
     script_type: str = "",
     test_result: bool = False,
     files: str = "",
+    use_previous_work_result: bool = False,
     uuid: str | None = None,
 ) -> WorkNodeRecord:
     created_at = now_job_datetime()
@@ -410,8 +529,10 @@ def create_work_node(
             f"""
             INSERT INTO work_node (
                 uuid, work_name, work_description, target_agent, work_script,
-                script_type, test_result, files, create_date, validate_date
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                script_type, test_result, files, create_date, validate_date,
+                last_start_date, last_end_date, last_success, last_fail_reason,
+                use_previous_work_result
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', '', 0, '', ?)
             RETURNING {_WORK_NODE_SELECT}
             """,
             (
@@ -425,6 +546,7 @@ def create_work_node(
                 (files or "").strip()[:300],
                 created_at,
                 validate_at,
+                1 if use_previous_work_result else 0,
             ),
         ).fetchone()
     return _row_to_work_node(row)
@@ -441,12 +563,13 @@ def update_work_node(
     script_type: str,
     test_result: bool,
     files: str,
+    use_previous_work_result: bool = False,
 ) -> WorkNodeRecord | None:
     existing = get_work_node_by_uuid(database_path, node_uuid)
     if existing is None:
         return None
     if test_result:
-        validate_date = existing.validate_date or now_job_datetime()
+        validate_date = now_job_datetime()
     else:
         validate_date = ""
     normalized_script_type = normalize_script_type(script_type)
@@ -456,7 +579,8 @@ def update_work_node(
             """
             UPDATE work_node
             SET work_name = ?, work_description = ?, target_agent = ?, work_script = ?,
-                script_type = ?, test_result = ?, files = ?, validate_date = ?
+                script_type = ?, test_result = ?, files = ?, validate_date = ?,
+                use_previous_work_result = ?
             WHERE uuid = ?
             """,
             (
@@ -468,8 +592,33 @@ def update_work_node(
                 1 if test_result else 0,
                 (files or "").strip()[:300],
                 validate_date,
+                1 if use_previous_work_result else 0,
                 existing.uuid,
             ),
+        )
+    return get_work_node_by_uuid(database_path, existing.uuid)
+
+
+def update_work_node_validation(
+    database_path: str | Path,
+    node_uuid: str,
+    *,
+    test_result: bool,
+) -> WorkNodeRecord | None:
+    """Update only validation flags (used during check-in draft sessions)."""
+    existing = get_work_node_by_uuid(database_path, node_uuid)
+    if existing is None:
+        return None
+    validate_date = now_job_datetime() if test_result else ""
+    with get_connection(database_path) as connection:
+        ensure_workflow_tables(connection)
+        connection.execute(
+            """
+            UPDATE work_node
+            SET test_result = ?, validate_date = ?
+            WHERE uuid = ?
+            """,
+            (1 if test_result else 0, validate_date, existing.uuid),
         )
     return get_work_node_by_uuid(database_path, existing.uuid)
 
@@ -525,9 +674,10 @@ def create_workflow(
             f"""
             INSERT INTO workflow (
                 uuid, checkin_user, checkin_time, workflow_name, workflow_description, workflow,
-                create_date, test_result, validate_date
+                create_date, test_result, validate_date,
+                last_start_date, last_end_date, run_count, sucess_count, fail_count, last_success
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, 0, '')
+            VALUES (?, ?, ?, ?, ?, ?, ?, 0, '', '', '', 0, 0, 0, 0)
             RETURNING {_WORKFLOW_SELECT}
             """,
             (
@@ -614,3 +764,98 @@ def delete_workflow(database_path: str | Path, workflow_uuid: str) -> bool:
         ensure_workflow_tables(connection)
         cursor = connection.execute("DELETE FROM workflow WHERE uuid = ?", (key,))
         return int(cursor.rowcount or 0) > 0
+
+
+def mark_workflow_run_started(database_path: str | Path, workflow_uuid: str) -> WorkflowRecord | None:
+    existing = get_workflow_by_uuid(database_path, workflow_uuid)
+    if existing is None:
+        return None
+    started = now_job_datetime()
+    with get_connection(database_path) as connection:
+        ensure_workflow_tables(connection)
+        connection.execute(
+            """
+            UPDATE workflow
+            SET last_start_date = ?, last_end_date = '', run_count = run_count + 1,
+                last_success = 0
+            WHERE uuid = ?
+            """,
+            (started, existing.uuid),
+        )
+    return get_workflow_by_uuid(database_path, existing.uuid)
+
+
+def mark_workflow_run_finished(
+    database_path: str | Path,
+    workflow_uuid: str,
+    *,
+    success: bool,
+) -> WorkflowRecord | None:
+    existing = get_workflow_by_uuid(database_path, workflow_uuid)
+    if existing is None:
+        return None
+    ended = now_job_datetime()
+    with get_connection(database_path) as connection:
+        ensure_workflow_tables(connection)
+        if success:
+            connection.execute(
+                """
+                UPDATE workflow
+                SET last_end_date = ?, last_success = 1, sucess_count = sucess_count + 1
+                WHERE uuid = ?
+                """,
+                (ended, existing.uuid),
+            )
+        else:
+            connection.execute(
+                """
+                UPDATE workflow
+                SET last_end_date = ?, last_success = 0, fail_count = fail_count + 1
+                WHERE uuid = ?
+                """,
+                (ended, existing.uuid),
+            )
+    return get_workflow_by_uuid(database_path, existing.uuid)
+
+
+def mark_work_node_run_started(database_path: str | Path, node_uuid: str) -> WorkNodeRecord | None:
+    existing = get_work_node_by_uuid(database_path, node_uuid)
+    if existing is None:
+        return None
+    started = now_job_datetime()
+    with get_connection(database_path) as connection:
+        ensure_workflow_tables(connection)
+        connection.execute(
+            """
+            UPDATE work_node
+            SET last_start_date = ?, last_end_date = '', last_success = 0, last_fail_reason = ''
+            WHERE uuid = ?
+            """,
+            (started, existing.uuid),
+        )
+    return get_work_node_by_uuid(database_path, existing.uuid)
+
+
+def mark_work_node_run_finished(
+    database_path: str | Path,
+    node_uuid: str,
+    *,
+    success: bool,
+    fail_reason: str = "",
+) -> WorkNodeRecord | None:
+    existing = get_work_node_by_uuid(database_path, node_uuid)
+    if existing is None:
+        return None
+    ended = now_job_datetime()
+    reason = (fail_reason or "").strip()[:200] if not success else ""
+    with get_connection(database_path) as connection:
+        ensure_workflow_tables(connection)
+        connection.execute(
+            """
+            UPDATE work_node
+            SET last_end_date = ?, last_success = ?, last_fail_reason = ?
+            WHERE uuid = ?
+            """,
+            (ended, 1 if success else 0, reason, existing.uuid),
+        )
+    return get_work_node_by_uuid(database_path, existing.uuid)

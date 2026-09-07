@@ -20,17 +20,18 @@ Analyze the request and create ordered unit works. Names in parentheses are JSON
 | Work id | `work_id` | Unique per work; `/^[a-zA-Z0-9_-]{4,64}$/` (e.g. `ssl_extract`, `work_1`). **Not a UUID.** Used in the flow expression and file paths |
 | Target agent | `target_agent` | **Never invent.** Use only values the requester provided. If unknown, ask first |
 | Script | `work_script` | Executable content for the step |
-| Script type | `script_type` | One of: `yaml` \| `ansible` \| `cli` |
+| Script type | `script_type` | One of: `kubectl` \| `ansible` \| `cli` \| `prompt` |
 
 Do **not** include a `uuid` field on work nodes (ignored if present).
 
 ### Script type selection
 
 - **Kubernetes targets**
-  - Manifest YAML work → `script_type`: **`yaml`**
-  - kubectl (CLI) work → `script_type`: **`cli`**
-  - Split manifest YAML work and kubectl CLI work into **separate** work nodes
+  - Manifest YAML work → `script_type`: **`kubectl`**
+  - kubectl/bash CLI work → `script_type`: **`cli`**
+  - Split manifest YAML work and CLI work into **separate** work nodes
 - **Ansible playbook** → `script_type`: **`ansible`**
+- **Natural-language / agent prompt only** (no executable kubectl/ansible/cli artifact) → `script_type`: **`prompt`**
 - Keep scripts focused; put brief intent as script comments (≤ 2 lines) when needed
 
 ## Mission 2 — Connect the workflow
@@ -87,7 +88,7 @@ When a work step must **write result files**, or when the requester will **uploa
       "work_id": "work_1",
       "target_agent": "대상에이전트#1",
       "work_script": "스크립트#1",
-      "script_type": "yaml"
+      "script_type": "kubectl"
     },
     {
       "work_name": "작업명#2",
@@ -107,7 +108,7 @@ When a work step must **write result files**, or when the requester will **uploa
 ```
 
 - Top-level array key must be **`work_node`** (not `work`)
-- `script_type` must be exactly `yaml`, `ansible`, or `cli`
+- `script_type` must be exactly `kubectl`, `ansible`, `cli`, or `prompt`
 - `work_id` values must be unique and match tokens in `workflow`
 - **Never put UUID-shaped strings** in `work_id`, scripts, or the flow expression
 - Prefer compact, valid scripts over narrative explanations

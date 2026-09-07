@@ -21,6 +21,11 @@ export type WorkEditorNode = {
   files: string;
   createDate: string;
   validateDate: string;
+  lastStartDate: string;
+  lastEndDate: string;
+  lastSuccess: boolean;
+  lastFailReason: string;
+  usePreviousWorkResult: boolean;
   fail: FailSpec;
 };
 
@@ -70,11 +75,16 @@ export function workFieldsFromItem(
     targetAgentName: item.target_agent_name || "",
     userPrompt: "",
     workScript: item.work_script || "",
-    scriptType: item.script_type || "",
+    scriptType: item.script_type === "yaml" ? "kubectl" : item.script_type || "",
     testResult: item.test_result,
     files: item.files,
     createDate: item.create_date || "",
     validateDate: item.validate_date || "",
+    lastStartDate: item.last_start_date || "",
+    lastEndDate: item.last_end_date || "",
+    lastSuccess: Boolean(item.last_success),
+    lastFailReason: item.last_fail_reason || "",
+    usePreviousWorkResult: Boolean(item.use_previous_work_result),
   };
 }
 
@@ -90,7 +100,10 @@ export function workNodeFromItem(
   };
 }
 
-export function workNodeWriteBody(node: WorkEditorNode) {
+export function workNodeWriteBody(
+  node: WorkEditorNode,
+  extras?: { validation_message?: string },
+) {
   return {
     work_name: node.name,
     work_description: node.description,
@@ -99,6 +112,10 @@ export function workNodeWriteBody(node: WorkEditorNode) {
     script_type: node.scriptType || "",
     test_result: node.testResult,
     files: node.files,
+    use_previous_work_result: node.usePreviousWorkResult,
+    ...(extras?.validation_message != null
+      ? { validation_message: extras.validation_message }
+      : {}),
   };
 }
 
@@ -188,6 +205,11 @@ export function hydrateEditor(
       files: "",
       createDate: "",
       validateDate: "",
+      lastStartDate: "",
+      lastEndDate: "",
+      lastSuccess: false,
+      lastFailReason: "",
+      usePreviousWorkResult: false,
       fail,
     };
   };

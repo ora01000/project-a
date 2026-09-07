@@ -5,6 +5,7 @@ import {
   JOB_TYPE_AX_INFRA,
   JOB_TYPE_SIGNUP,
   JOB_TYPE_WHATAP,
+  JOB_TYPE_WORKFLOW,
   type JobRecord,
 } from "../../types/job";
 import type { JobResult } from "../../types/jobResult";
@@ -31,6 +32,9 @@ function jobTypeLabel(jobType: number | undefined): string {
   }
   if (jobType === JOB_TYPE_WHATAP) {
     return "Whatap이벤트";
+  }
+  if (jobType === JOB_TYPE_WORKFLOW) {
+    return "워크플로우승인";
   }
   if (jobType === JOB_TYPE_SIGNUP) {
     return "가입신청";

@@ -2058,19 +2058,17 @@ Your sole task is to write high-quality, production-ready, and syntactically cor
 메인 매뉴 에 "워크플로우" 를 추가한다
 - 추가 테이블
   1. work_node
-    - idx int primary key, auto increment <- 삭제
     - uuid varchar primary key
     - work_name varchar(100)
     - work_description varchar(500)
     - target_agent int <- agentruntime.idx
     - work_script text <- 에이전트의 결과(생성된 작업 스크립트) : 구 agent_response
-    - script_type varchar <- 에이전트의 결과 스크립트의 종료 [ yaml | ansible | cli ]
+    - script_type varchar <- 에이전트의 결과 스크립트의 종료 [ kubectl | ansible | cli | prompt ]
     - test_result boolean <- 에이전트의 결과가 정상인지를 기록
     - files varchar(300) <- 작업에 필요한 부가 파일 업로드 경로
     - create_date datetime
     - validate_date datetime <- 에이전트의 결과가 정상으로 판단된 시각
   2. workflow
-    - idx int primary key, auto increment <- 삭제
     - uuid varchar primary key
     - checkin_user int <- checkin 사용자 users.idx, checkout 시 0
     - checkin_time datetime <- checkin 시각, checkout 시 공백
@@ -2174,24 +2172,41 @@ Your sole task is to write high-quality, production-ready, and syntactically cor
           - 대상 에이전트(target_agent)
           - 작업 설명(work_desription)
           - 작업 스크립트 생성(프롬프트, DB 미저장) : 프롬프트를 실행하는 실행 버튼은 "삼각형 플레이" 버튼에서 "작성요청"으로 변경
+            - 작성요청 버튼 왼쪽에 "스크립트 종류" 를 선택할 수 있게 선택박스를 배치한다. 구성은 "생성된 스크립트" 패널의 "스크립트 종류" 와 동일하다.
+              1. script_type : prompt 인 경우
+                작업 스크립트 생성에는 프롬프트에 넣을 문구를 사용자가 입력한다. 작성요청을 누르면 다음 내용을 앞에 두고 질의하고 답변을 받는다.
+                - 보완 요청사항 : "다음 질의는 질의 자체에 결함이 없는지를 테스트하기 위함이며 절대 도구를 사용해서 작업을 수행하지 마세요. 단 실제로 수행한다면 수행이 가능할지를 판단하고 다음에도 동일한 문구로 에이전트가 수행시 결과의 차이가 최소화 될 수 있도록 보완해 주세요. 보완 수정된(또는 문제가 없다면 원문 그대로) 문구 외에는 어떤 결과도 덧붙이지 마세요. 결과는 다음 형태로 응답주세요"
+                '''
+                {
+                  script_type: "prompt",
+                  work_script: "검토된 질의문"
+                }
+                '''
+              2. script_type : kubectl 인 경우
+                작업 스크립트 생성에는 생성할 kubernetes yaml 을 
+
             - "작성요청" 버튼 클릭시 target_agent로 프롬프트를 전송한다. 이 때 프롬프트 내용 외 제반되어야 할 사항을 붙여서 보낸다.
               - 제반사항
                 - 질의 요청사항에 대한 답변시 반드시 스크립트 결과물만 응답하며 스크립트의 내용 설명은 2줄 이내의 스크립트 주석으로 표현한다. 다음 json 형식으로 응답한다.
                 '''
                 {
-                  script_type: "스크립트 종류 [ yaml | ansible | cli ] 중 1",
+                  script_type: "스크립트 종류 [ kubectl | ansible | cli | prompt ] 중 1",
                   work_script: "스크립트 내용(스크립트 설명에 대한 주석을 포함)"
                 }
                 '''
             - json 응답에 따라 script_type 과 work_script 컬럼에 업데이트
-          - work_script 가 있는 경우, 작업 편집 패널의 오른쪽에 "생성된 스크립트" 패널을 만들고 work_script를 출력한다. "생성된 스크립트" 패널의 상단 오른쪽에 "삭제" "검증" 버튼을 둔다.
+          - work_script 가 있는 경우, 작업 편집 패널의 오른쪽에 "생성된 스크립트" 패널을 만들고 work_script를 출력한다. "생성된 스크립트" 패널의 상단 오른쪽에 "삭제" "검증" 버튼을 두고, script_type 을 변경할 수 있는 선택 박스를 배치한다(표시 레이블은 "스크립트 종류" 이며 선택 값은 [ "자연어(프롬프트)" | "kubectl(Kubernetes)" | "playbook" | "cli(kubectl/bash)" ] 중 1).
             - 검증 버튼을 클릭시 script_type 에 따라 검증을 수행
-              1. kubectl yaml 의 경우
+              1. kubectl 의 경우
                 - 대상 에이전트로 dry-run 을 요청
               2. ansible 
                 - 대상 에이전트로 lint 테스트를 수행하고 가능하면 dry-run 을 요청 : 이경우 대상 에이전트는 ansible-lint 가 가능한 에이전트가 될 것이다.
               3. cli
                 - 자동 검증은 아직 미지원
+              4. prompt
+                - 대상 에이전트로 자연어 질의와 응답을 받는다.
+            - 검증 수행 결과 출력
+              - 검증 이후 결과가 반환되면 하단에 응답 결과 패널을 생성하고 출력한다.
 
           - 파일 업로드(files)
             - 업로드 홈디렉토리는 다음과 같다.
@@ -2241,9 +2256,10 @@ Your sole task is to write high-quality, production-ready, and syntactically cor
       - 대상에이전트(target_agent) : 대상 에이전트는 유추하지 말고 정보가 없을 경우 반드시 요청자에게 피드백하고 보충 답변을 받아야 합니다.
       - 스크립트(work_script) 및 스크립트 종류(script_type): 인프라의 형태에 따라 스크립트 종류와 스크립트를 생성
         - kubernetes 대상인 경우 manifest yaml 을 생성하는 작업과 kubectl(cli)를 사용하는 작업을 분리해서 생성합니다.
-          - manifest yaml을 사용해야 하는 작업은 script_type : yaml 입니다.
+          - manifest yaml을 사용해야 하는 작업은 script_type : kubectl 입니다.
           - kubectl(cli)를 사용해야 하는 작업은 script_type : cli 입니다.
         - ansbile playbook으로 작업 스크립트를 만들수 있습니다. 이 경우 script_type 은 ansible 입니다.
+        - 실행 스크립트가 아니라 대상 에이전트에 전달할 자연어 지시만 필요한 경우 script_type 은 prompt 입니다.
     2. 요청에 따라 워크플로우를 생성하고 각 작업을 연결합니다.
       - 워크플로우명(workflow_name)
       - 워크플로우설명(workflow_description)

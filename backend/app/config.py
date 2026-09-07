@@ -1035,12 +1035,28 @@ def resolve_control_plane_base_url(server: ServerSettings) -> str:
 
 
 def resolve_upload_home() -> Path:
-    """Workflow work_node file upload root (``UPLOAD_HOME``, default ``/app/upload``)."""
+    """Workflow work_node file upload root (``UPLOAD_HOME``, default ``/app/upload``).
+
+    Outside containers the default ``/app/upload`` is often unusable (missing or
+    read-only ``/app``). In that case fall back to ``{PROJECT_ROOT}/upload``.
+    """
     raw = (AppSettings().upload_home or "/app/upload").strip() or "/app/upload"
     path = Path(raw).expanduser()
     if not path.is_absolute():
         path = PROJECT_ROOT / path
-    return path
+    if _ensure_upload_home(path):
+        return path
+    fallback = PROJECT_ROOT / "upload"
+    _ensure_upload_home(fallback)
+    return fallback
+
+
+def _ensure_upload_home(path: Path) -> bool:
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+        return True
+    except OSError:
+        return False
 
 
 def work_node_upload_dir(node_uuid: str) -> Path:
@@ -1068,3 +1084,47 @@ def work_node_file_path(node_uuid: str, filename: str | None) -> Path | None:
     if not name:
         return None
     return work_node_upload_dir(node_uuid) / name
+
+
+def validation_output_filename(validate_date: str | None) -> str:
+    """Filename ``result_{timestamp}.out`` derived from validate_date (digits only)."""
+    import re
+
+    from backend.app.db.job_datetime import now_job_datetime
+
+    digits = re.sub(r"\D", "", (validate_date or "").strip())
+    if not digits:
+        digits = re.sub(r"\D", "", now_job_datetime())
+    return f"result_{digits}.out"
+
+
+def write_work_node_validation_output(
+    node_uuid: str,
+    *,
+    validate_date: str,
+    message: str,
+) -> str:
+    """Write validation message to ``{UPLOAD_HOME}/{uuid}/result_{timestamp}.out``. Returns filename."""
+    directory = work_node_upload_dir(node_uuid)
+    directory.mkdir(parents=True, exist_ok=True)
+    filename = validation_output_filename(validate_date)
+    target = directory / filename
+    target.write_text(message or "", encoding="utf-8")
+    return filename
+
+
+def read_work_node_validation_output(
+    node_uuid: str,
+    *,
+    validate_date: str | None,
+) -> str | None:
+    """Load ``result_{timestamp}.out`` for the node's validate_date, or None if missing."""
+    import re
+
+    digits = re.sub(r"\D", "", (validate_date or "").strip())
+    if not digits:
+        return None
+    path = work_node_file_path(node_uuid, f"result_{digits}.out")
+    if path is None or not path.is_file():
+        return None
+    return path.read_text(encoding="utf-8")

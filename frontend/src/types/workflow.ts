@@ -1,9 +1,10 @@
-export type WorkScriptType = "" | "yaml" | "ansible" | "cli";
+export type WorkScriptType = "" | "kubectl" | "ansible" | "cli" | "prompt";
 
 export const WORK_SCRIPT_TYPE_OPTIONS: { value: Exclude<WorkScriptType, "">; label: string }[] = [
-  { value: "yaml", label: "yaml" },
-  { value: "ansible", label: "ansible" },
-  { value: "cli", label: "cli" },
+  { value: "prompt", label: "자연어(프롬프트)" },
+  { value: "kubectl", label: "kubectl(Kubernetes)" },
+  { value: "ansible", label: "playbook" },
+  { value: "cli", label: "cli(bash)" },
 ];
 
 export interface WorkNodeItem {
@@ -18,6 +19,11 @@ export interface WorkNodeItem {
   files: string;
   create_date?: string;
   validate_date?: string;
+  last_start_date?: string;
+  last_end_date?: string;
+  last_success?: boolean;
+  last_fail_reason?: string;
+  use_previous_work_result?: boolean;
   is_draft?: boolean;
 }
 
@@ -63,6 +69,12 @@ export interface WorkflowItem {
   create_date?: string;
   test_result?: boolean;
   validate_date?: string;
+  last_start_date?: string;
+  last_end_date?: string;
+  run_count?: number;
+  sucess_count?: number;
+  fail_count?: number;
+  last_success?: boolean;
   graph: WorkflowGraph;
   is_draft?: boolean;
   draft_dirty?: boolean;

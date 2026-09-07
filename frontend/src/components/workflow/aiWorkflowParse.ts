@@ -20,7 +20,7 @@ export type AiWorkflowDesignPayload = {
   workflow: string;
 };
 
-const SCRIPT_TYPES = new Set(["yaml", "ansible", "cli"]);
+const SCRIPT_TYPES = new Set(["kubectl", "ansible", "cli", "prompt"]);
 /** Prefer short logical ids from the agent; also accept opaque tokens (incl. guardrail-masked text). */
 const LOGICAL_ID_RE = /^[^\s]{1,200}$/;
 
@@ -128,9 +128,10 @@ export function parseAiWorkflowDesignResponse(raw: string): AiWorkflowDesignPayl
     }
     seen.add(logicalId);
 
-    const scriptType = asString(row.script_type).toLowerCase();
+    const scriptTypeRaw = asString(row.script_type).toLowerCase();
+    const scriptType = scriptTypeRaw === "yaml" ? "kubectl" : scriptTypeRaw;
     if (scriptType && !SCRIPT_TYPES.has(scriptType)) {
-      throw new Error(`script_type은 yaml|ansible|cli 중 하나여야 합니다: ${scriptType}`);
+      throw new Error(`script_type은 kubectl|ansible|cli|prompt 중 하나여야 합니다: ${scriptType}`);
     }
 
     const uuid = newUuid();
