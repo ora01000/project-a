@@ -18,6 +18,7 @@ import type { AgentRuntimeRecord } from "../../types/agentruntime";
 import { assignableAgentId } from "../../types/agentruntime";
 import type { WorkNodeItem, WorkflowApprover, WorkflowItem } from "../../types/workflow";
 import { WorkNodeEditPanel } from "./WorkNodeEditPanel";
+import { WorkflowHistoryPanel } from "./WorkflowHistoryPanel";
 import {
   parseAiWorkflowDesignResponse,
 } from "./aiWorkflowParse";
@@ -91,18 +92,31 @@ function FlowArrow() {
   );
 }
 
-function FlowDownArrow() {
+function FlowDownArrow({ tone = "fail" }: { tone?: "fail" | "report" }) {
+  const colorClass = tone === "report" ? "text-emerald-400" : "text-rose-400";
+  const dashed = tone === "fail";
   return (
-    <svg viewBox="0 0 12 28" className="h-7 w-3 shrink-0 text-rose-400" aria-hidden="true">
+    <svg viewBox="0 0 12 28" className={`h-7 w-3 shrink-0 ${colorClass}`} aria-hidden="true">
       <path
         d="M6 1 V20"
         fill="none"
         stroke="currentColor"
         strokeWidth="1.5"
-        strokeDasharray="3 2"
+        strokeDasharray={dashed ? "3 2" : undefined}
       />
       <path d="M1.5 18 L6 26 L10.5 18 Z" fill="currentColor" />
     </svg>
+  );
+}
+
+function MailReportBadge() {
+  return (
+    <div
+      className="flex h-10 min-w-10 items-center justify-center rounded-full border border-emerald-400 bg-slate-950 px-2 text-[10px] font-semibold text-emerald-100"
+      title="작업 완료 후 결과 메일 전송"
+    >
+      메일전송
+    </div>
   );
 }
 
@@ -181,6 +195,7 @@ export function WorkflowEditor({
     null,
   );
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [bottomTab, setBottomTab] = useState<"edit" | "results">("results");
   const [editPanelHeight, setEditPanelHeight] = useState<number | null>(null);
   const workflowCanvasRef = useRef<HTMLDivElement>(null);
   const editPanelRef = useRef<HTMLElement>(null);
@@ -409,6 +424,7 @@ export function WorkflowEditor({
               test_result: false,
               files: "",
               use_previous_work_result: Boolean(draft.use_previous_work_result),
+              work_report: (draft.work_report || "").trim().slice(0, 200),
             }),
           });
           if (!response.ok) {
@@ -861,6 +877,9 @@ export function WorkflowEditor({
 
   const isSelected = (clientId: string) => selectedNodeId === clientId;
 
+  const hasMailReport = (node: WorkEditorNode): boolean =>
+    Boolean((node.workReport || "").trim());
+
   const renderWorkCard = (node: WorkEditorNode, failBranch = false) => {
     const hasScript = Boolean(node.workScript.trim());
     const hasFile = Boolean(node.files.trim());
@@ -1006,19 +1025,38 @@ export function WorkflowEditor({
                     ) : null}
                     {step.type === "work" ? renderWorkCard(step) : null}
                     {step.type === "work" &&
-                    step.fail.kind === "work" &&
-                    model.extras[step.fail.clientId] ? (
+                    (hasMailReport(step) ||
+                      step.fail.kind === "work" ||
+                      step.fail.kind === "end") ? (
                       <div className="absolute left-1/2 top-full flex -translate-x-1/2 flex-col items-center">
-                        <FlowDownArrow />
-                        {renderWorkCard(model.extras[step.fail.clientId], true)}
-                      </div>
-                    ) : null}
-                    {step.type === "work" && step.fail.kind === "end" ? (
-                      <div className="absolute left-1/2 top-full flex -translate-x-1/2 flex-col items-center">
-                        <FlowDownArrow />
-                        <div className="flex h-10 min-w-10 items-center justify-center rounded-full border border-rose-300 bg-slate-950 px-2 text-xs font-semibold text-rose-100">
-                          종료
-                        </div>
+                        {hasMailReport(step) ? (
+                          <>
+                            <FlowDownArrow tone="report" />
+                            <MailReportBadge />
+                          </>
+                        ) : null}
+                        {step.fail.kind === "work" && model.extras[step.fail.clientId] ? (
+                          <>
+                            <FlowDownArrow tone="fail" />
+                            <div className="relative flex flex-col items-center">
+                              {renderWorkCard(model.extras[step.fail.clientId], true)}
+                              {hasMailReport(model.extras[step.fail.clientId]) ? (
+                                <>
+                                  <FlowDownArrow tone="report" />
+                                  <MailReportBadge />
+                                </>
+                              ) : null}
+                            </div>
+                          </>
+                        ) : null}
+                        {step.fail.kind === "end" ? (
+                          <>
+                            <FlowDownArrow tone="fail" />
+                            <div className="flex h-10 min-w-10 items-center justify-center rounded-full border border-rose-300 bg-slate-950 px-2 text-xs font-semibold text-rose-100">
+                              종료
+                            </div>
+                          </>
+                        ) : null}
                       </div>
                     ) : null}
                   </div>
@@ -1029,12 +1067,12 @@ export function WorkflowEditor({
           </div>
         </div>
 
-        {selectedWorkNode && !readOnly ? (
+        {workflowUuid || (selectedWorkNode && !readOnly) ? (
           <>
             <div
               role="separator"
               aria-orientation="horizontal"
-              aria-label="작업 편집 패널 높이 조절"
+              aria-label="하단 패널 높이 조절"
               onMouseDown={handleEditPanelResizeStart}
               className="group flex h-2 shrink-0 cursor-row-resize items-center justify-center border-y border-slate-700 bg-slate-900 hover:bg-slate-800"
             >
@@ -1045,20 +1083,59 @@ export function WorkflowEditor({
               className="flex shrink-0 flex-col overflow-hidden bg-slate-950/40"
               style={{ height: editPanelHeight ?? resolveDefaultEditPanelHeight() }}
             >
-              <header className="shrink-0 border-b border-slate-800 px-4 py-2">
-                <h3 className="text-xs font-semibold text-slate-300">작업 편집</h3>
+              <header className="flex shrink-0 items-center gap-1 border-b border-slate-800 px-3 py-1.5">
+                <button
+                  type="button"
+                  onClick={() => setBottomTab("results")}
+                  className={`rounded-md px-2.5 py-1 text-[11px] font-medium ${
+                    bottomTab === "results"
+                      ? "bg-slate-800 text-slate-100"
+                      : "text-slate-400 hover:bg-slate-900 hover:text-slate-200"
+                  }`}
+                >
+                  워크플로우 작업결과
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setBottomTab("edit")}
+                  className={`rounded-md px-2.5 py-1 text-[11px] font-medium ${
+                    bottomTab === "edit"
+                      ? "bg-slate-800 text-slate-100"
+                      : "text-slate-400 hover:bg-slate-900 hover:text-slate-200"
+                  }`}
+                >
+                  작업 편집
+                </button>
               </header>
-              <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-4">
-                <WorkNodeEditPanel
-                  node={selectedWorkNode}
-                  assignedAgents={assignedAgents}
-                  runtimes={runtimes}
-                  userid={user.userid}
-                  onChange={patchSelectedWork}
-                  onSave={handleSaveSelectedWork}
-                  onPersistPatch={handlePersistSelectedPatch}
-                  onUploadFile={handleUploadSelectedFile}
-                />
+              <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+                {bottomTab === "results" ? (
+                  workflowUuid ? (
+                    <WorkflowHistoryPanel workflowUuid={workflowUuid} />
+                  ) : (
+                    <div className="flex h-full items-center justify-center p-4 text-[11px] text-slate-500">
+                      워크플로우를 선택하면 작업결과를 확인할 수 있습니다.
+                    </div>
+                  )
+                ) : selectedWorkNode && !readOnly ? (
+                  <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-4">
+                    <WorkNodeEditPanel
+                      node={selectedWorkNode}
+                      assignedAgents={assignedAgents}
+                      runtimes={runtimes}
+                      userid={user.userid}
+                      onChange={patchSelectedWork}
+                      onSave={handleSaveSelectedWork}
+                      onPersistPatch={handlePersistSelectedPatch}
+                      onUploadFile={handleUploadSelectedFile}
+                    />
+                  </div>
+                ) : (
+                  <div className="flex h-full items-center justify-center p-4 text-[11px] text-slate-500">
+                    {readOnly
+                      ? "읽기 모드에서는 작업 편집을 사용할 수 없습니다."
+                      : "편집할 작업노드를 선택하세요."}
+                  </div>
+                )}
               </div>
             </section>
           </>

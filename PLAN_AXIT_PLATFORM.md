@@ -2280,11 +2280,10 @@ Your sole task is to write high-quality, production-ready, and syntactically cor
       - 작업 UUID(uuid)
       - 대상에이전트(target_agent) : 대상 에이전트는 유추하지 말고 정보가 없을 경우 반드시 요청자에게 피드백하고 보충 답변을 받아야 합니다.
       - 스크립트(work_script) 및 스크립트 종류(script_type): 인프라의 형태에 따라 스크립트 종류와 스크립트를 생성
-        - kubernetes 대상인 경우 manifest yaml 을 생성하는 작업과 kubectl(cli)를 사용하는 작업을 분리해서 생성합니다.
-          - manifest yaml을 사용해야 하는 작업은 script_type : kubectl 입니다.
-          - kubectl(cli)를 사용해야 하는 작업은 script_type : cli 입니다.
-        - ansbile playbook으로 작업 스크립트를 만들수 있습니다. 이 경우 script_type 은 ansible 입니다.
-        - 실행 스크립트가 아니라 대상 에이전트에 전달할 자연어 지시만 필요한 경우 script_type 은 prompt 입니다.
+        - kubernetes 대상으로 kubectl 을 사용하는 작업 : script_type = kubectl
+        - ansbile playbook 을 사용하는 작업 : script_type = ansible
+        - 실행 스크립트가 아니라 대상 에이전트에 전달할 자연어 지시만 필요한 경우 : script_type = prompt
+        - bash 스크립트를 사용하는 작업 : script_type = cli
     2. 요청에 따라 워크플로우를 생성하고 각 작업을 연결합니다.
       - 워크플로우명(workflow_name)
       - 워크플로우설명(workflow_description)
@@ -2309,7 +2308,9 @@ Your sole task is to write high-quality, production-ready, and syntactically cor
           "uuid": "작업#1 UUID",
           "target_agent": "대상에이전트#1",
           "work_script": "스크립트#1",
-          "script_type": "스크립트 종류#1"
+          "script_type": "스크립트 종류#1",
+          "use_previous_work_result": "false",
+          "work_report": "수신자이메일#1;수신자이메일#2... | 공백"
         },
         {
           "work_name": "작업명#2",
@@ -2317,7 +2318,9 @@ Your sole task is to write high-quality, production-ready, and syntactically cor
           "uuid": "작업#2 UUID",
           "target_agent": "대상에이전트#2",
           "work_script": "스크립트#2",
-          "script_type": "스크립트 종류#2"
+          "script_type": "스크립트 종류#2",
+          "use_previous_work_result": "true",
+          "work_report": "수신자이메일#1;수신자이메일#2... | 공백"
         }
       ],
       "workflow": {
@@ -2376,7 +2379,35 @@ left "워크플로우 목록" 패널의 생성된 워크플로우 목록의 오�
 # 워크플로우 UI 개선
 - 작업노드 박스의 width 를 30% 확장한다.
 - 작업명, 에이전트명 이 작업노드 박스를 벗어날 경우 박스에 맞추고 hover 시 툴팁으로 전체를 보여준다
+- 작업명, 에이전트명의 텍스트는 모두 왼쪽 정렬로 통일하고 레이블 버튼의 스타일은 텍스트의 크이에 맞춰 width를 조절한다
+- 워크플로우 목록에서 제목이 목록 박스를 벗어날 경우 박스에 맞춰 생략하고 hover 시 툴팁 처리한다.
+- 워크플로우 삭제 버튼을 "X" 로 오른쪽 상단에 표시한다. "X" 버튼 클릭시 확인후 다음을 삭제한다.
+  - workflow
+  - workflow 가 참조하는 work_node
+- "X" 삭제 버튼은 workflow 이름과 같은 행의 오른쪽 끝에 배치한다.
+- 하단 패널 내부를 탭 구조로 변경한다.
+  - 기존 "작업 편집" 패널은 "작업 편집" 탭으로 이동
+  - "워크플로우 작업결과" 탭을 추가
+    - 워크플로우 이력 테이블이 필요하다. 이 테이블은 실행된 워크플로우가 최종 완료(E) 에 도달하면 업데이트된다.
+      - workflow_history
+        - idx int primary key
+        - uuid varchar <- workflow.uuid
+        - start_date datetime <- workflow.last_start_date 가 갱신될때 값
+        - end_date datetime <- workflow.last_end_date 가 갱신될때 값
+        - finish_success boolean <- 최종 성공 여부
+        - result_file varchar <- workflow 에 소속된 마지막 work_node 의 결과파일 위치(절대경로)
+    - "워크플로우 작업결과" 탭은 내부에 left / right 두 개 패널로 구성된다.
+      - left 패널은 workflow_history 테이블 목록으로 선택된 workflow 의 이력만 출력한다.
+      - right 패널은 left 패널에서 레코드 선택시 해당 workflow 실행 이력의 최종 결과 파일을 md 로 렌더링해서 출력한다.
+    - "워크플로우 작업결과" 탭을 "작업 편집" 탭 앞에 둔다. "워크플로우" 메뉴 진입시 "워크플로우 작업결과" 탭이 default 선택이다.
 
+# 단위작업 결과보고 단계 추가
+- 단위작업 결과보고 로직을 넣는다. work_node 에 다음 컬럼을 추가한다
+  - work_report varchar(200) <- 이메일주소#1;이메일주소#2;이메일주소#3 ..
+- work_report 컬럼에 주소가 있으면 작업 완료 이후 작업 결과를 메일로 전송한다.
+- 다이어그램 표시는 "작업노드" 다이어그램 아래 선으로 연결하고 동그라미로 "메일전송" 으로 표시한다.
+
+- 작업 편집에서 메일주소 선택 UI는 대시보드>작업노트>나의작업결과>메일전송 팝업과 동일한 UI로 파업창을 띄우고 선택하도록 한다. 단 이 팝업에는 CC/BCC 는 없다
 
 
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import shutil
+from pathlib import Path
 
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 from pydantic import BaseModel, Field
@@ -25,6 +26,7 @@ from backend.app.db.roles import ROLE_ADMIN, ROLE_INFRAADMIN
 from backend.app.db.users import get_user_by_idx, list_users
 from backend.app.db.workflow import (
     WorkNodeRecord,
+    WorkflowHistoryRecord,
     WorkflowRecord,
     clone_workflow,
     create_work_node,
@@ -33,7 +35,9 @@ from backend.app.db.workflow import (
     delete_workflow,
     get_work_node_by_uuid,
     get_workflow_by_uuid,
+    get_workflow_history_by_idx,
     list_work_nodes_visible,
+    list_workflow_history,
     list_workflows_visible,
     normalize_script_type,
     set_workflow_distribute,
@@ -73,6 +77,7 @@ class WorkNodeResponse(BaseModel):
     last_success: bool = False
     last_fail_reason: str = ""
     use_previous_work_result: bool = False
+    work_report: str = ""
     is_draft: bool = False
 
     @classmethod
@@ -102,6 +107,7 @@ class WorkNodeResponse(BaseModel):
             last_success=record.last_success,
             last_fail_reason=record.last_fail_reason,
             use_previous_work_result=record.use_previous_work_result,
+            work_report=record.work_report,
             is_draft=False,
         )
 
@@ -116,6 +122,7 @@ class WorkNodeWriteRequest(BaseModel):
     test_result: bool = False
     files: str = Field(default="", max_length=300)
     use_previous_work_result: bool = False
+    work_report: str = Field(default="", max_length=200)
     validation_message: str | None = None
 
 
@@ -221,6 +228,26 @@ class WorkflowDistributeRequest(BaseModel):
     distribute: bool
 
 
+class WorkflowHistoryResponse(BaseModel):
+    idx: int
+    uuid: str
+    start_date: str = ""
+    end_date: str = ""
+    finish_success: bool = False
+    result_file: str = ""
+
+    @classmethod
+    def from_record(cls, record: WorkflowHistoryRecord) -> "WorkflowHistoryResponse":
+        return cls(
+            idx=record.idx,
+            uuid=record.uuid,
+            start_date=record.start_date,
+            end_date=record.end_date,
+            finish_success=record.finish_success,
+            result_file=record.result_file,
+        )
+
+
 class WorkflowRunStepResponse(BaseModel):
     kind: str
     label: str
@@ -274,6 +301,14 @@ def _visible_work_names(database_path, user_idx: int) -> dict[str, str]:
     }
 
 
+def _visible_work_reports(database_path, user_idx: int) -> set[str]:
+    return {
+        node.uuid
+        for node in list_work_nodes_visible(database_path, user_idx)
+        if (node.work_report or "").strip()
+    }
+
+
 def _user_names(database_path) -> dict[str, str]:
     mapping: dict[str, str] = {}
     for user in list_users(database_path, viewer_role=ROLE_ADMIN):
@@ -309,6 +344,7 @@ def _graph_for(
             expression,
             work_names=names,
             user_names=_user_names(database_path),
+            work_report_uuids=_visible_work_reports(database_path, user_idx),
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -426,6 +462,7 @@ async def api_create_work_node(body: WorkNodeWriteRequest, request: Request) -> 
             test_result=body.test_result,
             files=normalize_work_node_filename(body.files),
             use_previous_work_result=body.use_previous_work_result,
+            work_report=body.work_report,
             uuid=body.uuid,
             owner=auth_user.idx,
         )
@@ -466,6 +503,7 @@ async def api_update_work_node(
         test_result=bool(body.test_result),
         files=normalize_work_node_filename(body.files),
         use_previous_work_result=bool(body.use_previous_work_result),
+        work_report=(body.work_report or "").strip()[:200],
     )
     if record is None:
         raise HTTPException(status_code=404, detail="워크 노드를 찾을 수 없습니다.")
@@ -562,6 +600,7 @@ async def api_upload_work_node_file(
         test_result=record.test_result,
         files=stored_name,
         use_previous_work_result=record.use_previous_work_result,
+        work_report=record.work_report,
     )
     if updated is None:
         raise HTTPException(status_code=404, detail="워크 노드를 찾을 수 없습니다.")
@@ -666,6 +705,56 @@ async def api_set_workflow_distribute(
     if record is None:
         raise HTTPException(status_code=404, detail="워크플로우를 찾을 수 없습니다.")
     return _workflow_response(database_path, record, user_idx=auth_user.idx)
+
+
+@router.get("/workflows/{workflow_uuid}/history", response_model=list[WorkflowHistoryResponse])
+async def api_list_workflow_history(
+    workflow_uuid: str,
+    request: Request,
+) -> list[WorkflowHistoryResponse]:
+    auth_user = get_request_auth_user(request)
+    database_path = request.app.state.database_path
+    existing = get_workflow_by_uuid(database_path, workflow_uuid)
+    if existing is None:
+        raise HTTPException(status_code=404, detail="워크플로우를 찾을 수 없습니다.")
+    _require_view_workflow(existing, auth_user.idx)
+    return [
+        WorkflowHistoryResponse.from_record(record)
+        for record in list_workflow_history(database_path, existing.uuid)
+    ]
+
+
+@router.get("/workflows/{workflow_uuid}/history/{history_idx}/result")
+async def api_get_workflow_history_result(
+    workflow_uuid: str,
+    history_idx: int,
+    request: Request,
+) -> dict[str, str | bool | int]:
+    auth_user = get_request_auth_user(request)
+    database_path = request.app.state.database_path
+    existing = get_workflow_by_uuid(database_path, workflow_uuid)
+    if existing is None:
+        raise HTTPException(status_code=404, detail="워크플로우를 찾을 수 없습니다.")
+    _require_view_workflow(existing, auth_user.idx)
+    history = get_workflow_history_by_idx(database_path, history_idx)
+    if history is None or history.uuid != existing.uuid:
+        raise HTTPException(status_code=404, detail="이력을 찾을 수 없습니다.")
+    path_text = (history.result_file or "").strip()
+    if not path_text:
+        raise HTTPException(status_code=404, detail="결과 파일이 없습니다.")
+    path = Path(path_text)
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="결과 파일을 찾을 수 없습니다.")
+    try:
+        content = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"결과 파일을 읽지 못했습니다: {exc}") from exc
+    return {
+        "idx": history.idx,
+        "content": content,
+        "result_file": history.result_file,
+        "finish_success": history.finish_success,
+    }
 
 
 @router.post("/workflows/{workflow_uuid}/clone", response_model=WorkflowResponse, status_code=201)

@@ -12,13 +12,24 @@ export interface JobReportRequester {
 
 type RecipientColumn = "to" | "cc" | "bcc";
 
+interface JobReportEmailModalPickMode {
+  /** Semicolon-separated emails already stored (e.g. work_report). */
+  initialEmails?: string;
+  title?: string;
+  confirmLabel?: string;
+  maxLength?: number;
+  onConfirm: (emailsJoined: string) => void;
+}
+
 interface JobReportEmailModalProps {
-  subject: string;
-  sendEndpoint: string;
+  subject?: string;
+  sendEndpoint?: string;
   requester?: JobReportRequester | null;
   extraBody?: Record<string, unknown>;
+  /** Recipient-only picker (no send / no CC / no BCC). */
+  pickMode?: JobReportEmailModalPickMode;
   onClose: () => void;
-  onSent: (message: string) => void;
+  onSent?: (message: string) => void;
 }
 
 const EMAIL_SEPARATORS = new Set([";", ",", " "]);
@@ -74,6 +85,27 @@ function normalizeEmail(value: string): string {
   return value.trim();
 }
 
+function parseInitialEmails(raw: string | undefined): string[] {
+  if (!raw?.trim()) {
+    return [];
+  }
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const part of raw.split(/[;,]/)) {
+    const email = normalizeEmail(part);
+    if (!email) {
+      continue;
+    }
+    const key = email.toLowerCase();
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    result.push(email);
+  }
+  return result;
+}
+
 const COLUMN_LABELS: Record<RecipientColumn, string> = {
   to: "수신자",
   cc: "참조",
@@ -83,18 +115,22 @@ const COLUMN_LABELS: Record<RecipientColumn, string> = {
 const DEFAULT_FORWARD_MESSAGE = "AI를 통해 생성된 처리 결과를 메일로 전달드립니다.";
 
 export function JobReportEmailModal({
-  subject: initialSubject,
-  sendEndpoint,
+  subject: initialSubject = "",
+  sendEndpoint = "",
   requester = null,
   extraBody,
+  pickMode,
   onClose,
   onSent,
 }: JobReportEmailModalProps) {
+  const isPickMode = Boolean(pickMode);
   const [users, setUsers] = useState<UserRecord[]>([]);
   const [toUserIdxs, setToUserIdxs] = useState<Set<number>>(new Set());
   const [ccUserIdxs, setCcUserIdxs] = useState<Set<number>>(new Set());
   const [bccUserIdxs, setBccUserIdxs] = useState<Set<number>>(new Set());
-  const [toEmails, setToEmails] = useState<string[]>([]);
+  const [toEmails, setToEmails] = useState<string[]>(() =>
+    isPickMode ? parseInitialEmails(pickMode?.initialEmails) : [],
+  );
   const [ccEmails, setCcEmails] = useState<string[]>([]);
   const [bccEmails, setBccEmails] = useState<string[]>([]);
   const [draftByColumn, setDraftByColumn] = useState<Record<RecipientColumn, string>>({
@@ -110,6 +146,7 @@ export function JobReportEmailModal({
   const [error, setError] = useState<string | null>(null);
   const [isLoadingUsers, setIsLoadingUsers] = useState(false);
   const [isSending, setIsSending] = useState(false);
+  const [didHydratePickUsers, setDidHydratePickUsers] = useState(false);
 
   const requesterEmail = requester?.email.trim().toLowerCase() ?? "";
   const requesterHasEmail = requesterEmail.includes("@");
@@ -148,6 +185,31 @@ export function JobReportEmailModal({
   useEffect(() => {
     setEmailSubject(initialSubject);
   }, [initialSubject]);
+
+  useEffect(() => {
+    if (!isPickMode || didHydratePickUsers || users.length === 0) {
+      return;
+    }
+    const initial = parseInitialEmails(pickMode?.initialEmails);
+    if (initial.length === 0) {
+      setDidHydratePickUsers(true);
+      return;
+    }
+    const byEmail = new Map(users.map((user) => [user.email.trim().toLowerCase(), user]));
+    const matchedIdxs = new Set<number>();
+    const unmatched: string[] = [];
+    for (const email of initial) {
+      const user = byEmail.get(email.toLowerCase());
+      if (user) {
+        matchedIdxs.add(user.idx);
+      } else {
+        unmatched.push(email);
+      }
+    }
+    setToUserIdxs(matchedIdxs);
+    setToEmails(unmatched);
+    setDidHydratePickUsers(true);
+  }, [didHydratePickUsers, isPickMode, pickMode?.initialEmails, users]);
 
   const usersByIdx = useMemo(() => new Map(users.map((user) => [user.idx, user])), [users]);
 
@@ -308,7 +370,9 @@ export function JobReportEmailModal({
 
   const toCount =
     toUserIdxs.size + toEmails.length + (includeRequester && requesterHasEmail ? 1 : 0);
-  const totalSelected = toCount + ccUserIdxs.size + ccEmails.length + bccUserIdxs.size + bccEmails.length;
+  const totalSelected = isPickMode
+    ? toCount
+    : toCount + ccUserIdxs.size + ccEmails.length + bccUserIdxs.size + bccEmails.length;
 
   const renderRecipientChips = (column: RecipientColumn, idxSet: Set<number>) => {
     const chips: ReactNode[] = [];
@@ -412,7 +476,65 @@ export function JobReportEmailModal({
     return { emails: [...current, email], error: null };
   };
 
+  const resolveToEmailList = (): { emails: string[]; error: string | null } => {
+    const toCollected = collectEmailsWithDraft("to", toEmails);
+    if (toCollected.error) {
+      return { emails: [], error: toCollected.error };
+    }
+    const seen = new Set<string>();
+    const emails: string[] = [];
+    const push = (value: string) => {
+      const email = normalizeEmail(value);
+      if (!email) {
+        return;
+      }
+      const key = email.toLowerCase();
+      if (seen.has(key)) {
+        return;
+      }
+      seen.add(key);
+      emails.push(email);
+    };
+    if (includeRequester && requesterHasEmail && requester?.email) {
+      push(requester.email);
+    }
+    for (const userIdx of toUserIdxs) {
+      const user = usersByIdx.get(userIdx);
+      if (user?.email) {
+        push(user.email);
+      }
+    }
+    for (const email of toCollected.emails) {
+      push(email);
+    }
+    return { emails, error: null };
+  };
+
+  const handleConfirmPick = () => {
+    if (!pickMode) {
+      return;
+    }
+    const resolved = resolveToEmailList();
+    if (resolved.error) {
+      setError(resolved.error);
+      return;
+    }
+    const joined = resolved.emails.join(";");
+    const maxLength = pickMode.maxLength ?? 200;
+    if (joined.length > maxLength) {
+      setError(`수신자 목록이 ${maxLength}자를 초과합니다. (${joined.length}자)`);
+      return;
+    }
+    setError(null);
+    pickMode.onConfirm(joined);
+    onClose();
+  };
+
   const handleSend = async () => {
+    if (!sendEndpoint || !onSent) {
+      setError("메일 전송 설정이 없습니다.");
+      return;
+    }
     const toCollected = collectEmailsWithDraft("to", toEmails);
     const ccCollected = collectEmailsWithDraft("cc", ccEmails);
     const bccCollected = collectEmailsWithDraft("bcc", bccEmails);
@@ -474,6 +596,10 @@ export function JobReportEmailModal({
     }
   };
 
+  const dialogTitle = isPickMode
+    ? pickMode?.title || "결과보고 메일 수신자"
+    : "리포트 메일 전송";
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 px-4">
       <div
@@ -484,7 +610,7 @@ export function JobReportEmailModal({
       >
         <div className="mb-3 flex items-start justify-between gap-3">
           <h2 id="job-report-email-dialog-title" className="text-sm font-semibold text-slate-100">
-            리포트 메일 전송
+            {dialogTitle}
           </h2>
           <button
             type="button"
@@ -496,27 +622,31 @@ export function JobReportEmailModal({
         </div>
 
         <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
-          <label className="block space-y-1 text-xs">
-            <span className="text-slate-400">제목</span>
-            <input
-              type="text"
-              value={emailSubject}
-              maxLength={300}
-              onChange={(event) => setEmailSubject(event.target.value)}
-              className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1.5 text-slate-100"
-            />
-          </label>
+          {isPickMode ? null : (
+            <>
+              <label className="block space-y-1 text-xs">
+                <span className="text-slate-400">제목</span>
+                <input
+                  type="text"
+                  value={emailSubject}
+                  maxLength={300}
+                  onChange={(event) => setEmailSubject(event.target.value)}
+                  className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1.5 text-slate-100"
+                />
+              </label>
 
-          <label className="block space-y-1 text-xs">
-            <span className="text-slate-400">추가 내용</span>
-            <textarea
-              value={forwardMessage}
-              onChange={(event) => setForwardMessage(event.target.value)}
-              rows={3}
-              placeholder="리포트 위에 추가할 메시지를 입력하세요."
-              className="w-full resize-y rounded-md border border-slate-700 bg-slate-950 px-2 py-1.5 text-slate-100 placeholder:text-slate-500"
-            />
-          </label>
+              <label className="block space-y-1 text-xs">
+                <span className="text-slate-400">추가 내용</span>
+                <textarea
+                  value={forwardMessage}
+                  onChange={(event) => setForwardMessage(event.target.value)}
+                  rows={3}
+                  placeholder="리포트 위에 추가할 메시지를 입력하세요."
+                  className="w-full resize-y rounded-md border border-slate-700 bg-slate-950 px-2 py-1.5 text-slate-100 placeholder:text-slate-500"
+                />
+              </label>
+            </>
+          )}
 
           <div className="space-y-2 rounded-md border border-slate-700 bg-slate-950/60 p-3">
             <p className="text-[10px] text-slate-500">
@@ -526,33 +656,40 @@ export function JobReportEmailModal({
               <h3 className="mb-1 text-[10px] font-semibold text-sky-300">수신자</h3>
               {renderRecipientChips("to", toUserIdxs)}
             </div>
-            <div>
-              <h3 className="mb-1 text-[10px] font-semibold text-amber-300">참조</h3>
-              {renderRecipientChips("cc", ccUserIdxs)}
-            </div>
-            <div>
-              <h3 className="mb-1 text-[10px] font-semibold text-violet-300">숨은참조</h3>
-              {renderRecipientChips("bcc", bccUserIdxs)}
-            </div>
+            {isPickMode ? null : (
+              <>
+                <div>
+                  <h3 className="mb-1 text-[10px] font-semibold text-amber-300">참조</h3>
+                  {renderRecipientChips("cc", ccUserIdxs)}
+                </div>
+                <div>
+                  <h3 className="mb-1 text-[10px] font-semibold text-violet-300">숨은참조</h3>
+                  {renderRecipientChips("bcc", bccUserIdxs)}
+                </div>
+              </>
+            )}
           </div>
 
-          <div className="flex flex-wrap gap-2">
-            {(["to", "cc", "bcc"] as RecipientColumn[]).map((column) => (
-              <button
-                key={column}
-                type="button"
-                onClick={() => setActiveColumn(column)}
-                aria-pressed={activeColumn === column}
-                className={`rounded-full border px-3 py-1 text-[11px] font-medium transition-colors ${columnTabClass(activeColumn === column)}`}
-              >
-                {COLUMN_LABELS[column]} 선택
-              </button>
-            ))}
-          </div>
+          {isPickMode ? null : (
+            <div className="flex flex-wrap gap-2">
+              {(["to", "cc", "bcc"] as RecipientColumn[]).map((column) => (
+                <button
+                  key={column}
+                  type="button"
+                  onClick={() => setActiveColumn(column)}
+                  aria-pressed={activeColumn === column}
+                  className={`rounded-full border px-3 py-1 text-[11px] font-medium transition-colors ${columnTabClass(activeColumn === column)}`}
+                >
+                  {COLUMN_LABELS[column]} 선택
+                </button>
+              ))}
+            </div>
+          )}
 
           <label className="block space-y-1 text-xs">
             <span className="text-slate-400">
-              등록된 사용자 검색 ({COLUMN_LABELS[activeColumn]}에 추가)
+              등록된 사용자 검색
+              {isPickMode ? "" : ` (${COLUMN_LABELS[activeColumn]}에 추가)`}
             </span>
             <input
               type="search"
@@ -564,7 +701,7 @@ export function JobReportEmailModal({
           </label>
 
           <div className="rounded-md border border-slate-700 bg-slate-950/60 p-3">
-            {activeColumn === "to" && requester ? (
+            {!isPickMode && activeColumn === "to" && requester ? (
               <section className="mb-3">
                 <h3 className="mb-2 text-[11px] font-semibold text-slate-300">SR 기안자</h3>
                 {requesterHasEmail ? (
@@ -614,8 +751,9 @@ export function JobReportEmailModal({
         </div>
 
         <p className="mt-2 text-[11px] text-slate-500">
-          선택 {totalSelected}명 (수신 {toCount}, 참조 {ccUserIdxs.size + ccEmails.length}, 숨은참조{" "}
-          {bccUserIdxs.size + bccEmails.length})
+          {isPickMode
+            ? `선택 ${totalSelected}명`
+            : `선택 ${totalSelected}명 (수신 ${toCount}, 참조 ${ccUserIdxs.size + ccEmails.length}, 숨은참조 ${bccUserIdxs.size + bccEmails.length})`}
         </p>
 
         {error ? (
@@ -632,18 +770,28 @@ export function JobReportEmailModal({
           >
             취소
           </button>
-          <button
-            type="button"
-            disabled={
-              isSending ||
-              !emailSubject.trim() ||
-              (toCount === 0 && !looksLikeEmail(draftByColumn.to))
-            }
-            onClick={() => void handleSend()}
-            className="rounded-md bg-sky-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-sky-600 disabled:opacity-50"
-          >
-            {isSending ? "전송 중..." : "메일 전송"}
-          </button>
+          {isPickMode ? (
+            <button
+              type="button"
+              onClick={handleConfirmPick}
+              className="rounded-md bg-sky-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-sky-600"
+            >
+              {pickMode?.confirmLabel || "확인"}
+            </button>
+          ) : (
+            <button
+              type="button"
+              disabled={
+                isSending ||
+                !emailSubject.trim() ||
+                (toCount === 0 && !looksLikeEmail(draftByColumn.to))
+              }
+              onClick={() => void handleSend()}
+              className="rounded-md bg-sky-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-sky-600 disabled:opacity-50"
+            >
+              {isSending ? "전송 중..." : "메일 전송"}
+            </button>
+          )}
         </div>
       </div>
     </div>

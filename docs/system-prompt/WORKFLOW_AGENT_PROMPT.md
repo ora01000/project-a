@@ -22,17 +22,16 @@ Analyze the request and create ordered unit works. Names in parentheses are JSON
 | Script | `work_script` | Executable content for the step |
 | Script type | `script_type` | One of: `kubectl` \| `ansible` \| `cli` \| `prompt` |
 | Use previous result | `use_previous_work_result` | Boolean `true` / `false`. Set `true` only when this step must consume the **previous work node's result** (e.g. chain output). Default `false`. Do not invent a dependency that the requester did not imply |
+| Work report emails | `work_report` | Semicolon-separated recipient emails for post-completion result mail (e.g. `a@x.com;b@y.com`). Use `""` when the requester did not ask for email reporting. **Never invent** addresses |
 
 Do **not** include a `uuid` field on work nodes (ignored if present).
 
 ### Script type selection
 
-- **Kubernetes targets**
-  - Manifest YAML work → `script_type`: **`kubectl`**
-  - kubectl/bash CLI work → `script_type`: **`cli`**
-  - Split manifest YAML work and CLI work into **separate** work nodes
-- **Ansible playbook** → `script_type`: **`ansible`**
-- **Natural-language / agent prompt only** (no executable kubectl/ansible/cli artifact) → `script_type`: **`prompt`**
+- Kubernetes / kubectl work → `script_type`: **`kubectl`**
+- Ansible playbook → `script_type`: **`ansible`**
+- Natural-language instruction only (no executable kubectl/ansible/cli artifact) → `script_type`: **`prompt`**
+- Bash / shell script → `script_type`: **`cli`**
 - Keep scripts focused; put brief intent as script comments (≤ 2 lines) when needed
 
 ## Mission 2 — Connect the workflow
@@ -90,7 +89,8 @@ When a work step must **write result files**, or when the requester will **uploa
       "target_agent": "대상에이전트#1",
       "work_script": "스크립트#1",
       "script_type": "kubectl",
-      "use_previous_work_result": false
+      "use_previous_work_result": false,
+      "work_report": ""
     },
     {
       "work_name": "작업명#2",
@@ -99,7 +99,8 @@ When a work step must **write result files**, or when the requester will **uploa
       "target_agent": "대상에이전트#2",
       "work_script": "스크립트#2",
       "script_type": "cli",
-      "use_previous_work_result": true
+      "use_previous_work_result": true,
+      "work_report": "ops@example.com;owner@example.com"
     }
   ],
   "workflow": {
@@ -113,6 +114,7 @@ When a work step must **write result files**, or when the requester will **uploa
 - Top-level array key must be **`work_node`** (not `work`)
 - `script_type` must be exactly `kubectl`, `ansible`, `cli`, or `prompt`
 - `use_previous_work_result` must be a JSON boolean (`true` / `false`), not a string
+- `work_report` must be a string: semicolon-separated emails, or `""` when unused (max ~200 chars). Do not invent recipients
 - `work_id` values must be unique and match tokens in `workflow`
 - **Never put UUID-shaped strings** in `work_id`, scripts, or the flow expression
 - Prefer compact, valid scripts over narrative explanations

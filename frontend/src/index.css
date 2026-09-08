@@ -98,6 +98,8 @@ body {
   --wf-diagram-start-stroke: #7dd3fc;
   --wf-diagram-edge: #94a3b8;
   --wf-diagram-edge-fail: #fb7185;
+  --wf-diagram-edge-report: #34d399;
+  --wf-diagram-mail-stroke: #34d399;
 }
 
 [data-theme="light"] {
@@ -112,6 +114,8 @@ body {
   --wf-diagram-start-stroke: #0284c7;
   --wf-diagram-edge: #64748b;
   --wf-diagram-edge-fail: #e11d48;
+  --wf-diagram-edge-report: #059669;
+  --wf-diagram-mail-stroke: #059669;
 }
 
 @keyframes wf-run-pulse {

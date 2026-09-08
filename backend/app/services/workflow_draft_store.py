@@ -76,6 +76,7 @@ def work_node_to_dict(record: WorkNodeRecord) -> dict[str, Any]:
         "last_success": record.last_success,
         "last_fail_reason": record.last_fail_reason,
         "use_previous_work_result": record.use_previous_work_result,
+        "work_report": record.work_report,
     }
 
 
@@ -99,6 +100,8 @@ def work_node_from_dict(data: dict[str, Any]) -> WorkNodeRecord:
         last_success=bool(data.get("last_success")),
         last_fail_reason=str(data.get("last_fail_reason") or "")[:200],
         use_previous_work_result=bool(data.get("use_previous_work_result")),
+        work_report=str(data.get("work_report") or "")[:200],
+        owner=int(data.get("owner") or 0),
     )
 
 

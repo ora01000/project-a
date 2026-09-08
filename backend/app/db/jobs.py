@@ -529,6 +529,40 @@ def _record_signup_job_approval_result(database_path: str | Path, job: JobRecord
     )
 
 
+def _record_workflow_job_approval_result(database_path: str | Path, job: JobRecord) -> None:
+    """Persist HITL approval outcome so My Job Results can load jobs_result."""
+    from backend.app.db.jobs_result import upsert_job_result
+
+    if int(job.job_type) != JOB_TYPE_WORKFLOW:
+        return
+    approver_userid = (job.approver or "").strip()
+    approver_name = _resolve_user_display_name(
+        database_path,
+        approver_userid,
+        fallback=approver_userid or "-",
+    )
+    requester_name = _resolve_user_display_name(
+        database_path,
+        (job.madang_id or "").strip(),
+        fallback=job.requester_name,
+    )
+    body = (job.job_content or "").strip()
+    result_text = (
+        f"## 워크플로우 승인 완료\n\n"
+        f"- 승인자: **{approver_name}**\n"
+        f"- 요청자: **{requester_name}**\n"
+        f"- 작업: {job.job_title}\n\n"
+    )
+    if body:
+        result_text = f"{result_text}---\n\n{body}\n"
+    upsert_job_result(
+        database_path,
+        srnum=job.srnum,
+        result=result_text.strip(),
+        complete_date=now_job_datetime(),
+    )
+
+
 def _finalize_signup_job_approval(database_path: str | Path, job: JobRecord):
     if job.job_type != JOB_TYPE_SIGNUP:
         return None
@@ -537,6 +571,27 @@ def _finalize_signup_job_approval(database_path: str | Path, job: JobRecord):
     approved_user = approve_pending_user_for_signup_job(database_path, job)
     _record_signup_job_approval_result(database_path, job)
     return approved_user
+
+
+def _finalize_workflow_job_approval(database_path: str | Path, job: JobRecord) -> None:
+    if int(job.job_type) != JOB_TYPE_WORKFLOW:
+        return
+    _record_workflow_job_approval_result(database_path, job)
+
+
+def ensure_workflow_job_result(database_path: str | Path, job: JobRecord) -> JobResultRecord | None:
+    """Return jobs_result for a workflow job, backfilling approval text when missing."""
+    from backend.app.db.jobs_result import JobResultRecord, get_job_result_by_srnum
+
+    if int(job.job_type) != JOB_TYPE_WORKFLOW:
+        return get_job_result_by_srnum(database_path, job.srnum)
+    existing = get_job_result_by_srnum(database_path, job.srnum)
+    if existing is not None:
+        return existing
+    if int(job.status_code) < JOB_STATUS_COMPLETED_SUCCESS:
+        return None
+    _record_workflow_job_approval_result(database_path, job)
+    return get_job_result_by_srnum(database_path, job.srnum)
 
 
 def assign_job_approver(
@@ -601,6 +656,7 @@ def direct_approve_job(
         status_code=approval_target_status_code(existing),
     )
     _finalize_signup_job_approval(database_path, updated)
+    _finalize_workflow_job_approval(database_path, updated)
     return updated
 
 
@@ -643,6 +699,7 @@ def approve_assigned_job(
     if updated is None:
         raise RuntimeError("Failed to load updated job record")
     _finalize_signup_job_approval(database_path, updated)
+    _finalize_workflow_job_approval(database_path, updated)
     return updated
 
 

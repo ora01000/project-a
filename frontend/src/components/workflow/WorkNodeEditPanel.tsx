@@ -5,6 +5,7 @@ import { assignableAgentId } from "../../types/agentruntime";
 import type { WorkScriptType } from "../../types/workflow";
 import { WORK_SCRIPT_TYPE_OPTIONS } from "../../types/workflow";
 import { flushSseBuffer, parseSseChunk } from "../../utils/parseSse";
+import { JobReportEmailModal } from "../jobs/JobReportEmailModal";
 import type { WorkEditorNode } from "./workflowModel";
 
 interface WorkNodeEditPanelProps {
@@ -264,6 +265,7 @@ export function WorkNodeEditPanel({
   const [generateError, setGenerateError] = useState<string | null>(null);
   const [validateMessage, setValidateMessage] = useState<string | null>(null);
   const [validateResult, setValidateResult] = useState<string | null>(null);
+  const [isReportMailOpen, setIsReportMailOpen] = useState(false);
 
   const hasGeneratedScript = Boolean(node.workScript.trim());
 
@@ -536,6 +538,52 @@ export function WorkNodeEditPanel({
             </span>
           </span>
         </label>
+
+        <div className="grid gap-1 text-xs text-slate-400">
+          <span className="flex flex-wrap items-center justify-between gap-2">
+            결과보고 메일
+            <button
+              type="button"
+              disabled={isGenerating || isValidating}
+              onClick={() => setIsReportMailOpen(true)}
+              className="rounded-md border border-emerald-700/80 bg-emerald-950/40 px-2.5 py-1 text-[11px] font-medium text-emerald-100 hover:bg-emerald-900/50 disabled:opacity-50"
+            >
+              수신자 선택
+            </button>
+          </span>
+          {node.workReport.trim() ? (
+            <div className="rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-[11px] text-slate-200">
+              {node.workReport
+                .split(";")
+                .map((part) => part.trim())
+                .filter(Boolean)
+                .join(", ")}
+            </div>
+          ) : (
+            <p className="rounded-md border border-dashed border-slate-700 bg-slate-950/40 px-3 py-2 text-[11px] text-slate-500">
+              선택된 수신자가 없습니다.
+            </p>
+          )}
+          <span className="text-[11px] text-slate-500">
+            수신자가 있으면 작업 완료 후 결과를 메일로 전송합니다.
+          </span>
+        </div>
+
+        {isReportMailOpen ? (
+          <JobReportEmailModal
+            pickMode={{
+              initialEmails: node.workReport,
+              title: "결과보고 메일 수신자",
+              confirmLabel: "적용",
+              maxLength: 200,
+              onConfirm: (emailsJoined) => {
+                onChange({ workReport: emailsJoined });
+                void onPersistPatch({ workReport: emailsJoined });
+              },
+            }}
+            onClose={() => setIsReportMailOpen(false)}
+          />
+        ) : null}
 
         <label className="grid gap-1 text-xs text-slate-400">
           <span className="flex flex-wrap items-center justify-between gap-2">

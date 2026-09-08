@@ -179,6 +179,10 @@ export function WorkflowPage({
     setWorkNodes((await response.json()) as WorkNodeItem[]);
   }, []);
 
+  const refreshWorkflowData = useCallback(async () => {
+    await Promise.all([loadWorkflows(), loadWorkNodes()]);
+  }, [loadWorkflows, loadWorkNodes]);
+
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
@@ -432,7 +436,7 @@ export function WorkflowPage({
                   : `wf-${selectedUuid ?? "none"}-${selected?.owner ?? 0}-${selected?.distribute ? "d" : "p"}`
               }
               onSaved={handleSaved}
-              onWorkNodesChanged={loadWorkNodes}
+              onWorkNodesChanged={refreshWorkflowData}
               onDistributed={handleDistributed}
               onCloned={handleCloned}
               aiImportRequest={aiImportRequest}

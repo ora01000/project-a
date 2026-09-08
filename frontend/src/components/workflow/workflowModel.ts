@@ -42,6 +42,7 @@ export type WorkEditorNode = {
   lastSuccess: boolean;
   lastFailReason: string;
   usePreviousWorkResult: boolean;
+  workReport: string;
   fail: FailSpec;
 };
 
@@ -101,6 +102,7 @@ export function workFieldsFromItem(
     lastSuccess: Boolean(item.last_success),
     lastFailReason: item.last_fail_reason || "",
     usePreviousWorkResult: Boolean(item.use_previous_work_result),
+    workReport: item.work_report || "",
   };
 }
 
@@ -129,6 +131,7 @@ export function workNodeWriteBody(
     test_result: node.testResult,
     files: node.files,
     use_previous_work_result: node.usePreviousWorkResult,
+    work_report: (node.workReport || "").trim().slice(0, 200),
     ...(extras?.validation_message != null
       ? { validation_message: extras.validation_message }
       : {}),
@@ -226,6 +229,7 @@ export function hydrateEditor(
       lastSuccess: false,
       lastFailReason: "",
       usePreviousWorkResult: false,
+      workReport: "",
       fail,
     };
   };

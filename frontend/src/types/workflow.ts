@@ -25,6 +25,7 @@ export interface WorkNodeItem {
   last_success?: boolean;
   last_fail_reason?: string;
   use_previous_work_result?: boolean;
+  work_report?: string;
 }
 
 export interface WorkflowApprover {
@@ -35,7 +36,7 @@ export interface WorkflowApprover {
 
 export interface WorkflowGraphNode {
   id: string;
-  kind: "start" | "end" | "work" | "hitl" | string;
+  kind: "start" | "end" | "work" | "hitl" | "mail" | string;
   label: string;
   work_uuid: string | null;
   userid: string | null;

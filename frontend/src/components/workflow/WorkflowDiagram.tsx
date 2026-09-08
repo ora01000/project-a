@@ -14,7 +14,7 @@ function nodeById(graph: WorkflowGraph, id: string): WorkflowGraphNode | undefin
 }
 
 function edgePath(from: WorkflowGraphNode, to: WorkflowGraphNode, kind: string): string {
-  if (kind === "fail") {
+  if (kind === "fail" || kind === "report") {
     const x1 = from.cx;
     const y1 = from.cy + from.height / 2;
     const x2 = to.cx;
@@ -79,6 +79,17 @@ export function WorkflowDiagram({
         >
           <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--wf-diagram-edge-fail)" />
         </marker>
+        <marker
+          id="wf-arrow-report"
+          viewBox="0 0 10 10"
+          refX="9"
+          refY="5"
+          markerWidth="7"
+          markerHeight="7"
+          orient="auto"
+        >
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--wf-diagram-edge-report)" />
+        </marker>
       </defs>
       {graph.edges.map((edge, index) => {
         const from = nodeById(graph, edge.source);
@@ -87,29 +98,48 @@ export function WorkflowDiagram({
           return null;
         }
         const isFail = edge.kind === "fail";
+        const isReport = edge.kind === "report";
         return (
           <path
             key={`${edge.source}-${edge.target}-${index}`}
             d={edgePath(from, to, edge.kind)}
             fill="none"
-            stroke={isFail ? "var(--wf-diagram-edge-fail)" : "var(--wf-diagram-edge)"}
+            stroke={
+              isFail
+                ? "var(--wf-diagram-edge-fail)"
+                : isReport
+                  ? "var(--wf-diagram-edge-report)"
+                  : "var(--wf-diagram-edge)"
+            }
             strokeWidth={1.5}
             strokeDasharray={isFail ? "5 4" : undefined}
-            markerEnd={isFail ? "url(#wf-arrow-fail)" : "url(#wf-arrow-success)"}
+            markerEnd={
+              isFail
+                ? "url(#wf-arrow-fail)"
+                : isReport
+                  ? "url(#wf-arrow-report)"
+                  : "url(#wf-arrow-success)"
+            }
           />
         );
       })}
       {graph.nodes.map((node) => {
-        if (node.kind === "start" || node.kind === "end") {
-          const label = node.kind === "start" ? "시작" : "종료";
+        if (node.kind === "start" || node.kind === "end" || node.kind === "mail") {
+          const label =
+            node.kind === "start" ? "시작" : node.kind === "end" ? "종료" : "메일전송";
+          const stroke =
+            node.kind === "mail"
+              ? "var(--wf-diagram-mail-stroke)"
+              : "var(--wf-diagram-start-stroke)";
+          const radius = Math.min(node.width, node.height) / 2 || 22;
           return (
             <g key={node.id}>
               <circle
                 cx={node.cx}
                 cy={node.cy}
-                r={22}
+                r={radius}
                 fill="var(--wf-diagram-node-fill)"
-                stroke="var(--wf-diagram-start-stroke)"
+                stroke={stroke}
                 strokeWidth={1.5}
               />
               <text
@@ -117,7 +147,7 @@ export function WorkflowDiagram({
                 y={node.cy + 4}
                 textAnchor="middle"
                 fill="var(--wf-diagram-node-text)"
-                fontSize="11"
+                fontSize={node.kind === "mail" ? 9 : 11}
                 fontWeight="600"
               >
                 {label}

@@ -195,6 +195,8 @@ ALTER TABLE work_node
     ADD COLUMN IF NOT EXISTS create_date TEXT NOT NULL DEFAULT '';
 ALTER TABLE work_node
     ADD COLUMN IF NOT EXISTS validate_date TEXT NOT NULL DEFAULT '';
+ALTER TABLE work_node
+    ADD COLUMN IF NOT EXISTS work_report VARCHAR(200) NOT NULL DEFAULT '';
 -- Legacy column cleanup (agent_response → work_script, drop user_prompt)
 DO $$
 BEGIN
@@ -247,3 +249,13 @@ ALTER TABLE workflow
 -- Legacy checkin columns (owner/distribute model); drop if present
 ALTER TABLE workflow DROP COLUMN IF EXISTS checkin_user;
 ALTER TABLE workflow DROP COLUMN IF EXISTS checkin_time;
+
+CREATE TABLE IF NOT EXISTS workflow_history (
+    idx SERIAL PRIMARY KEY,
+    uuid VARCHAR(36) NOT NULL,
+    start_date TEXT NOT NULL DEFAULT '',
+    end_date TEXT NOT NULL DEFAULT '',
+    finish_success INTEGER NOT NULL DEFAULT 0,
+    result_file VARCHAR(1000) NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS ix_workflow_history_uuid ON workflow_history (uuid);

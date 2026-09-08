@@ -11,6 +11,7 @@ export type AiWorkNodeDraft = {
   work_script: string;
   script_type: WorkScriptType | string;
   use_previous_work_result: boolean;
+  work_report: string;
 };
 
 export type AiWorkflowDesignPayload = {
@@ -55,6 +56,14 @@ function asBoolean(value: unknown, fallback = false): boolean {
     return false;
   }
   return fallback;
+}
+
+function asWorkReport(value: unknown): string {
+  const text = asString(value);
+  if (!text || text === "-" || text === "공백" || text.toLowerCase() === "none") {
+    return "";
+  }
+  return text.slice(0, 200);
 }
 
 function newUuid(): string {
@@ -131,6 +140,7 @@ export function parseAiWorkflowDesignResponse(raw: string): AiWorkflowDesignPayl
     work_script: string;
     script_type: string;
     use_previous_work_result: boolean;
+    work_report: string;
   }> = [];
 
   workList.forEach((item, index) => {
@@ -161,6 +171,7 @@ export function parseAiWorkflowDesignResponse(raw: string): AiWorkflowDesignPayl
       work_script: asString(row.work_script),
       script_type: scriptType,
       use_previous_work_result: asBoolean(row.use_previous_work_result, false),
+      work_report: asWorkReport(row.work_report),
     });
   });
 

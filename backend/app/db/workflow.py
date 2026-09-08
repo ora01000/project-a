@@ -19,7 +19,7 @@ _WORK_NODE_SELECT = """
     uuid, owner, work_name, work_description, target_agent, work_script,
     script_type, test_result, files, create_date, validate_date,
     last_start_date, last_end_date, last_success, last_fail_reason,
-    use_previous_work_result
+    use_previous_work_result, work_report
 """
 
 _WORKFLOW_SELECT = """
@@ -236,7 +236,8 @@ def ensure_workflow_tables(connection) -> None:
             last_end_date TEXT NOT NULL DEFAULT '',
             last_success INTEGER NOT NULL DEFAULT 0,
             last_fail_reason VARCHAR(200) NOT NULL DEFAULT '',
-            use_previous_work_result INTEGER NOT NULL DEFAULT 0
+            use_previous_work_result INTEGER NOT NULL DEFAULT 0,
+            work_report VARCHAR(200) NOT NULL DEFAULT ''
         )
         """
     )
@@ -304,6 +305,12 @@ def ensure_workflow_tables(connection) -> None:
         """
         ALTER TABLE work_node
             ADD COLUMN IF NOT EXISTS use_previous_work_result INTEGER NOT NULL DEFAULT 0
+        """
+    )
+    connection.execute(
+        """
+        ALTER TABLE work_node
+            ADD COLUMN IF NOT EXISTS work_report VARCHAR(200) NOT NULL DEFAULT ''
         """
     )
     _migrate_work_node_script_columns(connection)
@@ -416,6 +423,25 @@ def ensure_workflow_tables(connection) -> None:
     _migrate_to_uuid_primary_key(connection, "work_node")
     _migrate_to_uuid_primary_key(connection, "workflow")
 
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS workflow_history (
+            idx SERIAL PRIMARY KEY,
+            uuid VARCHAR(36) NOT NULL,
+            start_date TEXT NOT NULL DEFAULT '',
+            end_date TEXT NOT NULL DEFAULT '',
+            finish_success INTEGER NOT NULL DEFAULT 0,
+            result_file VARCHAR(1000) NOT NULL DEFAULT ''
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS ix_workflow_history_uuid
+            ON workflow_history (uuid)
+        """
+    )
+
 
 @dataclass(frozen=True)
 class WorkNodeRecord:
@@ -434,6 +460,7 @@ class WorkNodeRecord:
     last_success: bool = False
     last_fail_reason: str = ""
     use_previous_work_result: bool = False
+    work_report: str = ""
     owner: int = 0
 
 
@@ -479,6 +506,7 @@ def _row_to_work_node(row) -> WorkNodeRecord:
     use_previous_work_result = (
         row["use_previous_work_result"] if "use_previous_work_result" in keys else 0
     )
+    work_report = row["work_report"] if "work_report" in keys else ""
     owner = row["owner"] if "owner" in keys else 0
     return WorkNodeRecord(
         uuid=str(row["uuid"] or ""),
@@ -497,6 +525,7 @@ def _row_to_work_node(row) -> WorkNodeRecord:
         last_success=bool(int(last_success or 0)),
         last_fail_reason=str(last_fail_reason or "")[:200],
         use_previous_work_result=bool(int(use_previous_work_result or 0)),
+        work_report=str(work_report or "")[:200],
     )
 
 
@@ -606,6 +635,7 @@ def create_work_node(
     test_result: bool = False,
     files: str = "",
     use_previous_work_result: bool = False,
+    work_report: str = "",
     uuid: str | None = None,
     owner: int = 0,
 ) -> WorkNodeRecord:
@@ -621,8 +651,8 @@ def create_work_node(
                 uuid, owner, work_name, work_description, target_agent, work_script,
                 script_type, test_result, files, create_date, validate_date,
                 last_start_date, last_end_date, last_success, last_fail_reason,
-                use_previous_work_result
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', '', 0, '', ?)
+                use_previous_work_result, work_report
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', '', 0, '', ?, ?)
             RETURNING {_WORK_NODE_SELECT}
             """,
             (
@@ -638,6 +668,7 @@ def create_work_node(
                 created_at,
                 validate_at,
                 1 if use_previous_work_result else 0,
+                (work_report or "").strip()[:200],
             ),
         ).fetchone()
     return _row_to_work_node(row)
@@ -655,6 +686,7 @@ def update_work_node(
     test_result: bool,
     files: str,
     use_previous_work_result: bool = False,
+    work_report: str = "",
 ) -> WorkNodeRecord | None:
     existing = get_work_node_by_uuid(database_path, node_uuid)
     if existing is None:
@@ -671,7 +703,7 @@ def update_work_node(
             UPDATE work_node
             SET work_name = ?, work_description = ?, target_agent = ?, work_script = ?,
                 script_type = ?, test_result = ?, files = ?, validate_date = ?,
-                use_previous_work_result = ?
+                use_previous_work_result = ?, work_report = ?
             WHERE uuid = ?
             """,
             (
@@ -684,6 +716,7 @@ def update_work_node(
                 (files or "").strip()[:300],
                 validate_date,
                 1 if use_previous_work_result else 0,
+                (work_report or "").strip()[:200],
                 existing.uuid,
             ),
         )
@@ -880,6 +913,7 @@ def clone_workflow(
             test_result=node.test_result,
             files=node.files,
             use_previous_work_result=node.use_previous_work_result,
+            work_report=node.work_report,
             uuid=new_uuid,
             owner=owner_idx,
         )
@@ -1005,3 +1039,99 @@ def mark_work_node_run_finished(
             (ended, 1 if success else 0, reason, existing.uuid),
         )
     return get_work_node_by_uuid(database_path, existing.uuid)
+
+
+_WORKFLOW_HISTORY_SELECT = """
+    idx, uuid, start_date, end_date, finish_success, result_file
+"""
+
+
+@dataclass(frozen=True)
+class WorkflowHistoryRecord:
+    idx: int
+    uuid: str
+    start_date: str
+    end_date: str
+    finish_success: bool
+    result_file: str
+
+
+def _row_to_workflow_history(row) -> WorkflowHistoryRecord:
+    return WorkflowHistoryRecord(
+        idx=int(row["idx"]),
+        uuid=str(row["uuid"] or ""),
+        start_date=str(row["start_date"] or ""),
+        end_date=str(row["end_date"] or ""),
+        finish_success=bool(int(row["finish_success"] or 0)),
+        result_file=str(row["result_file"] or "")[:1000],
+    )
+
+
+def insert_workflow_history(
+    database_path: str | Path,
+    *,
+    workflow_uuid: str,
+    start_date: str,
+    end_date: str,
+    finish_success: bool,
+    result_file: str,
+) -> WorkflowHistoryRecord:
+    key = (workflow_uuid or "").strip()
+    if not key:
+        raise ValueError("workflow uuid가 비어 있습니다.")
+    with get_connection(database_path) as connection:
+        ensure_workflow_tables(connection)
+        row = connection.execute(
+            f"""
+            INSERT INTO workflow_history (
+                uuid, start_date, end_date, finish_success, result_file
+            ) VALUES (?, ?, ?, ?, ?)
+            RETURNING {_WORKFLOW_HISTORY_SELECT}
+            """,
+            (
+                key,
+                (start_date or "").strip(),
+                (end_date or "").strip(),
+                1 if finish_success else 0,
+                (result_file or "").strip()[:1000],
+            ),
+        ).fetchone()
+    return _row_to_workflow_history(row)
+
+
+def list_workflow_history(
+    database_path: str | Path,
+    workflow_uuid: str,
+) -> list[WorkflowHistoryRecord]:
+    key = (workflow_uuid or "").strip()
+    if not key:
+        return []
+    with get_connection(database_path) as connection:
+        ensure_workflow_tables(connection)
+        rows = connection.execute(
+            f"""
+            SELECT {_WORKFLOW_HISTORY_SELECT}
+            FROM workflow_history
+            WHERE uuid = ?
+            ORDER BY idx DESC
+            """,
+            (key,),
+        ).fetchall()
+    return [_row_to_workflow_history(row) for row in rows]
+
+
+def get_workflow_history_by_idx(
+    database_path: str | Path,
+    history_idx: int,
+) -> WorkflowHistoryRecord | None:
+    with get_connection(database_path) as connection:
+        ensure_workflow_tables(connection)
+        row = connection.execute(
+            f"""
+            SELECT {_WORKFLOW_HISTORY_SELECT}
+            FROM workflow_history
+            WHERE idx = ?
+            """,
+            (int(history_idx),),
+        ).fetchone()
+    return _row_to_workflow_history(row) if row is not None else None

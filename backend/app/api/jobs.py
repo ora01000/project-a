@@ -23,6 +23,7 @@ from backend.app.db.jobs import (
     can_view_job,
     cancel_failed_job,
     direct_approve_job,
+    ensure_workflow_job_result,
     get_job_by_idx,
     list_jobs,
     reject_assigned_job,
@@ -30,7 +31,7 @@ from backend.app.db.jobs import (
     rework_job,
     update_job_ai_audit_comment,
 )
-from backend.app.db.jobs_result import JobResultRecord, get_job_result_by_srnum
+from backend.app.db.jobs_result import JobResultRecord, get_job_result_by_srnum, upsert_job_result
 from backend.app.db.roles import is_admin_role
 from backend.app.middleware.session_auth import get_request_auth_user
 from backend.app.notifications.email_recipients import (
@@ -98,6 +99,7 @@ async def _resume_workflow_job_if_needed(request: Request, job: JobRecord) -> No
             result.status,
             result.message,
         )
+        _update_workflow_job_result_after_resume(database_path, job, result)
         if result.status == "failed":
             logger.warning("workflow continued but failed job=%s: %s", job.idx, result.message)
     except Exception:
@@ -106,6 +108,35 @@ async def _resume_workflow_job_if_needed(request: Request, job: JobRecord) -> No
             fail_workflow_after_rejection(database_path, job)
         except Exception:
             logger.exception("workflow fail fallback after resume error failed job=%s", job.idx)
+
+
+def _update_workflow_job_result_after_resume(database_path, job: JobRecord, run_result) -> None:
+    """Append workflow continuation outcome onto the HITL job result."""
+    from backend.app.db.job_datetime import now_job_datetime
+
+    existing = get_job_result_by_srnum(database_path, job.srnum)
+    base = (existing.result if existing is not None else job.job_content or "").strip()
+    step_lines: list[str] = []
+    for step in getattr(run_result, "steps", None) or []:
+        label = getattr(step, "label", "") or ""
+        status = getattr(step, "status", "") or ""
+        detail = getattr(step, "detail", "") or ""
+        step_lines.append(f"- [{status}] {label}" + (f": {detail}" if detail else ""))
+    steps_block = "\n".join(step_lines) if step_lines else "- (추가 단계 없음)"
+    status = getattr(run_result, "status", "") or ""
+    message = getattr(run_result, "message", "") or ""
+    appendix = (
+        f"\n\n---\n\n## 승인 이후 워크플로우 진행\n\n"
+        f"- 상태: **{status}**\n"
+        f"- 메시지: {message}\n\n"
+        f"### 단계\n\n{steps_block}\n"
+    )
+    upsert_job_result(
+        database_path,
+        srnum=job.srnum,
+        result=(base + appendix).strip(),
+        complete_date=now_job_datetime(),
+    )
 
 
 def _fail_workflow_job_if_needed(database_path, job: JobRecord) -> None:
@@ -335,6 +366,11 @@ async def get_job_result(request: Request, idx: int) -> JobResultResponse:
         raise HTTPException(status_code=404, detail="Job not found")
 
     result = get_job_result_by_srnum(database_path, job.srnum)
+    if result is None and int(job.job_type) == JOB_TYPE_WORKFLOW:
+        try:
+            result = ensure_workflow_job_result(database_path, job)
+        except Exception:
+            logger.exception("workflow job result backfill failed job=%s", job.idx)
     if result is None:
         raise HTTPException(status_code=404, detail="Job result not found")
     return JobResultResponse.from_record(result)

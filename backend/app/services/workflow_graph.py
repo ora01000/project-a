@@ -24,10 +24,12 @@ WORK_W = 50
 WORK_H = 50
 HITL_W = 50
 HITL_H = 20
+MAIL_R = 18
 ROUND_R = 22
 H_GAP = 110
 MAIN_Y = 70
 FAIL_Y = 180
+MAIL_GAP = 28
 ORIGIN_X = 50
 
 UUID_TOKEN_PATTERN = re.compile(
@@ -144,6 +146,7 @@ def build_workflow_graph(
     *,
     work_names: dict[str, str] | None = None,
     user_names: dict[str, str] | None = None,
+    work_report_uuids: set[str] | None = None,
 ) -> dict[str, Any]:
     tokens = parse_workflow_tokens(expression)
     if not tokens:
@@ -151,6 +154,7 @@ def build_workflow_graph(
 
     names = work_names or {}
     users = user_names or {}
+    report_uuids = work_report_uuids or set()
     nodes: list[GraphNode] = []
     edges: list[GraphEdge] = []
     main_ids: list[str] = []
@@ -213,6 +217,27 @@ def build_workflow_graph(
             edges.append(GraphEdge(source=source_id, target=fail_id, kind="fail"))
         elif token.fail_end:
             edges.append(GraphEdge(source=source_id, target=end_id, kind="fail"))
+
+    for node in list(nodes):
+        if node.kind != "work" or not node.work_uuid:
+            continue
+        if node.work_uuid not in report_uuids:
+            continue
+        mail_id = f"M:{node.id}"
+        mail_cy = node.cy + node.height / 2 + MAIL_GAP + MAIL_R
+        nodes.append(
+            GraphNode(
+                id=mail_id,
+                kind="mail",
+                label="메일전송",
+                work_uuid=node.work_uuid,
+                cx=node.cx,
+                cy=mail_cy,
+                width=MAIL_R * 2,
+                height=MAIL_R * 2,
+            )
+        )
+        edges.append(GraphEdge(source=node.id, target=mail_id, kind="report"))
 
     max_x = max((node.cx + node.width / 2 for node in nodes), default=ORIGIN_X)
     max_y = max((node.cy + node.height / 2 for node in nodes), default=MAIN_Y)
