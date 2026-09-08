@@ -325,26 +325,43 @@ export function WorkflowPage({
                   return (
                     <div
                       key={item.uuid}
-                      className={`relative flex min-h-[76px] w-full flex-col justify-center gap-1 overflow-hidden rounded-xl border bg-slate-900/90 px-3 py-2 pt-7 text-left shadow-lg ${
+                      className={`flex min-h-[76px] w-full flex-col justify-center gap-1 overflow-hidden rounded-xl border bg-slate-900/90 px-3 py-2 text-left shadow-lg ${
                         isActive ? "border-sky-500" : "border-slate-700"
                       } ${isRunning ? "wf-run-pulse" : ""}`}
                       aria-busy={isRunning || undefined}
                     >
-                      {isMine ? (
+                      <div className="flex min-w-0 items-start gap-1">
                         <button
                           type="button"
-                          title="워크플로우 삭제"
-                          aria-label="워크플로우 삭제"
-                          disabled={isRunning || runningUuid != null}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            void handleDeleteWorkflow(item);
+                          onClick={() => {
+                            setSelectedUuid(item.uuid);
+                            setMode("edit");
                           }}
-                          className="absolute right-1.5 top-1.5 z-10 flex h-5 w-5 items-center justify-center rounded-sm bg-transparent text-[11px] font-semibold leading-none text-slate-300 hover:bg-rose-950/60 hover:text-rose-200 disabled:cursor-not-allowed disabled:opacity-40"
+                          className="min-w-0 flex-1 text-left"
                         >
-                          X
+                          <h2
+                            className="min-w-0 truncate text-sm font-semibold text-slate-100"
+                            title={item.workflow_name}
+                          >
+                            {item.workflow_name}
+                          </h2>
                         </button>
-                      ) : null}
+                        {isMine ? (
+                          <button
+                            type="button"
+                            title="워크플로우 삭제"
+                            aria-label="워크플로우 삭제"
+                            disabled={isRunning || runningUuid != null}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              void handleDeleteWorkflow(item);
+                            }}
+                            className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-sm bg-transparent text-[11px] font-semibold leading-none text-slate-300 hover:bg-rose-950/60 hover:text-rose-200 disabled:cursor-not-allowed disabled:opacity-40"
+                          >
+                            X
+                          </button>
+                        ) : null}
+                      </div>
                       <button
                         type="button"
                         onClick={() => {
@@ -353,12 +370,6 @@ export function WorkflowPage({
                         }}
                         className="flex min-w-0 w-full flex-col gap-1 text-left"
                       >
-                        <h2
-                          className="min-w-0 truncate pr-1 text-sm font-semibold text-slate-100"
-                          title={item.workflow_name}
-                        >
-                          {item.workflow_name}
-                        </h2>
                         <p className="truncate text-[11px] text-slate-400" title={item.create_date || undefined}>
                           {item.create_date || "생성일 없음"}
                         </p>
