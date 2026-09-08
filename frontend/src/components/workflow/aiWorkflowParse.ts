@@ -10,6 +10,7 @@ export type AiWorkNodeDraft = {
   target_agent: string;
   work_script: string;
   script_type: WorkScriptType | string;
+  use_previous_work_result: boolean;
 };
 
 export type AiWorkflowDesignPayload = {
@@ -40,6 +41,20 @@ function extractJsonText(raw: string): string {
 
 function asString(value: unknown): string {
   return String(value ?? "").trim();
+}
+
+function asBoolean(value: unknown, fallback = false): boolean {
+  if (typeof value === "boolean") {
+    return value;
+  }
+  const text = asString(value).toLowerCase();
+  if (text === "true" || text === "1" || text === "yes") {
+    return true;
+  }
+  if (text === "false" || text === "0" || text === "no") {
+    return false;
+  }
+  return fallback;
 }
 
 function newUuid(): string {
@@ -115,6 +130,7 @@ export function parseAiWorkflowDesignResponse(raw: string): AiWorkflowDesignPayl
     target_agent: string;
     work_script: string;
     script_type: string;
+    use_previous_work_result: boolean;
   }> = [];
 
   workList.forEach((item, index) => {
@@ -144,6 +160,7 @@ export function parseAiWorkflowDesignResponse(raw: string): AiWorkflowDesignPayl
       target_agent: asString(row.target_agent),
       work_script: asString(row.work_script),
       script_type: scriptType,
+      use_previous_work_result: asBoolean(row.use_previous_work_result, false),
     });
   });
 

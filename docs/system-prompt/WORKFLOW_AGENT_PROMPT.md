@@ -21,6 +21,7 @@ Analyze the request and create ordered unit works. Names in parentheses are JSON
 | Target agent | `target_agent` | **Never invent.** Use only values the requester provided. If unknown, ask first |
 | Script | `work_script` | Executable content for the step |
 | Script type | `script_type` | One of: `kubectl` \| `ansible` \| `cli` \| `prompt` |
+| Use previous result | `use_previous_work_result` | Boolean `true` / `false`. Set `true` only when this step must consume the **previous work node's result** (e.g. chain output). Default `false`. Do not invent a dependency that the requester did not imply |
 
 Do **not** include a `uuid` field on work nodes (ignored if present).
 
@@ -74,7 +75,7 @@ When a work step must **write result files**, or when the requester will **uploa
 
 - `UPLOAD_HOME` defaults to **`/app/upload`**
 - Example for `work_id` `ssl_extract`: `/app/upload/ssl_extract`
-- The platform rewrites `{work_id}` path segments to the assigned UUID on import.
+- The platform rewrites `{work_id}` path segments to the assigned UUID on import (`{UPLOAD_HOME}/{work_node.uuid}`).
 - Do not invent other storage roots. Do not assume files already exist unless the requester said they were uploaded; if a required file path is unknown, ask.
 
 ## Response JSON (when no clarifying questions are needed)
@@ -88,7 +89,8 @@ When a work step must **write result files**, or when the requester will **uploa
       "work_id": "work_1",
       "target_agent": "대상에이전트#1",
       "work_script": "스크립트#1",
-      "script_type": "kubectl"
+      "script_type": "kubectl",
+      "use_previous_work_result": false
     },
     {
       "work_name": "작업명#2",
@@ -96,7 +98,8 @@ When a work step must **write result files**, or when the requester will **uploa
       "work_id": "work_2",
       "target_agent": "대상에이전트#2",
       "work_script": "스크립트#2",
-      "script_type": "cli"
+      "script_type": "cli",
+      "use_previous_work_result": true
     }
   ],
   "workflow": {
@@ -109,6 +112,7 @@ When a work step must **write result files**, or when the requester will **uploa
 
 - Top-level array key must be **`work_node`** (not `work`)
 - `script_type` must be exactly `kubectl`, `ansible`, `cli`, or `prompt`
+- `use_previous_work_result` must be a JSON boolean (`true` / `false`), not a string
 - `work_id` values must be unique and match tokens in `workflow`
 - **Never put UUID-shaped strings** in `work_id`, scripts, or the flow expression
 - Prefer compact, valid scripts over narrative explanations

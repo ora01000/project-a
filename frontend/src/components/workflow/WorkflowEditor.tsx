@@ -136,8 +136,8 @@ function HamburgerIcon() {
 function TextLabelChip({ children, title }: { children: ReactNode; title?: string }) {
   return (
     <span
-      title={title}
-      className="inline-block max-w-full truncate rounded-full border border-slate-600 bg-slate-900/80 px-2.5 py-1 text-center text-[11px] font-medium text-slate-200"
+      title={title || undefined}
+      className="inline-block max-w-full truncate rounded-full border border-slate-600 bg-slate-900/80 px-2.5 py-1 text-left text-[11px] font-medium text-slate-200"
     >
       {children}
     </span>
@@ -408,6 +408,7 @@ export function WorkflowEditor({
               script_type: draft.script_type || "",
               test_result: false,
               files: "",
+              use_previous_work_result: Boolean(draft.use_previous_work_result),
             }),
           });
           if (!response.ok) {
@@ -883,7 +884,7 @@ export function WorkflowEditor({
           }
         }}
         aria-busy={isNodeRunning || undefined}
-        className={`relative w-[160px] rounded-lg border px-2.5 pb-2.5 pt-6 text-left ${
+        className={`relative w-[208px] rounded-lg border px-2.5 pb-2.5 pt-6 text-left ${
           failBranch ? "border-rose-400/80 bg-slate-950" : "border-sky-400/80 bg-slate-950"
         } ${readOnly ? "cursor-default" : "cursor-pointer"} ${
           isSelected(node.clientId) ? "ring-2 ring-sky-300 ring-offset-1 ring-offset-slate-900" : ""
@@ -897,14 +898,16 @@ export function WorkflowEditor({
         {readOnly ? null : (
           <DeleteBox onClick={() => handleRemoveNode(node.clientId)} label="작업노드 삭제" />
         )}
-        <div className="grid gap-1.5">
-          <div>
+        <div className="grid min-w-0 gap-1.5">
+          <div className="min-w-0">
             <p className="text-[10px] text-slate-500">작업명</p>
-            <TextLabelChip title={node.name}>{node.name || "새 작업노드"}</TextLabelChip>
+            <TextLabelChip title={node.name || "새 작업노드"}>
+              {node.name || "새 작업노드"}
+            </TextLabelChip>
           </div>
-          <div>
+          <div className="min-w-0">
             <p className="text-[10px] text-slate-500">에이전트</p>
-            <TextLabelChip title={node.targetAgentName || undefined}>
+            <TextLabelChip title={node.targetAgentName || "미지정"}>
               {node.targetAgentName || "미지정"}
             </TextLabelChip>
           </div>
