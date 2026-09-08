@@ -504,7 +504,7 @@ async def api_get_work_node_validation_result(
     node_uuid: str,
     request: Request,
 ) -> dict[str, str]:
-    """Return saved validation output text located by work_node.validate_date."""
+    """Return saved validation/run output (``result_latest.out``, with archive fallback)."""
     auth_user = get_request_auth_user(request)
     database_path = request.app.state.database_path
     record = get_work_node_by_uuid(database_path, node_uuid)
@@ -513,18 +513,19 @@ async def api_get_work_node_validation_result(
     visible = {node.uuid for node in list_work_nodes_visible(database_path, auth_user.idx)}
     if record.uuid not in visible:
         raise HTTPException(status_code=403, detail="이 작업노드를 조회할 권한이 없습니다.")
-    if not record.test_result or not (record.validate_date or "").strip():
-        raise HTTPException(status_code=404, detail="저장된 검증 결과가 없습니다.")
     try:
         content = read_work_node_validation_output(
             record.uuid,
-            validate_date=record.validate_date,
+            validate_date=record.validate_date or record.last_end_date,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     if content is None:
         raise HTTPException(status_code=404, detail="검증 결과 파일을 찾을 수 없습니다.")
-    return {"content": content, "validate_date": record.validate_date}
+    return {
+        "content": content,
+        "validate_date": record.validate_date or record.last_end_date,
+    }
 
 
 @router.post("/work-nodes/{node_uuid}/file", response_model=WorkNodeResponse)

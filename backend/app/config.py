@@ -1086,8 +1086,11 @@ def work_node_file_path(node_uuid: str, filename: str | None) -> Path | None:
     return work_node_upload_dir(node_uuid) / name
 
 
+RESULT_LATEST_FILENAME = "result_latest.out"
+
+
 def validation_output_filename(validate_date: str | None) -> str:
-    """Filename ``result_{timestamp}.out`` derived from validate_date (digits only)."""
+    """Archive filename ``result_{timestamp}.out`` derived from validate_date (digits only)."""
     import re
 
     from backend.app.db.job_datetime import now_job_datetime
@@ -1104,22 +1107,28 @@ def write_work_node_validation_output(
     validate_date: str,
     message: str,
 ) -> str:
-    """Write validation message to ``{UPLOAD_HOME}/{uuid}/result_{timestamp}.out``. Returns filename."""
+    """Write message to ``result_latest.out`` and a timestamped archive. Returns latest filename."""
     directory = work_node_upload_dir(node_uuid)
     directory.mkdir(parents=True, exist_ok=True)
-    filename = validation_output_filename(validate_date)
-    target = directory / filename
-    target.write_text(message or "", encoding="utf-8")
-    return filename
+    text = message or ""
+    latest = directory / RESULT_LATEST_FILENAME
+    latest.write_text(text, encoding="utf-8")
+    archive_name = validation_output_filename(validate_date)
+    (directory / archive_name).write_text(text, encoding="utf-8")
+    return RESULT_LATEST_FILENAME
 
 
 def read_work_node_validation_output(
     node_uuid: str,
     *,
-    validate_date: str | None,
+    validate_date: str | None = None,
 ) -> str | None:
-    """Load ``result_{timestamp}.out`` for the node's validate_date, or None if missing."""
+    """Load ``result_latest.out``; fall back to timestamped archive when needed."""
     import re
+
+    latest = work_node_file_path(node_uuid, RESULT_LATEST_FILENAME)
+    if latest is not None and latest.is_file():
+        return latest.read_text(encoding="utf-8")
 
     digits = re.sub(r"\D", "", (validate_date or "").strip())
     if not digits:
