@@ -904,7 +904,7 @@ def clone_workflow(
     """Deep-copy a workflow and all referenced work_nodes for ``new_owner``."""
     source = get_workflow_by_uuid(database_path, source_uuid)
     if source is None:
-        raise ValueError("워크플로우를 찾을 수 없습니다.")
+        raise ValueError("작업 워크플로우를 찾을 수 없습니다.")
     owner_idx = int(new_owner or 0)
     if owner_idx <= 0:
         raise ValueError("복제 소유자가 올바르지 않습니다.")

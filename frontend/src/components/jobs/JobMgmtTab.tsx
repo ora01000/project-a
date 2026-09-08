@@ -35,7 +35,7 @@ function jobTypeLabel(jobType: number | undefined): string {
     return "Whatap이벤트";
   }
   if (jobType === JOB_TYPE_WORKFLOW) {
-    return "워크플로우승인";
+    return "작업 워크플로우 승인";
   }
   if (jobType === JOB_TYPE_SIGNUP) {
     return "가입신청";

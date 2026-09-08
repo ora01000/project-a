@@ -548,7 +548,7 @@ def _record_workflow_job_approval_result(database_path: str | Path, job: JobReco
     )
     body = (job.job_content or "").strip()
     result_text = (
-        f"## 워크플로우 승인 완료\n\n"
+        f"## 작업 워크플로우 승인 완료\n\n"
         f"- 승인자: **{approver_name}**\n"
         f"- 요청자: **{requester_name}**\n"
         f"- 작업: {job.job_title}\n\n"

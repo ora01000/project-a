@@ -104,8 +104,8 @@ When a work step must **write result files**, or when the requester will **uploa
     }
   ],
   "workflow": {
-    "workflow_name": "워크플로우명",
-    "workflow_description": "워크플로우설명",
+    "workflow_name": "작업 워크플로우명",
+    "workflow_description": "작업 워크플로우설명",
     "workflow": "S->work_1->work_2->E"
   }
 }

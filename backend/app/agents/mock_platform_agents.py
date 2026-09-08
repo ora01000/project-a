@@ -82,8 +82,8 @@ MOCK_PLATFORM_AGENT_SPECS: tuple[MockPlatformAgentSpec, ...] = (
     ),
     MockPlatformAgentSpec(
         agent_id=WORKFLOW_AGENT_LOCAL_AGENT_ID,
-        agent_name="워크플로우 생성",
-        description="사용자 요청을 분석해 워크플로우와 작업노드 JSON을 생성",
+        agent_name="작업 워크플로우 생성",
+        description="사용자 요청을 분석해 작업 워크플로우와 작업노드 JSON을 생성",
         system_prompt=_mock_platform_system_prompt(WORKFLOW_AGENT_LOCAL_AGENT_ID),
         callable_agent_ids=(),
     ),

@@ -71,7 +71,7 @@ export function WorkflowDesignPanel({
     return (
       <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-xl border border-slate-700 bg-slate-900/50 shadow-inner">
         <div className="flex h-full items-center justify-center text-sm text-slate-500">
-          워크플로우를 선택하거나 새로 만드세요.
+          작업 워크플로우를 선택하거나 새로 만드세요.
         </div>
       </section>
     );
@@ -89,7 +89,7 @@ export function WorkflowDesignPanel({
       }
       const confirmed = window.confirm(
         next
-          ? `"${selected.workflow_name}" 워크플로우를 배포하시겠습니까?\n다른 사용자가 조회·실행·복제할 수 있습니다.`
+          ? `"${selected.workflow_name}" 작업 워크플로우를 배포하시겠습니까?\n다른 사용자가 조회·실행·복제할 수 있습니다.`
           : `"${selected.workflow_name}" 배포를 취소하시겠습니까?`,
       );
       if (!confirmed) {
@@ -120,7 +120,7 @@ export function WorkflowDesignPanel({
         return;
       }
       const confirmed = window.confirm(
-        `"${selected.workflow_name}" 워크플로우를 복제하시겠습니까?\n하위 작업노드도 함께 복제됩니다.`,
+        `"${selected.workflow_name}" 작업 워크플로우를 복제하시겠습니까?\n하위 작업노드도 함께 복제됩니다.`,
       );
       if (!confirmed) {
         return;
@@ -148,7 +148,7 @@ export function WorkflowDesignPanel({
         <header className="flex shrink-0 items-start justify-between gap-3 border-b border-slate-700/80 px-4 py-3">
           <div className="min-w-0">
             <h2 className="truncate text-sm font-semibold text-slate-200">
-              {mode === "create" ? "새로운 워크플로우" : selected?.workflow_name ?? "워크플로우 편집"}
+              {mode === "create" ? "새로운 작업 워크플로우" : selected?.workflow_name ?? "작업 워크플로우 편집"}
             </h2>
             {mode === "edit" ? (
               <p className="mt-0.5 text-[11px] text-slate-500">
@@ -227,7 +227,7 @@ export function WorkflowDesignPanel({
   return (
     <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-xl border border-slate-700 bg-slate-900/50 shadow-inner">
       <div className="flex h-full items-center justify-center text-sm text-slate-500">
-        워크플로우를 선택하거나 새로 만드세요.
+        작업 워크플로우를 선택하거나 새로 만드세요.
       </div>
     </section>
   );

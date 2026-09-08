@@ -167,7 +167,7 @@ export function MenuBar({ activeView, user, onNavigate, onLogout, onUserUpdated 
             onClick={() => onNavigate("workflow")}
             className={menuButtonClass(activeView === "workflow")}
           >
-            워크플로우
+            작업 워크플로우
           </button>
           <span className="text-slate-600">|</span>
 

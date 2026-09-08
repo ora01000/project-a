@@ -73,8 +73,8 @@ export function WorkflowPage({
       if (looksLikeJson) {
         setError(
           err instanceof Error
-            ? `AI 워크플로우 파싱 실패: ${err.message}`
-            : "AI 워크플로우 파싱에 실패했습니다.",
+            ? `AI 작업 워크플로우 파싱 실패: ${err.message}`
+            : "AI 작업 워크플로우 파싱에 실패했습니다.",
         );
       }
       // 보충 질문(비 JSON)이면 무시
@@ -165,7 +165,7 @@ export function WorkflowPage({
   const loadWorkflows = useCallback(async () => {
     const response = await fetch("/api/workflows");
     if (!response.ok) {
-      throw new Error(await parseError(response, "워크플로우 목록을 불러오지 못했습니다."));
+      throw new Error(await parseError(response, "작업 워크플로우 목록을 불러오지 못했습니다."));
     }
     const data = (await response.json()) as WorkflowItem[];
     setItems(data);
@@ -190,7 +190,7 @@ export function WorkflowPage({
         await Promise.all([loadWorkflows(), loadWorkNodes()]);
       } catch (err) {
         if (!cancelled) {
-          setError(err instanceof Error ? err.message : "워크플로우를 불러오지 못했습니다.");
+          setError(err instanceof Error ? err.message : "작업 워크플로우를 불러오지 못했습니다.");
         }
       }
     };
@@ -240,7 +240,7 @@ export function WorkflowPage({
 
   const handleDeleteWorkflow = async (item: WorkflowItem) => {
     const confirmed = window.confirm(
-      `"${item.workflow_name}" 워크플로우를 삭제하시겠습니까?\n참조하는 작업노드도 함께 삭제됩니다.`,
+      `"${item.workflow_name}" 작업 워크플로우를 삭제하시겠습니까?\n참조하는 작업노드도 함께 삭제됩니다.`,
     );
     if (!confirmed) {
       return;
@@ -250,7 +250,7 @@ export function WorkflowPage({
     try {
       const response = await fetch(`/api/workflows/${item.uuid}`, { method: "DELETE" });
       if (!response.ok) {
-        throw new Error(await parseError(response, "워크플로우 삭제에 실패했습니다."));
+        throw new Error(await parseError(response, "작업 워크플로우 삭제에 실패했습니다."));
       }
       await Promise.all([loadWorkflows(), loadWorkNodes()]);
       if (selectedUuid === item.uuid) {
@@ -259,13 +259,13 @@ export function WorkflowPage({
       }
       setRunMessage(`"${item.workflow_name}" 을(를) 삭제했습니다.`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "워크플로우 삭제에 실패했습니다.");
+      setError(err instanceof Error ? err.message : "작업 워크플로우 삭제에 실패했습니다.");
     }
   };
 
   const handleRunWorkflow = async (item: WorkflowItem) => {
     const confirmed = window.confirm(
-      `"${item.workflow_name}" 워크플로우를 실행하시겠습니까?`,
+      `"${item.workflow_name}" 작업 워크플로우를 실행하시겠습니까?`,
     );
     if (!confirmed) {
       return;
@@ -276,7 +276,7 @@ export function WorkflowPage({
     try {
       const response = await fetch(`/api/workflows/${item.uuid}/run`, { method: "POST" });
       if (!response.ok) {
-        throw new Error(await parseError(response, "워크플로우 실행에 실패했습니다."));
+        throw new Error(await parseError(response, "작업 워크플로우 실행에 실패했습니다."));
       }
       const payload = (await response.json()) as {
         status?: string;
@@ -290,7 +290,7 @@ export function WorkflowPage({
         setMode("edit");
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "워크플로우 실행에 실패했습니다.");
+      setError(err instanceof Error ? err.message : "작업 워크플로우 실행에 실패했습니다.");
     } finally {
       setRunningUuid(null);
     }
@@ -314,7 +314,7 @@ export function WorkflowPage({
               {runMessage ? <p className="text-xs text-emerald-300">{runMessage}</p> : null}
               <div className="flex w-full flex-col gap-3">
                 {items.length === 0 && !error ? (
-                  <p className="text-xs text-slate-500">등록된 워크플로우가 없습니다.</p>
+                  <p className="text-xs text-slate-500">등록된 작업 워크플로우가 없습니다.</p>
                 ) : null}
                 {items.map((item) => {
                   const isActive = selectedUuid === item.uuid && mode === "edit";
@@ -353,8 +353,8 @@ export function WorkflowPage({
                         {isMine ? (
                           <button
                             type="button"
-                            title="워크플로우 삭제"
-                            aria-label="워크플로우 삭제"
+                            title="작업 워크플로우 삭제"
+                            aria-label="작업 워크플로우 삭제"
                             disabled={isRunning || runningUuid != null}
                             onClick={(event) => {
                               event.stopPropagation();
@@ -397,7 +397,7 @@ export function WorkflowPage({
                           ) : null}
                           {ownerName ? (
                             <span
-                              title={isMine ? "내 워크플로우" : `소유자: ${ownerName}`}
+                              title={isMine ? "내 작업 워크플로우" : `소유자: ${ownerName}`}
                               className="inline-block max-w-[40%] shrink-0 truncate rounded-full border border-slate-600 bg-slate-900/80 px-2.5 py-1 text-center text-[11px] font-medium text-slate-200"
                             >
                               {isMine ? "나" : ownerName}
@@ -409,7 +409,7 @@ export function WorkflowPage({
                         <button
                           type="button"
                           disabled={!canRun || isRunning || runningUuid != null}
-                          title={canRun ? "워크플로우 실행" : "실행할 수 없는 상태입니다"}
+                          title={canRun ? "작업 워크플로우 실행" : "실행할 수 없는 상태입니다"}
                           onClick={(event) => {
                             event.stopPropagation();
                             void handleRunWorkflow(item);

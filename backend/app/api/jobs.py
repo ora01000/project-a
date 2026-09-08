@@ -126,7 +126,7 @@ def _update_workflow_job_result_after_resume(database_path, job: JobRecord, run_
     status = getattr(run_result, "status", "") or ""
     message = getattr(run_result, "message", "") or ""
     appendix = (
-        f"\n\n---\n\n## 승인 이후 워크플로우 진행\n\n"
+        f"\n\n---\n\n## 승인 이후 작업 워크플로우 진행\n\n"
         f"- 상태: **{status}**\n"
         f"- 메시지: {message}\n\n"
         f"### 단계\n\n{steps_block}\n"

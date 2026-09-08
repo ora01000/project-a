@@ -18,6 +18,7 @@ import type { AgentRuntimeRecord } from "../../types/agentruntime";
 import { assignableAgentId } from "../../types/agentruntime";
 import type { WorkNodeItem, WorkflowApprover, WorkflowItem } from "../../types/workflow";
 import { WorkNodeEditPanel } from "./WorkNodeEditPanel";
+import { WorkflowApproverPickModal } from "./WorkflowApproverPickModal";
 import { WorkflowHistoryPanel } from "./WorkflowHistoryPanel";
 import {
   parseAiWorkflowDesignResponse,
@@ -56,8 +57,6 @@ interface WorkflowEditorProps {
   aiImportRequest?: { nonce: number; assistantText: string } | null;
   onAiImportHandled?: () => void;
 }
-
-type BalloonField = "approver";
 
 async function parseError(response: Response, fallback: string): Promise<string> {
   const payload = (await response.json().catch(() => null)) as { detail?: string } | null;
@@ -137,16 +136,6 @@ function DeleteBox({ onClick, label }: { onClick: () => void; label: string }) {
   );
 }
 
-function HamburgerIcon() {
-  return (
-    <svg viewBox="0 0 14 14" className="h-3.5 w-3.5" aria-hidden="true" fill="currentColor">
-      <rect x="2" y="3" width="10" height="1.5" rx="0.5" />
-      <rect x="2" y="6.25" width="10" height="1.5" rx="0.5" />
-      <rect x="2" y="9.5" width="10" height="1.5" rx="0.5" />
-    </svg>
-  );
-}
-
 function TextLabelChip({ children, title }: { children: ReactNode; title?: string }) {
   return (
     <span
@@ -155,15 +144,6 @@ function TextLabelChip({ children, title }: { children: ReactNode; title?: strin
     >
       {children}
     </span>
-  );
-}
-
-function Balloon({ children }: { children: ReactNode }) {
-  return (
-    <div className="absolute left-0 top-7 z-30 w-56 rounded-md border border-slate-600 bg-slate-800 p-2 shadow-xl">
-      <div className="absolute -top-1.5 left-4 h-3 w-3 rotate-45 border-l border-t border-slate-600 bg-slate-800" />
-      <div className="relative">{children}</div>
-    </div>
   );
 }
 
@@ -191,9 +171,8 @@ export function WorkflowEditor({
   const [runtimes, setRuntimes] = useState<AgentRuntimeRecord[]>([]);
   const [approvers, setApprovers] = useState<WorkflowApprover[]>([]);
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
-  const [openBalloon, setOpenBalloon] = useState<{ clientId: string; field: BalloonField } | null>(
-    null,
-  );
+  const [approverPickClientId, setApproverPickClientId] = useState<string | null>(null);
+  const approverPickClientIdRef = useRef<string | null>(null);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [bottomTab, setBottomTab] = useState<"edit" | "results">("results");
   const [editPanelHeight, setEditPanelHeight] = useState<number | null>(null);
@@ -328,7 +307,7 @@ export function WorkflowEditor({
     } catch (err) {
       setModel(emptyEditorModel());
       setSelectedNodeId(null);
-      setError(err instanceof Error ? err.message : "워크플로우 표현식을 읽지 못했습니다.");
+      setError(err instanceof Error ? err.message : "작업 워크플로우 표현식을 읽지 못했습니다.");
     }
     // 노드 목록 갱신으로 편집중 그래프가 초기화되지 않도록 workNodes는 의존성에서 제외한다.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -357,7 +336,7 @@ export function WorkflowEditor({
     if (readOnly) {
       setSelectedNodeId(null);
       setOpenMenuId(null);
-      setOpenBalloon(null);
+      setApproverPickClientId(null);
     }
   }, [readOnly]);
 
@@ -395,7 +374,7 @@ export function WorkflowEditor({
     if (readOnly) {
       processedAiImportNonceRef.current = aiImportRequest.nonce;
       onAiImportHandled?.();
-      setError("읽기 전용 상태에서는 AI 워크플로우를 삽입할 수 없습니다. 체크인 후 다시 시도하세요.");
+      setError("읽기 전용 상태에서는 AI 작업 워크플로우를 삽입할 수 없습니다. 체크인 후 다시 시도하세요.");
       return;
     }
 
@@ -469,12 +448,12 @@ export function WorkflowEditor({
         );
         if (!saveResponse.ok) {
           throw new Error(
-            await parseError(saveResponse, "작업노드는 생성됐지만 워크플로우 저장에 실패했습니다."),
+            await parseError(saveResponse, "작업노드는 생성됐지만 작업 워크플로우 저장에 실패했습니다."),
           );
         }
         await onSaved((await saveResponse.json()) as WorkflowItem);
       } catch (err) {
-        setError(err instanceof Error ? err.message : "AI 워크플로우 삽입에 실패했습니다.");
+        setError(err instanceof Error ? err.message : "AI 작업 워크플로우 삽입에 실패했습니다.");
       } finally {
         setIsSaving(false);
       }
@@ -520,7 +499,14 @@ export function WorkflowEditor({
   }, []);
 
   useEffect(() => {
+    approverPickClientIdRef.current = approverPickClientId;
+  }, [approverPickClientId]);
+
+  useEffect(() => {
     const handlePointer = (event: globalThis.MouseEvent) => {
+      if (approverPickClientIdRef.current) {
+        return;
+      }
       const target = event.target as Node;
       if (workflowCanvasRef.current?.contains(target)) {
         return;
@@ -530,7 +516,6 @@ export function WorkflowEditor({
       }
       setSelectedNodeId(null);
       setOpenMenuId(null);
-      setOpenBalloon(null);
     };
     window.addEventListener("mousedown", handlePointer);
     return () => window.removeEventListener("mousedown", handlePointer);
@@ -574,7 +559,7 @@ export function WorkflowEditor({
   const handleAddWork = async (afterId: string) => {
     setError(null);
     setOpenMenuId(null);
-    setOpenBalloon(null);
+    setApproverPickClientId(null);
     try {
       const node = await createWorkNode();
       setModel((current) => insertAfter(current, afterId, node));
@@ -610,7 +595,7 @@ export function WorkflowEditor({
   const handleSave = async () => {
     const trimmed = name.trim();
     if (!trimmed) {
-      setError("워크플로우 명을 입력하세요.");
+      setError("작업 워크플로우 명을 입력하세요.");
       return;
     }
     const invalid = validateEditor(model);
@@ -633,11 +618,11 @@ export function WorkflowEditor({
         }),
       });
       if (!response.ok) {
-        throw new Error(await parseError(response, "워크플로우를 저장하지 못했습니다."));
+        throw new Error(await parseError(response, "작업 워크플로우를 저장하지 못했습니다."));
       }
       await onSaved((await response.json()) as WorkflowItem);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "워크플로우를 저장하지 못했습니다.");
+      setError(err instanceof Error ? err.message : "작업 워크플로우를 저장하지 못했습니다.");
     } finally {
       setIsSaving(false);
     }
@@ -667,7 +652,7 @@ export function WorkflowEditor({
         void handleAddWork(stepId);
         return;
       }
-      setOpenBalloon(null);
+      setApproverPickClientId(null);
       setOpenMenuId(isOpen ? null : stepId);
     };
     return (
@@ -718,41 +703,6 @@ export function WorkflowEditor({
     );
   };
 
-  const renderBalloon = (clientId: string) => (
-    <Balloon>
-      {approvers.length === 0 ? (
-        <p className="text-[11px] text-slate-400">지정 가능한 승인자가 없습니다.</p>
-      ) : (
-        <div className="grid gap-1">
-          {approvers.map((item) => (
-            <button
-              key={item.userid}
-              type="button"
-              className="rounded border border-slate-600 bg-slate-900 px-2 py-1 text-left text-[11px] text-slate-100 hover:bg-slate-700"
-              onClick={() => {
-                setModel((current) => ({
-                  ...current,
-                  main: current.main.map((step) =>
-                    step.clientId === clientId && step.type === "hitl"
-                      ? {
-                          ...step,
-                          userid: item.userid,
-                          username: item.username || item.userid,
-                        }
-                      : step,
-                  ),
-                }));
-                setOpenBalloon(null);
-              }}
-            >
-              {item.username || item.userid}
-            </button>
-          ))}
-        </div>
-      )}
-    </Balloon>
-  );
-
   const renderApproverCard = (clientId: string, username: string, userid: string) => {
     const display = username || userid || "미지정";
     const isAwaiting =
@@ -761,7 +711,7 @@ export function WorkflowEditor({
     return (
       <div
         aria-busy={isAwaiting || undefined}
-        className={`relative w-[180px] rounded-sm border border-amber-400 bg-slate-950 px-2.5 py-2 pt-6 ${
+        className={`relative w-[208px] rounded-sm border border-amber-400 bg-slate-950 px-2.5 py-2 pt-6 ${
           isAwaiting ? "wf-run-pulse" : ""
         }`}
       >
@@ -771,31 +721,24 @@ export function WorkflowEditor({
           </span>
         ) : null}
         {readOnly ? null : <DeleteBox onClick={() => handleRemoveNode(clientId)} label="승인자 삭제" />}
-        <div className="flex items-center gap-1">
+        <div className="flex min-w-0 items-center gap-1.5">
           <span className="min-w-0 flex-1 truncate">
             <TextLabelChip title={display}>{display}</TextLabelChip>
           </span>
           {readOnly ? null : (
-            <div className="relative shrink-0">
-              <button
-                type="button"
-                aria-label="승인자 선택"
-                title="승인자 선택"
-                className="rounded p-1 text-slate-300 hover:bg-slate-800 hover:text-slate-100"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  setOpenMenuId(null);
-                  setOpenBalloon((current) =>
-                    current?.clientId === clientId ? null : { clientId, field: "approver" },
-                  );
-                }}
-              >
-                <HamburgerIcon />
-              </button>
-              {openBalloon?.clientId === clientId && openBalloon.field === "approver"
-                ? renderBalloon(clientId)
-                : null}
-            </div>
+            <button
+              type="button"
+              aria-label="결재자 선택"
+              title="결재자 선택"
+              className="shrink-0 rounded-md border border-emerald-700/80 bg-emerald-950/40 px-2.5 py-1 text-[11px] font-medium text-emerald-100 hover:bg-emerald-900/50"
+              onClick={(event) => {
+                event.stopPropagation();
+                setOpenMenuId(null);
+                setApproverPickClientId(clientId);
+              }}
+            >
+              결재자
+            </button>
           )}
         </div>
       </div>
@@ -804,7 +747,7 @@ export function WorkflowEditor({
 
   const handleRemoveNode = (clientId: string) => {
     setOpenMenuId(null);
-    setOpenBalloon(null);
+    setApproverPickClientId(null);
     setSelectedNodeId((current) => (current === clientId ? null : current));
     setModel((current) => removeNode(current, clientId));
   };
@@ -815,7 +758,7 @@ export function WorkflowEditor({
     }
     setSelectedNodeId(clientId);
     setOpenMenuId(null);
-    setOpenBalloon(null);
+    setApproverPickClientId(null);
   };
 
   const patchSelectedWork = (patch: Partial<WorkEditorNode>) => {
@@ -957,7 +900,7 @@ export function WorkflowEditor({
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="shrink-0 border-b border-slate-800 px-4 py-3">
         <label className="grid gap-1 text-xs text-slate-400">
-          워크플로우 명
+          작업 워크플로우 명
           <div className="flex items-center gap-2">
             <input
               value={name}
@@ -980,7 +923,7 @@ export function WorkflowEditor({
           </div>
         </label>
         <label className="mt-3 grid gap-1 text-xs text-slate-400">
-          워크플로우 설명
+          작업 워크플로우 설명
           <textarea
             value={description}
             onChange={(event) => setDescription(event.target.value)}
@@ -988,7 +931,7 @@ export function WorkflowEditor({
             rows={2}
             readOnly={readOnly}
             disabled={readOnly}
-            placeholder="워크플로우 메타 설명"
+            placeholder="작업 워크플로우 메타 설명"
             className="resize-y rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 disabled:opacity-80"
           />
         </label>
@@ -1093,7 +1036,7 @@ export function WorkflowEditor({
                       : "text-slate-400 hover:bg-slate-900 hover:text-slate-200"
                   }`}
                 >
-                  워크플로우 작업결과
+                  작업 워크플로우 작업결과
                 </button>
                 <button
                   type="button"
@@ -1113,7 +1056,7 @@ export function WorkflowEditor({
                     <WorkflowHistoryPanel workflowUuid={workflowUuid} />
                   ) : (
                     <div className="flex h-full items-center justify-center p-4 text-[11px] text-slate-500">
-                      워크플로우를 선택하면 작업결과를 확인할 수 있습니다.
+                      작업 워크플로우를 선택하면 작업결과를 확인할 수 있습니다.
                     </div>
                   )
                 ) : selectedWorkNode && !readOnly ? (
@@ -1141,6 +1084,30 @@ export function WorkflowEditor({
           </>
         ) : null}
       </div>
+
+      {approverPickClientId ? (
+        <WorkflowApproverPickModal
+          approvers={approvers}
+          initialUserid={
+            (
+              model.main.find(
+                (step) => step.clientId === approverPickClientId && step.type === "hitl",
+              ) as { userid?: string } | undefined
+            )?.userid || ""
+          }
+          onClose={() => setApproverPickClientId(null)}
+          onConfirm={({ userid, username }) => {
+            setModel((current) => ({
+              ...current,
+              main: current.main.map((step) =>
+                step.clientId === approverPickClientId && step.type === "hitl"
+                  ? { ...step, userid, username }
+                  : step,
+              ),
+            }));
+          }}
+        />
+      ) : null}
     </div>
   );
 }

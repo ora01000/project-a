@@ -188,7 +188,7 @@ export function parseAiWorkflowDesignResponse(raw: string): AiWorkflowDesignPayl
   return {
     work_nodes,
     workflow_uuid: newUuid(),
-    workflow_name: asString(workflowObj.workflow_name) || "AI 생성 워크플로우",
+    workflow_name: asString(workflowObj.workflow_name) || "AI 생성 작업 워크플로우",
     workflow_description: asString(workflowObj.workflow_description),
     workflow: remapWorkflowExpression(workflowRaw, idToUuid),
   };

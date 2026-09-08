@@ -41,7 +41,7 @@ export function WorkflowDiagram({
   if (graph.nodes.length === 0) {
     return (
       <div className="flex h-full items-center justify-center text-sm text-slate-500">
-        워크플로우 표현식이 없습니다.
+        작업 워크플로우 표현식이 없습니다.
       </div>
     );
   }
@@ -54,7 +54,7 @@ export function WorkflowDiagram({
       viewBox={`0 0 ${width} ${height}`}
       className="h-full w-full"
       role="img"
-      aria-label="워크플로우 다이어그램"
+      aria-label="작업 워크플로우 다이어그램"
     >
       <defs>
         <marker

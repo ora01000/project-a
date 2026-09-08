@@ -98,7 +98,7 @@ def _parse_token(raw: str) -> FlowToken:
         left = left.strip()
         right = right.strip()
         if not is_uuid_token(left):
-            raise ValueError(f"알 수 없는 워크플로우 토큰: {token}")
+            raise ValueError(f"알 수 없는 작업 워크플로우 토큰: {token}")
         if right.upper() == "E":
             return FlowToken(kind="work", raw=token, work_uuid=left, fail_end=True)
         if not is_uuid_token(right):
@@ -108,7 +108,7 @@ def _parse_token(raw: str) -> FlowToken:
         return FlowToken(kind="work", raw=token, work_uuid=left, fail_work_uuid=right)
     if is_uuid_token(token):
         return FlowToken(kind="work", raw=token, work_uuid=token)
-    raise ValueError(f"알 수 없는 워크플로우 토큰: {token}")
+    raise ValueError(f"알 수 없는 작업 워크플로우 토큰: {token}")
 
 
 def validate_workflow_expression(
@@ -121,9 +121,9 @@ def validate_workflow_expression(
     if not tokens:
         return []
     if tokens[0].kind != "start":
-        raise ValueError("워크플로우는 S 로 시작해야 합니다.")
+        raise ValueError("작업 워크플로우는 S 로 시작해야 합니다.")
     if tokens[-1].kind != "end":
-        raise ValueError("워크플로우는 E 로 끝나야 합니다.")
+        raise ValueError("작업 워크플로우는 E 로 끝나야 합니다.")
     for token in tokens:
         if token.kind == "work":
             assert token.work_uuid is not None

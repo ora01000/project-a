@@ -53,7 +53,7 @@ export function WorkflowListPanel({
       <button
         type="button"
         onClick={() => setCollapsed(false)}
-        aria-label="워크플로우 목록 펼치기"
+        aria-label="작업 워크플로우 목록 펼치기"
         aria-hidden={!isCollapsed}
         tabIndex={isCollapsed ? 0 : -1}
         className={`absolute inset-y-0 left-0 z-20 flex w-9 flex-col items-center justify-center rounded-xl border border-slate-700 bg-slate-900/50 shadow-inner transition-opacity duration-300 hover:border-slate-500 hover:bg-slate-800/70 ${
@@ -61,7 +61,7 @@ export function WorkflowListPanel({
         }`}
       >
         <span className="select-none text-xs font-semibold tracking-wide text-slate-200 [writing-mode:vertical-rl]">
-          워크플로우 목록
+          작업 워크플로우 목록
         </span>
       </button>
 
@@ -79,13 +79,13 @@ export function WorkflowListPanel({
         <div className="relative z-10 flex min-h-0 flex-1 flex-col">
           <header className="flex shrink-0 items-start justify-between gap-2 border-b border-slate-700/80 px-4 py-3">
             <div className="min-w-0">
-              <h2 className="text-sm font-semibold text-slate-200">워크플로우 목록</h2>
-              <p className="mt-0.5 text-xs text-slate-500">등록된 워크플로우를 선택합니다.</p>
+              <h2 className="text-sm font-semibold text-slate-200">작업 워크플로우 목록</h2>
+              <p className="mt-0.5 text-xs text-slate-500">등록된 작업 워크플로우를 선택합니다.</p>
             </div>
             <button
               type="button"
               onClick={() => setCollapsed(true)}
-              aria-label="워크플로우 목록 접기"
+              aria-label="작업 워크플로우 목록 접기"
               title="패널 접기"
               className="shrink-0 rounded-md border border-slate-700 bg-slate-800/60 p-1.5 text-slate-400 transition-colors hover:border-slate-500 hover:bg-slate-800 hover:text-slate-200"
             >
@@ -99,7 +99,7 @@ export function WorkflowListPanel({
               onClick={onCreate}
               className="w-full rounded-md border border-sky-700 bg-sky-950/50 px-3 py-2 text-sm font-medium text-sky-100 hover:bg-sky-900/60"
             >
-              새로운 워크플로우
+              새로운 작업 워크플로우
             </button>
           </div>
 

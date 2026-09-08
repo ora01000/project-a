@@ -161,7 +161,7 @@ function parseToken(raw: string): ParsedToken {
     const workUuid = token.slice(0, splitAt).trim();
     const fail = token.slice(splitAt + 1).trim();
     if (!isUuidToken(workUuid)) {
-      throw new Error(`알 수 없는 워크플로우 토큰: ${token}`);
+      throw new Error(`알 수 없는 작업 워크플로우 토큰: ${token}`);
     }
     if (fail.toUpperCase() === "E") {
       return { kind: "work", workUuid, failEnd: true };
@@ -174,7 +174,7 @@ function parseToken(raw: string): ParsedToken {
   if (isUuidToken(token)) {
     return { kind: "work", workUuid: token.toLowerCase() };
   }
-  throw new Error(`알 수 없는 워크플로우 토큰: ${token}`);
+  throw new Error(`알 수 없는 작업 워크플로우 토큰: ${token}`);
 }
 
 export function parseExpression(expression: string): ParsedToken[] {

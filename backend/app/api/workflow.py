@@ -400,7 +400,7 @@ def _awaiting_hitl_fields(
 
 def _require_view_workflow(record: WorkflowRecord, user_idx: int) -> None:
     if not user_can_view_workflow(record, user_idx):
-        raise HTTPException(status_code=403, detail="이 워크플로우를 조회할 권한이 없습니다.")
+        raise HTTPException(status_code=403, detail="이 작업 워크플로우를 조회할 권한이 없습니다.")
 
 
 def _require_own_workflow(record: WorkflowRecord, user_idx: int) -> None:
@@ -640,7 +640,7 @@ async def api_get_workflow(workflow_uuid: str, request: Request) -> WorkflowResp
     database_path = request.app.state.database_path
     record = get_workflow_by_uuid(database_path, workflow_uuid)
     if record is None:
-        raise HTTPException(status_code=404, detail="워크플로우를 찾을 수 없습니다.")
+        raise HTTPException(status_code=404, detail="작업 워크플로우를 찾을 수 없습니다.")
     _require_view_workflow(record, auth_user.idx)
     return _workflow_response(database_path, record, user_idx=auth_user.idx)
 
@@ -678,7 +678,7 @@ async def api_update_workflow(
     database_path = request.app.state.database_path
     existing = get_workflow_by_uuid(database_path, workflow_uuid)
     if existing is None:
-        raise HTTPException(status_code=404, detail="워크플로우를 찾을 수 없습니다.")
+        raise HTTPException(status_code=404, detail="작업 워크플로우를 찾을 수 없습니다.")
     _require_own_workflow(existing, auth_user.idx)
 
     try:
@@ -694,7 +694,7 @@ async def api_update_workflow(
         workflow=(body.workflow or "").strip(),
     )
     if record is None:
-        raise HTTPException(status_code=404, detail="워크플로우를 찾을 수 없습니다.")
+        raise HTTPException(status_code=404, detail="작업 워크플로우를 찾을 수 없습니다.")
     return _workflow_response(database_path, record, user_idx=auth_user.idx)
 
 
@@ -708,11 +708,11 @@ async def api_set_workflow_distribute(
     database_path = request.app.state.database_path
     existing = get_workflow_by_uuid(database_path, workflow_uuid)
     if existing is None:
-        raise HTTPException(status_code=404, detail="워크플로우를 찾을 수 없습니다.")
+        raise HTTPException(status_code=404, detail="작업 워크플로우를 찾을 수 없습니다.")
     _require_own_workflow(existing, auth_user.idx)
     record = set_workflow_distribute(database_path, existing.uuid, bool(body.distribute))
     if record is None:
-        raise HTTPException(status_code=404, detail="워크플로우를 찾을 수 없습니다.")
+        raise HTTPException(status_code=404, detail="작업 워크플로우를 찾을 수 없습니다.")
     return _workflow_response(database_path, record, user_idx=auth_user.idx)
 
 
@@ -725,7 +725,7 @@ async def api_list_workflow_history(
     database_path = request.app.state.database_path
     existing = get_workflow_by_uuid(database_path, workflow_uuid)
     if existing is None:
-        raise HTTPException(status_code=404, detail="워크플로우를 찾을 수 없습니다.")
+        raise HTTPException(status_code=404, detail="작업 워크플로우를 찾을 수 없습니다.")
     _require_view_workflow(existing, auth_user.idx)
     records = list_workflow_history(database_path, existing.uuid)
     name_by_idx: dict[int, str] = {}
@@ -756,7 +756,7 @@ async def api_get_workflow_history_result(
     database_path = request.app.state.database_path
     existing = get_workflow_by_uuid(database_path, workflow_uuid)
     if existing is None:
-        raise HTTPException(status_code=404, detail="워크플로우를 찾을 수 없습니다.")
+        raise HTTPException(status_code=404, detail="작업 워크플로우를 찾을 수 없습니다.")
     _require_view_workflow(existing, auth_user.idx)
     history = get_workflow_history_by_idx(database_path, history_idx)
     if history is None or history.uuid != existing.uuid:
@@ -785,7 +785,7 @@ async def api_clone_workflow(workflow_uuid: str, request: Request) -> WorkflowRe
     database_path = request.app.state.database_path
     existing = get_workflow_by_uuid(database_path, workflow_uuid)
     if existing is None:
-        raise HTTPException(status_code=404, detail="워크플로우를 찾을 수 없습니다.")
+        raise HTTPException(status_code=404, detail="작업 워크플로우를 찾을 수 없습니다.")
     _require_view_workflow(existing, auth_user.idx)
     try:
         record = clone_workflow(
@@ -805,14 +805,14 @@ async def api_run_workflow(workflow_uuid: str, request: Request) -> WorkflowRunR
     database_path = request.app.state.database_path
     existing = get_workflow_by_uuid(database_path, workflow_uuid)
     if existing is None:
-        raise HTTPException(status_code=404, detail="워크플로우를 찾을 수 없습니다.")
+        raise HTTPException(status_code=404, detail="작업 워크플로우를 찾을 수 없습니다.")
     if not (
         user_owns_workflow(existing, auth_user.idx)
         or bool(getattr(existing, "distribute", False))
     ):
         raise HTTPException(
             status_code=403,
-            detail="소유자이거나 배포된 워크플로우만 실행할 수 있습니다.",
+            detail="소유자이거나 배포된 작업 워크플로우만 실행할 수 있습니다.",
         )
     try:
         result: WorkflowRunResult = await run_workflow(
@@ -853,12 +853,12 @@ async def api_delete_workflow(workflow_uuid: str, request: Request) -> dict[str,
     database_path = request.app.state.database_path
     existing = get_workflow_by_uuid(database_path, workflow_uuid)
     if existing is None:
-        raise HTTPException(status_code=404, detail="워크플로우를 찾을 수 없습니다.")
+        raise HTTPException(status_code=404, detail="작업 워크플로우를 찾을 수 없습니다.")
     _require_own_workflow(existing, auth_user.idx)
 
     referenced = sorted(work_uuids_from_expression(existing.workflow))
     if not delete_workflow(database_path, existing.uuid):
-        raise HTTPException(status_code=404, detail="워크플로우를 찾을 수 없습니다.")
+        raise HTTPException(status_code=404, detail="작업 워크플로우를 찾을 수 없습니다.")
 
     for node_uuid in referenced:
         delete_work_node(database_path, node_uuid)
