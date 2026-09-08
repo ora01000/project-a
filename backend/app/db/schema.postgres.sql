@@ -256,6 +256,12 @@ CREATE TABLE IF NOT EXISTS workflow_history (
     start_date TEXT NOT NULL DEFAULT '',
     end_date TEXT NOT NULL DEFAULT '',
     finish_success INTEGER NOT NULL DEFAULT 0,
-    result_file VARCHAR(1000) NOT NULL DEFAULT ''
+    result_file VARCHAR(1000) NOT NULL DEFAULT '',
+    user_idx INTEGER NOT NULL DEFAULT 1
 );
+ALTER TABLE workflow_history
+    ADD COLUMN IF NOT EXISTS user_idx INTEGER NOT NULL DEFAULT 1;
+UPDATE workflow_history
+SET user_idx = 1
+WHERE user_idx IS NULL OR user_idx <= 0;
 CREATE INDEX IF NOT EXISTS ix_workflow_history_uuid ON workflow_history (uuid);

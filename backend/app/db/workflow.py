@@ -431,8 +431,22 @@ def ensure_workflow_tables(connection) -> None:
             start_date TEXT NOT NULL DEFAULT '',
             end_date TEXT NOT NULL DEFAULT '',
             finish_success INTEGER NOT NULL DEFAULT 0,
-            result_file VARCHAR(1000) NOT NULL DEFAULT ''
+            result_file VARCHAR(1000) NOT NULL DEFAULT '',
+            user_idx INTEGER NOT NULL DEFAULT 1
         )
+        """
+    )
+    connection.execute(
+        """
+        ALTER TABLE workflow_history
+            ADD COLUMN IF NOT EXISTS user_idx INTEGER NOT NULL DEFAULT 1
+        """
+    )
+    connection.execute(
+        """
+        UPDATE workflow_history
+        SET user_idx = 1
+        WHERE user_idx IS NULL OR user_idx <= 0
         """
     )
     connection.execute(
@@ -1042,7 +1056,7 @@ def mark_work_node_run_finished(
 
 
 _WORKFLOW_HISTORY_SELECT = """
-    idx, uuid, start_date, end_date, finish_success, result_file
+    idx, uuid, start_date, end_date, finish_success, result_file, user_idx
 """
 
 
@@ -1054,9 +1068,12 @@ class WorkflowHistoryRecord:
     end_date: str
     finish_success: bool
     result_file: str
+    user_idx: int = 1
 
 
 def _row_to_workflow_history(row) -> WorkflowHistoryRecord:
+    keys = row.keys() if hasattr(row, "keys") else []
+    user_idx = row["user_idx"] if "user_idx" in keys else 1
     return WorkflowHistoryRecord(
         idx=int(row["idx"]),
         uuid=str(row["uuid"] or ""),
@@ -1064,6 +1081,7 @@ def _row_to_workflow_history(row) -> WorkflowHistoryRecord:
         end_date=str(row["end_date"] or ""),
         finish_success=bool(int(row["finish_success"] or 0)),
         result_file=str(row["result_file"] or "")[:1000],
+        user_idx=int(user_idx or 1) or 1,
     )
 
 
@@ -1075,17 +1093,21 @@ def insert_workflow_history(
     end_date: str,
     finish_success: bool,
     result_file: str,
+    user_idx: int = 1,
 ) -> WorkflowHistoryRecord:
     key = (workflow_uuid or "").strip()
     if not key:
         raise ValueError("workflow uuid가 비어 있습니다.")
+    executor_idx = int(user_idx or 0)
+    if executor_idx <= 0:
+        executor_idx = 1
     with get_connection(database_path) as connection:
         ensure_workflow_tables(connection)
         row = connection.execute(
             f"""
             INSERT INTO workflow_history (
-                uuid, start_date, end_date, finish_success, result_file
-            ) VALUES (?, ?, ?, ?, ?)
+                uuid, start_date, end_date, finish_success, result_file, user_idx
+            ) VALUES (?, ?, ?, ?, ?, ?)
             RETURNING {_WORKFLOW_HISTORY_SELECT}
             """,
             (
@@ -1094,6 +1116,7 @@ def insert_workflow_history(
                 (end_date or "").strip(),
                 1 if finish_success else 0,
                 (result_file or "").strip()[:1000],
+                executor_idx,
             ),
         ).fetchone()
     return _row_to_workflow_history(row)

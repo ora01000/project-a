@@ -235,9 +235,16 @@ class WorkflowHistoryResponse(BaseModel):
     end_date: str = ""
     finish_success: bool = False
     result_file: str = ""
+    user_idx: int = 1
+    username: str = ""
 
     @classmethod
-    def from_record(cls, record: WorkflowHistoryRecord) -> "WorkflowHistoryResponse":
+    def from_record(
+        cls,
+        record: WorkflowHistoryRecord,
+        *,
+        username: str = "",
+    ) -> "WorkflowHistoryResponse":
         return cls(
             idx=record.idx,
             uuid=record.uuid,
@@ -245,6 +252,8 @@ class WorkflowHistoryResponse(BaseModel):
             end_date=record.end_date,
             finish_success=record.finish_success,
             result_file=record.result_file,
+            user_idx=int(record.user_idx or 1),
+            username=username,
         )
 
 
@@ -718,9 +727,22 @@ async def api_list_workflow_history(
     if existing is None:
         raise HTTPException(status_code=404, detail="워크플로우를 찾을 수 없습니다.")
     _require_view_workflow(existing, auth_user.idx)
+    records = list_workflow_history(database_path, existing.uuid)
+    name_by_idx: dict[int, str] = {}
+    for record in records:
+        key = int(record.user_idx or 1)
+        if key in name_by_idx:
+            continue
+        user = get_user_by_idx(database_path, key)
+        name_by_idx[key] = (
+            (user.username or user.userid).strip() if user is not None else str(key)
+        )
     return [
-        WorkflowHistoryResponse.from_record(record)
-        for record in list_workflow_history(database_path, existing.uuid)
+        WorkflowHistoryResponse.from_record(
+            record,
+            username=name_by_idx.get(int(record.user_idx or 1), str(record.user_idx or 1)),
+        )
+        for record in records
     ]
 
 
