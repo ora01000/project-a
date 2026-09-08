@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import logging
+import shutil
+
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 from pydantic import BaseModel, Field
 
@@ -38,6 +41,7 @@ from backend.app.db.workflow import (
     update_workflow,
     user_can_view_workflow,
     user_owns_workflow,
+    work_uuids_from_expression,
 )
 from backend.app.middleware.session_auth import get_request_auth_user
 from backend.app.services.workflow_graph import build_workflow_graph, validate_workflow_expression
@@ -48,6 +52,7 @@ from backend.app.services.workflow_runner import (
 )
 
 router = APIRouter(tags=["workflow"])
+logger = logging.getLogger(__name__)
 
 
 class WorkNodeResponse(BaseModel):
@@ -738,6 +743,18 @@ async def api_delete_workflow(workflow_uuid: str, request: Request) -> dict[str,
     if existing is None:
         raise HTTPException(status_code=404, detail="워크플로우를 찾을 수 없습니다.")
     _require_own_workflow(existing, auth_user.idx)
+
+    referenced = sorted(work_uuids_from_expression(existing.workflow))
     if not delete_workflow(database_path, existing.uuid):
         raise HTTPException(status_code=404, detail="워크플로우를 찾을 수 없습니다.")
+
+    for node_uuid in referenced:
+        delete_work_node(database_path, node_uuid)
+        upload_dir = work_node_upload_dir(node_uuid)
+        if upload_dir.is_dir():
+            try:
+                shutil.rmtree(upload_dir)
+            except OSError:
+                logger.warning("failed to remove work_node upload dir %s", upload_dir)
+
     return {"ok": True}

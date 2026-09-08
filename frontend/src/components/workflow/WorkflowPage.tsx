@@ -234,6 +234,31 @@ export function WorkflowPage({
     setRunMessage(`"${item.workflow_name}" 으로 복제되었습니다.`);
   };
 
+  const handleDeleteWorkflow = async (item: WorkflowItem) => {
+    const confirmed = window.confirm(
+      `"${item.workflow_name}" 워크플로우를 삭제하시겠습니까?\n참조하는 작업노드도 함께 삭제됩니다.`,
+    );
+    if (!confirmed) {
+      return;
+    }
+    setError(null);
+    setRunMessage(null);
+    try {
+      const response = await fetch(`/api/workflows/${item.uuid}`, { method: "DELETE" });
+      if (!response.ok) {
+        throw new Error(await parseError(response, "워크플로우 삭제에 실패했습니다."));
+      }
+      await Promise.all([loadWorkflows(), loadWorkNodes()]);
+      if (selectedUuid === item.uuid) {
+        setSelectedUuid(null);
+        setMode("idle");
+      }
+      setRunMessage(`"${item.workflow_name}" 을(를) 삭제했습니다.`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "워크플로우 삭제에 실패했습니다.");
+    }
+  };
+
   const handleRunWorkflow = async (item: WorkflowItem) => {
     const confirmed = window.confirm(
       `"${item.workflow_name}" 워크플로우를 실행하시겠습니까?`,
@@ -300,20 +325,38 @@ export function WorkflowPage({
                   return (
                     <div
                       key={item.uuid}
-                      className={`flex min-h-[76px] w-full flex-col justify-center gap-1 overflow-hidden rounded-xl border bg-slate-900/90 px-3 py-2 text-left shadow-lg ${
+                      className={`relative flex min-h-[76px] w-full flex-col justify-center gap-1 overflow-hidden rounded-xl border bg-slate-900/90 px-3 py-2 pt-7 text-left shadow-lg ${
                         isActive ? "border-sky-500" : "border-slate-700"
                       } ${isRunning ? "wf-run-pulse" : ""}`}
                       aria-busy={isRunning || undefined}
                     >
+                      {isMine ? (
+                        <button
+                          type="button"
+                          title="워크플로우 삭제"
+                          aria-label="워크플로우 삭제"
+                          disabled={isRunning || runningUuid != null}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void handleDeleteWorkflow(item);
+                          }}
+                          className="absolute right-1.5 top-1.5 z-10 flex h-5 w-5 items-center justify-center rounded-sm bg-transparent text-[11px] font-semibold leading-none text-slate-300 hover:bg-rose-950/60 hover:text-rose-200 disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                          X
+                        </button>
+                      ) : null}
                       <button
                         type="button"
                         onClick={() => {
                           setSelectedUuid(item.uuid);
                           setMode("edit");
                         }}
-                        className="flex w-full flex-col gap-1 text-left"
+                        className="flex min-w-0 w-full flex-col gap-1 text-left"
                       >
-                        <h2 className="truncate text-sm font-semibold text-slate-100" title={item.workflow_name}>
+                        <h2
+                          className="min-w-0 truncate pr-1 text-sm font-semibold text-slate-100"
+                          title={item.workflow_name}
+                        >
                           {item.workflow_name}
                         </h2>
                         <p className="truncate text-[11px] text-slate-400" title={item.create_date || undefined}>
