@@ -77,6 +77,9 @@ def work_node_to_dict(record: WorkNodeRecord) -> dict[str, Any]:
         "last_fail_reason": record.last_fail_reason,
         "use_previous_work_result": record.use_previous_work_result,
         "work_report": record.work_report,
+        "cron": record.cron,
+        "cron_expr": record.cron_expr,
+        "schedule_wait": record.schedule_wait,
     }
 
 
@@ -100,7 +103,10 @@ def work_node_from_dict(data: dict[str, Any]) -> WorkNodeRecord:
         last_success=bool(data.get("last_success")),
         last_fail_reason=str(data.get("last_fail_reason") or "")[:200],
         use_previous_work_result=bool(data.get("use_previous_work_result")),
-        work_report=str(data.get("work_report") or "")[:200],
+        work_report=str(data.get("work_report") or "")[:400],
+        cron=bool(data.get("cron")),
+        cron_expr=str(data.get("cron_expr") or "0 9 * * *")[:20],
+        schedule_wait=bool(data.get("schedule_wait")),
         owner=int(data.get("owner") or 0),
     )
 

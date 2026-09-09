@@ -1,6 +1,8 @@
 import {
+  forwardRef,
   useCallback,
   useEffect,
+  useImperativeHandle,
   useMemo,
   useRef,
   useState,
@@ -17,7 +19,13 @@ import type { AuthUser } from "../../types/auth";
 import type { AgentRuntimeRecord } from "../../types/agentruntime";
 import { assignableAgentId } from "../../types/agentruntime";
 import type { WorkNodeItem, WorkflowApprover, WorkflowItem } from "../../types/workflow";
+import {
+  DEFAULT_WORKFLOW_CRON_EXPR,
+  WorkflowScheduleField,
+} from "./WorkflowScheduleField";
+import { parseWorkNodeCronExpr } from "./WorkNodeScheduleField";
 import { WorkNodeEditPanel } from "./WorkNodeEditPanel";
+import { WorkNodeResultsPanel } from "./WorkNodeResultsPanel";
 import { WorkflowApproverPickModal } from "./WorkflowApproverPickModal";
 import { WorkflowHistoryPanel } from "./WorkflowHistoryPanel";
 import {
@@ -68,7 +76,8 @@ interface WorkflowEditorProps {
   initialName: string;
   initialExpression: string;
   initialDescription?: string;
-  saveLabel: string;
+  initialCron?: boolean;
+  initialCronExpr?: string;
   readOnly?: boolean;
   /** Changes only when starting a new create/edit session — not on create→edit after save. */
   sessionKey: string;
@@ -81,7 +90,13 @@ interface WorkflowEditorProps {
   diagramAgentEvent?: DiagramAgentEvent | null;
   onDiagramAgentEventHandled?: () => void;
   onDiagramGenerate?: (prompt: string) => void;
+  onSaveStateChange?: (state: { canSave: boolean; isSaving: boolean }) => void;
 }
+
+export type WorkflowEditorHandle = {
+  save: () => Promise<void>;
+};
+
 
 async function parseError(response: Response, fallback: string): Promise<string> {
   const payload = (await response.json().catch(() => null)) as { detail?: string } | null;
@@ -172,27 +187,34 @@ function TextLabelChip({ children, title }: { children: ReactNode; title?: strin
   );
 }
 
-export function WorkflowEditor({
-  user,
-  workNodes,
-  initialName,
-  initialExpression,
-  initialDescription = "",
-  saveLabel,
-  readOnly = false,
-  sessionKey,
-  onSaved,
-  onWorkNodesChanged,
-  workflowUuid,
-  awaitingHitlUserid = "",
-  aiImportRequest = null,
-  onAiImportHandled,
-  diagramAgentEvent = null,
-  onDiagramAgentEventHandled,
-  onDiagramGenerate,
-}: WorkflowEditorProps) {
+export const WorkflowEditor = forwardRef<WorkflowEditorHandle, WorkflowEditorProps>(function WorkflowEditor(
+  {
+    user,
+    workNodes,
+    initialName,
+    initialExpression,
+    initialDescription = "",
+    initialCron = false,
+    initialCronExpr = DEFAULT_WORKFLOW_CRON_EXPR,
+    readOnly = false,
+    sessionKey,
+    onSaved,
+    onWorkNodesChanged,
+    workflowUuid,
+    awaitingHitlUserid = "",
+    aiImportRequest = null,
+    onAiImportHandled,
+    diagramAgentEvent = null,
+    onDiagramAgentEventHandled,
+    onDiagramGenerate,
+    onSaveStateChange,
+  },
+  ref,
+) {
   const [name, setName] = useState(initialName);
   const [description, setDescription] = useState(initialDescription);
+  const [cronEnabled, setCronEnabled] = useState(initialCron);
+  const [cronExpr, setCronExpr] = useState(initialCronExpr || DEFAULT_WORKFLOW_CRON_EXPR);
   const [diagramPrompt, setDiagramPrompt] = useState("");
   const [templateNames, setTemplateNames] = useState<string[]>([]);
   const [selectedTemplate, setSelectedTemplate] = useState("");
@@ -221,7 +243,7 @@ export function WorkflowEditor({
   const [approverPickClientId, setApproverPickClientId] = useState<string | null>(null);
   const approverPickClientIdRef = useRef<string | null>(null);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
-  const [bottomTab, setBottomTab] = useState<"edit" | "results">("results");
+  const [bottomTab, setBottomTab] = useState<"edit" | "results" | "work-results">("results");
   const [editPanelHeight, setEditPanelHeight] = useState<number | null>(null);
   const workflowCanvasRef = useRef<HTMLDivElement>(null);
   const editPanelRef = useRef<HTMLElement>(null);
@@ -240,6 +262,31 @@ export function WorkflowEditor({
     const step = model.main.find((item) => item.clientId === selectedNodeId);
     return step?.type === "work" ? step : null;
   }, [model, selectedNodeId]);
+
+  const workflowWorkNodes = useMemo(() => {
+    const seen = new Set<string>();
+    const nodes: WorkEditorNode[] = [];
+    for (const step of model.main) {
+      if (step.type !== "work") {
+        continue;
+      }
+      const key = step.uuid.trim() || step.clientId;
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      nodes.push(step);
+    }
+    for (const extra of Object.values(model.extras)) {
+      const key = extra.uuid.trim() || extra.clientId;
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      nodes.push(extra);
+    }
+    return nodes;
+  }, [model]);
 
   const clampEditPanelHeight = useCallback((nextHeight: number) => {
     const containerHeight = splitLayoutRef.current?.clientHeight ?? 0;
@@ -403,6 +450,11 @@ export function WorkflowEditor({
   }, [initialDescription]);
 
   useEffect(() => {
+    setCronEnabled(Boolean(initialCron));
+    setCronExpr((initialCronExpr || DEFAULT_WORKFLOW_CRON_EXPR).slice(0, 20));
+  }, [initialCron, initialCronExpr]);
+
+  useEffect(() => {
     if (readOnly) {
       setSelectedNodeId(null);
       setOpenMenuId(null);
@@ -473,7 +525,9 @@ export function WorkflowEditor({
               test_result: false,
               files: "",
               use_previous_work_result: Boolean(draft.use_previous_work_result),
-              work_report: (draft.work_report || "").trim().slice(0, 200),
+              work_report: (draft.work_report || "").trim().slice(0, 400),
+              cron: Boolean(draft.cron),
+              cron_expr: (draft.cron_expr || "0 9 * * *").slice(0, 20),
             }),
           });
           if (!response.ok) {
@@ -495,16 +549,20 @@ export function WorkflowEditor({
         ];
         setName(payload.workflow_name);
         setDescription(payload.workflow_description);
+        setCronEnabled(Boolean(payload.cron));
+        setCronExpr((payload.cron_expr || DEFAULT_WORKFLOW_CRON_EXPR).slice(0, 20));
         setModel(hydrateEditor(remapped, mergedNodes, userNames));
         setSelectedNodeId(null);
         skipNextHydrateRef.current = true;
         await onWorkNodesChanged();
 
         const isCreate = !workflowUuid;
-        const saveBody: Record<string, string> = {
+        const saveBody: Record<string, unknown> = {
           workflow_name: payload.workflow_name,
           workflow_description: payload.workflow_description,
           workflow: remapped,
+          cron: Boolean(payload.cron),
+          cron_expr: (payload.cron_expr || DEFAULT_WORKFLOW_CRON_EXPR).slice(0, 20),
         };
         if (isCreate) {
           saveBody.uuid = payload.workflow_uuid;
@@ -876,7 +934,7 @@ export function WorkflowEditor({
     }
   };
 
-  const handleSave = async () => {
+  const handleSave = useCallback(async () => {
     const trimmed = name.trim();
     if (!trimmed) {
       setError("작업 워크플로우 명을 입력하세요.");
@@ -899,6 +957,8 @@ export function WorkflowEditor({
           workflow_name: trimmed,
           workflow_description: description,
           workflow: expression,
+          cron: cronEnabled,
+          cron_expr: (cronExpr || DEFAULT_WORKFLOW_CRON_EXPR).slice(0, 20),
         }),
       });
       if (!response.ok) {
@@ -910,7 +970,24 @@ export function WorkflowEditor({
     } finally {
       setIsSaving(false);
     }
-  };
+  }, [
+    cronEnabled,
+    cronExpr,
+    description,
+    model,
+    name,
+    onSaved,
+    workflowUuid,
+  ]);
+
+  useImperativeHandle(ref, () => ({ save: handleSave }), [handleSave]);
+
+  useEffect(() => {
+    onSaveStateChange?.({
+      canSave: !readOnly && Boolean(name.trim()),
+      isSaving,
+    });
+  }, [isSaving, name, onSaveStateChange, readOnly]);
 
   const findWork = (clientId: string): WorkEditorNode | undefined => {
     if (model.extras[clientId]) {
@@ -1115,6 +1192,10 @@ export function WorkflowEditor({
       live?.last_start_date ?? node.lastStartDate,
       live?.last_end_date ?? node.lastEndDate,
     );
+    const isScheduleWaiting = isNodeRunning && Boolean(live?.schedule_wait ?? node.scheduleWait);
+    const isCronEnabled = Boolean(live?.cron ?? node.cron);
+    const scheduleDraft = parseWorkNodeCronExpr(live?.cron_expr ?? node.cronExpr);
+    const scheduleLabel = `${String(scheduleDraft.hour).padStart(2, "0")}시 ${String(scheduleDraft.minute).padStart(2, "0")}분 예약됨`;
     return (
       <div
         role="button"
@@ -1134,9 +1215,15 @@ export function WorkflowEditor({
           failBranch ? "border-rose-400/80 bg-slate-950" : "border-sky-400/80 bg-slate-950"
         } ${readOnly ? "cursor-default" : "cursor-pointer"} ${
           isSelected(node.clientId) ? "ring-2 ring-sky-300 ring-offset-1 ring-offset-slate-900" : ""
-        } ${isNodeRunning ? "wf-run-pulse" : ""}`}
+        } ${
+          isScheduleWaiting ? "wf-schedule-pulse" : isNodeRunning ? "wf-run-pulse" : ""
+        }`}
       >
-        {isNodeRunning ? (
+        {isScheduleWaiting ? (
+          <span className="absolute left-1.5 top-1.5 rounded-full border border-amber-500/80 bg-amber-950/80 px-1.5 py-0.5 text-[9px] font-semibold text-amber-100">
+            예약대기중
+          </span>
+        ) : isNodeRunning ? (
           <span className="absolute left-1.5 top-1.5 rounded-full border border-rose-500/80 bg-rose-950/80 px-1.5 py-0.5 text-[9px] font-semibold text-rose-100">
             실행 중
           </span>
@@ -1159,13 +1246,23 @@ export function WorkflowEditor({
           </div>
           <div>
             <p className="text-[10px] text-slate-500">작업 스크립트</p>
-            {hasScript ? (
-              <span className="text-sm leading-none" title="실행 결과 있음" aria-label="실행 결과 있음">
-                ✅
-              </span>
-            ) : (
-              <TextLabelChip title="미실행">미실행</TextLabelChip>
-            )}
+            <div className="flex min-w-0 items-center justify-between gap-2">
+              {hasScript ? (
+                <span className="text-sm leading-none" title="실행 결과 있음" aria-label="실행 결과 있음">
+                  ✅
+                </span>
+              ) : (
+                <TextLabelChip title="미실행">미실행</TextLabelChip>
+              )}
+              {isCronEnabled ? (
+                <span
+                  className="shrink-0 text-[10px] font-medium text-amber-200/90"
+                  title={scheduleLabel}
+                >
+                  {scheduleLabel}
+                </span>
+              ) : null}
+            </div>
           </div>
           {hasFile ? (
             <div className="flex items-center justify-between gap-2">
@@ -1184,21 +1281,9 @@ export function WorkflowEditor({
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="shrink-0 border-b border-slate-800 px-4 py-3">
         <div className="flex min-w-0 gap-4">
-          <div className="min-w-0 flex-1 basis-1/2">
+          <div className={`min-w-0 ${cronEnabled ? "basis-[40%] flex-[2]" : "flex-1"}`}>
             <label className="grid gap-1 text-xs text-slate-400">
-              <span className="flex items-center justify-between gap-2">
-                <span>작업 워크플로우 명</span>
-                {readOnly ? null : (
-                  <button
-                    type="button"
-                    disabled={isSaving || !name.trim()}
-                    onClick={() => void handleSave()}
-                    className="shrink-0 rounded-md border border-sky-700 bg-sky-950/50 px-3 py-1 text-[11px] font-medium text-sky-100 hover:bg-sky-900/60 disabled:opacity-50"
-                  >
-                    {saveLabel}
-                  </button>
-                )}
-              </span>
+              작업 워크플로우 명
               <input
                 value={name}
                 onChange={(event) => setName(event.target.value)}
@@ -1223,7 +1308,7 @@ export function WorkflowEditor({
             </label>
           </div>
 
-          <div className="min-w-0 flex-1 basis-1/2">
+          <div className={`min-w-0 ${cronEnabled ? "basis-[40%] flex-[2]" : "flex-1"}`}>
             <div className="grid gap-1 text-xs text-slate-400">
               <div className="flex items-center justify-between gap-2">
                 <span>다이어그램 생성 프롬프트</span>
@@ -1355,6 +1440,22 @@ export function WorkflowEditor({
               )}
             </div>
           </div>
+
+          <div
+            className={`min-w-0 ${
+              cronEnabled ? "basis-[20%] flex-1" : "w-auto shrink-0 self-start"
+            }`}
+          >
+            <WorkflowScheduleField
+              enabled={cronEnabled}
+              cronExpr={cronExpr}
+              readOnly={readOnly}
+              onChange={({ enabled, cronExpr: nextExpr }) => {
+                setCronEnabled(enabled);
+                setCronExpr(nextExpr);
+              }}
+            />
+          </div>
         </div>
       </div>
 
@@ -1461,6 +1562,17 @@ export function WorkflowEditor({
                 </button>
                 <button
                   type="button"
+                  onClick={() => setBottomTab("work-results")}
+                  className={`rounded-md px-2.5 py-1 text-[11px] font-medium ${
+                    bottomTab === "work-results"
+                      ? "bg-slate-800 text-slate-100"
+                      : "text-slate-400 hover:bg-slate-900 hover:text-slate-200"
+                  }`}
+                >
+                  작업 결과
+                </button>
+                <button
+                  type="button"
                   onClick={() => setBottomTab("edit")}
                   className={`rounded-md px-2.5 py-1 text-[11px] font-medium ${
                     bottomTab === "edit"
@@ -1480,6 +1592,17 @@ export function WorkflowEditor({
                       작업 워크플로우를 선택하면 작업결과를 확인할 수 있습니다.
                     </div>
                   )
+                ) : bottomTab === "work-results" ? (
+                  <WorkNodeResultsPanel
+                    workNodes={workflowWorkNodes.map((node) => ({
+                      uuid: node.uuid,
+                      name: node.name,
+                      validateDate: node.validateDate,
+                      lastEndDate: node.lastEndDate,
+                      lastSuccess: node.lastSuccess,
+                    }))}
+                    selectedWorkUuid={selectedWorkNode?.uuid?.trim() || null}
+                  />
                 ) : selectedWorkNode && !readOnly ? (
                   <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-4">
                     <WorkNodeEditPanel
@@ -1531,4 +1654,4 @@ export function WorkflowEditor({
       ) : null}
     </div>
   );
-}
+});

@@ -11,6 +11,7 @@ import { parseAiWorkflowDesignResponse } from "./aiWorkflowParse";
 import { WorkflowDesignPanel } from "./WorkflowDesignPanel";
 import type { DiagramAgentEvent } from "./WorkflowEditor";
 import { WorkflowListPanel } from "./WorkflowListPanel";
+import { describeCronExpr } from "./WorkflowScheduleField";
 import { isRunInProgress } from "./workflowModel";
 
 const WORKFLOW_AGENT_ID = "WORKFLOW_AGENT";
@@ -507,6 +508,14 @@ export function WorkflowPage({ agents, user, onChatComplete }: WorkflowPageProps
                           className="shrink-0 rounded-full border border-sky-600/70 bg-sky-950/60 px-2 py-0.5 text-[10px] font-medium text-sky-100"
                         >
                           배포
+                        </span>
+                      ) : null}
+                      {item.cron ? (
+                        <span
+                          title={`스케줄: ${describeCronExpr(item.cron_expr)} (${item.cron_expr || ""})`}
+                          className="shrink-0 truncate rounded-full border border-violet-600/70 bg-violet-950/50 px-2 py-0.5 text-[10px] font-medium text-violet-100"
+                        >
+                          {describeCronExpr(item.cron_expr)}
                         </span>
                       ) : null}
                       {ownerName ? (

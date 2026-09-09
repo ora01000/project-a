@@ -43,6 +43,9 @@ export type WorkEditorNode = {
   lastFailReason: string;
   usePreviousWorkResult: boolean;
   workReport: string;
+  cron: boolean;
+  cronExpr: string;
+  scheduleWait: boolean;
   fail: FailSpec;
 };
 
@@ -103,6 +106,9 @@ export function workFieldsFromItem(
     lastFailReason: item.last_fail_reason || "",
     usePreviousWorkResult: Boolean(item.use_previous_work_result),
     workReport: item.work_report || "",
+    cron: Boolean(item.cron),
+    cronExpr: (item.cron_expr || "0 9 * * *").slice(0, 20),
+    scheduleWait: Boolean(item.schedule_wait),
   };
 }
 
@@ -131,7 +137,9 @@ export function workNodeWriteBody(
     test_result: node.testResult,
     files: node.files,
     use_previous_work_result: node.usePreviousWorkResult,
-    work_report: (node.workReport || "").trim().slice(0, 200),
+    work_report: (node.workReport || "").trim().slice(0, 400),
+    cron: Boolean(node.cron),
+    cron_expr: (node.cronExpr || "0 9 * * *").slice(0, 20),
     ...(extras?.validation_message != null
       ? { validation_message: extras.validation_message }
       : {}),
@@ -230,6 +238,9 @@ export function hydrateEditor(
       lastFailReason: "",
       usePreviousWorkResult: false,
       workReport: "",
+      cron: false,
+      cronExpr: "0 9 * * *",
+      scheduleWait: false,
       fail,
     };
   };

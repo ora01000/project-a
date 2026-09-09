@@ -1118,6 +1118,59 @@ def write_work_node_validation_output(
     return RESULT_LATEST_FILENAME
 
 
+def is_work_node_result_filename(filename: str | None) -> bool:
+    """True when ``filename`` is ``result_latest.out`` or ``result_*.out``."""
+    import re
+
+    name = normalize_work_node_filename(filename)
+    if not name:
+        return False
+    if name == RESULT_LATEST_FILENAME:
+        return True
+    return bool(re.fullmatch(r"result_\d+\.out", name))
+
+
+def list_work_node_result_outputs(node_uuid: str) -> list[dict[str, object]]:
+    """List saved run/validation outputs for a work node (newest archives after latest)."""
+    directory = work_node_upload_dir(node_uuid)
+    if not directory.is_dir():
+        return []
+    items: list[dict[str, object]] = []
+    for path in directory.iterdir():
+        if not path.is_file() or not is_work_node_result_filename(path.name):
+            continue
+        try:
+            stat = path.stat()
+        except OSError:
+            continue
+        items.append(
+            {
+                "filename": path.name,
+                "mtime": float(stat.st_mtime),
+                "size": int(stat.st_size),
+                "is_latest": path.name == RESULT_LATEST_FILENAME,
+            }
+        )
+    items.sort(
+        key=lambda row: (
+            0 if bool(row.get("is_latest")) else 1,
+            -float(row.get("mtime") or 0.0),
+        )
+    )
+    return items
+
+
+def read_work_node_result_output(node_uuid: str, filename: str) -> str | None:
+    """Read a specific result output file under the work-node upload directory."""
+    name = normalize_work_node_filename(filename)
+    if not is_work_node_result_filename(name):
+        raise ValueError("허용되지 않는 결과 파일입니다.")
+    path = work_node_file_path(node_uuid, name)
+    if path is None or not path.is_file():
+        return None
+    return path.read_text(encoding="utf-8")
+
+
 def read_work_node_validation_output(
     node_uuid: str,
     *,

@@ -196,7 +196,15 @@ ALTER TABLE work_node
 ALTER TABLE work_node
     ADD COLUMN IF NOT EXISTS validate_date TEXT NOT NULL DEFAULT '';
 ALTER TABLE work_node
-    ADD COLUMN IF NOT EXISTS work_report VARCHAR(200) NOT NULL DEFAULT '';
+    ADD COLUMN IF NOT EXISTS work_report VARCHAR(400) NOT NULL DEFAULT '';
+ALTER TABLE work_node
+    ALTER COLUMN work_report TYPE VARCHAR(400);
+ALTER TABLE work_node
+    ADD COLUMN IF NOT EXISTS cron INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE work_node
+    ADD COLUMN IF NOT EXISTS cron_expr VARCHAR(20) NOT NULL DEFAULT '0 9 * * *';
+ALTER TABLE work_node
+    ADD COLUMN IF NOT EXISTS schedule_wait INTEGER NOT NULL DEFAULT 0;
 -- Legacy column cleanup (agent_response → work_script, drop user_prompt)
 DO $$
 BEGIN
@@ -231,7 +239,9 @@ CREATE TABLE IF NOT EXISTS workflow (
     workflow TEXT NOT NULL DEFAULT '',
     create_date TEXT NOT NULL DEFAULT '',
     test_result INTEGER NOT NULL DEFAULT 0,
-    validate_date TEXT NOT NULL DEFAULT ''
+    validate_date TEXT NOT NULL DEFAULT '',
+    cron INTEGER NOT NULL DEFAULT 0,
+    cron_expr VARCHAR(20) NOT NULL DEFAULT '0 9 * * *'
 );
 
 ALTER TABLE workflow
@@ -246,6 +256,10 @@ ALTER TABLE workflow
     ADD COLUMN IF NOT EXISTS test_result INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE workflow
     ADD COLUMN IF NOT EXISTS validate_date TEXT NOT NULL DEFAULT '';
+ALTER TABLE workflow
+    ADD COLUMN IF NOT EXISTS cron INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE workflow
+    ADD COLUMN IF NOT EXISTS cron_expr VARCHAR(20) NOT NULL DEFAULT '0 9 * * *';
 -- Legacy checkin columns (owner/distribute model); drop if present
 ALTER TABLE workflow DROP COLUMN IF EXISTS checkin_user;
 ALTER TABLE workflow DROP COLUMN IF EXISTS checkin_time;

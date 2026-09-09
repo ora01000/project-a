@@ -34,6 +34,7 @@ from backend.app.services.k8s_scrape_scheduler import run_k8s_scrape_scheduler_l
 from backend.app.services.mail_receive_loop import run_mail_receive_loop
 from backend.app.services.mynote_flush_loop import run_mynote_flush_loop
 from backend.app.services.redis_client import close_redis, init_redis
+from backend.app.services.workflow_cron_scheduler import run_workflow_cron_scheduler_loop
 
 logger = logging.getLogger(__name__)
 
@@ -98,6 +99,15 @@ async def lifespan(app: FastAPI):
                     Path(app.state.database_path),
                     runtime_mode=runtime_mode,
                     settings=k8s_collector_settings,
+                )
+            )
+        )
+    if app.state.agent_runtime is not None:
+        tasks.append(
+            asyncio.create_task(
+                run_workflow_cron_scheduler_loop(
+                    Path(app.state.database_path),
+                    app.state.agent_runtime,
                 )
             )
         )

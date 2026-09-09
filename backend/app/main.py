@@ -76,6 +76,7 @@ from backend.app.services.job_processor_loop import run_job_processor_loop
 from backend.app.services.k8s_scrape_scheduler import run_k8s_scrape_scheduler_loop
 from backend.app.services.mail_receive_loop import run_mail_receive_loop
 from backend.app.services.mynote_flush_loop import run_mynote_flush_loop
+from backend.app.services.workflow_cron_scheduler import run_workflow_cron_scheduler_loop
 from backend.app.usage.token_tracker import TokenTracker
 
 logger = logging.getLogger(__name__)
@@ -495,6 +496,14 @@ async def lifespan(app: FastAPI):
                 settings=k8s_collector_settings,
             )
         )
+    workflow_cron_task: asyncio.Task | None = None
+    if run_workers and app.state.agent_runtime is not None:
+        workflow_cron_task = asyncio.create_task(
+            run_workflow_cron_scheduler_loop(
+                Path(app.state.database_path),
+                app.state.agent_runtime,
+            )
+        )
     received_mail_settings = load_received_mail_settings()
     mail_receive_task: asyncio.Task | None = None
     if run_workers and received_mail_settings.poll_enabled:
@@ -531,6 +540,10 @@ async def lifespan(app: FastAPI):
             k8s_scrape_task.cancel()
             with suppress(asyncio.CancelledError):
                 await k8s_scrape_task
+        if workflow_cron_task is not None:
+            workflow_cron_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await workflow_cron_task
         if mail_receive_task is not None:
             mail_receive_task.cancel()
             with suppress(asyncio.CancelledError):

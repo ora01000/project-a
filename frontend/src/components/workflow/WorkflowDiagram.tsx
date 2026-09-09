@@ -3,8 +3,11 @@ import { isRunInProgress } from "./workflowModel";
 
 interface WorkflowDiagramProps {
   graph: WorkflowGraph;
-  /** work_uuid → { last_start_date, last_end_date } */
-  workRunDates?: Record<string, { last_start_date?: string; last_end_date?: string }>;
+  /** work_uuid → run dates / schedule wait */
+  workRunDates?: Record<
+    string,
+    { last_start_date?: string; last_end_date?: string; schedule_wait?: boolean }
+  >;
   /** Graph node id of HITL waiting for approval (e.g. H:userid@3) */
   awaitingHitlNodeId?: string | null;
 }
@@ -163,11 +166,17 @@ export function WorkflowDiagram({
           !isHitl &&
           Boolean(node.work_uuid) &&
           isRunInProgress(dates?.last_start_date, dates?.last_end_date);
+        const isScheduleWaiting = isWorkRunning && Boolean(dates?.schedule_wait);
         const isHitlAwaiting =
           isHitl &&
           Boolean(awaitingHitlNodeId) &&
           node.id === awaitingHitlNodeId;
         const isRunning = isWorkRunning || isHitlAwaiting;
+        const accentVar = isScheduleWaiting
+          ? "var(--wf-schedule-accent)"
+          : "var(--wf-run-accent)";
+        const haloClass = isScheduleWaiting ? "wf-schedule-halo" : "wf-run-halo";
+        const strokeClass = isScheduleWaiting ? "wf-schedule-stroke" : "wf-run-stroke";
         const pad = 5;
         return (
           <g key={node.id} aria-busy={isRunning || undefined}>
@@ -178,7 +187,7 @@ export function WorkflowDiagram({
                 width={node.width + pad * 2}
                 height={node.height + pad * 2}
                 rx={isHitl ? 4 : 10}
-                className="wf-run-halo"
+                className={haloClass}
               />
             ) : null}
             <rect
@@ -190,7 +199,7 @@ export function WorkflowDiagram({
               fill={isHitl ? "var(--wf-diagram-hitl-fill)" : "var(--wf-diagram-node-fill)"}
               stroke={
                 isRunning
-                  ? "var(--wf-run-accent)"
+                  ? accentVar
                   : isHitl
                     ? "var(--wf-diagram-hitl-stroke)"
                     : "var(--wf-diagram-work-stroke)"
@@ -204,7 +213,7 @@ export function WorkflowDiagram({
                 width={node.width}
                 height={node.height}
                 rx={isHitl ? 2 : 8}
-                className="wf-run-stroke"
+                className={strokeClass}
               />
             ) : null}
             <text
@@ -215,7 +224,11 @@ export function WorkflowDiagram({
               fontSize={isHitl ? 9 : 10}
               fontWeight={isRunning ? 700 : undefined}
             >
-              {node.label.length > 8 ? `${node.label.slice(0, 7)}…` : node.label}
+              {isScheduleWaiting
+                ? "예약대기"
+                : node.label.length > 8
+                  ? `${node.label.slice(0, 7)}…`
+                  : node.label}
             </text>
           </g>
         );

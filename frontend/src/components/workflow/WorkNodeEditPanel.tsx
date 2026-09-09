@@ -7,6 +7,10 @@ import { WORK_SCRIPT_TYPE_OPTIONS } from "../../types/workflow";
 import { flushSseBuffer, parseSseChunk } from "../../utils/parseSse";
 import { JobReportEmailModal } from "../jobs/JobReportEmailModal";
 import type { WorkEditorNode } from "./workflowModel";
+import {
+  DEFAULT_WORK_NODE_CRON_EXPR,
+  WorkNodeScheduleField,
+} from "./WorkNodeScheduleField";
 
 interface WorkNodeEditPanelProps {
   node: WorkEditorNode;
@@ -508,6 +512,16 @@ export function WorkNodeEditPanel({
           )}
         </label>
 
+        <WorkNodeScheduleField
+          enabled={Boolean(node.cron)}
+          cronExpr={node.cronExpr || DEFAULT_WORK_NODE_CRON_EXPR}
+          readOnly={isGenerating || isValidating}
+          onChange={({ enabled, cronExpr }) => {
+            onChange({ cron: enabled, cronExpr });
+            void onPersistPatch({ cron: enabled, cronExpr });
+          }}
+        />
+
         <label className="grid gap-1 text-xs text-slate-400">
           작업 설명
           <textarea
@@ -575,7 +589,7 @@ export function WorkNodeEditPanel({
               initialEmails: node.workReport,
               title: "결과보고 메일 수신자",
               confirmLabel: "적용",
-              maxLength: 200,
+              maxLength: 400,
               onConfirm: (emailsJoined) => {
                 onChange({ workReport: emailsJoined });
                 void onPersistPatch({ workReport: emailsJoined });

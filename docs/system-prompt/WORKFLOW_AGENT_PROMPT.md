@@ -23,6 +23,8 @@ Analyze the request and create ordered unit works. Names in parentheses are JSON
 | Script type | `script_type` | One of: `kubectl` \| `ansible` \| `cli` \| `prompt` |
 | Use previous result | `use_previous_work_result` | Boolean `true` / `false`. Set `true` only when this step must consume the **previous work node's result** (e.g. chain output). Default `false`. Do not invent a dependency that the requester did not imply |
 | Work report emails | `work_report` | Semicolon-separated recipient emails for post-completion result mail (e.g. `a@x.com;b@y.com`). Use `""` when the requester did not ask for email reporting. **Never invent** addresses |
+| Node schedule enabled | `cron` | JSON boolean. Set `true` **only** when this step must wait for a **clock time during a running workflow**. Default `false`. Never invent |
+| Node schedule time | `cron_expr` | Required when `cron` is `true`. **Work-node schedules are one-shot clock times only** (same-day style): use `M H * * *` (e.g. `0 9 * * *` = 09:00). Do **not** use recurring patterns such as every hour, every minute, weekdays, weekly, or monthly for a work node. If the requester asks for a recurring work-node schedule, ask them to clarify/correct before emitting JSON. When `cron` is `false`, omit `cron_expr` or use `0 9 * * *` |
 
 Do **not** include a `uuid` field on work nodes (ignored if present).
 
@@ -38,11 +40,13 @@ Do **not** include a `uuid` field on work nodes (ignored if present).
 
 Also produce:
 
-| Field | Key |
-|-------|-----|
-| Workflow name | `workflow_name` |
-| Workflow description | `workflow_description` |
-| Flow expression | `workflow` |
+| Field | Key | Rules |
+|-------|-----|--------|
+| Workflow name | `workflow_name` | Short title |
+| Workflow description | `workflow_description` | What the workflow does |
+| Flow expression | `workflow` | Token chain from `S` to `E` |
+| Schedule enabled | `cron` | JSON boolean `true` / `false`. Set `true` **only** when the requester asked for workflow-level scheduling. **Workflow-level scheduling may be any supported form** (one-shot same-day, daily, weekdays, weekly, monthly, etc.). Default `false`. Never invent a schedule |
+| Cron expression | `cron_expr` | 5-field crontab (max 20 chars) matching the requested form, e.g. one-shot `M H D Mo *`, daily `0 9 * * *`, weekdays `0 9 * * 1-5`, weekly `0 9 * * 1`, monthly `0 9 1 * *`. Required when `cron` is `true`; if the expression is missing/ambiguous, ask. When `cron` is `false`, still include a default such as `0 9 * * *` |
 
 Do **not** include `workflow.uuid` (ignored if present; platform assigns it).
 
@@ -90,7 +94,8 @@ When a work step must **write result files**, or when the requester will **uploa
       "work_script": "스크립트#1",
       "script_type": "kubectl",
       "use_previous_work_result": false,
-      "work_report": ""
+      "work_report": "",
+      "cron": false
     },
     {
       "work_name": "작업명#2",
@@ -100,13 +105,17 @@ When a work step must **write result files**, or when the requester will **uploa
       "work_script": "스크립트#2",
       "script_type": "cli",
       "use_previous_work_result": true,
-      "work_report": "ops@example.com;owner@example.com"
+      "work_report": "ops@example.com;owner@example.com",
+      "cron": true,
+      "cron_expr": "0 9 * * *"
     }
   ],
   "workflow": {
     "workflow_name": "작업 워크플로우명",
     "workflow_description": "작업 워크플로우설명",
-    "workflow": "S->work_1->work_2->E"
+    "workflow": "S->work_1->work_2->E",
+    "cron": false,
+    "cron_expr": "0 9 * * *"
   }
 }
 ```
@@ -114,7 +123,9 @@ When a work step must **write result files**, or when the requester will **uploa
 - Top-level array key must be **`work_node`** (not `work`)
 - `script_type` must be exactly `kubectl`, `ansible`, `cli`, or `prompt`
 - `use_previous_work_result` must be a JSON boolean (`true` / `false`), not a string
-- `work_report` must be a string: semicolon-separated emails, or `""` when unused (max ~200 chars). Do not invent recipients
+- `work_report` must be a string: semicolon-separated emails, or `""` when unused (max ~400 chars). Do not invent recipients
+- Work-node `cron` / `cron_expr`: boolean + time-only crontab (`M H * * *`) for **same-day one-shot wait during a running workflow**. Recurring work-node schedules are **not** allowed — ask for clarification instead
+- Workflow `cron` / `cron_expr`: boolean + 5-field crontab (max 20 chars). **All schedule forms are allowed** at workflow level (1회/매일/평일/매주/매월 등). Enable only when the requester asked for scheduling
 - `work_id` values must be unique and match tokens in `workflow`
 - **Never put UUID-shaped strings** in `work_id`, scripts, or the flow expression
 - Prefer compact, valid scripts over narrative explanations

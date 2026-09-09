@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
 import re
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Any
+
+from croniter import croniter
 
 from backend.app.config import (
     RESULT_LATEST_FILENAME,
@@ -34,6 +39,7 @@ from backend.app.db.workflow import (
     mark_work_node_run_started,
     mark_workflow_run_finished,
     mark_workflow_run_started,
+    set_work_node_schedule_wait,
 )
 from backend.app.notifications.email_sender import (
     load_email_settings_from_db,
@@ -41,7 +47,9 @@ from backend.app.notifications.email_sender import (
     send_markdown_email,
 )
 from backend.app.services.agent_runtime_client import AgentInvokeRequest
+from backend.app.services.k8s_scrape_scheduler import cron_matches_minute
 from backend.app.services.workflow_graph import FlowToken, parse_workflow_tokens
+from backend.app.timezone import DISPLAY_TIMEZONE, now_display_datetime
 
 logger = logging.getLogger(__name__)
 
@@ -186,11 +194,8 @@ def _work_names_for_tokens(
     return work_names
 
 
-def _build_agent_message(node: WorkNodeRecord, previous_result: str) -> str:
-    script = (node.work_script or "").strip()
-    if not script:
-        raise ValueError(f"작업 스크립트가 비어 있습니다: {node.work_name}")
-    if not node.use_previous_work_result:
+def _append_previous_result(script: str, previous_result: str, *, use_previous: bool) -> str:
+    if not use_previous:
         return script
     prior = (previous_result or "").strip()
     if not prior:
@@ -200,6 +205,145 @@ def _build_agent_message(node: WorkNodeRecord, previous_result: str) -> str:
         "----- 이전 작업 결과 -----\n"
         f"{prior}"
     )
+
+
+def _wrap_work_script_for_execution(script_type: str, script: str) -> str:
+    """Wrap work_script by script_type before sending to target_agent."""
+    normalized = (script_type or "").strip().lower()
+    body = script.strip()
+    if normalized == "kubectl":
+        return (
+            "다음 스크립트를 kubectl 도구를 사용하여 수행하고 정의된 결과 json 형식에 맞춰 응답하세요\n"
+            "-------------\n"
+            "# 수행 스크립트\n"
+            f"{body}\n"
+            "-------------\n"
+            "# 결과\n"
+            "{\n"
+            '  "success": [ true | false ],\n'
+            '  "message": "결과 메시지"\n'
+            "}"
+        )
+    if normalized == "ansible":
+        return (
+            "다음 스크립트를 ansible 에이전트 도구를 사용하여 수행하고 정의된 결과 json 형식에 맞춰 응답하세요\n"
+            "-------------\n"
+            "# 수행 스크립트\n"
+            f"{body}\n"
+            "-------------\n"
+            "# 결과\n"
+            "{\n"
+            '  "success": [ true | false ],\n'
+            '  "message": "결과 메시지"\n'
+            "}"
+        )
+    # prompt: as-is. cli: TBD — currently as-is.
+    return body
+
+
+def _build_agent_message(node: WorkNodeRecord, previous_result: str) -> str:
+    script = (node.work_script or "").strip()
+    if not script:
+        raise ValueError(f"작업 스크립트가 비어 있습니다: {node.work_name}")
+    wrapped = _wrap_work_script_for_execution(node.script_type, script)
+    return _append_previous_result(
+        wrapped,
+        previous_result,
+        use_previous=bool(node.use_previous_work_result),
+    )
+
+
+def _extract_json_object(raw: str) -> dict[str, Any] | None:
+    text = (raw or "").strip()
+    if not text:
+        return None
+    fenced = re.search(r"```(?:json)?\s*([\s\S]*?)```", text, flags=re.IGNORECASE)
+    if fenced and fenced.group(1):
+        text = fenced.group(1).strip()
+    start = text.find("{")
+    end = text.rfind("}")
+    if start < 0 or end <= start:
+        return None
+    try:
+        parsed = json.loads(text[start : end + 1])
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def _coerce_success_flag(value: Any) -> bool | None:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)) and value in (0, 1):
+        return bool(value)
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "1", "yes", "ok", "success", "성공", "통과"}:
+            return True
+        if normalized in {"false", "0", "no", "fail", "failed", "실패"}:
+            return False
+    return None
+
+
+def _assert_structured_work_success(script_type: str, content: str) -> None:
+    """For kubectl/ansible, require JSON ``success: true``; otherwise raise (fail path)."""
+    normalized = (script_type or "").strip().lower()
+    if normalized not in {"kubectl", "ansible"}:
+        return
+    payload = _extract_json_object(content)
+    if payload is None:
+        raise ValueError("작업 결과 JSON을 파싱하지 못했습니다.")
+    flag = _coerce_success_flag(payload.get("success"))
+    if flag is None:
+        raise ValueError("작업 결과에 success 필드가 없습니다.")
+    if flag:
+        return
+    message = str(payload.get("message") or "").strip() or "작업 수행 결과가 success=false 입니다."
+    raise ValueError(message[:200])
+
+
+async def _await_work_node_schedule_if_needed(
+    database_path: Path | str,
+    node: WorkNodeRecord,
+) -> None:
+    """Block until the one-shot clock time when ``node.cron`` is enabled.
+
+    Schedule applies only while a workflow run is executing this node.
+    """
+    if not node.cron:
+        return
+    expr = (node.cron_expr or "").strip()
+    if not expr:
+        return
+
+    set_work_node_schedule_wait(database_path, node.uuid, waiting=True)
+    logger.info(
+        "workflow work_node schedule wait uuid=%s name=%s cron_expr=%s",
+        node.uuid,
+        node.work_name,
+        expr,
+    )
+    try:
+        while True:
+            now = now_display_datetime()
+            minute_now = now.astimezone(DISPLAY_TIMEZONE).replace(second=0, microsecond=0)
+            if cron_matches_minute(expr, minute_now):
+                return
+            try:
+                iterator = croniter(expr, minute_now)
+                nxt = iterator.get_next(datetime)
+            except (ValueError, KeyError, TypeError) as exc:
+                raise ValueError(f"잘못된 스케줄 표현식입니다: {expr}") from exc
+            if nxt.tzinfo is None:
+                nxt = nxt.replace(tzinfo=DISPLAY_TIMEZONE)
+            else:
+                nxt = nxt.astimezone(DISPLAY_TIMEZONE)
+            delay = (nxt - now).total_seconds()
+            if delay <= 0:
+                return
+            await asyncio.sleep(min(delay, 30.0))
+    finally:
+        set_work_node_schedule_wait(database_path, node.uuid, waiting=False)
 
 
 def _resolve_invoke_agent_id(database_path: Path | str, target_agent: int) -> str:
@@ -471,6 +615,7 @@ async def _execute_from_index(
 
         mark_work_node_run_started(database_path, node.uuid)
         try:
+            await _await_work_node_schedule_if_needed(database_path, node)
             message = _build_agent_message(node, previous)
             content = await _invoke_work_node(
                 database_path=database_path,
@@ -478,6 +623,7 @@ async def _execute_from_index(
                 node=node,
                 message=message,
             )
+            _assert_structured_work_success(node.script_type, content)
             finished_node = mark_work_node_run_finished(database_path, node.uuid, success=True)
             stamp = (
                 finished_node.last_end_date
@@ -536,6 +682,7 @@ async def _execute_from_index(
                     )
                 mark_work_node_run_started(database_path, fail_node.uuid)
                 try:
+                    await _await_work_node_schedule_if_needed(database_path, fail_node)
                     fail_message = _build_agent_message(fail_node, previous)
                     fail_content = await _invoke_work_node(
                         database_path=database_path,
@@ -543,6 +690,7 @@ async def _execute_from_index(
                         node=fail_node,
                         message=fail_message,
                     )
+                    _assert_structured_work_success(fail_node.script_type, fail_content)
                     finished_fail = mark_work_node_run_finished(
                         database_path, fail_node.uuid, success=True
                     )

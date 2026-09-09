@@ -90,6 +90,9 @@ body {
   --wf-run-accent: #f43f5e;
   --wf-run-glow: rgba(244, 63, 94, 0.75);
   --wf-run-glow-soft: rgba(244, 63, 94, 0.28);
+  --wf-schedule-accent: #eab308;
+  --wf-schedule-glow: rgba(234, 179, 8, 0.75);
+  --wf-schedule-glow-soft: rgba(234, 179, 8, 0.28);
   --wf-diagram-node-fill: #0f172a;
   --wf-diagram-hitl-fill: #1e293b;
   --wf-diagram-node-text: #f8fafc;
@@ -106,6 +109,9 @@ body {
   --wf-run-accent: #9f1239;
   --wf-run-glow: rgba(159, 18, 57, 0.65);
   --wf-run-glow-soft: rgba(190, 18, 60, 0.28);
+  --wf-schedule-accent: #a16207;
+  --wf-schedule-glow: rgba(161, 98, 7, 0.65);
+  --wf-schedule-glow-soft: rgba(202, 138, 4, 0.28);
   --wf-diagram-node-fill: #ffffff;
   --wf-diagram-hitl-fill: #fff7ed;
   --wf-diagram-node-text: #0f172a;
@@ -135,6 +141,25 @@ body {
 .wf-run-pulse {
   border-color: var(--wf-run-accent) !important;
   animation: wf-run-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes wf-schedule-pulse {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 1px var(--wf-schedule-accent),
+      0 0 0 0 var(--wf-schedule-glow);
+  }
+  50% {
+    box-shadow:
+      0 0 0 1px var(--wf-schedule-accent),
+      0 0 0 7px var(--wf-schedule-glow-soft);
+  }
+}
+
+.wf-schedule-pulse {
+  border-color: var(--wf-schedule-accent) !important;
+  animation: wf-schedule-pulse 1.4s ease-in-out infinite;
 }
 
 @keyframes wf-run-stroke-dash {
@@ -171,4 +196,36 @@ body {
   stroke-width: 2 !important;
   animation: wf-run-halo-pulse 1.2s ease-in-out infinite;
   pointer-events: none;
+}
+
+.wf-schedule-stroke {
+  fill: none !important;
+  stroke: var(--wf-schedule-accent) !important;
+  stroke-width: 3 !important;
+  stroke-dasharray: 10 6;
+  stroke-linecap: round;
+  animation: wf-run-stroke-dash 0.85s linear infinite;
+  pointer-events: none;
+}
+
+.wf-schedule-halo {
+  fill: none !important;
+  stroke: var(--wf-schedule-accent) !important;
+  stroke-width: 2 !important;
+  animation: wf-schedule-halo-pulse 1.2s ease-in-out infinite;
+  pointer-events: none;
+}
+
+@keyframes wf-schedule-halo-pulse {
+  0%,
+  100% {
+    stroke-opacity: 0.95;
+    filter: drop-shadow(0 0 1px var(--wf-schedule-accent))
+      drop-shadow(0 0 4px var(--wf-schedule-glow));
+  }
+  50% {
+    stroke-opacity: 0.55;
+    filter: drop-shadow(0 0 2px var(--wf-schedule-accent))
+      drop-shadow(0 0 10px var(--wf-schedule-glow));
+  }
 }

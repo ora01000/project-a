@@ -26,6 +26,9 @@ export interface WorkNodeItem {
   last_fail_reason?: string;
   use_previous_work_result?: boolean;
   work_report?: string;
+  cron?: boolean;
+  cron_expr?: string;
+  schedule_wait?: boolean;
 }
 
 export interface WorkflowApprover {
@@ -77,6 +80,8 @@ export interface WorkflowItem {
   sucess_count?: number;
   fail_count?: number;
   last_success?: boolean;
+  cron?: boolean;
+  cron_expr?: string;
   awaiting_approval?: boolean;
   awaiting_hitl_node_id?: string;
   awaiting_hitl_userid?: string;

@@ -1,9 +1,10 @@
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 
 import type { AuthUser } from "../../types/auth";
 import type { WorkNodeItem, WorkflowItem } from "../../types/workflow";
 import { WorkflowDiagram } from "./WorkflowDiagram";
-import { WorkflowEditor, type DiagramAgentEvent } from "./WorkflowEditor";
+import { WorkflowEditor, type DiagramAgentEvent, type WorkflowEditorHandle } from "./WorkflowEditor";
+import { DEFAULT_WORKFLOW_CRON_EXPR } from "./WorkflowScheduleField";
 import { isRunInProgress } from "./workflowModel";
 
 interface WorkflowDesignPanelProps {
@@ -46,13 +47,22 @@ export function WorkflowDesignPanel({
 }: WorkflowDesignPanelProps) {
   const [actionError, setActionError] = useState<string | null>(null);
   const [isBusy, setIsBusy] = useState(false);
+  const [saveState, setSaveState] = useState({ canSave: false, isSaving: false });
+  const editorRef = useRef<WorkflowEditorHandle>(null);
+  const handleSaveStateChange = useCallback((state: { canSave: boolean; isSaving: boolean }) => {
+    setSaveState(state);
+  }, []);
 
   const workRunDates = useMemo(() => {
-    const map: Record<string, { last_start_date?: string; last_end_date?: string }> = {};
+    const map: Record<
+      string,
+      { last_start_date?: string; last_end_date?: string; schedule_wait?: boolean }
+    > = {};
     for (const node of workNodes) {
       map[node.uuid] = {
         last_start_date: node.last_start_date,
         last_end_date: node.last_end_date,
+        schedule_wait: node.schedule_wait,
       };
     }
     return map;
@@ -194,6 +204,18 @@ export function WorkflowDesignPanel({
                 복제
               </button>
             ) : null}
+            {canEdit ? (
+              <button
+                type="button"
+                disabled={isBusy || saveState.isSaving || !saveState.canSave}
+                onClick={() => {
+                  void editorRef.current?.save();
+                }}
+                className="rounded-md border border-sky-700 bg-sky-950/50 px-3 py-1.5 text-sm font-medium text-sky-100 hover:bg-sky-900/60 disabled:opacity-50"
+              >
+                {saveState.isSaving ? "저장 중…" : "저장"}
+              </button>
+            ) : null}
           </div>
         </header>
         {mode === "edit" && selected?.graph && selected.graph.nodes.length > 0 ? (
@@ -211,6 +233,7 @@ export function WorkflowDesignPanel({
           </div>
         ) : null}
         <WorkflowEditor
+          ref={editorRef}
           sessionKey={editorSessionKey}
           user={user}
           workNodes={workNodes}
@@ -218,11 +241,17 @@ export function WorkflowDesignPanel({
           initialName={mode === "edit" ? selected?.workflow_name ?? "" : ""}
           initialExpression={mode === "edit" ? selected?.workflow ?? "" : ""}
           initialDescription={mode === "edit" ? selected?.workflow_description ?? "" : ""}
+          initialCron={mode === "edit" ? Boolean(selected?.cron) : false}
+          initialCronExpr={
+            mode === "edit"
+              ? selected?.cron_expr || DEFAULT_WORKFLOW_CRON_EXPR
+              : DEFAULT_WORKFLOW_CRON_EXPR
+          }
           workflowUuid={mode === "edit" ? selected?.uuid : undefined}
-          saveLabel="저장"
           readOnly={!canEdit}
           onSaved={onSaved}
           onWorkNodesChanged={onWorkNodesChanged}
+          onSaveStateChange={handleSaveStateChange}
           aiImportRequest={aiImportRequest}
           onAiImportHandled={onAiImportHandled}
           diagramAgentEvent={diagramAgentEvent}

@@ -12,6 +12,8 @@ export type AiWorkNodeDraft = {
   script_type: WorkScriptType | string;
   use_previous_work_result: boolean;
   work_report: string;
+  cron: boolean;
+  cron_expr: string;
 };
 
 export type AiWorkflowDesignPayload = {
@@ -20,11 +22,14 @@ export type AiWorkflowDesignPayload = {
   workflow_name: string;
   workflow_description: string;
   workflow: string;
+  cron: boolean;
+  cron_expr: string;
 };
 
 const SCRIPT_TYPES = new Set(["kubectl", "ansible", "cli", "prompt"]);
 /** Prefer short logical ids from the agent; also accept opaque tokens (incl. guardrail-masked text). */
 const LOGICAL_ID_RE = /^[^\s]{1,200}$/;
+const DEFAULT_CRON_EXPR = "0 9 * * *";
 
 function extractJsonText(raw: string): string {
   const trimmed = raw.trim();
@@ -73,7 +78,25 @@ function asWorkReport(value: unknown): string {
   if (!text || text === "-" || text === "공백" || text.toLowerCase() === "none") {
     return "";
   }
-  return text.slice(0, 200);
+  return text.slice(0, 400);
+}
+
+function asCronExpr(value: unknown): string {
+  const text = asString(value) || DEFAULT_CRON_EXPR;
+  return text.slice(0, 20);
+}
+
+/** Work-node schedules are time-of-day one-shot only: ``M H * * *``. */
+function asWorkNodeCronExpr(value: unknown): string {
+  const text = asCronExpr(value);
+  const parts = text.split(/\s+/);
+  const minuteRaw = parts[0] ?? "0";
+  const hourRaw = parts[1] ?? "9";
+  const minute = /^\d+$/.test(minuteRaw) ? Number(minuteRaw) : 0;
+  const hour = /^\d+$/.test(hourRaw) ? Number(hourRaw) : 9;
+  const safeMinute = Math.min(59, Math.max(0, Math.trunc(minute)));
+  const safeHour = Math.min(23, Math.max(0, Math.trunc(hour)));
+  return `${safeMinute} ${safeHour} * * *`.slice(0, 20);
 }
 
 function newUuid(): string {
@@ -151,6 +174,8 @@ export function parseAiWorkflowDesignResponse(raw: string): AiWorkflowDesignPayl
     script_type: string;
     use_previous_work_result: boolean;
     work_report: string;
+    cron: boolean;
+    cron_expr: string;
   }> = [];
 
   workList.forEach((item, index) => {
@@ -172,6 +197,7 @@ export function parseAiWorkflowDesignResponse(raw: string): AiWorkflowDesignPayl
 
     const uuid = newUuid();
     idToUuid[logicalId] = uuid;
+    const nodeCron = asBoolean(row.cron, false);
     drafts.push({
       logicalId,
       uuid,
@@ -182,6 +208,8 @@ export function parseAiWorkflowDesignResponse(raw: string): AiWorkflowDesignPayl
       script_type: scriptType,
       use_previous_work_result: asBoolean(row.use_previous_work_result, false),
       work_report: asWorkReport(row.work_report),
+      cron: nodeCron,
+      cron_expr: asWorkNodeCronExpr(row.cron_expr),
     });
   });
 
@@ -201,6 +229,8 @@ export function parseAiWorkflowDesignResponse(raw: string): AiWorkflowDesignPayl
     workflow_name: asString(workflowObj.workflow_name) || "AI 생성 작업 워크플로우",
     workflow_description: asString(workflowObj.workflow_description),
     workflow: remapWorkflowExpression(workflowRaw, idToUuid),
+    cron: asBoolean(workflowObj.cron, false),
+    cron_expr: asCronExpr(workflowObj.cron_expr),
   };
 }
 

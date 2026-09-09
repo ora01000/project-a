@@ -19,14 +19,18 @@ _WORK_NODE_SELECT = """
     uuid, owner, work_name, work_description, target_agent, work_script,
     script_type, test_result, files, create_date, validate_date,
     last_start_date, last_end_date, last_success, last_fail_reason,
-    use_previous_work_result, work_report
+    use_previous_work_result, work_report, cron, cron_expr, schedule_wait
 """
 
 _WORKFLOW_SELECT = """
     uuid, owner, distribute, workflow_name, workflow_description, workflow,
     create_date, test_result, validate_date,
-    last_start_date, last_end_date, run_count, sucess_count, fail_count, last_success
+    last_start_date, last_end_date, run_count, sucess_count, fail_count, last_success,
+    cron, cron_expr
 """
+
+DEFAULT_WORKFLOW_CRON_EXPR = "0 9 * * *"  # daily 09:00
+DEFAULT_WORK_NODE_CRON_EXPR = "0 9 * * *"  # time-of-day default (daily 09:00)
 
 
 def normalize_script_type(value: str | None) -> str:
@@ -237,7 +241,10 @@ def ensure_workflow_tables(connection) -> None:
             last_success INTEGER NOT NULL DEFAULT 0,
             last_fail_reason VARCHAR(200) NOT NULL DEFAULT '',
             use_previous_work_result INTEGER NOT NULL DEFAULT 0,
-            work_report VARCHAR(200) NOT NULL DEFAULT ''
+            work_report VARCHAR(400) NOT NULL DEFAULT '',
+            cron INTEGER NOT NULL DEFAULT 0,
+            cron_expr VARCHAR(20) NOT NULL DEFAULT '0 9 * * *',
+            schedule_wait INTEGER NOT NULL DEFAULT 0
         )
         """
     )
@@ -310,7 +317,31 @@ def ensure_workflow_tables(connection) -> None:
     connection.execute(
         """
         ALTER TABLE work_node
-            ADD COLUMN IF NOT EXISTS work_report VARCHAR(200) NOT NULL DEFAULT ''
+            ADD COLUMN IF NOT EXISTS work_report VARCHAR(400) NOT NULL DEFAULT ''
+        """
+    )
+    connection.execute(
+        """
+        ALTER TABLE work_node
+            ALTER COLUMN work_report TYPE VARCHAR(400)
+        """
+    )
+    connection.execute(
+        """
+        ALTER TABLE work_node
+            ADD COLUMN IF NOT EXISTS cron INTEGER NOT NULL DEFAULT 0
+        """
+    )
+    connection.execute(
+        """
+        ALTER TABLE work_node
+            ADD COLUMN IF NOT EXISTS cron_expr VARCHAR(20) NOT NULL DEFAULT '0 9 * * *'
+        """
+    )
+    connection.execute(
+        """
+        ALTER TABLE work_node
+            ADD COLUMN IF NOT EXISTS schedule_wait INTEGER NOT NULL DEFAULT 0
         """
     )
     _migrate_work_node_script_columns(connection)
@@ -332,7 +363,9 @@ def ensure_workflow_tables(connection) -> None:
             run_count INTEGER NOT NULL DEFAULT 0,
             sucess_count INTEGER NOT NULL DEFAULT 0,
             fail_count INTEGER NOT NULL DEFAULT 0,
-            last_success INTEGER NOT NULL DEFAULT 0
+            last_success INTEGER NOT NULL DEFAULT 0,
+            cron INTEGER NOT NULL DEFAULT 0,
+            cron_expr VARCHAR(20) NOT NULL DEFAULT '0 9 * * *'
         )
         """
     )
@@ -408,6 +441,18 @@ def ensure_workflow_tables(connection) -> None:
             ADD COLUMN IF NOT EXISTS last_success INTEGER NOT NULL DEFAULT 0
         """
     )
+    connection.execute(
+        """
+        ALTER TABLE workflow
+            ADD COLUMN IF NOT EXISTS cron INTEGER NOT NULL DEFAULT 0
+        """
+    )
+    connection.execute(
+        """
+        ALTER TABLE workflow
+            ADD COLUMN IF NOT EXISTS cron_expr VARCHAR(20) NOT NULL DEFAULT '0 9 * * *'
+        """
+    )
     connection.execute("ALTER TABLE work_node ALTER COLUMN owner SET DEFAULT 1")
     connection.execute("ALTER TABLE workflow ALTER COLUMN owner SET DEFAULT 1")
     # Migrate away from checkin model when upgrading existing DBs.
@@ -475,6 +520,9 @@ class WorkNodeRecord:
     last_fail_reason: str = ""
     use_previous_work_result: bool = False
     work_report: str = ""
+    cron: bool = False
+    cron_expr: str = DEFAULT_WORK_NODE_CRON_EXPR
+    schedule_wait: bool = False
     owner: int = 0
 
 
@@ -495,6 +543,8 @@ class WorkflowRecord:
     last_success: bool = False
     owner: int = 0
     distribute: bool = False
+    cron: bool = False
+    cron_expr: str = DEFAULT_WORKFLOW_CRON_EXPR
 
 
 def user_owns_workflow(record: WorkflowRecord, user_idx: int) -> bool:
@@ -521,6 +571,9 @@ def _row_to_work_node(row) -> WorkNodeRecord:
         row["use_previous_work_result"] if "use_previous_work_result" in keys else 0
     )
     work_report = row["work_report"] if "work_report" in keys else ""
+    cron = row["cron"] if "cron" in keys else 0
+    cron_expr = row["cron_expr"] if "cron_expr" in keys else DEFAULT_WORK_NODE_CRON_EXPR
+    schedule_wait = row["schedule_wait"] if "schedule_wait" in keys else 0
     owner = row["owner"] if "owner" in keys else 0
     return WorkNodeRecord(
         uuid=str(row["uuid"] or ""),
@@ -539,7 +592,10 @@ def _row_to_work_node(row) -> WorkNodeRecord:
         last_success=bool(int(last_success or 0)),
         last_fail_reason=str(last_fail_reason or "")[:200],
         use_previous_work_result=bool(int(use_previous_work_result or 0)),
-        work_report=str(work_report or "")[:200],
+        work_report=str(work_report or "")[:400],
+        cron=bool(int(cron or 0)),
+        cron_expr=str(cron_expr or DEFAULT_WORK_NODE_CRON_EXPR)[:20],
+        schedule_wait=bool(int(schedule_wait or 0)),
     )
 
 
@@ -556,6 +612,8 @@ def _row_to_workflow(row) -> WorkflowRecord:
     sucess_count = row["sucess_count"] if "sucess_count" in keys else 0
     fail_count = row["fail_count"] if "fail_count" in keys else 0
     last_success = row["last_success"] if "last_success" in keys else 0
+    cron = row["cron"] if "cron" in keys else 0
+    cron_expr = row["cron_expr"] if "cron_expr" in keys else DEFAULT_WORKFLOW_CRON_EXPR
     return WorkflowRecord(
         uuid=str(row["uuid"] or ""),
         owner=int(owner or 0),
@@ -572,6 +630,8 @@ def _row_to_workflow(row) -> WorkflowRecord:
         sucess_count=int(sucess_count or 0),
         fail_count=int(fail_count or 0),
         last_success=bool(int(last_success or 0)),
+        cron=bool(int(cron or 0)),
+        cron_expr=str(cron_expr or DEFAULT_WORKFLOW_CRON_EXPR)[:20],
     )
 
 
@@ -650,13 +710,19 @@ def create_work_node(
     files: str = "",
     use_previous_work_result: bool = False,
     work_report: str = "",
+    cron: bool = False,
+    cron_expr: str | None = None,
     uuid: str | None = None,
     owner: int = 0,
 ) -> WorkNodeRecord:
+    from backend.app.db.k8s_inventory import validate_cron_expr
+
     created_at = now_job_datetime()
     validate_at = created_at if test_result else ""
     normalized_script_type = normalize_script_type(script_type)
     node_uuid = _normalize_uuid(uuid)
+    enabled = bool(cron)
+    expr = validate_cron_expr(cron_expr or DEFAULT_WORK_NODE_CRON_EXPR)
     with get_connection(database_path) as connection:
         ensure_workflow_tables(connection)
         row = connection.execute(
@@ -665,8 +731,8 @@ def create_work_node(
                 uuid, owner, work_name, work_description, target_agent, work_script,
                 script_type, test_result, files, create_date, validate_date,
                 last_start_date, last_end_date, last_success, last_fail_reason,
-                use_previous_work_result, work_report
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', '', 0, '', ?, ?)
+                use_previous_work_result, work_report, cron, cron_expr
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', '', 0, '', ?, ?, ?, ?)
             RETURNING {_WORK_NODE_SELECT}
             """,
             (
@@ -682,7 +748,9 @@ def create_work_node(
                 created_at,
                 validate_at,
                 1 if use_previous_work_result else 0,
-                (work_report or "").strip()[:200],
+                (work_report or "").strip()[:400],
+                1 if enabled else 0,
+                expr,
             ),
         ).fetchone()
     return _row_to_work_node(row)
@@ -701,7 +769,11 @@ def update_work_node(
     files: str,
     use_previous_work_result: bool = False,
     work_report: str = "",
+    cron: bool | None = None,
+    cron_expr: str | None = None,
 ) -> WorkNodeRecord | None:
+    from backend.app.db.k8s_inventory import validate_cron_expr
+
     existing = get_work_node_by_uuid(database_path, node_uuid)
     if existing is None:
         return None
@@ -710,6 +782,12 @@ def update_work_node(
     else:
         validate_date = ""
     normalized_script_type = normalize_script_type(script_type)
+    next_cron = existing.cron if cron is None else bool(cron)
+    if cron_expr is None:
+        next_expr = existing.cron_expr or DEFAULT_WORK_NODE_CRON_EXPR
+    else:
+        next_expr = cron_expr
+    next_expr = validate_cron_expr(next_expr)
     with get_connection(database_path) as connection:
         ensure_workflow_tables(connection)
         connection.execute(
@@ -717,7 +795,7 @@ def update_work_node(
             UPDATE work_node
             SET work_name = ?, work_description = ?, target_agent = ?, work_script = ?,
                 script_type = ?, test_result = ?, files = ?, validate_date = ?,
-                use_previous_work_result = ?, work_report = ?
+                use_previous_work_result = ?, work_report = ?, cron = ?, cron_expr = ?
             WHERE uuid = ?
             """,
             (
@@ -730,7 +808,9 @@ def update_work_node(
                 (files or "").strip()[:300],
                 validate_date,
                 1 if use_previous_work_result else 0,
-                (work_report or "").strip()[:200],
+                (work_report or "").strip()[:400],
+                1 if next_cron else 0,
+                next_expr,
                 existing.uuid,
             ),
         )
@@ -818,9 +898,17 @@ def create_workflow(
     owner: int = 0,
     distribute: bool = False,
     uuid: str | None = None,
+    cron: bool = False,
+    cron_expr: str | None = None,
 ) -> WorkflowRecord:
+    from backend.app.db.k8s_inventory import validate_cron_expr
+
     created_at = now_job_datetime()
     workflow_uuid = _normalize_uuid(uuid)
+    enabled = bool(cron)
+    expr = validate_cron_expr(cron_expr) if enabled else validate_cron_expr(
+        cron_expr or DEFAULT_WORKFLOW_CRON_EXPR
+    )
     with get_connection(database_path) as connection:
         ensure_workflow_tables(connection)
         row = connection.execute(
@@ -828,9 +916,10 @@ def create_workflow(
             INSERT INTO workflow (
                 uuid, owner, distribute, workflow_name, workflow_description, workflow,
                 create_date, test_result, validate_date,
-                last_start_date, last_end_date, run_count, sucess_count, fail_count, last_success
+                last_start_date, last_end_date, run_count, sucess_count, fail_count, last_success,
+                cron, cron_expr
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, 0, '', '', '', 0, 0, 0, 0)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 0, '', '', '', 0, 0, 0, 0, ?, ?)
             RETURNING {_WORKFLOW_SELECT}
             """,
             (
@@ -841,6 +930,8 @@ def create_workflow(
                 (workflow_description or "").strip()[:500],
                 (workflow or "").strip(),
                 created_at,
+                1 if enabled else 0,
+                expr,
             ),
         ).fetchone()
     return _row_to_workflow(row)
@@ -854,17 +945,28 @@ def update_workflow(
     workflow_description: str,
     workflow: str,
     distribute: bool | None = None,
+    cron: bool | None = None,
+    cron_expr: str | None = None,
 ) -> WorkflowRecord | None:
+    from backend.app.db.k8s_inventory import validate_cron_expr
+
     existing = get_workflow_by_uuid(database_path, workflow_uuid)
     if existing is None:
         return None
     next_distribute = existing.distribute if distribute is None else bool(distribute)
+    next_cron = existing.cron if cron is None else bool(cron)
+    if cron_expr is None:
+        next_expr = existing.cron_expr or DEFAULT_WORKFLOW_CRON_EXPR
+    else:
+        next_expr = cron_expr
+    next_expr = validate_cron_expr(next_expr)
     with get_connection(database_path) as connection:
         ensure_workflow_tables(connection)
         connection.execute(
             """
             UPDATE workflow
-            SET workflow_name = ?, workflow_description = ?, workflow = ?, distribute = ?
+            SET workflow_name = ?, workflow_description = ?, workflow = ?, distribute = ?,
+                cron = ?, cron_expr = ?
             WHERE uuid = ?
             """,
             (
@@ -872,10 +974,26 @@ def update_workflow(
                 (workflow_description or "").strip()[:500],
                 (workflow or "").strip(),
                 next_distribute,
+                1 if next_cron else 0,
+                next_expr,
                 existing.uuid,
             ),
         )
     return get_workflow_by_uuid(database_path, existing.uuid)
+
+
+def list_scheduled_workflows(database_path: str | Path) -> list[WorkflowRecord]:
+    with get_connection(database_path) as connection:
+        ensure_workflow_tables(connection)
+        rows = connection.execute(
+            f"""
+            SELECT {_WORKFLOW_SELECT}
+            FROM workflow
+            WHERE cron = 1
+            ORDER BY workflow_name ASC, uuid ASC
+            """
+        ).fetchall()
+    return [_row_to_workflow(row) for row in rows]
 
 
 def set_workflow_distribute(
@@ -891,6 +1009,20 @@ def set_workflow_distribute(
         connection.execute(
             "UPDATE workflow SET distribute = ? WHERE uuid = ?",
             (bool(distribute), existing.uuid),
+        )
+    return get_workflow_by_uuid(database_path, existing.uuid)
+
+
+def disable_workflow_cron(database_path: str | Path, workflow_uuid: str) -> WorkflowRecord | None:
+    """Turn off schedule after a one-shot fire (cron stays stored for UI)."""
+    existing = get_workflow_by_uuid(database_path, workflow_uuid)
+    if existing is None:
+        return None
+    with get_connection(database_path) as connection:
+        ensure_workflow_tables(connection)
+        connection.execute(
+            "UPDATE workflow SET cron = 0 WHERE uuid = ?",
+            (existing.uuid,),
         )
     return get_workflow_by_uuid(database_path, existing.uuid)
 
@@ -928,6 +1060,8 @@ def clone_workflow(
             files=node.files,
             use_previous_work_result=node.use_previous_work_result,
             work_report=node.work_report,
+            cron=node.cron,
+            cron_expr=node.cron_expr,
             uuid=new_uuid,
             owner=owner_idx,
         )
@@ -947,6 +1081,8 @@ def clone_workflow(
         workflow=remapped,
         owner=owner_idx,
         distribute=False,
+        cron=source.cron,
+        cron_expr=source.cron_expr,
     )
 
 
@@ -1022,10 +1158,33 @@ def mark_work_node_run_started(database_path: str | Path, node_uuid: str) -> Wor
         connection.execute(
             """
             UPDATE work_node
-            SET last_start_date = ?, last_end_date = '', last_success = 0, last_fail_reason = ''
+            SET last_start_date = ?, last_end_date = '', last_success = 0,
+                last_fail_reason = '', schedule_wait = 0
             WHERE uuid = ?
             """,
             (started, existing.uuid),
+        )
+    return get_work_node_by_uuid(database_path, existing.uuid)
+
+
+def set_work_node_schedule_wait(
+    database_path: str | Path,
+    node_uuid: str,
+    *,
+    waiting: bool,
+) -> WorkNodeRecord | None:
+    existing = get_work_node_by_uuid(database_path, node_uuid)
+    if existing is None:
+        return None
+    with get_connection(database_path) as connection:
+        ensure_workflow_tables(connection)
+        connection.execute(
+            """
+            UPDATE work_node
+            SET schedule_wait = ?
+            WHERE uuid = ?
+            """,
+            (1 if waiting else 0, existing.uuid),
         )
     return get_work_node_by_uuid(database_path, existing.uuid)
 
@@ -1047,7 +1206,7 @@ def mark_work_node_run_finished(
         connection.execute(
             """
             UPDATE work_node
-            SET last_end_date = ?, last_success = ?, last_fail_reason = ?
+            SET last_end_date = ?, last_success = ?, last_fail_reason = ?, schedule_wait = 0
             WHERE uuid = ?
             """,
             (ended, 1 if success else 0, reason, existing.uuid),

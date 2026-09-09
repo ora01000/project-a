@@ -11,7 +11,9 @@ from pydantic import BaseModel, Field
 
 from backend.app.config import (
     PROJECT_ROOT,
+    list_work_node_result_outputs,
     normalize_work_node_filename,
+    read_work_node_result_output,
     read_work_node_validation_output,
     work_node_upload_dir,
     write_work_node_validation_output,
@@ -129,6 +131,9 @@ class WorkNodeResponse(BaseModel):
     last_fail_reason: str = ""
     use_previous_work_result: bool = False
     work_report: str = ""
+    cron: bool = False
+    cron_expr: str = "0 9 * * *"
+    schedule_wait: bool = False
     is_draft: bool = False
 
     @classmethod
@@ -159,6 +164,9 @@ class WorkNodeResponse(BaseModel):
             last_fail_reason=record.last_fail_reason,
             use_previous_work_result=record.use_previous_work_result,
             work_report=record.work_report,
+            cron=bool(getattr(record, "cron", False)),
+            cron_expr=str(getattr(record, "cron_expr", None) or "0 9 * * *")[:20],
+            schedule_wait=bool(getattr(record, "schedule_wait", False)),
             is_draft=False,
         )
 
@@ -173,7 +181,9 @@ class WorkNodeWriteRequest(BaseModel):
     test_result: bool = False
     files: str = Field(default="", max_length=300)
     use_previous_work_result: bool = False
-    work_report: str = Field(default="", max_length=200)
+    work_report: str = Field(default="", max_length=400)
+    cron: bool | None = None
+    cron_expr: str | None = Field(default=None, max_length=20)
     validation_message: str | None = None
 
 
@@ -226,6 +236,8 @@ class WorkflowResponse(BaseModel):
     sucess_count: int = 0
     fail_count: int = 0
     last_success: bool = False
+    cron: bool = False
+    cron_expr: str = "0 9 * * *"
     awaiting_approval: bool = False
     awaiting_hitl_node_id: str = ""
     awaiting_hitl_userid: str = ""
@@ -261,6 +273,8 @@ class WorkflowResponse(BaseModel):
             sucess_count=record.sucess_count,
             fail_count=record.fail_count,
             last_success=record.last_success,
+            cron=bool(getattr(record, "cron", False)),
+            cron_expr=str(getattr(record, "cron_expr", None) or "0 9 * * *")[:20],
             awaiting_approval=awaiting_approval,
             awaiting_hitl_node_id=awaiting_hitl_node_id,
             awaiting_hitl_userid=awaiting_hitl_userid,
@@ -273,6 +287,8 @@ class WorkflowWriteRequest(BaseModel):
     workflow_name: str = Field(min_length=1, max_length=100)
     workflow_description: str = Field(default="", max_length=500)
     workflow: str = ""
+    cron: bool | None = None
+    cron_expr: str | None = Field(default=None, max_length=20)
 
 
 class WorkflowDistributeRequest(BaseModel):
@@ -523,6 +539,8 @@ async def api_create_work_node(body: WorkNodeWriteRequest, request: Request) -> 
             files=normalize_work_node_filename(body.files),
             use_previous_work_result=body.use_previous_work_result,
             work_report=body.work_report,
+            cron=bool(body.cron) if body.cron is not None else False,
+            cron_expr=body.cron_expr,
             uuid=body.uuid,
             owner=auth_user.idx,
         )
@@ -552,19 +570,24 @@ async def api_update_work_node(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    record = update_work_node(
-        database_path,
-        existing.uuid,
-        work_name=body.work_name.strip() or "새 작업노드",
-        work_description=(body.work_description or "").strip()[:500],
-        target_agent=int(body.target_agent),
-        work_script=body.work_script,
-        script_type=script_type,
-        test_result=bool(body.test_result),
-        files=normalize_work_node_filename(body.files),
-        use_previous_work_result=bool(body.use_previous_work_result),
-        work_report=(body.work_report or "").strip()[:200],
-    )
+    try:
+        record = update_work_node(
+            database_path,
+            existing.uuid,
+            work_name=body.work_name.strip() or "새 작업노드",
+            work_description=(body.work_description or "").strip()[:500],
+            target_agent=int(body.target_agent),
+            work_script=body.work_script,
+            script_type=script_type,
+            test_result=bool(body.test_result),
+            files=normalize_work_node_filename(body.files),
+            use_previous_work_result=bool(body.use_previous_work_result),
+            work_report=(body.work_report or "").strip()[:400],
+            cron=body.cron,
+            cron_expr=body.cron_expr,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     if record is None:
         raise HTTPException(status_code=404, detail="워크 노드를 찾을 수 없습니다.")
     _write_validation_output_if_needed(record, body.validation_message)
@@ -597,12 +620,7 @@ async def api_list_workflow_approvers(request: Request) -> list[WorkflowApprover
     ]
 
 
-@router.get("/work-nodes/{node_uuid}/validation-result")
-async def api_get_work_node_validation_result(
-    node_uuid: str,
-    request: Request,
-) -> dict[str, str]:
-    """Return saved validation/run output (``result_latest.out``, with archive fallback)."""
+def _require_visible_work_node(request: Request, node_uuid: str) -> WorkNodeRecord:
     auth_user = get_request_auth_user(request)
     database_path = request.app.state.database_path
     record = get_work_node_by_uuid(database_path, node_uuid)
@@ -611,18 +629,54 @@ async def api_get_work_node_validation_result(
     visible = {node.uuid for node in list_work_nodes_visible(database_path, auth_user.idx)}
     if record.uuid not in visible:
         raise HTTPException(status_code=403, detail="이 작업노드를 조회할 권한이 없습니다.")
+    return record
+
+
+@router.get("/work-nodes/{node_uuid}/results")
+async def api_list_work_node_results(
+    node_uuid: str,
+    request: Request,
+) -> dict[str, object]:
+    """List saved work-node result files (``result_latest.out`` and archives)."""
+    record = _require_visible_work_node(request, node_uuid)
     try:
-        content = read_work_node_validation_output(
-            record.uuid,
-            validate_date=record.validate_date or record.last_end_date,
-        )
+        items = list_work_node_result_outputs(record.uuid)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {
+        "items": items,
+        "work_name": record.work_name,
+        "validate_date": record.validate_date or record.last_end_date or "",
+        "last_success": bool(record.last_success),
+    }
+
+
+@router.get("/work-nodes/{node_uuid}/validation-result")
+async def api_get_work_node_validation_result(
+    node_uuid: str,
+    request: Request,
+    filename: str | None = None,
+) -> dict[str, str]:
+    """Return saved validation/run output (``result_latest.out``, with archive fallback)."""
+    record = _require_visible_work_node(request, node_uuid)
+    try:
+        if filename and filename.strip():
+            content = read_work_node_result_output(record.uuid, filename)
+            resolved_name = normalize_work_node_filename(filename)
+        else:
+            content = read_work_node_validation_output(
+                record.uuid,
+                validate_date=record.validate_date or record.last_end_date,
+            )
+            resolved_name = ""
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     if content is None:
         raise HTTPException(status_code=404, detail="검증 결과 파일을 찾을 수 없습니다.")
     return {
         "content": content,
-        "validate_date": record.validate_date or record.last_end_date,
+        "filename": resolved_name,
+        "validate_date": record.validate_date or record.last_end_date or "",
     }
 
 
@@ -713,6 +767,8 @@ async def api_create_workflow(body: WorkflowWriteRequest, request: Request) -> W
             uuid=body.uuid,
             owner=auth_user.idx,
             distribute=False,
+            cron=bool(body.cron) if body.cron is not None else False,
+            cron_expr=body.cron_expr,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -737,13 +793,18 @@ async def api_update_workflow(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    record = update_workflow(
-        database_path,
-        existing.uuid,
-        workflow_name=body.workflow_name.strip(),
-        workflow_description=(body.workflow_description or "").strip()[:500],
-        workflow=(body.workflow or "").strip(),
-    )
+    try:
+        record = update_workflow(
+            database_path,
+            existing.uuid,
+            workflow_name=body.workflow_name.strip(),
+            workflow_description=(body.workflow_description or "").strip()[:500],
+            workflow=(body.workflow or "").strip(),
+            cron=body.cron,
+            cron_expr=body.cron_expr,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     if record is None:
         raise HTTPException(status_code=404, detail="작업 워크플로우를 찾을 수 없습니다.")
     return _workflow_response(database_path, record, user_idx=auth_user.idx)
