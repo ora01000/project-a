@@ -11,7 +11,7 @@ interface WorkflowDesignPanelProps {
   selected: WorkflowItem | null;
   workNodes: WorkNodeItem[];
   user: AuthUser;
-  editorKey: string;
+  editorSessionKey: string;
   onSaved: (item: WorkflowItem) => Promise<void> | void;
   onWorkNodesChanged: () => Promise<void> | void;
   onDistributed: (item: WorkflowItem) => Promise<void> | void;
@@ -33,7 +33,7 @@ export function WorkflowDesignPanel({
   selected,
   workNodes,
   user,
-  editorKey,
+  editorSessionKey,
   onSaved,
   onWorkNodesChanged,
   onDistributed,
@@ -211,7 +211,7 @@ export function WorkflowDesignPanel({
           </div>
         ) : null}
         <WorkflowEditor
-          key={editorKey}
+          sessionKey={editorSessionKey}
           user={user}
           workNodes={workNodes}
           awaitingHitlUserid={selected?.awaiting_hitl_userid || ""}

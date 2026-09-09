@@ -23,7 +23,7 @@ import { WorkflowHistoryPanel } from "./WorkflowHistoryPanel";
 import {
   applyTemplateVariables,
   extractTemplateVariableNames,
-  WorkflowTemplateMarkdown,
+  WorkflowTemplatePromptField,
 } from "./WorkflowTemplateMarkdown";
 import {
   formatAiWorkflowDesignJson,
@@ -70,6 +70,8 @@ interface WorkflowEditorProps {
   initialDescription?: string;
   saveLabel: string;
   readOnly?: boolean;
+  /** Changes only when starting a new create/edit session — not on create→edit after save. */
+  sessionKey: string;
   onSaved: (item: WorkflowItem) => Promise<void> | void;
   onWorkNodesChanged: () => Promise<void> | void;
   workflowUuid?: string;
@@ -178,6 +180,7 @@ export function WorkflowEditor({
   initialDescription = "",
   saveLabel,
   readOnly = false,
+  sessionKey,
   onSaved,
   onWorkNodesChanged,
   workflowUuid,
@@ -201,9 +204,14 @@ export function WorkflowEditor({
   const [workingPrompt, setWorkingPrompt] = useState("");
   const lastSentPromptRef = useRef("");
   const diagramStateBeforeGenerateRef = useRef<DiagramPanelState>("STATE_INPUT");
+  const sessionTemplateCacheRef = useRef<
+    Record<string, { content: string; vars: Record<string, string> }>
+  >({});
+  const skipNextHydrateRef = useRef(false);
   const processedDiagramEventNonceRef = useRef<number | null>(null);
   const clarifyPromptTextareaRef = useRef<HTMLTextAreaElement>(null);
   const processedAiImportNonceRef = useRef<number | null>(null);
+  const activeSessionKeyRef = useRef(sessionKey);
   const [model, setModel] = useState<EditorModel>(() => emptyEditorModel());
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
@@ -339,6 +347,29 @@ export function WorkflowEditor({
   }, [approvers]);
 
   useEffect(() => {
+    if (activeSessionKeyRef.current === sessionKey) {
+      return;
+    }
+    activeSessionKeyRef.current = sessionKey;
+    setDiagramPanelState("STATE_INPUT");
+    setDiagramResultJson("");
+    setClarifyMessages([]);
+    setWorkingPrompt("");
+    setDiagramPrompt("");
+    setSelectedTemplate("");
+    setTemplateVarValues({});
+    sessionTemplateCacheRef.current = {};
+    lastSentPromptRef.current = "";
+    processedDiagramEventNonceRef.current = null;
+    processedAiImportNonceRef.current = null;
+    skipNextHydrateRef.current = false;
+  }, [sessionKey]);
+
+  useEffect(() => {
+    if (skipNextHydrateRef.current) {
+      skipNextHydrateRef.current = false;
+      return;
+    }
     try {
       setModel(hydrateEditor(initialExpression, workNodes, userNames));
       setSelectedNodeId(null);
@@ -350,7 +381,7 @@ export function WorkflowEditor({
     }
     // 노드 목록 갱신으로 편집중 그래프가 초기화되지 않도록 workNodes는 의존성에서 제외한다.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialExpression, workflowUuid]);
+  }, [initialExpression, workflowUuid, sessionKey]);
 
   useEffect(() => {
     setModel((current) => ({
@@ -466,6 +497,7 @@ export function WorkflowEditor({
         setDescription(payload.workflow_description);
         setModel(hydrateEditor(remapped, mergedNodes, userNames));
         setSelectedNodeId(null);
+        skipNextHydrateRef.current = true;
         await onWorkNodesChanged();
 
         const isCreate = !workflowUuid;
@@ -544,13 +576,46 @@ export function WorkflowEditor({
     };
   }, []);
 
+  const rememberCurrentTemplateSession = (templateName: string) => {
+    const key = templateName.trim();
+    if (!key) {
+      return;
+    }
+    sessionTemplateCacheRef.current[key] = {
+      content: diagramPrompt,
+      vars: { ...templateVarValues },
+    };
+  };
+
+  const syncTemplateVarFields = (content: string, previousVars?: Record<string, string>) => {
+    const names = extractTemplateVariableNames(content);
+    const source = previousVars ?? templateVarValues;
+    const nextValues: Record<string, string> = {};
+    for (const varName of names) {
+      nextValues[varName] = source[varName] ?? "";
+    }
+    setTemplateVarValues(nextValues);
+  };
+
   const handleTemplateSelect = async (name: string) => {
+    if (selectedTemplate) {
+      rememberCurrentTemplateSession(selectedTemplate);
+    }
     setSelectedTemplate(name);
     if (!name) {
       setDiagramPrompt("");
       setTemplateVarValues({});
       return;
     }
+
+    const cached = sessionTemplateCacheRef.current[name];
+    if (cached) {
+      setDiagramPrompt(cached.content);
+      setTemplateVarValues({ ...cached.vars });
+      setError(null);
+      return;
+    }
+
     setIsLoadingTemplate(true);
     setError(null);
     try {
@@ -559,13 +624,15 @@ export function WorkflowEditor({
         throw new Error(await parseError(response, "양식을 불러오지 못했습니다."));
       }
       const data = (await response.json()) as { name: string; content: string };
+      // Server file is read-only source; session edits never write back.
       setDiagramPrompt(data.content);
-      const names = extractTemplateVariableNames(data.content);
-      const nextValues: Record<string, string> = {};
-      for (const varName of names) {
-        nextValues[varName] = "";
-      }
-      setTemplateVarValues(nextValues);
+      syncTemplateVarFields(data.content, {});
+      sessionTemplateCacheRef.current[name] = {
+        content: data.content,
+        vars: Object.fromEntries(
+          extractTemplateVariableNames(data.content).map((varName) => [varName, ""]),
+        ),
+      };
     } catch (err) {
       setDiagramPrompt("");
       setTemplateVarValues({});
@@ -574,6 +641,28 @@ export function WorkflowEditor({
       setIsLoadingTemplate(false);
     }
   };
+
+  const handleDiagramPromptChange = (nextContent: string) => {
+    setDiagramPrompt(nextContent);
+    setTemplateVarValues((current) => {
+      const nextValues: Record<string, string> = {};
+      for (const varName of extractTemplateVariableNames(nextContent)) {
+        nextValues[varName] = current[varName] ?? "";
+      }
+      return nextValues;
+    });
+  };
+
+  // Keep session cache in sync with prompt + var edits (never persists to md files).
+  useEffect(() => {
+    if (!selectedTemplate || diagramPanelState === "STATE_RESPONSE_SUCCESS") {
+      return;
+    }
+    sessionTemplateCacheRef.current[selectedTemplate] = {
+      content: diagramPrompt,
+      vars: { ...templateVarValues },
+    };
+  }, [selectedTemplate, diagramPrompt, templateVarValues, diagramPanelState]);
 
   const templateVarNames = useMemo(
     () => extractTemplateVariableNames(diagramPrompt),
@@ -667,6 +756,17 @@ export function WorkflowEditor({
         : "STATE_INPUT";
     });
   }, [diagramAgentEvent, onDiagramAgentEventHandled]);
+
+  // Recover if generate UI stayed busy but AI import already arrived (event race / remount).
+  useEffect(() => {
+    if (!aiImportRequest || diagramPanelState !== "STATE_GENERATE") {
+      return;
+    }
+    setDiagramResultJson(formatAiWorkflowDesignJson(aiImportRequest.assistantText));
+    setClarifyMessages([]);
+    setWorkingPrompt("");
+    setDiagramPanelState("STATE_RESPONSE_SUCCESS");
+  }, [aiImportRequest, diagramPanelState]);
 
   useEffect(() => {
     if (diagramPanelState !== "STATE_RESPONSE_ADDITIONAL_DATA") {
@@ -1219,9 +1319,12 @@ export function WorkflowEditor({
                     </>
                   ) : (
                     <>
-                      <WorkflowTemplateMarkdown
-                        content={diagramPrompt}
-                        className="min-h-[7.5rem] max-h-48 overflow-y-auto rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-xs"
+                      <WorkflowTemplatePromptField
+                        value={diagramPrompt}
+                        onChange={handleDiagramPromptChange}
+                        disabled={isDiagramInputLocked}
+                        placeholder="양식을 선택하거나 클릭하여 편집하세요"
+                        rows={8}
                       />
                       {templateVarNames.length > 0 ? (
                         <div className="mt-1 grid gap-2">

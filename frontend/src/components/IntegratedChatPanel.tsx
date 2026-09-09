@@ -26,6 +26,8 @@ interface IntegratedChatPanelProps {
   /** Fill the composer and submit once (nonce must change each request). */
   externalSubmitRequest?: { nonce: number; message: string } | null;
   onExternalSubmitHandled?: () => void;
+  /** Fired when an external submit is discarded (e.g. billing cancel) before chat starts. */
+  onExternalSubmitAborted?: () => void;
   /** Fired after a successful assistant reply (not abort/error). */
   onAssistantResponse?: (payload: { agentId: string; content: string }) => void;
   /** Fired when a chat attempt finishes (success, error, or abort). */
@@ -109,6 +111,7 @@ export function IntegratedChatPanel({
   allowedAgentIds,
   externalSubmitRequest = null,
   onExternalSubmitHandled,
+  onExternalSubmitAborted,
   onAssistantResponse,
   onChatSettled,
   expandUserInput = false,
@@ -377,9 +380,9 @@ export function IntegratedChatPanel({
     setHistoryIndex(-1);
   };
 
-  const sendChatMessage = async (trimmed: string) => {
+  const sendChatMessage = async (trimmed: string): Promise<boolean> => {
     if (!selectedAgent || isLoading) {
-      return;
+      return false;
     }
 
     const agentId = selectedAgent.id;
@@ -484,10 +487,10 @@ export function IntegratedChatPanel({
     } catch (err) {
       if (isAbortError(err)) {
         updateLastResponse("요청이 취소되었습니다.", toolsUsed);
-        return;
+      } else {
+        const message = err instanceof Error ? err.message : "Unknown error";
+        updateLastResponse(`오류: ${message}`, []);
       }
-      const message = err instanceof Error ? err.message : "Unknown error";
-      updateLastResponse(`오류: ${message}`, []);
     } finally {
       abortControllerRef.current = null;
       setIsLoading(false);
@@ -501,6 +504,7 @@ export function IntegratedChatPanel({
         content: assistantText.trim(),
       });
     }
+    return true;
   };
 
   sendChatMessageRef.current = sendChatMessage;
@@ -533,6 +537,7 @@ export function IntegratedChatPanel({
     if (processedExternalNonceRef.current === externalSubmitRequest.nonce) {
       return;
     }
+    // Wait until idle so we never consume the request without attempting send.
     if (!selectedAgent || isLoading) {
       return;
     }
@@ -542,6 +547,7 @@ export function IntegratedChatPanel({
     onExternalSubmitHandled?.();
 
     if (!trimmed) {
+      onExternalSubmitAborted?.();
       return;
     }
 
@@ -559,11 +565,20 @@ export function IntegratedChatPanel({
       } catch {
         // keep going
       }
-      await sendChatMessageRef.current(trimmed);
+      const started = await sendChatMessageRef.current(trimmed);
+      if (!started) {
+        onExternalSubmitAborted?.();
+      }
     };
 
     void submitExternal();
-  }, [externalSubmitRequest, selectedAgent, isLoading, onExternalSubmitHandled]);
+  }, [
+    externalSubmitRequest,
+    selectedAgent,
+    isLoading,
+    onExternalSubmitHandled,
+    onExternalSubmitAborted,
+  ]);
 
   const handleBillingConfirm = () => {
     if (!billingConfirmPrompt) {
@@ -572,12 +587,17 @@ export function IntegratedChatPanel({
     const prompt = billingConfirmPrompt;
     setBillingConfirmPrompt(null);
     setBillingConfirmModel(null);
-    void sendChatMessage(prompt);
+    void sendChatMessage(prompt).then((started) => {
+      if (!started) {
+        onExternalSubmitAborted?.();
+      }
+    });
   };
 
   const handleBillingCancel = () => {
     setBillingConfirmPrompt(null);
     setBillingConfirmModel(null);
+    onExternalSubmitAborted?.();
   };
 
   const canShowPrevious = inputHistory.length > 0;

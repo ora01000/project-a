@@ -28,6 +28,8 @@ import { ThemeSettingsModal } from "./ThemeSettingsModal";
 
 interface MenuBarProps {
   activeView: AppView;
+  /** Underlying dashboard/workflow while a modal overlay is open. */
+  shellView?: "dashboard" | "workflow";
   user: AuthUser;
   onNavigate: (view: AppView) => void;
   onLogout: () => void;
@@ -42,7 +44,14 @@ function menuButtonClass(isActive: boolean): string {
   }`;
 }
 
-export function MenuBar({ activeView, user, onNavigate, onLogout, onUserUpdated }: MenuBarProps) {
+export function MenuBar({
+  activeView,
+  shellView = "dashboard",
+  user,
+  onNavigate,
+  onLogout,
+  onUserUpdated,
+}: MenuBarProps) {
   const [currentTime, setCurrentTime] = useState(formatCurrentTime(new Date()));
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [sessionRemainingMs, setSessionRemainingMs] = useState(() => getAuthSessionRemainingMs());
@@ -149,6 +158,12 @@ export function MenuBar({ activeView, user, onNavigate, onLogout, onUserUpdated 
 
 
   const isUserManagementActive = activeView === "user-list" || showEventReportSub;
+  const isOverlayView =
+    activeView === "user-list" ||
+    activeView === "agent-assignment" ||
+    activeView === "agent-connections" ||
+    activeView === "notice-board";
+  const highlightedShell = isOverlayView ? shellView : activeView;
 
   return (
     <>
@@ -157,7 +172,7 @@ export function MenuBar({ activeView, user, onNavigate, onLogout, onUserUpdated 
           <button
             type="button"
             onClick={() => onNavigate("dashboard")}
-            className={menuButtonClass(activeView === "dashboard")}
+            className={menuButtonClass(highlightedShell === "dashboard")}
           >
             대시보드
           </button>
@@ -165,7 +180,7 @@ export function MenuBar({ activeView, user, onNavigate, onLogout, onUserUpdated 
           <button
             type="button"
             onClick={() => onNavigate("workflow")}
-            className={menuButtonClass(activeView === "workflow")}
+            className={menuButtonClass(highlightedShell === "workflow")}
           >
             작업 워크플로우
           </button>

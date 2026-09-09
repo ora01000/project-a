@@ -2,7 +2,10 @@ import {
   Children,
   cloneElement,
   isValidElement,
+  useEffect,
   useMemo,
+  useRef,
+  useState,
   type ReactNode,
 } from "react";
 import ReactMarkdown from "react-markdown";
@@ -112,15 +115,20 @@ const TEMPLATE_MARKDOWN_COMPONENTS: Components = {
 interface WorkflowTemplateMarkdownProps {
   content: string;
   className?: string;
+  emptyLabel?: string;
 }
 
-export function WorkflowTemplateMarkdown({ content, className }: WorkflowTemplateMarkdownProps) {
+export function WorkflowTemplateMarkdown({
+  content,
+  className,
+  emptyLabel = "양식을 선택하세요.",
+}: WorkflowTemplateMarkdownProps) {
   const normalized = useMemo(() => content.replace(/\n{3,}/g, "\n\n"), [content]);
 
   if (!normalized.trim()) {
     return (
       <div className={className}>
-        <p className="text-xs text-slate-500">양식을 선택하세요.</p>
+        <p className="text-xs text-slate-500">{emptyLabel}</p>
       </div>
     );
   }
@@ -131,5 +139,114 @@ export function WorkflowTemplateMarkdown({ content, className }: WorkflowTemplat
         {normalized}
       </ReactMarkdown>
     </div>
+  );
+}
+
+const PROMPT_FIELD_BOX =
+  "min-h-[9rem] w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-xs disabled:opacity-80";
+
+interface WorkflowTemplatePromptFieldProps {
+  value: string;
+  onChange: (next: string) => void;
+  disabled?: boolean;
+  /** Start in edit mode (e.g. clarify answer flow). */
+  defaultEditing?: boolean;
+  /** Force edit mode while true (resets when becoming false). */
+  forceEditing?: boolean;
+  placeholder?: string;
+  rows?: number;
+  "aria-label"?: string;
+}
+
+/** Single box: markdown preview with `{}` highlights, click to edit source text. */
+export function WorkflowTemplatePromptField({
+  value,
+  onChange,
+  disabled = false,
+  defaultEditing = false,
+  forceEditing = false,
+  placeholder = "양식을 선택하거나 클릭하여 편집하세요",
+  rows = 8,
+  "aria-label": ariaLabel = "다이어그램 생성 프롬프트",
+}: WorkflowTemplatePromptFieldProps) {
+  const [isEditing, setIsEditing] = useState(defaultEditing || forceEditing);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    if (disabled) {
+      setIsEditing(false);
+      return;
+    }
+    if (forceEditing) {
+      setIsEditing(true);
+    }
+  }, [disabled, forceEditing]);
+
+  useEffect(() => {
+    if (!isEditing || disabled) {
+      return;
+    }
+    const node = textareaRef.current;
+    if (!node) {
+      return;
+    }
+    const focusId = window.requestAnimationFrame(() => {
+      node.focus();
+      const cursor = node.value.length;
+      node.setSelectionRange(cursor, cursor);
+      node.scrollTop = node.scrollHeight;
+    });
+    return () => window.cancelAnimationFrame(focusId);
+  }, [isEditing, disabled, forceEditing]);
+
+  if (disabled || !isEditing) {
+    return (
+      <div
+        role={disabled ? undefined : "button"}
+        tabIndex={disabled ? -1 : 0}
+        onClick={() => {
+          if (!disabled) {
+            setIsEditing(true);
+          }
+        }}
+        onKeyDown={(event) => {
+          if (disabled) {
+            return;
+          }
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            setIsEditing(true);
+          }
+        }}
+        className={`${PROMPT_FIELD_BOX} max-h-64 overflow-y-auto ${
+          disabled ? "cursor-default opacity-80" : "cursor-text hover:border-slate-500"
+        }`}
+        title={disabled ? undefined : "클릭하여 편집"}
+        aria-label={ariaLabel}
+      >
+        <WorkflowTemplateMarkdown content={value} emptyLabel={placeholder} />
+        {!disabled ? (
+          <p className="mt-2 text-[10px] text-slate-500">클릭하여 편집 · 포커스 해제 시 미리보기</p>
+        ) : null}
+      </div>
+    );
+  }
+
+  return (
+    <textarea
+      ref={textareaRef}
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+      onBlur={() => {
+        if (!forceEditing) {
+          setIsEditing(false);
+        }
+      }}
+      rows={rows}
+      spellCheck={false}
+      placeholder={placeholder}
+      className={`${PROMPT_FIELD_BOX} max-h-64 resize-y font-mono text-[12px] leading-5 text-slate-200`}
+      aria-label={ariaLabel}
+    />
   );
 }

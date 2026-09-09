@@ -23,13 +23,44 @@ import {
   userFromAuthResponse,
 } from "./utils/authSession";
 
+type ShellView = "dashboard" | "workflow";
+
+const OVERLAY_VIEWS: ReadonlySet<AppView> = new Set([
+  "user-list",
+  "agent-assignment",
+  "agent-connections",
+  "notice-board",
+]);
+
+function isShellView(view: AppView): view is ShellView {
+  return view === "dashboard" || view === "workflow";
+}
+
 export default function App() {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [authBootstrapping, setAuthBootstrapping] = useState(() => Boolean(getAccessToken()));
   const [activeView, setActiveView] = useState<AppView>("dashboard");
+  /** Keeps dashboard/workflow mounted under modal overlays (user list, agents, notices). */
+  const [shellView, setShellView] = useState<ShellView>("dashboard");
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [integratedChatFullscreen, setIntegratedChatFullscreen] = useState(false);
+
+  const handleNavigate = useCallback((view: AppView) => {
+    setActiveView((current) => {
+      if (isShellView(view)) {
+        setShellView(view);
+        return view;
+      }
+      if (OVERLAY_VIEWS.has(view)) {
+        if (isShellView(current)) {
+          setShellView(current);
+        }
+        return view;
+      }
+      return view;
+    });
+  }, []);
 
   const toggleIntegratedChatFullscreen = useCallback(() => {
     setIntegratedChatFullscreen((current) => !current);
@@ -39,6 +70,7 @@ export default function App() {
     (loggedInUser: AuthUser, accessToken: string, expiresInSeconds: number) => {
       startAuthSession(loggedInUser, accessToken, expiresInSeconds);
       setUser(loggedInUser);
+      setShellView("dashboard");
       setActiveView("dashboard");
     },
     [],
@@ -52,6 +84,7 @@ export default function App() {
   const handleLogout = useCallback(() => {
     void logoutSession();
     setUser(null);
+    setShellView("dashboard");
     setActiveView("dashboard");
     setAgents([]);
     setError(null);
@@ -62,6 +95,7 @@ export default function App() {
     setUnauthorizedHandler(() => {
       clearAuthUser();
       setUser(null);
+      setShellView("dashboard");
       setActiveView("dashboard");
       setAgents([]);
       setError(null);
@@ -215,10 +249,10 @@ export default function App() {
   }, [loadDashboardData, user]);
 
   useEffect(() => {
-    if (activeView !== "dashboard") {
+    if (shellView !== "dashboard") {
       setIntegratedChatFullscreen(false);
     }
-  }, [activeView]);
+  }, [shellView]);
 
   useEffect(() => {
     if (!user) {
@@ -226,9 +260,9 @@ export default function App() {
     }
     const adminOnlyViews: AppView[] = ["agent-assignment", "agent-connections"];
     if (!hasAdminAccess(user.role) && adminOnlyViews.includes(activeView)) {
-      setActiveView("dashboard");
+      setActiveView(shellView);
     }
-  }, [activeView, user]);
+  }, [activeView, shellView, user]);
 
   if (authBootstrapping) {
     return (
@@ -242,25 +276,24 @@ export default function App() {
     return <LoginPage onLoginSuccess={handleLoginSuccess} />;
   }
 
-  const closeOverlay = () => setActiveView("dashboard");
+  const closeOverlay = () => setActiveView(shellView);
 
   return (
     <>
       <div className="flex h-screen flex-col overflow-hidden bg-slate-950 px-2 py-1">
         <MenuBar
           activeView={activeView}
+          shellView={shellView}
           user={user}
-          onNavigate={setActiveView}
+          onNavigate={handleNavigate}
           onLogout={handleLogout}
           onUserUpdated={handleUserUpdated}
         />
 
-        {activeView === "workflow" ? (
+        {shellView === "workflow" ? (
           <WorkflowPage
             agents={agents}
             user={user}
-            integratedChatFullscreen={integratedChatFullscreen}
-            onToggleIntegratedChatFullscreen={toggleIntegratedChatFullscreen}
             onChatComplete={loadDashboardData}
           />
         ) : (
