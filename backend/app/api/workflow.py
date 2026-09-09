@@ -10,6 +10,7 @@ from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 from pydantic import BaseModel, Field
 
 from backend.app.config import (
+    PROJECT_ROOT,
     normalize_work_node_filename,
     read_work_node_validation_output,
     work_node_upload_dir,
@@ -57,6 +58,56 @@ from backend.app.services.workflow_runner import (
 
 router = APIRouter(tags=["workflow"])
 logger = logging.getLogger(__name__)
+
+WORKFLOW_TEMPLATE_DIR = PROJECT_ROOT / "docs" / "workflow_template"
+
+
+class WorkflowTemplateListItem(BaseModel):
+    name: str
+
+
+class WorkflowTemplateResponse(BaseModel):
+    name: str
+    content: str
+
+
+def _resolve_workflow_template_path(name: str) -> Path:
+    normalized = Path(name).name.strip()
+    if not normalized or normalized != name.strip() or not normalized.endswith(".md"):
+        raise HTTPException(status_code=400, detail="Invalid template name")
+    if "/" in name or "\\" in name or ".." in name:
+        raise HTTPException(status_code=400, detail="Invalid template name")
+    path = (WORKFLOW_TEMPLATE_DIR / normalized).resolve()
+    try:
+        path.relative_to(WORKFLOW_TEMPLATE_DIR.resolve())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid template name") from exc
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="Template not found")
+    return path
+
+
+@router.get("/workflow-templates", response_model=list[WorkflowTemplateListItem])
+async def api_list_workflow_templates(request: Request) -> list[WorkflowTemplateListItem]:
+    get_request_auth_user(request)
+    if not WORKFLOW_TEMPLATE_DIR.is_dir():
+        return []
+    names = sorted(
+        path.name
+        for path in WORKFLOW_TEMPLATE_DIR.iterdir()
+        if path.is_file() and path.suffix.lower() == ".md"
+    )
+    return [WorkflowTemplateListItem(name=name) for name in names]
+
+
+@router.get("/workflow-templates/{name}", response_model=WorkflowTemplateResponse)
+async def api_get_workflow_template(name: str, request: Request) -> WorkflowTemplateResponse:
+    get_request_auth_user(request)
+    path = _resolve_workflow_template_path(name)
+    return WorkflowTemplateResponse(
+        name=path.name,
+        content=path.read_text(encoding="utf-8"),
+    )
 
 
 class WorkNodeResponse(BaseModel):

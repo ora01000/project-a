@@ -28,6 +28,8 @@ interface IntegratedChatPanelProps {
   onExternalSubmitHandled?: () => void;
   /** Fired after a successful assistant reply (not abort/error). */
   onAssistantResponse?: (payload: { agentId: string; content: string }) => void;
+  /** Fired when a chat attempt finishes (success, error, or abort). */
+  onChatSettled?: (payload: { agentId: string; ok: boolean; content: string }) => void;
   /** Expand user message input height for workflow terminal (fixed px; dashboard keeps default). */
   expandUserInput?: boolean;
   /** Fixed user input height when expandUserInput is true. Default 300. */
@@ -108,6 +110,7 @@ export function IntegratedChatPanel({
   externalSubmitRequest = null,
   onExternalSubmitHandled,
   onAssistantResponse,
+  onChatSettled,
   expandUserInput = false,
   userInputHeightPx = 300,
 }: IntegratedChatPanelProps) {
@@ -492,6 +495,11 @@ export function IntegratedChatPanel({
       if (completedOk) {
         onAssistantResponse?.({ agentId, content: assistantText.trim() });
       }
+      onChatSettled?.({
+        agentId,
+        ok: completedOk,
+        content: assistantText.trim(),
+      });
     }
   };
 

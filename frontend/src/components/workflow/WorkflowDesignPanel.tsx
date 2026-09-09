@@ -3,7 +3,7 @@ import { useMemo, useState } from "react";
 import type { AuthUser } from "../../types/auth";
 import type { WorkNodeItem, WorkflowItem } from "../../types/workflow";
 import { WorkflowDiagram } from "./WorkflowDiagram";
-import { WorkflowEditor } from "./WorkflowEditor";
+import { WorkflowEditor, type DiagramAgentEvent } from "./WorkflowEditor";
 import { isRunInProgress } from "./workflowModel";
 
 interface WorkflowDesignPanelProps {
@@ -18,6 +18,9 @@ interface WorkflowDesignPanelProps {
   onCloned: (item: WorkflowItem) => Promise<void> | void;
   aiImportRequest?: { nonce: number; assistantText: string } | null;
   onAiImportHandled?: () => void;
+  diagramAgentEvent?: DiagramAgentEvent | null;
+  onDiagramAgentEventHandled?: () => void;
+  onDiagramGenerate?: (prompt: string) => void;
 }
 
 async function parseError(response: Response, fallback: string): Promise<string> {
@@ -37,6 +40,9 @@ export function WorkflowDesignPanel({
   onCloned,
   aiImportRequest = null,
   onAiImportHandled,
+  diagramAgentEvent = null,
+  onDiagramAgentEventHandled,
+  onDiagramGenerate,
 }: WorkflowDesignPanelProps) {
   const [actionError, setActionError] = useState<string | null>(null);
   const [isBusy, setIsBusy] = useState(false);
@@ -219,6 +225,9 @@ export function WorkflowDesignPanel({
           onWorkNodesChanged={onWorkNodesChanged}
           aiImportRequest={aiImportRequest}
           onAiImportHandled={onAiImportHandled}
+          diagramAgentEvent={diagramAgentEvent}
+          onDiagramAgentEventHandled={onDiagramAgentEventHandled}
+          onDiagramGenerate={onDiagramGenerate}
         />
       </section>
     );

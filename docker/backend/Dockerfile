@@ -26,6 +26,8 @@ COPY backend ./backend
 COPY config ./config
 COPY docs/system-prompt ./docs/system-prompt
 COPY docs/skill ./docs/skill
+# Entire dir (md files may be added/renamed freely; API lists *.md at runtime)
+COPY docs/workflow_template ./docs/workflow_template
 COPY RELEASE.md ./RELEASE.md
 
 ENV PATH="/app/.venv/bin:${PATH}" \

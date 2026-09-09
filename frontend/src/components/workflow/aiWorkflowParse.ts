@@ -40,6 +40,16 @@ function extractJsonText(raw: string): string {
   return trimmed;
 }
 
+/** Pretty-print AI workflow design JSON for result panel display. */
+export function formatAiWorkflowDesignJson(raw: string): string {
+  const extracted = extractJsonText(raw);
+  try {
+    return JSON.stringify(JSON.parse(extracted), null, 2);
+  } catch {
+    return extracted || raw.trim();
+  }
+}
+
 function asString(value: unknown): string {
   return String(value ?? "").trim();
 }

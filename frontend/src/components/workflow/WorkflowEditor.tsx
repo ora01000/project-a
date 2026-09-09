@@ -21,6 +21,12 @@ import { WorkNodeEditPanel } from "./WorkNodeEditPanel";
 import { WorkflowApproverPickModal } from "./WorkflowApproverPickModal";
 import { WorkflowHistoryPanel } from "./WorkflowHistoryPanel";
 import {
+  applyTemplateVariables,
+  extractTemplateVariableNames,
+  WorkflowTemplateMarkdown,
+} from "./WorkflowTemplateMarkdown";
+import {
+  formatAiWorkflowDesignJson,
   parseAiWorkflowDesignResponse,
 } from "./aiWorkflowParse";
 import {
@@ -42,6 +48,20 @@ import {
   type WorkEditorNode,
 } from "./workflowModel";
 
+const CLARIFY_ANSWER_SECTION = "## 보완질의에 대한 답변";
+
+export type DiagramPanelState =
+  | "STATE_INPUT"
+  | "STATE_GENERATE"
+  | "STATE_RESPONSE_SUCCESS"
+  | "STATE_RESPONSE_ADDITIONAL_DATA";
+
+export type DiagramAgentEvent = {
+  nonce: number;
+  kind: "success" | "clarify" | "error";
+  content: string;
+};
+
 interface WorkflowEditorProps {
   user: AuthUser;
   workNodes: WorkNodeItem[];
@@ -56,6 +76,9 @@ interface WorkflowEditorProps {
   awaitingHitlUserid?: string;
   aiImportRequest?: { nonce: number; assistantText: string } | null;
   onAiImportHandled?: () => void;
+  diagramAgentEvent?: DiagramAgentEvent | null;
+  onDiagramAgentEventHandled?: () => void;
+  onDiagramGenerate?: (prompt: string) => void;
 }
 
 async function parseError(response: Response, fallback: string): Promise<string> {
@@ -161,9 +184,25 @@ export function WorkflowEditor({
   awaitingHitlUserid = "",
   aiImportRequest = null,
   onAiImportHandled,
+  diagramAgentEvent = null,
+  onDiagramAgentEventHandled,
+  onDiagramGenerate,
 }: WorkflowEditorProps) {
   const [name, setName] = useState(initialName);
   const [description, setDescription] = useState(initialDescription);
+  const [diagramPrompt, setDiagramPrompt] = useState("");
+  const [templateNames, setTemplateNames] = useState<string[]>([]);
+  const [selectedTemplate, setSelectedTemplate] = useState("");
+  const [isLoadingTemplate, setIsLoadingTemplate] = useState(false);
+  const [templateVarValues, setTemplateVarValues] = useState<Record<string, string>>({});
+  const [diagramPanelState, setDiagramPanelState] = useState<DiagramPanelState>("STATE_INPUT");
+  const [diagramResultJson, setDiagramResultJson] = useState("");
+  const [clarifyMessages, setClarifyMessages] = useState<string[]>([]);
+  const [workingPrompt, setWorkingPrompt] = useState("");
+  const lastSentPromptRef = useRef("");
+  const diagramStateBeforeGenerateRef = useRef<DiagramPanelState>("STATE_INPUT");
+  const processedDiagramEventNonceRef = useRef<number | null>(null);
+  const clarifyPromptTextareaRef = useRef<HTMLTextAreaElement>(null);
   const processedAiImportNonceRef = useRef<number | null>(null);
   const [model, setModel] = useState<EditorModel>(() => emptyEditorModel());
   const [error, setError] = useState<string | null>(null);
@@ -475,9 +514,10 @@ export function WorkflowEditor({
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
-      const [runtimeRes, approverRes] = await Promise.all([
+      const [runtimeRes, approverRes, templateRes] = await Promise.all([
         fetch("/api/agentruntime"),
         fetch("/api/workflow-approvers"),
+        fetch("/api/workflow-templates"),
       ]);
       if (runtimeRes.ok) {
         const data = (await runtimeRes.json()) as AgentRuntimeRecord[];
@@ -491,12 +531,159 @@ export function WorkflowEditor({
           setApprovers(data);
         }
       }
+      if (templateRes.ok) {
+        const data = (await templateRes.json()) as { name: string }[];
+        if (!cancelled) {
+          setTemplateNames(data.map((item) => item.name));
+        }
+      }
     };
     void load();
     return () => {
       cancelled = true;
     };
   }, []);
+
+  const handleTemplateSelect = async (name: string) => {
+    setSelectedTemplate(name);
+    if (!name) {
+      setDiagramPrompt("");
+      setTemplateVarValues({});
+      return;
+    }
+    setIsLoadingTemplate(true);
+    setError(null);
+    try {
+      const response = await fetch(`/api/workflow-templates/${encodeURIComponent(name)}`);
+      if (!response.ok) {
+        throw new Error(await parseError(response, "양식을 불러오지 못했습니다."));
+      }
+      const data = (await response.json()) as { name: string; content: string };
+      setDiagramPrompt(data.content);
+      const names = extractTemplateVariableNames(data.content);
+      const nextValues: Record<string, string> = {};
+      for (const varName of names) {
+        nextValues[varName] = "";
+      }
+      setTemplateVarValues(nextValues);
+    } catch (err) {
+      setDiagramPrompt("");
+      setTemplateVarValues({});
+      setError(err instanceof Error ? err.message : "양식을 불러오지 못했습니다.");
+    } finally {
+      setIsLoadingTemplate(false);
+    }
+  };
+
+  const templateVarNames = useMemo(
+    () => extractTemplateVariableNames(diagramPrompt),
+    [diagramPrompt],
+  );
+
+  const hasEmptyTemplateVars = templateVarNames.some(
+    (varName) => !(templateVarValues[varName] ?? "").trim(),
+  );
+
+  const isDiagramBusy = diagramPanelState === "STATE_GENERATE";
+  const isDiagramInputLocked = isDiagramBusy || readOnly;
+
+  const handleDiagramGenerate = () => {
+    if (!onDiagramGenerate || readOnly || isDiagramBusy) {
+      return;
+    }
+
+    let promptToSend = "";
+    if (diagramPanelState === "STATE_RESPONSE_ADDITIONAL_DATA") {
+      promptToSend = workingPrompt.trim();
+      if (!promptToSend) {
+        setError("보완 답변이 포함된 프롬프트를 입력하세요.");
+        return;
+      }
+    } else {
+      if (!diagramPrompt.trim()) {
+        return;
+      }
+      if (hasEmptyTemplateVars) {
+        setError("양식 변수 값을 모두 입력하세요.");
+        return;
+      }
+      promptToSend = applyTemplateVariables(diagramPrompt, templateVarValues).trim();
+    }
+
+    setError(null);
+    lastSentPromptRef.current = promptToSend;
+    diagramStateBeforeGenerateRef.current =
+      diagramPanelState === "STATE_GENERATE"
+        ? diagramStateBeforeGenerateRef.current
+        : diagramPanelState;
+    setDiagramPanelState("STATE_GENERATE");
+    onDiagramGenerate(promptToSend);
+  };
+
+  const handleDiagramRegenerate = () => {
+    setDiagramResultJson("");
+    setClarifyMessages([]);
+    setWorkingPrompt("");
+    lastSentPromptRef.current = "";
+    setDiagramPanelState("STATE_INPUT");
+    setError(null);
+  };
+
+  useEffect(() => {
+    if (!diagramAgentEvent) {
+      return;
+    }
+    if (processedDiagramEventNonceRef.current === diagramAgentEvent.nonce) {
+      return;
+    }
+    processedDiagramEventNonceRef.current = diagramAgentEvent.nonce;
+    onDiagramAgentEventHandled?.();
+
+    if (diagramAgentEvent.kind === "success") {
+      setDiagramResultJson(formatAiWorkflowDesignJson(diagramAgentEvent.content));
+      setClarifyMessages([]);
+      setWorkingPrompt("");
+      setDiagramPanelState("STATE_RESPONSE_SUCCESS");
+      return;
+    }
+
+    if (diagramAgentEvent.kind === "clarify") {
+      setClarifyMessages((current) => [...current, diagramAgentEvent.content]);
+      setWorkingPrompt((current) => {
+        const base = (current.trim() ? current : lastSentPromptRef.current).trimEnd();
+        return `${base}\n\n${CLARIFY_ANSWER_SECTION}\n`;
+      });
+      setDiagramPanelState("STATE_RESPONSE_ADDITIONAL_DATA");
+      return;
+    }
+
+    setError(diagramAgentEvent.content || "작업 워크플로우 생성에 실패했습니다.");
+    setDiagramPanelState((current) => {
+      if (current !== "STATE_GENERATE") {
+        return current;
+      }
+      return diagramStateBeforeGenerateRef.current === "STATE_RESPONSE_ADDITIONAL_DATA"
+        ? "STATE_RESPONSE_ADDITIONAL_DATA"
+        : "STATE_INPUT";
+    });
+  }, [diagramAgentEvent, onDiagramAgentEventHandled]);
+
+  useEffect(() => {
+    if (diagramPanelState !== "STATE_RESPONSE_ADDITIONAL_DATA") {
+      return;
+    }
+    const node = clarifyPromptTextareaRef.current;
+    if (!node) {
+      return;
+    }
+    const focusId = window.requestAnimationFrame(() => {
+      node.focus();
+      const cursor = node.value.length;
+      node.setSelectionRange(cursor, cursor);
+      node.scrollTop = node.scrollHeight;
+    });
+    return () => window.cancelAnimationFrame(focusId);
+  }, [diagramPanelState, workingPrompt, clarifyMessages.length]);
 
   useEffect(() => {
     approverPickClientIdRef.current = approverPickClientId;
@@ -899,42 +1086,176 @@ export function WorkflowEditor({
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="shrink-0 border-b border-slate-800 px-4 py-3">
-        <label className="grid gap-1 text-xs text-slate-400">
-          작업 워크플로우 명
-          <div className="flex items-center gap-2">
-            <input
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-              maxLength={100}
-              readOnly={readOnly}
-              disabled={readOnly}
-              className="min-w-0 flex-1 rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 disabled:opacity-80"
-            />
-            {readOnly ? null : (
-              <button
-                type="button"
-                disabled={isSaving || !name.trim()}
-                onClick={() => void handleSave()}
-                className="shrink-0 rounded-md border border-sky-700 bg-sky-950/50 px-3 py-2 text-sm text-sky-100 hover:bg-sky-900/60 disabled:opacity-50"
-              >
-                {saveLabel}
-              </button>
-            )}
+        <div className="flex min-w-0 gap-4">
+          <div className="min-w-0 flex-1 basis-1/2">
+            <label className="grid gap-1 text-xs text-slate-400">
+              <span className="flex items-center justify-between gap-2">
+                <span>작업 워크플로우 명</span>
+                {readOnly ? null : (
+                  <button
+                    type="button"
+                    disabled={isSaving || !name.trim()}
+                    onClick={() => void handleSave()}
+                    className="shrink-0 rounded-md border border-sky-700 bg-sky-950/50 px-3 py-1 text-[11px] font-medium text-sky-100 hover:bg-sky-900/60 disabled:opacity-50"
+                  >
+                    {saveLabel}
+                  </button>
+                )}
+              </span>
+              <input
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+                maxLength={100}
+                readOnly={readOnly}
+                disabled={readOnly}
+                className="min-w-0 w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 disabled:opacity-80"
+              />
+            </label>
+            <label className="mt-3 grid gap-1 text-xs text-slate-400">
+              작업 워크플로우 설명
+              <textarea
+                value={description}
+                onChange={(event) => setDescription(event.target.value)}
+                maxLength={500}
+                rows={2}
+                readOnly={readOnly}
+                disabled={readOnly}
+                placeholder="작업 워크플로우 메타 설명"
+                className="resize-y rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 disabled:opacity-80"
+              />
+            </label>
           </div>
-        </label>
-        <label className="mt-3 grid gap-1 text-xs text-slate-400">
-          작업 워크플로우 설명
-          <textarea
-            value={description}
-            onChange={(event) => setDescription(event.target.value)}
-            maxLength={500}
-            rows={2}
-            readOnly={readOnly}
-            disabled={readOnly}
-            placeholder="작업 워크플로우 메타 설명"
-            className="resize-y rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 disabled:opacity-80"
-          />
-        </label>
+
+          <div className="min-w-0 flex-1 basis-1/2">
+            <div className="grid gap-1 text-xs text-slate-400">
+              <div className="flex items-center justify-between gap-2">
+                <span>다이어그램 생성 프롬프트</span>
+                {diagramPanelState === "STATE_RESPONSE_SUCCESS" ? (
+                  <button
+                    type="button"
+                    disabled={readOnly}
+                    onClick={handleDiagramRegenerate}
+                    className="shrink-0 rounded-md border border-slate-600 bg-slate-900 px-3 py-1 text-[11px] font-medium text-slate-100 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    다시생성하기
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={
+                      isDiagramInputLocked ||
+                      isLoadingTemplate ||
+                      !onDiagramGenerate ||
+                      (diagramPanelState === "STATE_RESPONSE_ADDITIONAL_DATA"
+                        ? !workingPrompt.trim()
+                        : !diagramPrompt.trim() || hasEmptyTemplateVars)
+                    }
+                    onClick={handleDiagramGenerate}
+                    className="shrink-0 rounded-md border border-slate-600 bg-slate-900 px-3 py-1 text-[11px] font-medium text-slate-100 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+                    title="대화형 터미널로 전송"
+                  >
+                    {isDiagramBusy ? "생성 중…" : "생성"}
+                  </button>
+                )}
+              </div>
+
+              {diagramPanelState === "STATE_RESPONSE_SUCCESS" ? (
+                <pre className="max-h-64 min-h-[7.5rem] overflow-auto rounded-md border border-slate-700 bg-slate-950 px-3 py-2 font-mono text-[11px] leading-5 text-emerald-100 whitespace-pre-wrap">
+                  {diagramResultJson || "결과 JSON이 비어 있습니다."}
+                </pre>
+              ) : (
+                <>
+                  <select
+                    value={selectedTemplate}
+                    disabled={
+                      isDiagramInputLocked ||
+                      isLoadingTemplate ||
+                      diagramPanelState !== "STATE_INPUT"
+                    }
+                    onChange={(event) => {
+                      void handleTemplateSelect(event.target.value);
+                    }}
+                    className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1.5 text-xs text-slate-200 disabled:opacity-80"
+                    aria-label="다이어그램 생성 양식"
+                  >
+                    <option value="">양식 선택</option>
+                    {templateNames.map((templateName) => (
+                      <option key={templateName} value={templateName}>
+                        {templateName}
+                      </option>
+                    ))}
+                  </select>
+
+                  {diagramPanelState === "STATE_RESPONSE_ADDITIONAL_DATA" ||
+                  (diagramPanelState === "STATE_GENERATE" &&
+                    diagramStateBeforeGenerateRef.current ===
+                      "STATE_RESPONSE_ADDITIONAL_DATA") ? (
+                    <>
+                      {clarifyMessages.length > 0 ? (
+                        <div className="grid gap-2">
+                          {clarifyMessages.map((message, index) => (
+                            <div
+                              key={`clarify-${index}`}
+                              className="rounded-md border border-amber-800/70 bg-amber-950/30 px-3 py-2 text-xs leading-5 text-amber-100 whitespace-pre-wrap"
+                            >
+                              <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-amber-300/90">
+                                보완 질의 {clarifyMessages.length > 1 ? `#${index + 1}` : ""}
+                              </p>
+                              {message}
+                            </div>
+                          ))}
+                        </div>
+                      ) : null}
+                      <textarea
+                        ref={clarifyPromptTextareaRef}
+                        value={workingPrompt}
+                        onChange={(event) => setWorkingPrompt(event.target.value)}
+                        disabled={isDiagramInputLocked}
+                        rows={8}
+                        spellCheck={false}
+                        className="w-full resize-y rounded-md border border-slate-700 bg-slate-950 px-3 py-2 font-mono text-[12px] leading-5 text-slate-200 disabled:opacity-80"
+                        aria-label="보완질의 반영 프롬프트"
+                      />
+                    </>
+                  ) : (
+                    <>
+                      <WorkflowTemplateMarkdown
+                        content={diagramPrompt}
+                        className="min-h-[7.5rem] max-h-48 overflow-y-auto rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-xs"
+                      />
+                      {templateVarNames.length > 0 ? (
+                        <div className="mt-1 grid gap-2">
+                          {templateVarNames.map((varName) => (
+                            <label
+                              key={varName}
+                              className="grid gap-1 text-xs text-slate-400"
+                            >
+                              {varName}
+                              <input
+                                value={templateVarValues[varName] ?? ""}
+                                onChange={(event) => {
+                                  const nextValue = event.target.value;
+                                  setTemplateVarValues((current) => ({
+                                    ...current,
+                                    [varName]: nextValue,
+                                  }));
+                                }}
+                                readOnly={isDiagramInputLocked}
+                                disabled={isDiagramInputLocked}
+                                placeholder={`{${varName}}`}
+                                className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1.5 text-xs text-slate-100 disabled:opacity-80"
+                              />
+                            </label>
+                          ))}
+                        </div>
+                      ) : null}
+                    </>
+                  )}
+                </>
+              )}
+            </div>
+          </div>
+        </div>
       </div>
 
       {error ? (

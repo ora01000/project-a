@@ -6,6 +6,7 @@ import type { WorkflowItem, WorkNodeItem } from "../../types/workflow";
 import { IntegratedChatPanel } from "../IntegratedChatPanel";
 import { parseAiWorkflowDesignResponse } from "./aiWorkflowParse";
 import { WorkflowDesignPanel } from "./WorkflowDesignPanel";
+import type { DiagramAgentEvent } from "./WorkflowEditor";
 import { WorkflowListPanel } from "./WorkflowListPanel";
 import { isRunInProgress } from "./workflowModel";
 
@@ -53,51 +54,132 @@ export function WorkflowPage({
     nonce: number;
     assistantText: string;
   } | null>(null);
+  const [chatSubmitRequest, setChatSubmitRequest] = useState<{
+    nonce: number;
+    message: string;
+  } | null>(null);
+  const [diagramAgentEvent, setDiagramAgentEvent] = useState<DiagramAgentEvent | null>(null);
+  const diagramAwaitingRef = useRef(false);
 
   const [runningUuid, setRunningUuid] = useState<string | null>(null);
   const [runMessage, setRunMessage] = useState<string | null>(null);
 
   const selected = items.find((item) => item.uuid === selectedUuid) ?? null;
 
-  const handleAssistantResponse = useCallback((payload: { agentId: string; content: string }) => {
-    const agentId = payload.agentId.trim();
-    const isWorkflowAgent =
-      agentId === "WORKFLOW_AGENT" || agentId.toUpperCase().includes("WORKFLOW_AGENT");
-    if (!isWorkflowAgent) {
-      return;
-    }
-    try {
-      parseAiWorkflowDesignResponse(payload.content);
-    } catch (err) {
-      const looksLikeJson = payload.content.trim().startsWith("{");
-      if (looksLikeJson) {
-        setError(
-          err instanceof Error
-            ? `AI 작업 워크플로우 파싱 실패: ${err.message}`
-            : "AI 작업 워크플로우 파싱에 실패했습니다.",
-        );
-      }
-      // 보충 질문(비 JSON)이면 무시
-      return;
-    }
-    setError(null);
-    setMode((current) => {
-      if (current === "idle") {
-        setSelectedUuid(null);
-        setCreateKey((key) => key + 1);
-        return "create";
-      }
-      return current;
-    });
-    setAiImportRequest((current) => ({
+  const pushDiagramAgentEvent = useCallback((kind: DiagramAgentEvent["kind"], content: string) => {
+    setDiagramAgentEvent((current) => ({
       nonce: (current?.nonce ?? 0) + 1,
-      assistantText: payload.content,
+      kind,
+      content,
     }));
   }, []);
+
+  const handleAssistantResponse = useCallback(
+    (payload: { agentId: string; content: string }) => {
+      const agentId = payload.agentId.trim();
+      const isWorkflowAgent =
+        agentId === "WORKFLOW_AGENT" || agentId.toUpperCase().includes("WORKFLOW_AGENT");
+      if (!isWorkflowAgent) {
+        return;
+      }
+
+      const awaitingDiagram = diagramAwaitingRef.current;
+      try {
+        parseAiWorkflowDesignResponse(payload.content);
+      } catch (err) {
+        const looksLikeJson = payload.content.trim().startsWith("{");
+        if (awaitingDiagram) {
+          diagramAwaitingRef.current = false;
+          if (looksLikeJson) {
+            const message =
+              err instanceof Error
+                ? `AI 작업 워크플로우 파싱 실패: ${err.message}`
+                : "AI 작업 워크플로우 파싱에 실패했습니다.";
+            setError(message);
+            pushDiagramAgentEvent("error", message);
+          } else {
+            setError(null);
+            pushDiagramAgentEvent("clarify", payload.content);
+          }
+          return;
+        }
+        if (looksLikeJson) {
+          setError(
+            err instanceof Error
+              ? `AI 작업 워크플로우 파싱 실패: ${err.message}`
+              : "AI 작업 워크플로우 파싱에 실패했습니다.",
+          );
+        }
+        // 보충 질문(비 JSON)이면 무시 (다이어그램 패널 대기 중이 아닐 때)
+        return;
+      }
+
+      setError(null);
+      if (awaitingDiagram) {
+        diagramAwaitingRef.current = false;
+        pushDiagramAgentEvent("success", payload.content);
+      }
+      setMode((current) => {
+        if (current === "idle") {
+          setSelectedUuid(null);
+          setCreateKey((key) => key + 1);
+          return "create";
+        }
+        return current;
+      });
+      setAiImportRequest((current) => ({
+        nonce: (current?.nonce ?? 0) + 1,
+        assistantText: payload.content,
+      }));
+    },
+    [pushDiagramAgentEvent],
+  );
 
   const handleAiImportHandled = useCallback(() => {
     setAiImportRequest(null);
   }, []);
+
+  const handleDiagramAgentEventHandled = useCallback(() => {
+    setDiagramAgentEvent(null);
+  }, []);
+
+  const handleDiagramGenerate = useCallback((prompt: string) => {
+    const trimmed = prompt.trim();
+    if (!trimmed) {
+      return;
+    }
+    diagramAwaitingRef.current = true;
+    setChatSubmitRequest((current) => ({
+      nonce: (current?.nonce ?? 0) + 1,
+      message: trimmed,
+    }));
+  }, []);
+
+  const handleChatSubmitHandled = useCallback(() => {
+    setChatSubmitRequest(null);
+  }, []);
+
+  const handleChatSettled = useCallback(
+    (payload: { agentId: string; ok: boolean; content: string }) => {
+      if (!diagramAwaitingRef.current) {
+        return;
+      }
+      const agentId = payload.agentId.trim();
+      const isWorkflowAgent =
+        agentId === "WORKFLOW_AGENT" || agentId.toUpperCase().includes("WORKFLOW_AGENT");
+      if (!isWorkflowAgent) {
+        return;
+      }
+      if (payload.ok) {
+        return;
+      }
+      diagramAwaitingRef.current = false;
+      const message = payload.content.trim() || "작업 워크플로우 생성 요청이 실패했거나 취소되었습니다.";
+      setError(message);
+      pushDiagramAgentEvent("error", message);
+    },
+    [pushDiagramAgentEvent],
+  );
 
   const minCenterPanelWidth =
     (isListCollapsed ? LIST_COLLAPSED_WIDTH : LIST_PANEL_WIDTH) + MIN_DESIGN_PANEL_WIDTH;
@@ -441,6 +523,9 @@ export function WorkflowPage({
               onCloned={handleCloned}
               aiImportRequest={aiImportRequest}
               onAiImportHandled={handleAiImportHandled}
+              diagramAgentEvent={diagramAgentEvent}
+              onDiagramAgentEventHandled={handleDiagramAgentEventHandled}
+              onDiagramGenerate={handleDiagramGenerate}
             />
           </div>
 
@@ -465,7 +550,10 @@ export function WorkflowPage({
         allowedAgentIds={["WORKFLOW_AGENT"]}
         expandUserInput
         userInputHeightPx={300}
+        externalSubmitRequest={chatSubmitRequest}
+        onExternalSubmitHandled={handleChatSubmitHandled}
         onAssistantResponse={handleAssistantResponse}
+        onChatSettled={handleChatSettled}
       />
     </div>
   );

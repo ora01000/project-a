@@ -12,10 +12,12 @@ PLATFORMS="${PLATFORMS:-linux/amd64}"
 BUILDER_NAME="${BUILDER_NAME:-project-a-multiarch}"
 PUSH="${PUSH:-true}"
 
-# Backend image bundles agent prompts/skills from docs/ (see docker/backend/Dockerfile).
+# Backend image bundles agent prompts/skills/templates from docs/ (see docker/backend/Dockerfile).
+# workflow_template: copy whole directory — md files may be added or renamed freely.
 BACKEND_DEPLOY_DIRS=(
   docs/system-prompt
   docs/skill
+  docs/workflow_template
 )
 
 verify_backend_deploy_assets() {
@@ -28,6 +30,11 @@ verify_backend_deploy_assets() {
   if [[ ${#missing[@]} -gt 0 ]]; then
     echo "Missing backend deploy directories (required for image COPY):" >&2
     printf '  - %s\n' "${missing[@]}" >&2
+    exit 1
+  fi
+  # Do not pin filenames; any *.md under workflow_template is included by directory COPY.
+  if ! compgen -G "${ROOT_DIR}/docs/workflow_template/*.md" > /dev/null; then
+    echo "docs/workflow_template has no *.md files (directory is included as a whole at build)" >&2
     exit 1
   fi
 }
