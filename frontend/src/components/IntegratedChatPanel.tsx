@@ -132,7 +132,7 @@ export function IntegratedChatPanel({
   const layoutRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const processedExternalNonceRef = useRef<number | null>(null);
-  const sendChatMessageRef = useRef<(trimmed: string) => Promise<void>>(async () => {});
+  const sendChatMessageRef = useRef<(trimmed: string) => Promise<boolean>>(async () => false);
   const [agentListHeight, setAgentListHeight] = useState(DEFAULT_AGENT_LIST_HEIGHT);
   const isResizingRef = useRef(false);
   const resizeStartYRef = useRef(0);

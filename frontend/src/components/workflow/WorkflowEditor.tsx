@@ -701,10 +701,7 @@ export function WorkflowEditor({
 
     setError(null);
     lastSentPromptRef.current = promptToSend;
-    diagramStateBeforeGenerateRef.current =
-      diagramPanelState === "STATE_GENERATE"
-        ? diagramStateBeforeGenerateRef.current
-        : diagramPanelState;
+    diagramStateBeforeGenerateRef.current = diagramPanelState;
     setDiagramPanelState("STATE_GENERATE");
     onDiagramGenerate(promptToSend);
   };
