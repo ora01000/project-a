@@ -41,6 +41,7 @@ from backend.app.db.workflow import (
     resolve_work_node_upload_userid,
     mark_workflow_run_started,
     set_work_node_schedule_wait,
+    work_uuids_from_expression,
 )
 from backend.app.notifications.email_sender import (
     load_email_settings_from_db,
@@ -58,6 +59,45 @@ logger = logging.getLogger(__name__)
 _WORKFLOW_JOB_MESSAGE_RE = re.compile(
     r"^workflow:(?P<uuid>[0-9a-fA-F-]{36}):(?P<index>\d+)$"
 )
+
+# workflow_uuid(lower) → work_node uuid(lower) requested to stop
+_stop_requests: dict[str, str] = {}
+
+USER_STOP_REASON = "사용자에 의해 중지되었습니다."
+
+
+class WorkflowStopRequested(Exception):
+    """Raised when an operator stops the currently running work node."""
+
+    def __init__(self, work_uuid: str, *, reason: str = USER_STOP_REASON) -> None:
+        self.work_uuid = (work_uuid or "").strip()
+        self.reason = reason or USER_STOP_REASON
+        super().__init__(self.reason)
+
+
+def request_work_node_stop(workflow_uuid: str, work_uuid: str) -> None:
+    wf = (workflow_uuid or "").strip().lower()
+    node = (work_uuid or "").strip().lower()
+    if not wf or not node:
+        raise ValueError("중지 대상이 올바르지 않습니다.")
+    _stop_requests[wf] = node
+
+
+def clear_work_node_stop(workflow_uuid: str) -> None:
+    _stop_requests.pop((workflow_uuid or "").strip().lower(), None)
+
+
+def is_work_node_stop_requested(workflow_uuid: str, work_uuid: str) -> bool:
+    wf = (workflow_uuid or "").strip().lower()
+    node = (work_uuid or "").strip().lower()
+    if not wf or not node:
+        return False
+    return _stop_requests.get(wf) == node
+
+
+def _raise_if_work_node_stopped(workflow_uuid: str, work_uuid: str) -> None:
+    if is_work_node_stop_requested(workflow_uuid, work_uuid):
+        raise WorkflowStopRequested(work_uuid)
 
 
 def _parse_work_report_addresses(work_report: str) -> list[str]:
@@ -470,6 +510,8 @@ def _assert_structured_work_success(script_type: str, content: str) -> None:
 async def _await_work_node_schedule_if_needed(
     database_path: Path | str,
     node: WorkNodeRecord,
+    *,
+    workflow_uuid: str = "",
 ) -> None:
     """Block until the one-shot clock time when ``node.cron`` is enabled.
 
@@ -490,6 +532,8 @@ async def _await_work_node_schedule_if_needed(
     )
     try:
         while True:
+            if workflow_uuid:
+                _raise_if_work_node_stopped(workflow_uuid, node.uuid)
             now = now_display_datetime()
             minute_now = now.astimezone(DISPLAY_TIMEZONE).replace(second=0, microsecond=0)
             if cron_matches_minute(expr, minute_now):
@@ -529,9 +573,10 @@ async def _invoke_work_node(
     agent_runtime: Any,
     node: WorkNodeRecord,
     message: str,
+    workflow_uuid: str = "",
 ) -> str:
     agent_id = _resolve_invoke_agent_id(database_path, node.target_agent)
-    result = await agent_runtime.invoke(
+    invoke_coro = agent_runtime.invoke(
         AgentInvokeRequest(
             agent_id=agent_id,
             message=message,
@@ -539,10 +584,80 @@ async def _invoke_work_node(
             agentruntime_idx=int(node.target_agent),
         )
     )
+    if not workflow_uuid:
+        result = await invoke_coro
+    else:
+        task = asyncio.ensure_future(invoke_coro)
+        try:
+            while not task.done():
+                _raise_if_work_node_stopped(workflow_uuid, node.uuid)
+                done, _ = await asyncio.wait({task}, timeout=0.5)
+                if done:
+                    break
+            result = await task
+        except WorkflowStopRequested:
+            task.cancel()
+            try:
+                await task
+            except (asyncio.CancelledError, Exception):
+                pass
+            raise
     content = str(getattr(result, "content", "") or "").strip()
     if not content:
         raise ValueError("에이전트 응답이 비어 있습니다.")
+    if workflow_uuid:
+        _raise_if_work_node_stopped(workflow_uuid, node.uuid)
     return content
+
+
+def _finalize_user_stop(
+    database_path: Path | str,
+    *,
+    workflow: WorkflowRecord,
+    tokens: list[FlowToken],
+    node: WorkNodeRecord,
+    steps: list[WorkflowRunStep],
+    requester: User | None,
+) -> WorkflowRunResult:
+    reason = USER_STOP_REASON
+    clear_work_node_stop(workflow.uuid)
+    current_node = get_work_node_by_uuid(database_path, node.uuid) or node
+    if _is_work_node_run_in_progress(current_node):
+        mark_work_node_run_finished(
+            database_path, node.uuid, success=False, fail_reason=reason
+        )
+    if not any(
+        step.work_uuid == node.uuid and step.status == "failed" and step.detail == reason
+        for step in steps
+    ):
+        steps.append(
+            WorkflowRunStep(
+                kind="work",
+                label=node.work_name,
+                status="failed",
+                detail=reason,
+                work_uuid=node.uuid,
+            )
+        )
+    current_wf = get_workflow_by_uuid(database_path, workflow.uuid) or workflow
+    wf_end = (current_wf.last_end_date or "").strip()
+    if not wf_end:
+        finished = mark_workflow_run_finished(database_path, workflow.uuid, success=False)
+        _record_workflow_history_on_end(
+            database_path,
+            workflow_uuid=workflow.uuid,
+            tokens=tokens,
+            success=False,
+            user_idx=int(requester.idx) if requester is not None else 1,
+        )
+    else:
+        finished = current_wf
+    return WorkflowRunResult(
+        status="failed",
+        message=reason,
+        workflow=finished or get_workflow_by_uuid(database_path, workflow.uuid),
+        steps=steps,
+    )
 
 
 def _load_node_result_text(database_path: Path | str, node: WorkNodeRecord) -> str:
@@ -793,7 +908,9 @@ async def _execute_from_index(
 
         mark_work_node_run_started(database_path, node.uuid)
         try:
-            await _await_work_node_schedule_if_needed(database_path, node)
+            await _await_work_node_schedule_if_needed(
+                database_path, node, workflow_uuid=workflow.uuid
+            )
             attachment_text = _attachment_context_from_previous_hitl(
                 database_path, tokens, index
             )
@@ -805,6 +922,7 @@ async def _execute_from_index(
                 agent_runtime=agent_runtime,
                 node=node,
                 message=message,
+                workflow_uuid=workflow.uuid,
             )
             _assert_structured_work_success(node.script_type, content)
             finished_node = mark_work_node_run_finished(database_path, node.uuid, success=True)
@@ -837,6 +955,15 @@ async def _execute_from_index(
             )
             index += 1
             continue
+        except WorkflowStopRequested:
+            return _finalize_user_stop(
+                database_path,
+                workflow=workflow,
+                tokens=tokens,
+                node=node,
+                steps=steps,
+                requester=requester,
+            )
         except Exception as exc:
             reason = str(exc)[:200]
             mark_work_node_run_finished(
@@ -866,7 +993,9 @@ async def _execute_from_index(
                     )
                 mark_work_node_run_started(database_path, fail_node.uuid)
                 try:
-                    await _await_work_node_schedule_if_needed(database_path, fail_node)
+                    await _await_work_node_schedule_if_needed(
+                        database_path, fail_node, workflow_uuid=workflow.uuid
+                    )
                     fail_message = _build_agent_message(
                         fail_node,
                         previous,
@@ -879,6 +1008,7 @@ async def _execute_from_index(
                         agent_runtime=agent_runtime,
                         node=fail_node,
                         message=fail_message,
+                        workflow_uuid=workflow.uuid,
                     )
                     _assert_structured_work_success(fail_node.script_type, fail_content)
                     finished_fail = mark_work_node_run_finished(
@@ -917,6 +1047,15 @@ async def _execute_from_index(
                     )
                     index += 1
                     continue
+                except WorkflowStopRequested:
+                    return _finalize_user_stop(
+                        database_path,
+                        workflow=workflow,
+                        tokens=tokens,
+                        node=fail_node,
+                        steps=steps,
+                        requester=requester,
+                    )
                 except Exception as fail_exc:
                     fail_reason = str(fail_exc)[:200]
                     mark_work_node_run_finished(
@@ -980,6 +1119,7 @@ async def run_workflow(
     started = mark_workflow_run_started(database_path, workflow.uuid)
     if started is None:
         raise ValueError("작업 워크플로우 실행 시작 기록에 실패했습니다.")
+    clear_work_node_stop(workflow.uuid)
 
     return await _execute_from_index(
         database_path=database_path,
@@ -1040,4 +1180,61 @@ def fail_workflow_after_rejection(database_path: Path | str, job: JobRecord) -> 
     if parsed is None:
         return None
     workflow_uuid, _ = parsed
+    clear_work_node_stop(workflow_uuid)
     return mark_workflow_run_finished(database_path, workflow_uuid, success=False)
+
+
+def _is_work_node_run_in_progress(node: WorkNodeRecord) -> bool:
+    start = (node.last_start_date or "").strip()
+    end = (node.last_end_date or "").strip()
+    if not start:
+        return False
+    if not end:
+        return True
+    return start > end
+
+
+def stop_running_work_node(
+    database_path: Path | str,
+    *,
+    workflow_uuid: str,
+    work_uuid: str,
+) -> WorkflowRecord:
+    """Request stop of a running work node and mark workflow failed.
+
+    The active runner cooperatively cancels the agent invoke / schedule wait
+    and finalizes. This call also updates DB immediately so the UI unlocks.
+    """
+    workflow = get_workflow_by_uuid(database_path, workflow_uuid)
+    if workflow is None:
+        raise ValueError("작업 워크플로우를 찾을 수 없습니다.")
+    wf_start = (workflow.last_start_date or "").strip()
+    wf_end = (workflow.last_end_date or "").strip()
+    if not wf_start or (wf_end and wf_start <= wf_end):
+        raise ValueError("실행 중인 작업 워크플로우가 아닙니다.")
+
+    node = get_work_node_by_uuid(database_path, work_uuid)
+    if node is None:
+        raise ValueError("작업노드를 찾을 수 없습니다.")
+    referenced = {u.lower() for u in work_uuids_from_expression(workflow.workflow)}
+    if node.uuid.lower() not in referenced:
+        raise ValueError("이 작업 워크플로우에 속하지 않는 작업노드입니다.")
+    if not _is_work_node_run_in_progress(node):
+        raise ValueError("실행 중인 작업노드가 아닙니다.")
+
+    request_work_node_stop(workflow.uuid, node.uuid)
+    mark_work_node_run_finished(
+        database_path, node.uuid, success=False, fail_reason=USER_STOP_REASON
+    )
+    finished = mark_workflow_run_finished(database_path, workflow.uuid, success=False)
+    if finished is None:
+        raise ValueError("작업 워크플로우 종료 기록에 실패했습니다.")
+    tokens = parse_workflow_document(workflow.workflow)
+    _record_workflow_history_on_end(
+        database_path,
+        workflow_uuid=workflow.uuid,
+        tokens=tokens,
+        success=False,
+        user_idx=int(getattr(workflow, "owner", 1) or 1),
+    )
+    return finished

@@ -85,6 +85,29 @@ export function WorkflowDesignPanel({
     [selected?.awaiting_approval, selected?.graph, workRunDates],
   );
 
+  const isWorkflowRunning =
+    mode === "edit" &&
+    Boolean(selected) &&
+    (Boolean(selected?.awaiting_approval) ||
+      isRunInProgress(selected?.last_start_date, selected?.last_end_date));
+
+  const handleStopWorkNode = useCallback(
+    async (workUuid: string) => {
+      if (!selected?.uuid || !workUuid) {
+        return;
+      }
+      const response = await fetch(
+        `/api/workflows/${selected.uuid}/work-nodes/${workUuid}/stop`,
+        { method: "POST" },
+      );
+      if (!response.ok) {
+        throw new Error(await parseError(response, "작업노드를 중지하지 못했습니다."));
+      }
+      await onWorkNodesChanged();
+    },
+    [onWorkNodesChanged, selected?.uuid],
+  );
+
   if (mode === "idle") {
     return (
       <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-xl border border-slate-700 bg-slate-900/50 shadow-inner">
@@ -96,10 +119,11 @@ export function WorkflowDesignPanel({
   }
 
   if (mode === "create" || (mode === "edit" && selected)) {
-    const canEdit = mode === "create" || Boolean(selected?.can_edit);
-    const isOwner = mode === "edit" && (selected?.owner ?? 0) === user.idx;
-    const isDistributed = Boolean(selected?.distribute);
-    const ownerLabel = (selected?.owner_username || "").trim() || "소유자";
+  const canEdit = mode === "create" || Boolean(selected?.can_edit);
+  const isOwner = mode === "edit" && (selected?.owner ?? 0) === user.idx;
+  const isDistributed = Boolean(selected?.distribute);
+  const editorReadOnly = !canEdit || isWorkflowRunning;
+  const ownerLabel = (selected?.owner_username || "").trim() || "소유자";
 
     const handleDistribute = async (next: boolean) => {
       if (!selected) {
@@ -231,8 +255,9 @@ export function WorkflowDesignPanel({
               graph={selected.graph}
               workRunDates={workRunDates}
               awaitingHitlNodeId={selected.awaiting_hitl_node_id || null}
+              awaitingHitlUserid={selected.awaiting_hitl_userid || null}
               onAwaitingHitlClick={
-                selected.awaiting_job_idx
+                selected.awaiting_job_idx != null
                   ? () => setHitlJobIdx(selected.awaiting_job_idx ?? null)
                   : undefined
               }
@@ -245,6 +270,12 @@ export function WorkflowDesignPanel({
           user={user}
           workNodes={workNodes}
           awaitingHitlUserid={selected?.awaiting_hitl_userid || ""}
+          awaitingJobIdx={selected?.awaiting_job_idx ?? null}
+          onAwaitingHitlApprove={
+            selected?.awaiting_job_idx != null
+              ? () => setHitlJobIdx(selected.awaiting_job_idx ?? null)
+              : undefined
+          }
           initialName={mode === "edit" ? selected?.workflow_name ?? "" : ""}
           initialExpression={mode === "edit" ? selected?.workflow ?? "" : ""}
           initialDescription={mode === "edit" ? selected?.workflow_description ?? "" : ""}
@@ -255,9 +286,10 @@ export function WorkflowDesignPanel({
               : DEFAULT_WORKFLOW_CRON_EXPR
           }
           workflowUuid={mode === "edit" ? selected?.uuid : undefined}
-          readOnly={!canEdit}
+          readOnly={editorReadOnly}
           onSaved={onSaved}
           onWorkNodesChanged={onWorkNodesChanged}
+          onStopWorkNode={isWorkflowRunning ? handleStopWorkNode : undefined}
           onSaveStateChange={handleSaveStateChange}
           aiImportRequest={aiImportRequest}
           onAiImportHandled={onAiImportHandled}

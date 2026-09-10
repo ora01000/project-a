@@ -85,8 +85,12 @@ interface WorkflowEditorProps {
   sessionKey: string;
   onSaved: (item: WorkflowItem) => Promise<void> | void;
   onWorkNodesChanged: () => Promise<void> | void;
+  /** Stop a running work node (fails the whole workflow). */
+  onStopWorkNode?: (workUuid: string) => Promise<void> | void;
   workflowUuid?: string;
   awaitingHitlUserid?: string;
+  awaitingJobIdx?: number | null;
+  onAwaitingHitlApprove?: () => void;
   aiImportRequest?: { nonce: number; assistantText: string } | null;
   onAiImportHandled?: () => void;
   diagramAgentEvent?: DiagramAgentEvent | null;
@@ -178,6 +182,24 @@ function DeleteBox({ onClick, label }: { onClick: () => void; label: string }) {
   );
 }
 
+function StopBox({ onClick, disabled }: { onClick: () => void; disabled?: boolean }) {
+  return (
+    <button
+      type="button"
+      aria-label="작업 중지"
+      title="실행 중지 (워크플로우 실패 종료)"
+      disabled={disabled}
+      onClick={(event) => {
+        event.stopPropagation();
+        onClick();
+      }}
+      className="absolute right-1 top-1 z-10 rounded-sm border border-rose-500/80 bg-rose-950/80 px-1.5 py-0.5 text-[9px] font-semibold leading-none text-rose-100 hover:bg-rose-900 disabled:cursor-not-allowed disabled:opacity-50"
+    >
+      중지
+    </button>
+  );
+}
+
 function TextLabelChip({ children, title }: { children: ReactNode; title?: string }) {
   return (
     <span
@@ -202,8 +224,11 @@ export const WorkflowEditor = forwardRef<WorkflowEditorHandle, WorkflowEditorPro
     sessionKey,
     onSaved,
     onWorkNodesChanged,
+    onStopWorkNode,
     workflowUuid,
     awaitingHitlUserid = "",
+    awaitingJobIdx = null,
+    onAwaitingHitlApprove,
     aiImportRequest = null,
     onAiImportHandled,
     diagramAgentEvent = null,
@@ -239,6 +264,7 @@ export const WorkflowEditor = forwardRef<WorkflowEditorHandle, WorkflowEditorPro
   const [model, setModel] = useState<EditorModel>(() => emptyEditorModel());
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [isStoppingUuid, setIsStoppingUuid] = useState<string | null>(null);
   const [runtimes, setRuntimes] = useState<AgentRuntimeRecord[]>([]);
   const [approvers, setApprovers] = useState<WorkflowApprover[]>([]);
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
@@ -1109,15 +1135,30 @@ export const WorkflowEditor = forwardRef<WorkflowEditorHandle, WorkflowEditorPro
     const isAwaiting =
       Boolean(awaitingHitlUserid) &&
       userid.trim().toLowerCase() === awaitingHitlUserid.trim().toLowerCase();
+    const canOpenHitlApprove =
+      isAwaiting && awaitingJobIdx != null && typeof onAwaitingHitlApprove === "function";
     return (
       <div
         aria-busy={isAwaiting || undefined}
+        title={canOpenHitlApprove ? "클릭하여 승인·반려·파일 업로드" : undefined}
         className={`relative w-[208px] rounded-sm border border-amber-400 bg-slate-950 px-2.5 py-2 pt-6 ${
           isAwaiting ? "wf-run-pulse" : ""
-        }`}
+        } ${canOpenHitlApprove ? "cursor-pointer hover:border-rose-400" : ""}`}
+        onClick={
+          canOpenHitlApprove
+            ? (event) => {
+                event.stopPropagation();
+                onAwaitingHitlApprove();
+              }
+            : undefined
+        }
       >
         {isAwaiting ? (
-          <span className="absolute left-1.5 top-1.5 rounded-full border border-rose-500/80 bg-rose-950/80 px-1.5 py-0.5 text-[9px] font-semibold text-rose-100">
+          <span
+            className={`absolute left-1.5 top-1.5 rounded-full border border-rose-500/80 bg-rose-950/80 px-1.5 py-0.5 text-[9px] font-semibold text-rose-100 ${
+              canOpenHitlApprove ? "ring-1 ring-rose-300/60" : ""
+            }`}
+          >
             승인 대기
           </span>
         ) : null}
@@ -1221,6 +1262,8 @@ export const WorkflowEditor = forwardRef<WorkflowEditorHandle, WorkflowEditorPro
 
   const isSelected = (clientId: string) => selectedNodeId === clientId;
 
+  const showDiagramPromptPanel = !workflowUuid;
+
   const hasMailReport = (node: WorkEditorNode): boolean =>
     Boolean((node.workReport || "").trim());
 
@@ -1268,7 +1311,31 @@ export const WorkflowEditor = forwardRef<WorkflowEditorHandle, WorkflowEditorPro
             실행 중
           </span>
         ) : null}
-        {readOnly ? null : (
+        {isNodeRunning && onStopWorkNode && node.uuid ? (
+          <StopBox
+            disabled={isStoppingUuid === node.uuid}
+            onClick={() => {
+              const label = (node.name || "").trim() || "이 작업노드";
+              const confirmed = window.confirm(
+                `"${label}" 실행을 중지하시겠습니까?\n해당 작업노드와 작업 워크플로우가 실패로 종료됩니다.`,
+              );
+              if (!confirmed) {
+                return;
+              }
+              void (async () => {
+                setIsStoppingUuid(node.uuid);
+                setError(null);
+                try {
+                  await onStopWorkNode(node.uuid);
+                } catch (err) {
+                  setError(err instanceof Error ? err.message : "작업노드를 중지하지 못했습니다.");
+                } finally {
+                  setIsStoppingUuid(null);
+                }
+              })();
+            }}
+          />
+        ) : readOnly ? null : (
           <DeleteBox onClick={() => handleRemoveNode(node.clientId)} label="작업노드 삭제" />
         )}
         <div className="grid min-w-0 gap-1.5">
@@ -1321,7 +1388,11 @@ export const WorkflowEditor = forwardRef<WorkflowEditorHandle, WorkflowEditorPro
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="shrink-0 border-b border-slate-800 px-4 py-3">
         <div className="flex min-w-0 gap-4">
-          <div className={`min-w-0 ${cronEnabled ? "basis-[40%] flex-[2]" : "flex-1"}`}>
+          <div
+            className={`min-w-0 ${
+              showDiagramPromptPanel && cronEnabled ? "basis-[40%] flex-[2]" : "flex-1"
+            }`}
+          >
             <label className="grid gap-1 text-xs text-slate-400">
               작업 워크플로우 명
               <input
@@ -1348,6 +1419,7 @@ export const WorkflowEditor = forwardRef<WorkflowEditorHandle, WorkflowEditorPro
             </label>
           </div>
 
+          {showDiagramPromptPanel ? (
           <div className={`min-w-0 ${cronEnabled ? "basis-[40%] flex-[2]" : "flex-1"}`}>
             <div className="grid gap-1 text-xs text-slate-400">
               <div className="flex items-center justify-between gap-2">
@@ -1480,6 +1552,7 @@ export const WorkflowEditor = forwardRef<WorkflowEditorHandle, WorkflowEditorPro
               )}
             </div>
           </div>
+          ) : null}
 
           <div
             className={`min-w-0 ${

@@ -66,6 +66,7 @@ from backend.app.services.workflow_runner import (
     resolve_awaiting_hitl_from_job,
     resolve_hitl_work_uuid_from_job,
     run_workflow,
+    stop_running_work_node,
 )
 
 router = APIRouter(tags=["workflow"])
@@ -1018,6 +1019,38 @@ async def api_run_workflow(workflow_uuid: str, request: Request) -> WorkflowRunR
         ],
         workflow=workflow_payload,
     )
+
+
+@router.post(
+    "/workflows/{workflow_uuid}/work-nodes/{node_uuid}/stop",
+    response_model=WorkflowResponse,
+)
+async def api_stop_work_node(
+    workflow_uuid: str, node_uuid: str, request: Request
+) -> WorkflowResponse:
+    """Stop a running work node and fail the parent workflow."""
+    auth_user = get_request_auth_user(request)
+    database_path = request.app.state.database_path
+    existing = get_workflow_by_uuid(database_path, workflow_uuid)
+    if existing is None:
+        raise HTTPException(status_code=404, detail="작업 워크플로우를 찾을 수 없습니다.")
+    if not (
+        user_owns_workflow(existing, auth_user.idx)
+        or bool(getattr(existing, "distribute", False))
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail="소유자이거나 배포된 작업 워크플로우만 중지할 수 있습니다.",
+        )
+    try:
+        finished = stop_running_work_node(
+            database_path,
+            workflow_uuid=existing.uuid,
+            work_uuid=node_uuid,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _workflow_response(database_path, finished, user_idx=auth_user.idx)
 
 
 @router.delete("/workflows/{workflow_uuid}")

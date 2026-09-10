@@ -10,6 +10,8 @@ interface WorkflowDiagramProps {
   >;
   /** Graph node id of HITL waiting for approval (e.g. H:userid@3) */
   awaitingHitlNodeId?: string | null;
+  /** Fallback match when node id differs but approver userid matches */
+  awaitingHitlUserid?: string | null;
   onAwaitingHitlClick?: () => void;
 }
 
@@ -41,6 +43,7 @@ export function WorkflowDiagram({
   graph,
   workRunDates = {},
   awaitingHitlNodeId = null,
+  awaitingHitlUserid = null,
   onAwaitingHitlClick,
 }: WorkflowDiagramProps) {
   if (graph.nodes.length === 0) {
@@ -171,8 +174,10 @@ export function WorkflowDiagram({
         const isScheduleWaiting = isWorkRunning && Boolean(dates?.schedule_wait);
         const isHitlAwaiting =
           isHitl &&
-          Boolean(awaitingHitlNodeId) &&
-          node.id === awaitingHitlNodeId;
+          ((Boolean(awaitingHitlNodeId) && node.id === awaitingHitlNodeId) ||
+            (Boolean(awaitingHitlUserid) &&
+              (node.userid || "").trim().toLowerCase() ===
+                (awaitingHitlUserid || "").trim().toLowerCase()));
         const isRunning = isWorkRunning || isHitlAwaiting;
         const accentVar = isScheduleWaiting
           ? "var(--wf-schedule-accent)"
@@ -180,8 +185,21 @@ export function WorkflowDiagram({
         const haloClass = isScheduleWaiting ? "wf-schedule-halo" : "wf-run-halo";
         const strokeClass = isScheduleWaiting ? "wf-schedule-stroke" : "wf-run-stroke";
         const pad = 5;
+        const canClickHitl = isHitlAwaiting && Boolean(onAwaitingHitlClick);
         return (
-          <g key={node.id} aria-busy={isRunning || undefined}>
+          <g
+            key={node.id}
+            aria-busy={isRunning || undefined}
+            style={canClickHitl ? { cursor: "pointer" } : undefined}
+            onClick={
+              canClickHitl
+                ? (event) => {
+                    event.stopPropagation();
+                    onAwaitingHitlClick?.();
+                  }
+                : undefined
+            }
+          >
             {isRunning ? (
               <rect
                 x={x - pad}
@@ -190,6 +208,7 @@ export function WorkflowDiagram({
                 height={node.height + pad * 2}
                 rx={isHitl ? 4 : 10}
                 className={haloClass}
+                pointerEvents="none"
               />
             ) : null}
             <rect
@@ -207,19 +226,6 @@ export function WorkflowDiagram({
                     : "var(--wf-diagram-work-stroke)"
               }
               strokeWidth={isRunning ? 2.5 : 1.5}
-              style={
-                isHitlAwaiting && onAwaitingHitlClick
-                  ? { cursor: "pointer" }
-                  : undefined
-              }
-              onClick={
-                isHitlAwaiting && onAwaitingHitlClick
-                  ? (event) => {
-                      event.stopPropagation();
-                      onAwaitingHitlClick();
-                    }
-                  : undefined
-              }
             />
             {isRunning ? (
               <rect
@@ -229,6 +235,7 @@ export function WorkflowDiagram({
                 height={node.height}
                 rx={isHitl ? 2 : 8}
                 className={strokeClass}
+                pointerEvents="none"
               />
             ) : null}
             <text
@@ -238,6 +245,7 @@ export function WorkflowDiagram({
               fill="var(--wf-diagram-node-text)"
               fontSize={isHitl ? 9 : 10}
               fontWeight={isRunning ? 700 : undefined}
+              pointerEvents="none"
             >
               {isScheduleWaiting
                 ? "예약대기"
