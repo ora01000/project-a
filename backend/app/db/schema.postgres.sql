@@ -205,6 +205,14 @@ ALTER TABLE work_node
     ADD COLUMN IF NOT EXISTS cron_expr VARCHAR(20) NOT NULL DEFAULT '0 9 * * *';
 ALTER TABLE work_node
     ADD COLUMN IF NOT EXISTS schedule_wait INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE work_node
+    ADD COLUMN IF NOT EXISTS worker VARCHAR(10) NOT NULL DEFAULT 'agent';
+ALTER TABLE work_node
+    ADD COLUMN IF NOT EXISTS upload INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE work_node
+    ADD COLUMN IF NOT EXISTS upload_path VARCHAR(500) NOT NULL DEFAULT '';
+ALTER TABLE work_node
+    ADD COLUMN IF NOT EXISTS approver_userid VARCHAR(50) NOT NULL DEFAULT '';
 -- Legacy column cleanup (agent_response → work_script, drop user_prompt)
 DO $$
 BEGIN

@@ -38,6 +38,7 @@ from backend.app.db.workflow import (
     mark_work_node_run_finished,
     mark_work_node_run_started,
     mark_workflow_run_finished,
+    resolve_work_node_upload_userid,
     mark_workflow_run_started,
     set_work_node_schedule_wait,
 )
@@ -48,7 +49,8 @@ from backend.app.notifications.email_sender import (
 )
 from backend.app.services.agent_runtime_client import AgentInvokeRequest
 from backend.app.services.k8s_scrape_scheduler import cron_matches_minute
-from backend.app.services.workflow_graph import FlowToken, parse_workflow_tokens
+from backend.app.services.workflow_document import parse_workflow_document
+from backend.app.services.workflow_graph import FlowToken
 from backend.app.timezone import DISPLAY_TIMEZONE, now_display_datetime
 
 logger = logging.getLogger(__name__)
@@ -121,11 +123,23 @@ class WorkflowRunStep:
 
 
 @dataclass
+class WorkflowRuntimeNodeStatus:
+    """In-memory per-node status for the current run (not persisted in workflow JSON)."""
+
+    work_uuid: str | None
+    kind: str
+    label: str
+    status: str  # pending|running|ok|failed|awaiting|skipped
+    detail: str = ""
+
+
+@dataclass
 class WorkflowRunResult:
     status: str  # success | failed | awaiting_approval
     message: str
     workflow: WorkflowRecord | None = None
     steps: list[WorkflowRunStep] = field(default_factory=list)
+    runtime_nodes: list[WorkflowRuntimeNodeStatus] = field(default_factory=list)
     job_idx: int | None = None
 
 
@@ -140,10 +154,34 @@ def parse_workflow_job_message_id(message_id: str) -> tuple[str, int] | None:
     return match.group("uuid").lower(), int(match.group("index"))
 
 
+def _hitl_info_for_token(
+    database_path: Path | str,
+    token: FlowToken,
+) -> tuple[str, str | None] | None:
+    """Return (approver_userid, work_uuid) when token is a HITL step."""
+    if token.kind == "hitl":
+        userid = (token.userid or "").strip()
+        if not userid:
+            return None
+        return userid, token.work_uuid
+    if token.kind == "work" and token.work_uuid:
+        node = get_work_node_by_uuid(database_path, token.work_uuid)
+        if node is None:
+            return None
+        if (node.worker or "agent").strip().lower() != "hitl":
+            return None
+        userid = (node.approver_userid or "").strip()
+        if not userid:
+            return None
+        return userid, node.uuid
+    return None
+
+
 def resolve_awaiting_hitl_from_job(
     *,
     workflow_expression: str,
     message_id: str,
+    database_path: Path | str | None = None,
 ) -> tuple[str, str] | None:
     """Return (graph_node_id, userid) for the HITL token waiting on this job."""
     parsed = parse_workflow_job_message_id(message_id)
@@ -153,30 +191,102 @@ def resolve_awaiting_hitl_from_job(
     hitl_index = int(resume_index) - 1
     if hitl_index < 0:
         return None
-    tokens = parse_workflow_tokens(workflow_expression)
+    tokens = parse_workflow_document(workflow_expression)
     if hitl_index >= len(tokens):
         return None
     token = tokens[hitl_index]
+    if database_path is not None:
+        info = _hitl_info_for_token(database_path, token)
+        if info is None:
+            return None
+        userid, work_uuid = info
+        if work_uuid:
+            return f"H:{userid}@{hitl_index}", userid
+        return f"H:{userid}@{hitl_index}", userid
     if token.kind != "hitl" or not (token.userid or "").strip():
         return None
     userid = token.userid.strip()
     return f"H:{userid}@{hitl_index}", userid
 
 
-def _diagram_text(tokens: list[FlowToken], work_names: dict[str, str]) -> str:
+def resolve_hitl_work_uuid_from_job(
+    *,
+    database_path: Path | str,
+    workflow_expression: str,
+    message_id: str,
+) -> str | None:
+    parsed = parse_workflow_job_message_id(message_id)
+    if parsed is None:
+        return None
+    _, resume_index = parsed
+    hitl_index = int(resume_index) - 1
+    if hitl_index < 0:
+        return None
+    tokens = parse_workflow_document(workflow_expression)
+    if hitl_index >= len(tokens):
+        return None
+    info = _hitl_info_for_token(database_path, tokens[hitl_index])
+    if info is None:
+        return None
+    return info[1]
+
+
+def require_hitl_attachment_ready(database_path: Path | str, job: JobRecord) -> None:
+    """Raise ValueError when HITL step requires upload but none is present."""
+    if int(job.job_type) != JOB_TYPE_WORKFLOW:
+        return
+    parsed = parse_workflow_job_message_id(job.message_id)
+    if parsed is None:
+        return
+    workflow_uuid, _ = parsed
+    workflow = get_workflow_by_uuid(database_path, workflow_uuid)
+    if workflow is None:
+        return
+    work_uuid = resolve_hitl_work_uuid_from_job(
+        database_path=database_path,
+        workflow_expression=workflow.workflow,
+        message_id=job.message_id,
+    )
+    if not work_uuid:
+        return
+    node = get_work_node_by_uuid(database_path, work_uuid)
+    if node is None or not node.upload:
+        return
+    path = (node.upload_path or "").strip()
+    if not path:
+        raise ValueError("승인 전에 파일을 업로드해야 합니다.")
+    from backend.app.config import resolve_attachment_dir
+
+    directory = resolve_attachment_dir(path)
+    if directory is None or not directory.is_dir():
+        raise ValueError("업로드된 첨부 디렉터리를 찾을 수 없습니다.")
+    has_file = any(child.is_file() for child in directory.iterdir())
+    if not has_file:
+        raise ValueError("승인 전에 텍스트 파일을 1개 이상 업로드해야 합니다.")
+
+
+def _diagram_text(
+    database_path: Path | str,
+    tokens: list[FlowToken],
+    work_names: dict[str, str],
+) -> str:
     parts: list[str] = []
     for token in tokens:
         if token.kind == "start":
             parts.append("시작(S)")
         elif token.kind == "end":
             parts.append("종료(E)")
-        elif token.kind == "hitl":
-            parts.append(f"승인(H:{token.userid})")
-        elif token.kind == "work" and token.work_uuid:
-            name = work_names.get(token.work_uuid, token.work_uuid[:8])
-            parts.append(name)
         else:
-            parts.append(token.raw)
+            hitl = _hitl_info_for_token(database_path, token)
+            if hitl is not None:
+                userid, work_uuid = hitl
+                label = work_names.get(work_uuid or "", f"승인(H:{userid})")
+                parts.append(label)
+            elif token.kind == "work" and token.work_uuid:
+                name = work_names.get(token.work_uuid, token.work_uuid[:8])
+                parts.append(name)
+            else:
+                parts.append(token.raw)
     return " → ".join(parts)
 
 
@@ -241,16 +351,71 @@ def _wrap_work_script_for_execution(script_type: str, script: str) -> str:
     return body
 
 
-def _build_agent_message(node: WorkNodeRecord, previous_result: str) -> str:
+def _build_agent_message(
+    node: WorkNodeRecord,
+    previous_result: str,
+    *,
+    attachment_text: str = "",
+) -> str:
     script = (node.work_script or "").strip()
     if not script:
         raise ValueError(f"작업 스크립트가 비어 있습니다: {node.work_name}")
     wrapped = _wrap_work_script_for_execution(node.script_type, script)
-    return _append_previous_result(
+    message = _append_previous_result(
         wrapped,
         previous_result,
         use_previous=bool(node.use_previous_work_result),
     )
+    attach = (attachment_text or "").strip()
+    if attach:
+        message = f"{message}\n\n----- 승인 단계 업로드 파일 -----\n{attach}"
+    return message
+
+
+def _read_attachment_bundle(upload_path: str) -> str:
+    """Load text file listing + contents from an attachment directory path."""
+    from backend.app.config import resolve_attachment_dir
+
+    directory = resolve_attachment_dir(upload_path)
+    if directory is None or not directory.is_dir():
+        return ""
+    chunks: list[str] = []
+    files = sorted(path for path in directory.iterdir() if path.is_file())
+    if not files:
+        return f"(디렉터리 비어 있음: {directory})"
+    names = ", ".join(path.name for path in files)
+    chunks.append(f"경로: {directory}")
+    chunks.append(f"파일 목록: {names}")
+    for path in files:
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            chunks.append(f"\n## {path.name}\n(텍스트로 읽을 수 없는 파일)")
+            continue
+        chunks.append(f"\n## {path.name}\n{text}")
+    return "\n".join(chunks)
+
+
+def _attachment_context_from_previous_hitl(
+    database_path: Path | str,
+    tokens: list[FlowToken],
+    current_index: int,
+) -> str:
+    """Use the immediately preceding HITL node's upload_path when present."""
+    for token in reversed(tokens[: max(0, current_index)]):
+        info = _hitl_info_for_token(database_path, token)
+        if info is None:
+            continue
+        _userid, work_uuid = info
+        if not work_uuid:
+            return ""
+        node = get_work_node_by_uuid(database_path, work_uuid)
+        if node is None:
+            return ""
+        if not node.upload:
+            return ""
+        return _read_attachment_bundle(node.upload_path)
+    return ""
 
 
 def _extract_json_object(raw: str) -> dict[str, Any] | None:
@@ -380,9 +545,10 @@ async def _invoke_work_node(
     return content
 
 
-def _load_node_result_text(node: WorkNodeRecord) -> str:
+def _load_node_result_text(database_path: Path | str, node: WorkNodeRecord) -> str:
     text = read_work_node_validation_output(
         node.uuid,
+        userid=resolve_work_node_upload_userid(database_path, node.owner),
         validate_date=node.last_end_date or node.validate_date,
     )
     if text and text.strip():
@@ -399,7 +565,7 @@ def _previous_result_before_index(
         node = get_work_node_by_uuid(database_path, token.work_uuid)
         if node is None:
             continue
-        text = _load_node_result_text(node)
+        text = _load_node_result_text(database_path, node)
         if text:
             return text
     return ""
@@ -474,12 +640,22 @@ async def _notify_hitl_approval(
     return job.idx
 
 
-def _last_work_result_file_path(tokens: list[FlowToken]) -> str:
+def _last_work_result_file_path(
+    database_path: Path | str,
+    tokens: list[FlowToken],
+) -> str:
     for token in reversed(tokens):
         if token.kind != "work" or not token.work_uuid:
             continue
-        path = work_node_file_path(token.work_uuid, RESULT_LATEST_FILENAME)
-        if path is not None:
+        node = get_work_node_by_uuid(database_path, token.work_uuid)
+        if node is None:
+            continue
+        path = work_node_file_path(
+            token.work_uuid,
+            RESULT_LATEST_FILENAME,
+            userid=resolve_work_node_upload_userid(database_path, node.owner),
+        )
+        if path is not None and path.is_file():
             return str(path.resolve())
     return ""
 
@@ -502,7 +678,7 @@ def _record_workflow_history_on_end(
             start_date=finished.last_start_date,
             end_date=finished.last_end_date,
             finish_success=success,
-            result_file=_last_work_result_file_path(tokens),
+            result_file=_last_work_result_file_path(database_path, tokens),
             user_idx=user_idx,
         )
     except Exception:
@@ -522,7 +698,7 @@ async def _execute_from_index(
     mark_hitl_approved: bool = False,
 ) -> WorkflowRunResult:
     work_names = _work_names_for_tokens(database_path, tokens)
-    diagram = _diagram_text(tokens, work_names)
+    diagram = _diagram_text(database_path, tokens, work_names)
     steps = list(steps or [])
     previous = previous_result or ""
     index = max(0, int(start_index))
@@ -560,8 +736,9 @@ async def _execute_from_index(
                 workflow=finished or get_workflow_by_uuid(database_path, workflow.uuid),
                 steps=steps,
             )
-        if token.kind == "hitl":
-            userid = (token.userid or "").strip()
+        hitl_info = _hitl_info_for_token(database_path, token)
+        if hitl_info is not None:
+            userid, hitl_work_uuid = hitl_info
             if requester is None:
                 raise ValueError("승인 요청을 생성하려면 요청자 정보가 필요합니다.")
             steps.append(
@@ -570,6 +747,7 @@ async def _execute_from_index(
                     label=f"승인:{userid}",
                     status="awaiting",
                     detail="승인 요청을 생성했습니다.",
+                    work_uuid=hitl_work_uuid,
                 )
             )
             job_idx = await _notify_hitl_approval(
@@ -616,7 +794,12 @@ async def _execute_from_index(
         mark_work_node_run_started(database_path, node.uuid)
         try:
             await _await_work_node_schedule_if_needed(database_path, node)
-            message = _build_agent_message(node, previous)
+            attachment_text = _attachment_context_from_previous_hitl(
+                database_path, tokens, index
+            )
+            message = _build_agent_message(
+                node, previous, attachment_text=attachment_text
+            )
             content = await _invoke_work_node(
                 database_path=database_path,
                 agent_runtime=agent_runtime,
@@ -633,6 +816,7 @@ async def _execute_from_index(
             try:
                 write_work_node_validation_output(
                     node.uuid,
+                    userid=resolve_work_node_upload_userid(database_path, node.owner),
                     validate_date=stamp,
                     message=content,
                 )
@@ -683,7 +867,13 @@ async def _execute_from_index(
                 mark_work_node_run_started(database_path, fail_node.uuid)
                 try:
                     await _await_work_node_schedule_if_needed(database_path, fail_node)
-                    fail_message = _build_agent_message(fail_node, previous)
+                    fail_message = _build_agent_message(
+                        fail_node,
+                        previous,
+                        attachment_text=_attachment_context_from_previous_hitl(
+                            database_path, tokens, index
+                        ),
+                    )
                     fail_content = await _invoke_work_node(
                         database_path=database_path,
                         agent_runtime=agent_runtime,
@@ -702,6 +892,9 @@ async def _execute_from_index(
                     try:
                         write_work_node_validation_output(
                             fail_node.uuid,
+                            userid=resolve_work_node_upload_userid(
+                                database_path, fail_node.owner
+                            ),
                             validate_date=stamp,
                             message=fail_content,
                         )
@@ -778,7 +971,7 @@ async def run_workflow(
     if workflow is None:
         raise ValueError("작업 워크플로우를 찾을 수 없습니다.")
 
-    tokens = parse_workflow_tokens(workflow.workflow)
+    tokens = parse_workflow_document(workflow.workflow)
     if not tokens:
         raise ValueError("작업 워크플로우 표현식이 비어 있습니다.")
     if tokens[0].kind != "start" or tokens[-1].kind != "end":
@@ -819,7 +1012,7 @@ async def resume_workflow_after_approval(
     workflow = get_workflow_by_uuid(database_path, workflow_uuid)
     if workflow is None:
         raise ValueError(f"승인 재개 대상 작업 워크플로우를 찾을 수 없습니다: {workflow_uuid}")
-    tokens = parse_workflow_tokens(workflow.workflow)
+    tokens = parse_workflow_document(workflow.workflow)
     if not tokens:
         raise ValueError("작업 워크플로우 표현식이 비어 있습니다.")
     if resume_index < 0 or resume_index >= len(tokens):

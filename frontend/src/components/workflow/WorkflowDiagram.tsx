@@ -10,6 +10,7 @@ interface WorkflowDiagramProps {
   >;
   /** Graph node id of HITL waiting for approval (e.g. H:userid@3) */
   awaitingHitlNodeId?: string | null;
+  onAwaitingHitlClick?: () => void;
 }
 
 function nodeById(graph: WorkflowGraph, id: string): WorkflowGraphNode | undefined {
@@ -40,6 +41,7 @@ export function WorkflowDiagram({
   graph,
   workRunDates = {},
   awaitingHitlNodeId = null,
+  onAwaitingHitlClick,
 }: WorkflowDiagramProps) {
   if (graph.nodes.length === 0) {
     return (
@@ -205,6 +207,19 @@ export function WorkflowDiagram({
                     : "var(--wf-diagram-work-stroke)"
               }
               strokeWidth={isRunning ? 2.5 : 1.5}
+              style={
+                isHitlAwaiting && onAwaitingHitlClick
+                  ? { cursor: "pointer" }
+                  : undefined
+              }
+              onClick={
+                isHitlAwaiting && onAwaitingHitlClick
+                  ? (event) => {
+                      event.stopPropagation();
+                      onAwaitingHitlClick();
+                    }
+                  : undefined
+              }
             />
             {isRunning ? (
               <rect

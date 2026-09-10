@@ -29,6 +29,10 @@ export interface WorkNodeItem {
   cron?: boolean;
   cron_expr?: string;
   schedule_wait?: boolean;
+  worker?: "agent" | "hitl" | string;
+  upload?: boolean;
+  upload_path?: string;
+  approver_userid?: string;
 }
 
 export interface WorkflowApprover {
@@ -85,5 +89,6 @@ export interface WorkflowItem {
   awaiting_approval?: boolean;
   awaiting_hitl_node_id?: string;
   awaiting_hitl_userid?: string;
+  awaiting_job_idx?: number | null;
   graph: WorkflowGraph;
 }

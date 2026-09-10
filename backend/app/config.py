@@ -1059,12 +1059,86 @@ def _ensure_upload_home(path: Path) -> bool:
         return False
 
 
-def work_node_upload_dir(node_uuid: str) -> Path:
-    """Per-node upload directory: ``{UPLOAD_HOME}/{work_node.uuid}``."""
+def sanitize_upload_userid(userid: str | None) -> str:
+    """Filesystem-safe segment for ``{UPLOAD_HOME}/{userid}/...`` (no path traversal)."""
+    import re
+
+    text = (userid or "").strip()
+    if not text:
+        return ""
+    text = text.replace("\\", "/").split("/")[-1].strip()
+    if text in {".", ".."}:
+        return ""
+    text = re.sub(r"[^A-Za-z0-9._-]", "_", text)
+    if text in {".", ".."}:
+        return ""
+    return text[:80]
+
+
+def new_attachment_timestamp() -> str:
+    """Digits-only timestamp folder name under ``attachment/``."""
+    import re
+
+    from backend.app.db.job_datetime import now_job_datetime
+
+    return re.sub(r"\D", "", now_job_datetime()) or "0"
+
+
+def attachment_relative_path(userid: str, timestamp: str) -> str:
+    user_key = sanitize_upload_userid(userid)
+    stamp = sanitize_upload_userid(timestamp) or new_attachment_timestamp()
+    if not user_key:
+        raise ValueError("upload userid가 비어 있습니다.")
+    return f"{user_key}/attachment/{stamp}"
+
+
+def attachment_dir(userid: str, timestamp: str) -> Path:
+    """``{UPLOAD_HOME}/{userid}/attachment/{timestamp}``."""
+    rel = attachment_relative_path(userid, timestamp)
+    return resolve_upload_home() / Path(rel)
+
+
+def resolve_attachment_dir(upload_path: str | None) -> Path | None:
+    """Resolve stored upload_path (relative or absolute) to a directory under UPLOAD_HOME."""
+    text = (upload_path or "").strip()
+    if not text:
+        return None
+    path = Path(text).expanduser()
+    home = resolve_upload_home().resolve()
+    if not path.is_absolute():
+        path = home / path
+    try:
+        resolved = path.resolve()
+    except OSError:
+        return None
+    try:
+        resolved.relative_to(home)
+    except ValueError:
+        return None
+    return resolved
+
+
+def work_node_upload_dir(node_uuid: str, *, userid: str) -> Path:
+    """Per-user per-node upload directory: ``{UPLOAD_HOME}/{userid}/{work_node.uuid}``."""
+    user_key = sanitize_upload_userid(userid)
+    if not user_key:
+        raise ValueError("upload userid가 비어 있습니다.")
     key = (node_uuid or "").strip().lower()
     if not key:
         raise ValueError("work_node uuid가 비어 있습니다.")
-    return resolve_upload_home() / key
+    return resolve_upload_home() / user_key / key
+
+
+def find_work_node_upload_dir(node_uuid: str, *, userid: str) -> Path:
+    """Resolve upload dir, preferring per-user path; fall back to legacy flat path."""
+    preferred = work_node_upload_dir(node_uuid, userid=userid)
+    if preferred.is_dir():
+        return preferred
+    key = (node_uuid or "").strip().lower()
+    legacy = resolve_upload_home() / key
+    if legacy.is_dir():
+        return legacy
+    return preferred
 
 
 def normalize_work_node_filename(value: str | None) -> str:
@@ -1078,12 +1152,17 @@ def normalize_work_node_filename(value: str | None) -> str:
     return name[:300]
 
 
-def work_node_file_path(node_uuid: str, filename: str | None) -> Path | None:
-    """Absolute path: ``{UPLOAD_HOME}/{work_node.uuid}/{filename}``."""
+def work_node_file_path(
+    node_uuid: str,
+    filename: str | None,
+    *,
+    userid: str,
+) -> Path | None:
+    """Absolute path under the work-node upload directory (legacy-aware)."""
     name = normalize_work_node_filename(filename)
     if not name:
         return None
-    return work_node_upload_dir(node_uuid) / name
+    return find_work_node_upload_dir(node_uuid, userid=userid) / name
 
 
 RESULT_LATEST_FILENAME = "result_latest.out"
@@ -1104,11 +1183,12 @@ def validation_output_filename(validate_date: str | None) -> str:
 def write_work_node_validation_output(
     node_uuid: str,
     *,
+    userid: str,
     validate_date: str,
     message: str,
 ) -> str:
     """Write message to ``result_latest.out`` and a timestamped archive. Returns latest filename."""
-    directory = work_node_upload_dir(node_uuid)
+    directory = work_node_upload_dir(node_uuid, userid=userid)
     directory.mkdir(parents=True, exist_ok=True)
     text = message or ""
     latest = directory / RESULT_LATEST_FILENAME
@@ -1130,9 +1210,13 @@ def is_work_node_result_filename(filename: str | None) -> bool:
     return bool(re.fullmatch(r"result_\d+\.out", name))
 
 
-def list_work_node_result_outputs(node_uuid: str) -> list[dict[str, object]]:
+def list_work_node_result_outputs(
+    node_uuid: str,
+    *,
+    userid: str,
+) -> list[dict[str, object]]:
     """List saved run/validation outputs for a work node (newest archives after latest)."""
-    directory = work_node_upload_dir(node_uuid)
+    directory = find_work_node_upload_dir(node_uuid, userid=userid)
     if not directory.is_dir():
         return []
     items: list[dict[str, object]] = []
@@ -1160,12 +1244,17 @@ def list_work_node_result_outputs(node_uuid: str) -> list[dict[str, object]]:
     return items
 
 
-def read_work_node_result_output(node_uuid: str, filename: str) -> str | None:
+def read_work_node_result_output(
+    node_uuid: str,
+    filename: str,
+    *,
+    userid: str,
+) -> str | None:
     """Read a specific result output file under the work-node upload directory."""
     name = normalize_work_node_filename(filename)
     if not is_work_node_result_filename(name):
         raise ValueError("허용되지 않는 결과 파일입니다.")
-    path = work_node_file_path(node_uuid, name)
+    path = work_node_file_path(node_uuid, name, userid=userid)
     if path is None or not path.is_file():
         return None
     return path.read_text(encoding="utf-8")
@@ -1174,19 +1263,20 @@ def read_work_node_result_output(node_uuid: str, filename: str) -> str | None:
 def read_work_node_validation_output(
     node_uuid: str,
     *,
+    userid: str,
     validate_date: str | None = None,
 ) -> str | None:
     """Load ``result_latest.out``; fall back to timestamped archive when needed."""
     import re
 
-    latest = work_node_file_path(node_uuid, RESULT_LATEST_FILENAME)
+    latest = work_node_file_path(node_uuid, RESULT_LATEST_FILENAME, userid=userid)
     if latest is not None and latest.is_file():
         return latest.read_text(encoding="utf-8")
 
     digits = re.sub(r"\D", "", (validate_date or "").strip())
     if not digits:
         return None
-    path = work_node_file_path(node_uuid, f"result_{digits}.out")
+    path = work_node_file_path(node_uuid, f"result_{digits}.out", userid=userid)
     if path is None or not path.is_file():
         return None
     return path.read_text(encoding="utf-8")

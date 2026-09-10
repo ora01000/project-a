@@ -147,23 +147,55 @@ def build_workflow_graph(
     work_names: dict[str, str] | None = None,
     user_names: dict[str, str] | None = None,
     work_report_uuids: set[str] | None = None,
+    worker_by_uuid: dict[str, str] | None = None,
+    approver_by_uuid: dict[str, str] | None = None,
 ) -> dict[str, Any]:
-    tokens = parse_workflow_tokens(expression)
+    from backend.app.services.workflow_document import parse_workflow_document
+
+    tokens = parse_workflow_document(expression)
     if not tokens:
         return {"nodes": [], "edges": [], "width": 200, "height": 160}
 
     names = work_names or {}
     users = user_names or {}
     report_uuids = work_report_uuids or set()
+    workers = {
+        str(k).lower(): str(v or "agent").strip().lower()
+        for k, v in (worker_by_uuid or {}).items()
+    }
+    approvers = {
+        str(k).lower(): str(v or "").strip() for k, v in (approver_by_uuid or {}).items()
+    }
     nodes: list[GraphNode] = []
     edges: list[GraphEdge] = []
     main_ids: list[str] = []
     id_by_work: dict[str, str] = {}
     end_id = "E"
 
-    for index, token in enumerate(tokens):
+    display_tokens: list[FlowToken] = []
+    for token in tokens:
+        kind = token.kind
+        userid = token.userid
+        if kind == "work" and token.work_uuid:
+            if workers.get(token.work_uuid.lower(), "agent") == "hitl":
+                kind = "hitl"
+                userid = approvers.get(token.work_uuid.lower()) or userid
+        display_tokens.append(
+            FlowToken(
+                kind=kind,
+                raw=token.raw,
+                work_uuid=token.work_uuid,
+                fail_work_uuid=token.fail_work_uuid,
+                fail_end=token.fail_end,
+                userid=userid,
+            )
+        )
+
+    for index, token in enumerate(display_tokens):
         node_id = _main_node_id(token, index)
         label = _token_label(token, names, users)
+        if token.kind == "hitl" and token.work_uuid and token.work_uuid in names:
+            label = names[token.work_uuid]
         width, height = _token_size(token.kind)
         nodes.append(
             GraphNode(
@@ -179,7 +211,7 @@ def build_workflow_graph(
             )
         )
         main_ids.append(node_id)
-        if token.kind == "work" and token.work_uuid is not None:
+        if token.work_uuid is not None:
             id_by_work.setdefault(token.work_uuid, node_id)
         if token.kind == "end":
             end_id = node_id
@@ -188,8 +220,10 @@ def build_workflow_graph(
         edges.append(GraphEdge(source=main_ids[index], target=main_ids[index + 1], kind="success"))
 
     fail_slot = 0
-    for index, token in enumerate(tokens):
-        if token.kind != "work":
+    for index, token in enumerate(display_tokens):
+        if token.kind == "hitl":
+            continue
+        if tokens[index].kind != "work":
             continue
         source_id = main_ids[index]
         next_id = main_ids[index + 1] if index + 1 < len(main_ids) else end_id

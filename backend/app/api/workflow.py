@@ -11,10 +11,15 @@ from pydantic import BaseModel, Field
 
 from backend.app.config import (
     PROJECT_ROOT,
+    attachment_dir,
+    attachment_relative_path,
+    find_work_node_upload_dir,
     list_work_node_result_outputs,
+    new_attachment_timestamp,
     normalize_work_node_filename,
     read_work_node_result_output,
     read_work_node_validation_output,
+    resolve_attachment_dir,
     work_node_upload_dir,
     write_work_node_validation_output,
 )
@@ -23,6 +28,7 @@ from backend.app.db.job_datetime import now_job_datetime
 from backend.app.db.jobs import (
     JobRecord,
     find_pending_workflow_approval_job,
+    get_job_by_idx,
     map_pending_workflow_approval_jobs,
 )
 from backend.app.db.roles import ROLE_ADMIN, ROLE_INFRAADMIN
@@ -43,7 +49,9 @@ from backend.app.db.workflow import (
     list_workflow_history,
     list_workflows_visible,
     normalize_script_type,
+    resolve_work_node_upload_userid,
     set_workflow_distribute,
+    set_work_node_upload_path,
     update_work_node,
     update_workflow,
     user_can_view_workflow,
@@ -51,10 +59,12 @@ from backend.app.db.workflow import (
     work_uuids_from_expression,
 )
 from backend.app.middleware.session_auth import get_request_auth_user
-from backend.app.services.workflow_graph import build_workflow_graph, validate_workflow_expression
+from backend.app.services.workflow_graph import build_workflow_graph
+from backend.app.services.workflow_document import validate_workflow_document
 from backend.app.services.workflow_runner import (
     WorkflowRunResult,
     resolve_awaiting_hitl_from_job,
+    resolve_hitl_work_uuid_from_job,
     run_workflow,
 )
 
@@ -134,6 +144,10 @@ class WorkNodeResponse(BaseModel):
     cron: bool = False
     cron_expr: str = "0 9 * * *"
     schedule_wait: bool = False
+    worker: str = "agent"
+    upload: bool = False
+    upload_path: str = ""
+    approver_userid: str = ""
     is_draft: bool = False
 
     @classmethod
@@ -167,6 +181,10 @@ class WorkNodeResponse(BaseModel):
             cron=bool(getattr(record, "cron", False)),
             cron_expr=str(getattr(record, "cron_expr", None) or "0 9 * * *")[:20],
             schedule_wait=bool(getattr(record, "schedule_wait", False)),
+            worker=str(getattr(record, "worker", None) or "agent"),
+            upload=bool(getattr(record, "upload", False)),
+            upload_path=str(getattr(record, "upload_path", None) or ""),
+            approver_userid=str(getattr(record, "approver_userid", None) or ""),
             is_draft=False,
         )
 
@@ -184,6 +202,10 @@ class WorkNodeWriteRequest(BaseModel):
     work_report: str = Field(default="", max_length=400)
     cron: bool | None = None
     cron_expr: str | None = Field(default=None, max_length=20)
+    worker: str | None = Field(default=None, max_length=10)
+    upload: bool | None = None
+    upload_path: str | None = Field(default=None, max_length=500)
+    approver_userid: str | None = Field(default=None, max_length=50)
     validation_message: str | None = None
 
 
@@ -241,6 +263,7 @@ class WorkflowResponse(BaseModel):
     awaiting_approval: bool = False
     awaiting_hitl_node_id: str = ""
     awaiting_hitl_userid: str = ""
+    awaiting_job_idx: int | None = None
     graph: WorkflowGraph
 
     @classmethod
@@ -254,6 +277,7 @@ class WorkflowResponse(BaseModel):
         awaiting_approval: bool = False,
         awaiting_hitl_node_id: str = "",
         awaiting_hitl_userid: str = "",
+        awaiting_job_idx: int | None = None,
     ) -> "WorkflowResponse":
         return cls(
             uuid=record.uuid,
@@ -278,6 +302,7 @@ class WorkflowResponse(BaseModel):
             awaiting_approval=awaiting_approval,
             awaiting_hitl_node_id=awaiting_hitl_node_id,
             awaiting_hitl_userid=awaiting_hitl_userid,
+            awaiting_job_idx=awaiting_job_idx,
             graph=WorkflowGraph.model_validate(graph),
         )
 
@@ -347,7 +372,11 @@ def _agent_name(database_path, target_agent: int) -> str:
     return record.agent_name if record is not None else ""
 
 
-def _write_validation_output_if_needed(record: WorkNodeRecord, message: str | None) -> None:
+def _write_validation_output_if_needed(
+    database_path,
+    record: WorkNodeRecord,
+    message: str | None,
+) -> None:
     if not record.test_result:
         return
     text = (message or "").strip()
@@ -356,6 +385,7 @@ def _write_validation_output_if_needed(record: WorkNodeRecord, message: str | No
     try:
         write_work_node_validation_output(
             record.uuid,
+            userid=resolve_work_node_upload_userid(database_path, record.owner),
             validate_date=record.validate_date or now_job_datetime(),
             message=text,
         )
@@ -415,12 +445,20 @@ def _graph_for(
     names = _visible_work_names(database_path, user_idx)
     if extra_work_names:
         names.update(extra_work_names)
+    worker_by_uuid: dict[str, str] = {}
+    approver_by_uuid: dict[str, str] = {}
+    for node in list_work_nodes_visible(database_path, user_idx):
+        worker_by_uuid[node.uuid] = node.worker or "agent"
+        if (node.approver_userid or "").strip():
+            approver_by_uuid[node.uuid] = node.approver_userid.strip()
     try:
         return build_workflow_graph(
             expression,
             work_names=names,
             user_names=_user_names(database_path),
             work_report_uuids=_visible_work_reports(database_path, user_idx),
+            worker_by_uuid=worker_by_uuid,
+            approver_by_uuid=approver_by_uuid,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -440,7 +478,7 @@ def _validate_expression(
     if extra_work_uuids:
         known |= extra_work_uuids
     try:
-        validate_workflow_expression(
+        validate_workflow_document(
             text,
             known_work_uuids=known,
             known_userids=_known_userids(database_path),
@@ -450,6 +488,7 @@ def _validate_expression(
 
 
 def _awaiting_hitl_fields(
+    database_path,
     record: WorkflowRecord,
     pending_job: JobRecord | None,
 ) -> tuple[bool, str, str]:
@@ -458,6 +497,7 @@ def _awaiting_hitl_fields(
     resolved = resolve_awaiting_hitl_from_job(
         workflow_expression=record.workflow,
         message_id=pending_job.message_id,
+        database_path=database_path,
     )
     if resolved is None:
         return True, "", ""
@@ -491,7 +531,7 @@ def _workflow_response(
     if job is None and record.uuid:
         job = find_pending_workflow_approval_job(database_path, record.uuid)
     awaiting_approval, awaiting_hitl_node_id, awaiting_hitl_userid = _awaiting_hitl_fields(
-        record, job
+        database_path, record, job
     )
     return WorkflowResponse.from_record(
         record,
@@ -501,6 +541,7 @@ def _workflow_response(
         awaiting_approval=awaiting_approval,
         awaiting_hitl_node_id=awaiting_hitl_node_id,
         awaiting_hitl_userid=awaiting_hitl_userid,
+        awaiting_job_idx=int(job.idx) if job is not None else None,
     )
 
 
@@ -543,10 +584,14 @@ async def api_create_work_node(body: WorkNodeWriteRequest, request: Request) -> 
             cron_expr=body.cron_expr,
             uuid=body.uuid,
             owner=auth_user.idx,
+            worker=body.worker or "agent",
+            upload=bool(body.upload) if body.upload is not None else False,
+            upload_path=body.upload_path or "",
+            approver_userid=body.approver_userid or "",
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    _write_validation_output_if_needed(record, body.validation_message)
+    _write_validation_output_if_needed(database_path, record, body.validation_message)
     return WorkNodeResponse.from_record(
         record, agent_name=_agent_name(database_path, record.target_agent)
     )
@@ -585,12 +630,16 @@ async def api_update_work_node(
             work_report=(body.work_report or "").strip()[:400],
             cron=body.cron,
             cron_expr=body.cron_expr,
+            worker=body.worker,
+            upload=body.upload,
+            upload_path=body.upload_path,
+            approver_userid=body.approver_userid,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     if record is None:
         raise HTTPException(status_code=404, detail="워크 노드를 찾을 수 없습니다.")
-    _write_validation_output_if_needed(record, body.validation_message)
+    _write_validation_output_if_needed(database_path, record, body.validation_message)
     return WorkNodeResponse.from_record(
         record, agent_name=_agent_name(database_path, record.target_agent)
     )
@@ -639,8 +688,11 @@ async def api_list_work_node_results(
 ) -> dict[str, object]:
     """List saved work-node result files (``result_latest.out`` and archives)."""
     record = _require_visible_work_node(request, node_uuid)
+    upload_userid = resolve_work_node_upload_userid(
+        request.app.state.database_path, record.owner
+    )
     try:
-        items = list_work_node_result_outputs(record.uuid)
+        items = list_work_node_result_outputs(record.uuid, userid=upload_userid)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {
@@ -659,13 +711,19 @@ async def api_get_work_node_validation_result(
 ) -> dict[str, str]:
     """Return saved validation/run output (``result_latest.out``, with archive fallback)."""
     record = _require_visible_work_node(request, node_uuid)
+    upload_userid = resolve_work_node_upload_userid(
+        request.app.state.database_path, record.owner
+    )
     try:
         if filename and filename.strip():
-            content = read_work_node_result_output(record.uuid, filename)
+            content = read_work_node_result_output(
+                record.uuid, filename, userid=upload_userid
+            )
             resolved_name = normalize_work_node_filename(filename)
         else:
             content = read_work_node_validation_output(
                 record.uuid,
+                userid=upload_userid,
                 validate_date=record.validate_date or record.last_end_date,
             )
             resolved_name = ""
@@ -695,7 +753,10 @@ async def api_upload_work_node_file(
     raw_name = (file.filename or "upload.bin").replace("/", "_").replace("\\", "_")
     safe_name = raw_name.strip()[:180] or "upload.bin"
     try:
-        directory = work_node_upload_dir(record.uuid)
+        directory = work_node_upload_dir(
+            record.uuid,
+            userid=resolve_work_node_upload_userid(database_path, record.owner),
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     directory.mkdir(parents=True, exist_ok=True)
@@ -973,8 +1034,13 @@ async def api_delete_workflow(workflow_uuid: str, request: Request) -> dict[str,
         raise HTTPException(status_code=404, detail="작업 워크플로우를 찾을 수 없습니다.")
 
     for node_uuid in referenced:
+        node = get_work_node_by_uuid(database_path, node_uuid)
+        upload_userid = resolve_work_node_upload_userid(
+            database_path,
+            node.owner if node is not None else auth_user.idx,
+        )
         delete_work_node(database_path, node_uuid)
-        upload_dir = work_node_upload_dir(node_uuid)
+        upload_dir = find_work_node_upload_dir(node_uuid, userid=upload_userid)
         if upload_dir.is_dir():
             try:
                 shutil.rmtree(upload_dir)
@@ -982,3 +1048,150 @@ async def api_delete_workflow(workflow_uuid: str, request: Request) -> dict[str,
                 logger.warning("failed to remove work_node upload dir %s", upload_dir)
 
     return {"ok": True}
+
+
+_TEXT_ATTACHMENT_SUFFIXES = {
+    ".txt",
+    ".md",
+    ".csv",
+    ".json",
+    ".yaml",
+    ".yml",
+    ".xml",
+    ".conf",
+    ".cfg",
+    ".ini",
+    ".log",
+    ".sh",
+    ".py",
+    ".crt",
+    ".pem",
+    ".key",
+    ".csr",
+}
+
+
+def _is_text_attachment_name(filename: str) -> bool:
+    name = (filename or "").strip().lower()
+    if not name:
+        return False
+    suffix = Path(name).suffix
+    return suffix in _TEXT_ATTACHMENT_SUFFIXES or suffix == ""
+
+
+@router.get("/workflow-jobs/{job_idx}/hitl")
+async def api_get_workflow_job_hitl(job_idx: int, request: Request) -> dict[str, object]:
+    auth_user = get_request_auth_user(request)
+    database_path = request.app.state.database_path
+    from backend.app.db.jobs import JOB_TYPE_WORKFLOW
+    from backend.app.services.workflow_runner import parse_workflow_job_message_id
+
+    job = get_job_by_idx(database_path, job_idx)
+    if job is None or int(job.job_type) != JOB_TYPE_WORKFLOW:
+        raise HTTPException(status_code=404, detail="워크플로우 승인 작업을 찾을 수 없습니다.")
+    parsed = parse_workflow_job_message_id(job.message_id)
+    if parsed is None:
+        raise HTTPException(status_code=400, detail="워크플로우 승인 작업이 올바르지 않습니다.")
+    workflow_uuid, _ = parsed
+    workflow = get_workflow_by_uuid(database_path, workflow_uuid)
+    if workflow is None:
+        raise HTTPException(status_code=404, detail="작업 워크플로우를 찾을 수 없습니다.")
+    _require_view_workflow(workflow, auth_user.idx)
+    work_uuid = resolve_hitl_work_uuid_from_job(
+        database_path=database_path,
+        workflow_expression=workflow.workflow,
+        message_id=job.message_id,
+    )
+    node = get_work_node_by_uuid(database_path, work_uuid) if work_uuid else None
+    files: list[str] = []
+    if node is not None and (node.upload_path or "").strip():
+        directory = resolve_attachment_dir(node.upload_path)
+        if directory is not None and directory.is_dir():
+            files = sorted(path.name for path in directory.iterdir() if path.is_file())
+    return {
+        "job_idx": job.idx,
+        "workflow_uuid": workflow.uuid,
+        "work_uuid": work_uuid or "",
+        "work_name": node.work_name if node else "",
+        "upload": bool(node.upload) if node else False,
+        "upload_path": node.upload_path if node else "",
+        "approver_userid": node.approver_userid if node else (job.approver or ""),
+        "files": files,
+    }
+
+
+@router.post("/workflow-jobs/{job_idx}/attachments")
+async def api_upload_workflow_job_attachments(
+    job_idx: int,
+    request: Request,
+    files: list[UploadFile] = File(...),
+) -> dict[str, object]:
+    auth_user = get_request_auth_user(request)
+    database_path = request.app.state.database_path
+    from backend.app.db.jobs import JOB_TYPE_WORKFLOW
+    from backend.app.services.workflow_runner import parse_workflow_job_message_id
+
+    job = get_job_by_idx(database_path, job_idx)
+    if job is None or int(job.job_type) != JOB_TYPE_WORKFLOW:
+        raise HTTPException(status_code=404, detail="워크플로우 승인 작업을 찾을 수 없습니다.")
+    if (job.approver or "").strip() and (job.approver or "").strip() != auth_user.userid:
+        from backend.app.db.roles import is_admin_role
+
+        if not is_admin_role(auth_user.role):
+            raise HTTPException(status_code=403, detail="승인자만 파일을 업로드할 수 있습니다.")
+    parsed = parse_workflow_job_message_id(job.message_id)
+    if parsed is None:
+        raise HTTPException(status_code=400, detail="워크플로우 승인 작업이 올바르지 않습니다.")
+    workflow_uuid, _ = parsed
+    workflow = get_workflow_by_uuid(database_path, workflow_uuid)
+    if workflow is None:
+        raise HTTPException(status_code=404, detail="작업 워크플로우를 찾을 수 없습니다.")
+    work_uuid = resolve_hitl_work_uuid_from_job(
+        database_path=database_path,
+        workflow_expression=workflow.workflow,
+        message_id=job.message_id,
+    )
+    if not work_uuid:
+        raise HTTPException(status_code=400, detail="HITL 작업 노드를 찾을 수 없습니다.")
+    node = get_work_node_by_uuid(database_path, work_uuid)
+    if node is None:
+        raise HTTPException(status_code=404, detail="HITL 작업 노드를 찾을 수 없습니다.")
+    if not node.upload:
+        raise HTTPException(status_code=400, detail="이 승인 단계는 파일 업로드가 필요하지 않습니다.")
+    if not files:
+        raise HTTPException(status_code=400, detail="업로드할 파일이 없습니다.")
+
+    stamp = new_attachment_timestamp()
+    try:
+        relative = attachment_relative_path(auth_user.userid, stamp)
+        directory = attachment_dir(auth_user.userid, stamp)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    directory.mkdir(parents=True, exist_ok=True)
+    saved: list[str] = []
+    for upload in files:
+        raw_name = (upload.filename or "upload.txt").replace("/", "_").replace("\\", "_")
+        safe_name = raw_name.strip()[:180] or "upload.txt"
+        if not _is_text_attachment_name(safe_name):
+            raise HTTPException(
+                status_code=400,
+                detail=f"텍스트 파일만 업로드할 수 있습니다: {safe_name}",
+            )
+        payload = await upload.read()
+        try:
+            payload.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise HTTPException(
+                status_code=400,
+                detail=f"UTF-8 텍스트 파일만 업로드할 수 있습니다: {safe_name}",
+            ) from exc
+        (directory / safe_name).write_bytes(payload)
+        saved.append(safe_name)
+    updated = set_work_node_upload_path(database_path, node.uuid, relative)
+    return {
+        "ok": True,
+        "upload_path": relative,
+        "files": saved,
+        "work_uuid": node.uuid,
+        "work_name": updated.work_name if updated else node.work_name,
+    }

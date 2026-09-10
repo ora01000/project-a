@@ -4,6 +4,7 @@ import type { AuthUser } from "../../types/auth";
 import type { WorkNodeItem, WorkflowItem } from "../../types/workflow";
 import { WorkflowDiagram } from "./WorkflowDiagram";
 import { WorkflowEditor, type DiagramAgentEvent, type WorkflowEditorHandle } from "./WorkflowEditor";
+import { WorkflowHitlApproveModal } from "./WorkflowHitlApproveModal";
 import { DEFAULT_WORKFLOW_CRON_EXPR } from "./WorkflowScheduleField";
 import { isRunInProgress } from "./workflowModel";
 
@@ -48,6 +49,7 @@ export function WorkflowDesignPanel({
   const [actionError, setActionError] = useState<string | null>(null);
   const [isBusy, setIsBusy] = useState(false);
   const [saveState, setSaveState] = useState({ canSave: false, isSaving: false });
+  const [hitlJobIdx, setHitlJobIdx] = useState<number | null>(null);
   const editorRef = useRef<WorkflowEditorHandle>(null);
   const handleSaveStateChange = useCallback((state: { canSave: boolean; isSaving: boolean }) => {
     setSaveState(state);
@@ -229,6 +231,11 @@ export function WorkflowDesignPanel({
               graph={selected.graph}
               workRunDates={workRunDates}
               awaitingHitlNodeId={selected.awaiting_hitl_node_id || null}
+              onAwaitingHitlClick={
+                selected.awaiting_job_idx
+                  ? () => setHitlJobIdx(selected.awaiting_job_idx ?? null)
+                  : undefined
+              }
             />
           </div>
         ) : null}
@@ -258,6 +265,17 @@ export function WorkflowDesignPanel({
           onDiagramAgentEventHandled={onDiagramAgentEventHandled}
           onDiagramGenerate={onDiagramGenerate}
         />
+        {hitlJobIdx != null ? (
+          <WorkflowHitlApproveModal
+            jobIdx={hitlJobIdx}
+            actorUserid={user.userid}
+            onClose={() => setHitlJobIdx(null)}
+            onDone={() => {
+              setHitlJobIdx(null);
+              void onWorkNodesChanged();
+            }}
+          />
+        ) : null}
       </section>
     );
   }

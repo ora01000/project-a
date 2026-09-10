@@ -26,7 +26,12 @@ Analyze the request and create ordered unit works. Names in parentheses are JSON
 | Node schedule enabled | `cron` | JSON boolean. Set `true` **only** when this step must wait for a **clock time during a running workflow**. Default `false`. Never invent |
 | Node schedule time | `cron_expr` | Required when `cron` is `true`. **Work-node schedules are one-shot clock times only** (same-day style): use `M H * * *` (e.g. `0 9 * * *` = 09:00). Do **not** use recurring patterns such as every hour, every minute, weekdays, weekly, or monthly for a work node. If the requester asks for a recurring work-node schedule, ask them to clarify/correct before emitting JSON. When `cron` is `false`, omit `cron_expr` or use `0 9 * * *` |
 
-Do **not** include a `uuid` field on work nodes (ignored if present).
+| Worker | `worker` | `agent` (default) or `hitl`. Use `hitl` only for human approval / file-upload gates |
+| Approver | `approver_userid` | Required when `worker` is `hitl`. Never invent; ask if unknown |
+| Upload required | `upload` | HITL only. Boolean — `true` when the approver must upload text files before approval (e.g. certificate renewal). Default `false` |
+| Upload path | `upload_path` | Always `""` at design time (runtime fills `{userid}/attachment/{timestamp}`) |
+
+For `worker: "hitl"` nodes: omit `target_agent` / `work_script` / `script_type` (or leave empty). Do **not** include a `uuid` field on work nodes (ignored if present).
 
 ### Script type selection
 
@@ -44,42 +49,55 @@ Also produce:
 |-------|-----|--------|
 | Workflow name | `workflow_name` | Short title |
 | Workflow description | `workflow_description` | What the workflow does |
-| Flow expression | `workflow` | Token chain from `S` to `E` |
+| Flow document | `workflow` | **JSON object** (not a string): `{ "version": 1, "nodes": [...], "edges": [...] }` |
 | Schedule enabled | `cron` | JSON boolean `true` / `false`. Set `true` **only** when the requester asked for workflow-level scheduling. **Workflow-level scheduling may be any supported form** (one-shot same-day, daily, weekdays, weekly, monthly, etc.). Default `false`. Never invent a schedule |
 | Cron expression | `cron_expr` | 5-field crontab (max 20 chars) matching the requested form, e.g. one-shot `M H D Mo *`, daily `0 9 * * *`, weekdays `0 9 * * 1-5`, weekly `0 9 * * 1`, monthly `0 9 1 * *`. Required when `cron` is `true`; if the expression is missing/ambiguous, ask. When `cron` is `false`, still include a default such as `0 9 * * *` |
 
 Do **not** include `workflow.uuid` (ignored if present; platform assigns it).
 
-### Flow expression tokens
+### Flow JSON
 
-- `S` — start
-- `E` — end
-- `{work_id}` — a work node (`work_id` from the `work_node` array)
-- `{work_id}:{fail_work_id}` — on failure of `work_id`, run `fail_work_id` (if that also fails → end)
-- `{work_id}:E` — on failure of `work_id`, end
-- `H:{userid}` — HITL approver (only when the requester asked for approval)
-- `->` — success path to the next token
-
-Example:
-
-```text
-S->ssl_extract->ssl_check:E->ssl_report->E
+```json
+{
+  "version": 1,
+  "nodes": ["work_1", "approve_1", "work_2"],
+  "edges": [
+    { "from": "S", "to": "work_1", "kind": "success" },
+    { "from": "work_1", "to": "approve_1", "kind": "success" },
+    { "from": "work_1", "to": "E", "kind": "fail" },
+    { "from": "approve_1", "to": "work_2", "kind": "success" },
+    { "from": "work_2", "to": "E", "kind": "success" }
+  ]
+}
 ```
 
-Every `work_id` referenced in `workflow` must exist in the `work_node` array. The expression must start with `S` and eventually reach `E` on the success path.
+- `nodes` lists every `work_id` (agent or hitl) on the diagram (fail-only nodes may also appear)
+- `edges` use `kind`: `success` \| `fail`
+- Start with an edge from `S`; end success path at `E`
+- Approval steps are HITL `work_node` entries (`worker: "hitl"`) referenced by `work_id` — **do not** use `H:{userid}` tokens
 
-## Mission 3 — Per-node file store
+Every `work_id` in `nodes` / `edges` must exist in the `work_node` array.
 
-When a work step must **write result files**, or when the requester will **upload requirement files** for that step, use this directory pattern with the step's **`work_id`** (not a UUID):
+## Mission 3 — File stores
+
+**Runtime human uploads (preferred for renewal packs, etc.)** happen at HITL approval:
 
 ```text
-{UPLOAD_HOME}/{work_id}
+{UPLOAD_HOME}/{userid}/attachment/{timestamp}/
+```
+
+- Set HITL `upload: true` when the next agent step needs those files
+- The following `worker: "agent"` step receives the file list/contents automatically from the **immediately preceding** HITL `upload_path`
+
+**Agent result / legacy per-node store** (optional design-time paths in scripts):
+
+```text
+{UPLOAD_HOME}/{userid}/{work_id}
 ```
 
 - `UPLOAD_HOME` defaults to **`/app/upload`**
-- Example for `work_id` `ssl_extract`: `/app/upload/ssl_extract`
-- The platform rewrites `{work_id}` path segments to the assigned UUID on import (`{UPLOAD_HOME}/{work_node.uuid}`).
-- Do not invent other storage roots. Do not assume files already exist unless the requester said they were uploaded; if a required file path is unknown, ask.
+- Platform rewrites `{work_id}` to `{work_node.uuid}` on import
+- Do not invent other storage roots
 
 ## Response JSON (when no clarifying questions are needed)
 
@@ -90,6 +108,7 @@ When a work step must **write result files**, or when the requester will **uploa
       "work_name": "작업명#1",
       "work_description": "작업설명#1",
       "work_id": "work_1",
+      "worker": "agent",
       "target_agent": "대상에이전트#1",
       "work_script": "스크립트#1",
       "script_type": "kubectl",
@@ -98,9 +117,19 @@ When a work step must **write result files**, or when the requester will **uploa
       "cron": false
     },
     {
+      "work_name": "결재승인#1",
+      "work_description": "인증서 파일 업로드 및 승인",
+      "work_id": "approve_1",
+      "worker": "hitl",
+      "approver_userid": "isyun",
+      "upload": true,
+      "upload_path": ""
+    },
+    {
       "work_name": "작업명#2",
       "work_description": "작업설명#2",
       "work_id": "work_2",
+      "worker": "agent",
       "target_agent": "대상에이전트#2",
       "work_script": "스크립트#2",
       "script_type": "cli",
@@ -113,7 +142,16 @@ When a work step must **write result files**, or when the requester will **uploa
   "workflow": {
     "workflow_name": "작업 워크플로우명",
     "workflow_description": "작업 워크플로우설명",
-    "workflow": "S->work_1->work_2->E",
+    "workflow": {
+      "version": 1,
+      "nodes": ["work_1", "approve_1", "work_2"],
+      "edges": [
+        { "from": "S", "to": "work_1", "kind": "success" },
+        { "from": "work_1", "to": "approve_1", "kind": "success" },
+        { "from": "approve_1", "to": "work_2", "kind": "success" },
+        { "from": "work_2", "to": "E", "kind": "success" }
+      ]
+    },
     "cron": false,
     "cron_expr": "0 9 * * *"
   }
@@ -121,12 +159,13 @@ When a work step must **write result files**, or when the requester will **uploa
 ```
 
 - Top-level array key must be **`work_node`** (not `work`)
-- `script_type` must be exactly `kubectl`, `ansible`, `cli`, or `prompt`
+- `worker` is `agent` or `hitl` (default `agent`)
+- `script_type` must be exactly `kubectl`, `ansible`, `cli`, or `prompt` for agent nodes
 - `use_previous_work_result` must be a JSON boolean (`true` / `false`), not a string
 - `work_report` must be a string: semicolon-separated emails, or `""` when unused (max ~400 chars). Do not invent recipients
 - Work-node `cron` / `cron_expr`: boolean + time-only crontab (`M H * * *`) for **same-day one-shot wait during a running workflow**. Recurring work-node schedules are **not** allowed — ask for clarification instead
 - Workflow `cron` / `cron_expr`: boolean + 5-field crontab (max 20 chars). **All schedule forms are allowed** at workflow level (1회/매일/평일/매주/매월 등). Enable only when the requester asked for scheduling
-- `work_id` values must be unique and match tokens in `workflow`
-- **Never put UUID-shaped strings** in `work_id`, scripts, or the flow expression
+- `work_id` values must be unique and match ids in `workflow.workflow.nodes` / edges
+- **Never put UUID-shaped strings** in `work_id`, scripts, or the flow document
 - Prefer compact, valid scripts over narrative explanations
-- File I/O paths use `{UPLOAD_HOME}/{work_id}` (`/app/upload/<work_id>`)
+- Attachment uploads use `{UPLOAD_HOME}/{userid}/attachment/{timestamp}`; agent I/O may use `{UPLOAD_HOME}/{userid}/{work_id}`

@@ -8,18 +8,25 @@ import uuid as uuid_lib
 from dataclasses import dataclass
 from pathlib import Path
 
-from backend.app.config import work_node_upload_dir
+from backend.app.config import (
+    find_work_node_upload_dir,
+    sanitize_upload_userid,
+    work_node_upload_dir,
+)
 from backend.app.db.database import get_connection
 from backend.app.db.job_datetime import now_job_datetime
-from backend.app.services.workflow_graph import parse_workflow_tokens
+from backend.app.db.users import get_user_by_idx
+from backend.app.services.workflow_graph import parse_workflow_tokens  # noqa: F401 — used by migration helpers indirectly
 
 SCRIPT_TYPES = frozenset({"kubectl", "ansible", "cli", "prompt"})
+WORKER_TYPES = frozenset({"agent", "hitl"})
 
 _WORK_NODE_SELECT = """
     uuid, owner, work_name, work_description, target_agent, work_script,
     script_type, test_result, files, create_date, validate_date,
     last_start_date, last_end_date, last_success, last_fail_reason,
-    use_previous_work_result, work_report, cron, cron_expr, schedule_wait
+    use_previous_work_result, work_report, cron, cron_expr, schedule_wait,
+    worker, upload, upload_path, approver_userid
 """
 
 _WORKFLOW_SELECT = """
@@ -42,6 +49,13 @@ def normalize_script_type(value: str | None) -> str:
         normalized = "kubectl"
     if normalized not in SCRIPT_TYPES:
         raise ValueError("script_type은 kubectl, ansible, cli, prompt 중 하나여야 합니다.")
+    return normalized
+
+
+def normalize_worker(value: str | None) -> str:
+    normalized = (value or "").strip().lower() or "agent"
+    if normalized not in WORKER_TYPES:
+        raise ValueError("worker는 agent 또는 hitl 이어야 합니다.")
     return normalized
 
 
@@ -120,41 +134,20 @@ def _backfill_missing_uuids(connection, table: str) -> None:
 
 
 def work_uuids_from_expression(expression: str) -> set[str]:
-    """Collect work_node uuids referenced by a workflow expression."""
-    uuids: set[str] = set()
+    """Collect work_node uuids referenced by a workflow expression or JSON document."""
+    from backend.app.services.workflow_document import work_uuids_from_document
+
     try:
-        tokens = parse_workflow_tokens(expression)
+        return work_uuids_from_document(expression)
     except ValueError:
-        return uuids
-    for token in tokens:
-        if token.work_uuid:
-            uuids.add(str(token.work_uuid))
-        if token.fail_work_uuid:
-            uuids.add(str(token.fail_work_uuid))
-    return uuids
+        return set()
 
 
 def rewrite_expression_uuid_map(expression: str, mapping: dict[str, str]) -> str:
-    """Remap work_node uuid tokens in a workflow expression."""
-    text = (expression or "").strip()
-    if not text or not mapping:
-        return text
-    rewritten: list[str] = []
-    for part in text.split("->"):
-        token = part.strip()
-        upper = token.upper()
-        if upper in {"S", "E"} or upper.startswith("H:"):
-            rewritten.append(token)
-            continue
-        if ":" in token:
-            left, right = token.split(":", 1)
-            left = left.strip()
-            right = right.strip()
-            fail = right if right.upper() == "E" else mapping.get(right, right)
-            rewritten.append(f"{mapping.get(left, left)}:{fail}")
-            continue
-        rewritten.append(mapping.get(token, token))
-    return "->".join(rewritten)
+    """Remap work_node uuid tokens in a workflow expression or JSON document."""
+    from backend.app.services.workflow_document import rewrite_document_uuid_map
+
+    return rewrite_document_uuid_map(expression, mapping)
 
 
 def rewrite_expression_idx_to_uuid(expression: str, mapping: dict[str, str]) -> str:
@@ -221,6 +214,96 @@ def _migrate_work_node_script_columns(connection) -> None:
         connection.execute("ALTER TABLE work_node DROP COLUMN IF EXISTS user_prompt")
 
 
+def _migrate_legacy_hitl_and_workflow_json(connection) -> None:
+    """Replace ``H:userid`` tokens with hitl work_nodes and persist JSON documents."""
+    from backend.app.services.workflow_document import (
+        dumps_workflow_json,
+        is_workflow_json_text,
+        normalize_workflow_document,
+        tokens_to_workflow_json,
+    )
+    from backend.app.services.workflow_graph import parse_workflow_tokens
+
+    rows = connection.execute(
+        "SELECT uuid, owner, workflow FROM workflow WHERE workflow IS NOT NULL"
+    ).fetchall()
+    for row in rows:
+        workflow_uuid = str(_column_value(row, "uuid", 0) or "").strip()
+        owner = int(_column_value(row, "owner", 1) or 0)
+        expression = str(_column_value(row, "workflow", 2) or "").strip()
+        if not workflow_uuid or not expression:
+            continue
+        if is_workflow_json_text(expression):
+            try:
+                normalized = normalize_workflow_document(expression)
+            except ValueError:
+                continue
+            if normalized != expression:
+                connection.execute(
+                    "UPDATE workflow SET workflow = ? WHERE uuid = ?",
+                    (normalized, workflow_uuid),
+                )
+            continue
+        try:
+            tokens = parse_workflow_tokens(expression)
+        except ValueError:
+            continue
+        needs_hitl = any(token.kind == "hitl" and not token.work_uuid for token in tokens)
+        if not needs_hitl:
+            try:
+                normalized = normalize_workflow_document(expression)
+            except ValueError:
+                continue
+            if normalized != expression:
+                connection.execute(
+                    "UPDATE workflow SET workflow = ? WHERE uuid = ?",
+                    (normalized, workflow_uuid),
+                )
+            continue
+
+        rewritten_parts: list[str] = []
+        for token in tokens:
+            if token.kind == "hitl" and not token.work_uuid:
+                userid = (token.userid or "").strip()
+                hitl_uuid = _new_uuid()
+                connection.execute(
+                    """
+                    INSERT INTO work_node (
+                        uuid, owner, work_name, work_description, target_agent, work_script,
+                        script_type, test_result, files, create_date, validate_date,
+                        last_start_date, last_end_date, last_success, last_fail_reason,
+                        use_previous_work_result, work_report, cron, cron_expr,
+                        worker, upload, upload_path, approver_userid
+                    ) VALUES (
+                        ?, ?, ?, ?, 0, '', '', 0, '', ?, '',
+                        '', '', 0, '', 0, '', 0, '0 9 * * *',
+                        'hitl', 0, '', ?
+                    )
+                    """,
+                    (
+                        hitl_uuid,
+                        owner,
+                        f"결재승인 ({userid})"[:100] if userid else "결재승인",
+                        "마이그레이션된 HITL 승인 단계",
+                        now_job_datetime(),
+                        userid[:50],
+                    ),
+                )
+                rewritten_parts.append(hitl_uuid)
+                continue
+            rewritten_parts.append(token.raw)
+        new_expression = "->".join(rewritten_parts)
+        try:
+            new_tokens = parse_workflow_tokens(new_expression)
+            normalized = dumps_workflow_json(tokens_to_workflow_json(new_tokens))
+        except ValueError:
+            normalized = new_expression
+        connection.execute(
+            "UPDATE workflow SET workflow = ? WHERE uuid = ?",
+            (normalized, workflow_uuid),
+        )
+
+
 def ensure_workflow_tables(connection) -> None:
     connection.execute(
         """
@@ -244,7 +327,11 @@ def ensure_workflow_tables(connection) -> None:
             work_report VARCHAR(400) NOT NULL DEFAULT '',
             cron INTEGER NOT NULL DEFAULT 0,
             cron_expr VARCHAR(20) NOT NULL DEFAULT '0 9 * * *',
-            schedule_wait INTEGER NOT NULL DEFAULT 0
+            schedule_wait INTEGER NOT NULL DEFAULT 0,
+            worker VARCHAR(10) NOT NULL DEFAULT 'agent',
+            upload INTEGER NOT NULL DEFAULT 0,
+            upload_path VARCHAR(500) NOT NULL DEFAULT '',
+            approver_userid VARCHAR(50) NOT NULL DEFAULT ''
         )
         """
     )
@@ -344,7 +431,32 @@ def ensure_workflow_tables(connection) -> None:
             ADD COLUMN IF NOT EXISTS schedule_wait INTEGER NOT NULL DEFAULT 0
         """
     )
+    connection.execute(
+        """
+        ALTER TABLE work_node
+            ADD COLUMN IF NOT EXISTS worker VARCHAR(10) NOT NULL DEFAULT 'agent'
+        """
+    )
+    connection.execute(
+        """
+        ALTER TABLE work_node
+            ADD COLUMN IF NOT EXISTS upload INTEGER NOT NULL DEFAULT 0
+        """
+    )
+    connection.execute(
+        """
+        ALTER TABLE work_node
+            ADD COLUMN IF NOT EXISTS upload_path VARCHAR(500) NOT NULL DEFAULT ''
+        """
+    )
+    connection.execute(
+        """
+        ALTER TABLE work_node
+            ADD COLUMN IF NOT EXISTS approver_userid VARCHAR(50) NOT NULL DEFAULT ''
+        """
+    )
     _migrate_work_node_script_columns(connection)
+    _migrate_legacy_hitl_and_workflow_json(connection)
 
     connection.execute(
         """
@@ -524,6 +636,10 @@ class WorkNodeRecord:
     cron_expr: str = DEFAULT_WORK_NODE_CRON_EXPR
     schedule_wait: bool = False
     owner: int = 0
+    worker: str = "agent"
+    upload: bool = False
+    upload_path: str = ""
+    approver_userid: str = ""
 
 
 @dataclass(frozen=True)
@@ -557,6 +673,20 @@ def user_can_view_workflow(record: WorkflowRecord, user_idx: int) -> bool:
     return user_owns_workflow(record, user_idx) or bool(record.distribute)
 
 
+def resolve_work_node_upload_userid(
+    database_path: str | Path,
+    owner: int,
+) -> str:
+    """Map ``work_node.owner`` (users.idx) to filesystem ``users.userid`` segment."""
+    user = get_user_by_idx(database_path, int(owner or 0))
+    if user is not None:
+        key = sanitize_upload_userid(user.userid)
+        if key:
+            return key
+    fallback = sanitize_upload_userid(f"owner_{int(owner or 0)}")
+    return fallback or "unknown"
+
+
 def _row_to_work_node(row) -> WorkNodeRecord:
     keys = row.keys() if hasattr(row, "keys") else []
     description = row["work_description"] if "work_description" in keys else ""
@@ -575,6 +705,18 @@ def _row_to_work_node(row) -> WorkNodeRecord:
     cron_expr = row["cron_expr"] if "cron_expr" in keys else DEFAULT_WORK_NODE_CRON_EXPR
     schedule_wait = row["schedule_wait"] if "schedule_wait" in keys else 0
     owner = row["owner"] if "owner" in keys else 0
+    worker = row["worker"] if "worker" in keys else "agent"
+    upload = row["upload"] if "upload" in keys else 0
+    upload_path = row["upload_path"] if "upload_path" in keys else ""
+    approver_userid = row["approver_userid"] if "approver_userid" in keys else ""
+    try:
+        script_type_norm = normalize_script_type(str(script_type or ""))
+    except ValueError:
+        script_type_norm = ""
+    try:
+        worker_norm = normalize_worker(str(worker or "agent"))
+    except ValueError:
+        worker_norm = "agent"
     return WorkNodeRecord(
         uuid=str(row["uuid"] or ""),
         owner=int(owner or 0),
@@ -582,7 +724,7 @@ def _row_to_work_node(row) -> WorkNodeRecord:
         work_description=str(description or ""),
         target_agent=int(row["target_agent"] or 0),
         work_script=str(row["work_script"] or ""),
-        script_type=normalize_script_type(str(script_type or "")),
+        script_type=script_type_norm,
         test_result=bool(int(row["test_result"] or 0)),
         files=str(row["files"] or ""),
         create_date=str(create_date or ""),
@@ -596,6 +738,10 @@ def _row_to_work_node(row) -> WorkNodeRecord:
         cron=bool(int(cron or 0)),
         cron_expr=str(cron_expr or DEFAULT_WORK_NODE_CRON_EXPR)[:20],
         schedule_wait=bool(int(schedule_wait or 0)),
+        worker=worker_norm,
+        upload=bool(int(upload or 0)),
+        upload_path=str(upload_path or "")[:500],
+        approver_userid=str(approver_userid or "")[:50],
     )
 
 
@@ -714,12 +860,17 @@ def create_work_node(
     cron_expr: str | None = None,
     uuid: str | None = None,
     owner: int = 0,
+    worker: str = "agent",
+    upload: bool = False,
+    upload_path: str = "",
+    approver_userid: str = "",
 ) -> WorkNodeRecord:
     from backend.app.db.k8s_inventory import validate_cron_expr
 
     created_at = now_job_datetime()
     validate_at = created_at if test_result else ""
     normalized_script_type = normalize_script_type(script_type)
+    worker_type = normalize_worker(worker)
     node_uuid = _normalize_uuid(uuid)
     enabled = bool(cron)
     expr = validate_cron_expr(cron_expr or DEFAULT_WORK_NODE_CRON_EXPR)
@@ -731,8 +882,9 @@ def create_work_node(
                 uuid, owner, work_name, work_description, target_agent, work_script,
                 script_type, test_result, files, create_date, validate_date,
                 last_start_date, last_end_date, last_success, last_fail_reason,
-                use_previous_work_result, work_report, cron, cron_expr
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', '', 0, '', ?, ?, ?, ?)
+                use_previous_work_result, work_report, cron, cron_expr,
+                worker, upload, upload_path, approver_userid
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', '', 0, '', ?, ?, ?, ?, ?, ?, ?, ?)
             RETURNING {_WORK_NODE_SELECT}
             """,
             (
@@ -751,6 +903,10 @@ def create_work_node(
                 (work_report or "").strip()[:400],
                 1 if enabled else 0,
                 expr,
+                worker_type,
+                1 if upload else 0,
+                (upload_path or "").strip()[:500],
+                (approver_userid or "").strip()[:50],
             ),
         ).fetchone()
     return _row_to_work_node(row)
@@ -771,6 +927,10 @@ def update_work_node(
     work_report: str = "",
     cron: bool | None = None,
     cron_expr: str | None = None,
+    worker: str | None = None,
+    upload: bool | None = None,
+    upload_path: str | None = None,
+    approver_userid: str | None = None,
 ) -> WorkNodeRecord | None:
     from backend.app.db.k8s_inventory import validate_cron_expr
 
@@ -788,6 +948,16 @@ def update_work_node(
     else:
         next_expr = cron_expr
     next_expr = validate_cron_expr(next_expr)
+    next_worker = existing.worker if worker is None else normalize_worker(worker)
+    next_upload = existing.upload if upload is None else bool(upload)
+    next_upload_path = (
+        existing.upload_path if upload_path is None else (upload_path or "").strip()[:500]
+    )
+    next_approver = (
+        existing.approver_userid
+        if approver_userid is None
+        else (approver_userid or "").strip()[:50]
+    )
     with get_connection(database_path) as connection:
         ensure_workflow_tables(connection)
         connection.execute(
@@ -795,7 +965,8 @@ def update_work_node(
             UPDATE work_node
             SET work_name = ?, work_description = ?, target_agent = ?, work_script = ?,
                 script_type = ?, test_result = ?, files = ?, validate_date = ?,
-                use_previous_work_result = ?, work_report = ?, cron = ?, cron_expr = ?
+                use_previous_work_result = ?, work_report = ?, cron = ?, cron_expr = ?,
+                worker = ?, upload = ?, upload_path = ?, approver_userid = ?
             WHERE uuid = ?
             """,
             (
@@ -811,8 +982,30 @@ def update_work_node(
                 (work_report or "").strip()[:400],
                 1 if next_cron else 0,
                 next_expr,
+                next_worker,
+                1 if next_upload else 0,
+                next_upload_path,
+                next_approver,
                 existing.uuid,
             ),
+        )
+    return get_work_node_by_uuid(database_path, existing.uuid)
+
+
+def set_work_node_upload_path(
+    database_path: str | Path,
+    node_uuid: str,
+    upload_path: str,
+) -> WorkNodeRecord | None:
+    existing = get_work_node_by_uuid(database_path, node_uuid)
+    if existing is None:
+        return None
+    path = (upload_path or "").strip()[:500]
+    with get_connection(database_path) as connection:
+        ensure_workflow_tables(connection)
+        connection.execute(
+            "UPDATE work_node SET upload_path = ? WHERE uuid = ?",
+            (path, existing.uuid),
         )
     return get_work_node_by_uuid(database_path, existing.uuid)
 
@@ -902,6 +1095,7 @@ def create_workflow(
     cron_expr: str | None = None,
 ) -> WorkflowRecord:
     from backend.app.db.k8s_inventory import validate_cron_expr
+    from backend.app.services.workflow_document import normalize_workflow_document
 
     created_at = now_job_datetime()
     workflow_uuid = _normalize_uuid(uuid)
@@ -909,6 +1103,7 @@ def create_workflow(
     expr = validate_cron_expr(cron_expr) if enabled else validate_cron_expr(
         cron_expr or DEFAULT_WORKFLOW_CRON_EXPR
     )
+    workflow_text = normalize_workflow_document(workflow)
     with get_connection(database_path) as connection:
         ensure_workflow_tables(connection)
         row = connection.execute(
@@ -928,7 +1123,7 @@ def create_workflow(
                 bool(distribute),
                 workflow_name.strip(),
                 (workflow_description or "").strip()[:500],
-                (workflow or "").strip(),
+                workflow_text,
                 created_at,
                 1 if enabled else 0,
                 expr,
@@ -949,6 +1144,7 @@ def update_workflow(
     cron_expr: str | None = None,
 ) -> WorkflowRecord | None:
     from backend.app.db.k8s_inventory import validate_cron_expr
+    from backend.app.services.workflow_document import normalize_workflow_document
 
     existing = get_workflow_by_uuid(database_path, workflow_uuid)
     if existing is None:
@@ -960,6 +1156,7 @@ def update_workflow(
     else:
         next_expr = cron_expr
     next_expr = validate_cron_expr(next_expr)
+    workflow_text = normalize_workflow_document(workflow)
     with get_connection(database_path) as connection:
         ensure_workflow_tables(connection)
         connection.execute(
@@ -972,7 +1169,7 @@ def update_workflow(
             (
                 workflow_name.strip(),
                 (workflow_description or "").strip()[:500],
-                (workflow or "").strip(),
+                workflow_text,
                 next_distribute,
                 1 if next_cron else 0,
                 next_expr,
@@ -1064,10 +1261,16 @@ def clone_workflow(
             cron_expr=node.cron_expr,
             uuid=new_uuid,
             owner=owner_idx,
+            worker=node.worker,
+            upload=node.upload,
+            upload_path="",
+            approver_userid=node.approver_userid,
         )
-        source_dir = work_node_upload_dir(old_uuid)
+        source_userid = resolve_work_node_upload_userid(database_path, node.owner)
+        target_userid = resolve_work_node_upload_userid(database_path, owner_idx)
+        source_dir = find_work_node_upload_dir(old_uuid, userid=source_userid)
         if source_dir.is_dir():
-            target_dir = work_node_upload_dir(new_uuid)
+            target_dir = work_node_upload_dir(new_uuid, userid=target_userid)
             shutil.copytree(source_dir, target_dir, dirs_exist_ok=True)
 
     remapped = rewrite_expression_uuid_map(source.workflow, uuid_map)

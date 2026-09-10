@@ -48,11 +48,13 @@ import {
   terminateAfter,
   updateWork,
   validateEditor,
-  workNodeFromItem,
   workFieldsFromItem,
+  workNodeFromItem,
   workNodeWriteBody,
+  hitlNodeWriteBody,
   isRunInProgress,
   type EditorModel,
+  type HitlEditorNode,
   type WorkEditorNode,
 } from "./workflowModel";
 
@@ -261,6 +263,14 @@ export const WorkflowEditor = forwardRef<WorkflowEditorHandle, WorkflowEditorPro
     }
     const step = model.main.find((item) => item.clientId === selectedNodeId);
     return step?.type === "work" ? step : null;
+  }, [model, selectedNodeId]);
+
+  const selectedHitlNode = useMemo(() => {
+    if (!selectedNodeId) {
+      return null;
+    }
+    const step = model.main.find((item) => item.clientId === selectedNodeId);
+    return step?.type === "hitl" ? step : null;
   }, [model, selectedNodeId]);
 
   const workflowWorkNodes = useMemo(() => {
@@ -519,15 +529,19 @@ export const WorkflowEditor = forwardRef<WorkflowEditorHandle, WorkflowEditorPro
               uuid: draft.uuid,
               work_name: draft.work_name,
               work_description: draft.work_description,
-              target_agent: target.idx,
-              work_script: draft.work_script,
-              script_type: draft.script_type || "",
+              target_agent: draft.worker === "hitl" ? 0 : target.idx,
+              work_script: draft.worker === "hitl" ? "" : draft.work_script,
+              script_type: draft.worker === "hitl" ? "" : draft.script_type || "",
               test_result: false,
               files: "",
               use_previous_work_result: Boolean(draft.use_previous_work_result),
               work_report: (draft.work_report || "").trim().slice(0, 400),
               cron: Boolean(draft.cron),
               cron_expr: (draft.cron_expr || "0 9 * * *").slice(0, 20),
+              worker: draft.worker || "agent",
+              upload: Boolean(draft.upload),
+              upload_path: "",
+              approver_userid: draft.approver_userid || "",
             }),
           });
           if (!response.ok) {
@@ -911,16 +925,42 @@ export const WorkflowEditor = forwardRef<WorkflowEditorHandle, WorkflowEditorPro
     }
   };
 
-  const handleAddHitl = (afterId: string) => {
+  const handleAddHitl = async (afterId: string) => {
     setOpenMenuId(null);
-    setModel((current) =>
-      insertAfter(current, afterId, {
-        clientId: nextClientId("H"),
-        type: "hitl",
-        userid: "",
-        username: "",
-      }),
-    );
+    setError(null);
+    try {
+      const response = await fetch("/api/work-nodes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          work_name: "결재승인",
+          worker: "hitl",
+          upload: false,
+          approver_userid: "",
+        }),
+      });
+      if (!response.ok) {
+        throw new Error(await parseError(response, "승인 노드를 만들지 못했습니다."));
+      }
+      const item = (await response.json()) as WorkNodeItem;
+      await onWorkNodesChanged();
+      const userid = (item.approver_userid || "").trim();
+      setModel((current) =>
+        insertAfter(current, afterId, {
+          clientId: nextClientId(`H${item.uuid}`),
+          type: "hitl",
+          uuid: item.uuid,
+          userid,
+          username: userid,
+          name: item.work_name || "결재승인",
+          description: item.work_description || "",
+          upload: Boolean(item.upload),
+          uploadPath: item.upload_path || "",
+        }),
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "승인 노드를 만들지 못했습니다.");
+    }
   };
 
   const handleAddFailWork = async (workClientId: string) => {
@@ -1603,6 +1643,51 @@ export const WorkflowEditor = forwardRef<WorkflowEditorHandle, WorkflowEditorPro
                     }))}
                     selectedWorkUuid={selectedWorkNode?.uuid?.trim() || null}
                   />
+                ) : selectedHitlNode && !readOnly ? (
+                  <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-auto p-4 text-[11px] text-slate-300">
+                    <p>
+                      <span className="text-slate-500">승인 노드</span>{" "}
+                      {selectedHitlNode.name || selectedHitlNode.uuid}
+                    </p>
+                    <p>
+                      <span className="text-slate-500">승인자</span>{" "}
+                      {selectedHitlNode.username || selectedHitlNode.userid || "(미지정)"}
+                    </p>
+                    <label className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={Boolean(selectedHitlNode.upload)}
+                        onChange={(event) => {
+                          const upload = event.target.checked;
+                          const next: HitlEditorNode = { ...selectedHitlNode, upload };
+                          setModel((current) => ({
+                            ...current,
+                            main: current.main.map((step) =>
+                              step.clientId === selectedHitlNode.clientId && step.type === "hitl"
+                                ? next
+                                : step,
+                            ),
+                          }));
+                          if (selectedHitlNode.uuid) {
+                            void fetch(`/api/work-nodes/${selectedHitlNode.uuid}`, {
+                              method: "PUT",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify(hitlNodeWriteBody(next)),
+                            }).then(async (response) => {
+                              if (!response.ok) {
+                                setError(
+                                  await parseError(response, "승인 노드를 저장하지 못했습니다."),
+                                );
+                                return;
+                              }
+                              await onWorkNodesChanged();
+                            });
+                          }
+                        }}
+                      />
+                      승인 시 파일 업로드 필수
+                    </label>
+                  </div>
                 ) : selectedWorkNode && !readOnly ? (
                   <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-4">
                     <WorkNodeEditPanel
@@ -1641,14 +1726,32 @@ export const WorkflowEditor = forwardRef<WorkflowEditorHandle, WorkflowEditorPro
           }
           onClose={() => setApproverPickClientId(null)}
           onConfirm={({ userid, username }) => {
+            const clientId = approverPickClientId;
             setModel((current) => ({
               ...current,
               main: current.main.map((step) =>
-                step.clientId === approverPickClientId && step.type === "hitl"
+                step.clientId === clientId && step.type === "hitl"
                   ? { ...step, userid, username }
                   : step,
               ),
             }));
+            const step = model.main.find(
+              (item) => item.clientId === clientId && item.type === "hitl",
+            ) as HitlEditorNode | undefined;
+            if (step?.uuid) {
+              const next: HitlEditorNode = { ...step, userid, username };
+              void fetch(`/api/work-nodes/${step.uuid}`, {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(hitlNodeWriteBody(next)),
+              }).then(async (response) => {
+                if (!response.ok) {
+                  setError(await parseError(response, "승인 노드를 저장하지 못했습니다."));
+                  return;
+                }
+                await onWorkNodesChanged();
+              });
+            }
           }}
         />
       ) : null}

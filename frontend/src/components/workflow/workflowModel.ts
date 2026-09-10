@@ -21,6 +21,18 @@ export type FailSpec =
   | { kind: "end" }
   | { kind: "work"; clientId: string };
 
+export type HitlEditorNode = {
+  clientId: string;
+  type: "hitl";
+  uuid: string;
+  userid: string;
+  username: string;
+  name: string;
+  description: string;
+  upload: boolean;
+  uploadPath: string;
+};
+
 export type WorkEditorNode = {
   clientId: string;
   type: "work";
@@ -46,13 +58,17 @@ export type WorkEditorNode = {
   cron: boolean;
   cronExpr: string;
   scheduleWait: boolean;
+  worker: "agent" | "hitl" | string;
+  upload: boolean;
+  uploadPath: string;
+  approverUserid: string;
   fail: FailSpec;
 };
 
 export type EditorStep =
   | { clientId: string; type: "start" }
   | { clientId: string; type: "end" }
-  | { clientId: string; type: "hitl"; userid: string; username: string }
+  | HitlEditorNode
   | WorkEditorNode;
 
 export type EditorModel = {
@@ -109,6 +125,10 @@ export function workFieldsFromItem(
     cron: Boolean(item.cron),
     cronExpr: (item.cron_expr || "0 9 * * *").slice(0, 20),
     scheduleWait: Boolean(item.schedule_wait),
+    worker: (item.worker || "agent") as "agent" | "hitl" | string,
+    upload: Boolean(item.upload),
+    uploadPath: item.upload_path || "",
+    approverUserid: item.approver_userid || "",
   };
 }
 
@@ -140,9 +160,33 @@ export function workNodeWriteBody(
     work_report: (node.workReport || "").trim().slice(0, 400),
     cron: Boolean(node.cron),
     cron_expr: (node.cronExpr || "0 9 * * *").slice(0, 20),
+    worker: node.worker || "agent",
+    upload: Boolean(node.upload),
+    upload_path: node.uploadPath || "",
+    approver_userid: node.approverUserid || "",
     ...(extras?.validation_message != null
       ? { validation_message: extras.validation_message }
       : {}),
+  };
+}
+
+export function hitlNodeWriteBody(node: HitlEditorNode) {
+  return {
+    work_name: node.name || `결재승인 (${node.userid})`,
+    work_description: node.description || "",
+    target_agent: 0,
+    work_script: "",
+    script_type: "",
+    test_result: false,
+    files: "",
+    use_previous_work_result: false,
+    work_report: "",
+    cron: false,
+    cron_expr: "0 9 * * *",
+    worker: "hitl",
+    upload: Boolean(node.upload),
+    upload_path: "",
+    approver_userid: node.userid || "",
   };
 }
 
@@ -190,11 +234,73 @@ export function parseExpression(expression: string): ParsedToken[] {
   if (!text) {
     return [];
   }
+  if (text.startsWith("{")) {
+    return parseJsonExpression(text);
+  }
   return text
     .split("->")
     .map((part) => part.trim())
     .filter(Boolean)
     .map(parseToken);
+}
+
+function parseJsonExpression(raw: string): ParsedToken[] {
+  const data = JSON.parse(raw) as {
+    nodes?: unknown;
+    edges?: Array<{ from?: string; to?: string; source?: string; target?: string; kind?: string }>;
+  };
+  const edges = Array.isArray(data.edges) ? data.edges : [];
+  const successNext = new Map<string, string>();
+  const failNext = new Map<string, string>();
+  for (const edge of edges) {
+    const from = String(edge.from || edge.source || "").trim();
+    const to = String(edge.to || edge.target || "").trim();
+    const kind = String(edge.kind || "success").trim().toLowerCase() || "success";
+    if (!from || !to) {
+      continue;
+    }
+    const fromKey = isUuidToken(from) ? from.toLowerCase() : from;
+    const toKey = isUuidToken(to) ? to.toLowerCase() : to;
+    if (kind === "fail") {
+      failNext.set(fromKey, toKey);
+    } else {
+      successNext.set(fromKey, toKey);
+    }
+  }
+  if (!successNext.has("S")) {
+    throw new Error("workflow JSON 에 S success edge 가 없습니다.");
+  }
+  const tokens: ParsedToken[] = [{ kind: "start" }];
+  let current = successNext.get("S") || "E";
+  const visited = new Set<string>();
+  while (current.toUpperCase() !== "E") {
+    if (visited.has(current)) {
+      throw new Error("workflow success 경로에 순환이 있습니다.");
+    }
+    visited.add(current);
+    if (!isUuidToken(current)) {
+      throw new Error(`알 수 없는 workflow 노드: ${current}`);
+    }
+    const failTarget = failNext.get(current);
+    if (failTarget?.toUpperCase() === "E") {
+      tokens.push({ kind: "work", workUuid: current.toLowerCase(), failEnd: true });
+    } else if (failTarget && isUuidToken(failTarget)) {
+      tokens.push({
+        kind: "work",
+        workUuid: current.toLowerCase(),
+        failWorkUuid: failTarget.toLowerCase(),
+      });
+    } else {
+      tokens.push({ kind: "work", workUuid: current.toLowerCase() });
+    }
+    const next = successNext.get(current);
+    if (!next) {
+      throw new Error(`노드 ${current} 에서 이어지는 success edge 가 없습니다.`);
+    }
+    current = next;
+  }
+  tokens.push({ kind: "end" });
+  return tokens;
 }
 
 export function hydrateEditor(
@@ -241,7 +347,26 @@ export function hydrateEditor(
       cron: false,
       cronExpr: "0 9 * * *",
       scheduleWait: false,
+      worker: "agent",
+      upload: false,
+      uploadPath: "",
+      approverUserid: "",
       fail,
+    };
+  };
+
+  const toHitl = (item: WorkNodeItem): HitlEditorNode => {
+    const userid = (item.approver_userid || "").trim();
+    return {
+      clientId: nextClientId(`H${item.uuid}`),
+      type: "hitl",
+      uuid: item.uuid,
+      userid,
+      username: userNames[userid] || userid,
+      name: item.work_name || `결재승인 (${userid})`,
+      description: item.work_description || "",
+      upload: Boolean(item.upload),
+      uploadPath: item.upload_path || "",
     };
   };
 
@@ -258,9 +383,19 @@ export function hydrateEditor(
       main.push({
         clientId: nextClientId("H"),
         type: "hitl",
+        uuid: "",
         userid: token.userid,
         username: userNames[token.userid] || token.userid,
+        name: `결재승인 (${token.userid})`,
+        description: "",
+        upload: false,
+        uploadPath: "",
       });
+      continue;
+    }
+    const item = byUuid.get(token.workUuid.toLowerCase());
+    if (item && (item.worker || "agent") === "hitl") {
+      main.push(toHitl(item));
       continue;
     }
     let fail: FailSpec = { kind: "none" };
@@ -295,46 +430,73 @@ export function serializeEditor(model: EditorModel): string {
     return found?.type === "work" ? found : undefined;
   };
 
-  const tokens: string[] = [];
+  const nodes: string[] = [];
+  const edges: Array<{ from: string; to: string; kind: string }> = [];
+  const mainRefs: string[] = [];
+
   for (const step of model.main) {
     if (step.type === "start") {
-      tokens.push("S");
+      mainRefs.push("S");
       continue;
     }
     if (step.type === "end") {
-      tokens.push("E");
+      mainRefs.push("E");
       continue;
     }
     if (step.type === "hitl") {
-      tokens.push(`H:${step.userid}`);
+      const uuid = (step.uuid || "").trim().toLowerCase();
+      if (!uuid) {
+        continue;
+      }
+      if (!nodes.includes(uuid)) {
+        nodes.push(uuid);
+      }
+      mainRefs.push(uuid);
       continue;
     }
     const uuid = step.uuid.toLowerCase();
+    if (!nodes.includes(uuid)) {
+      nodes.push(uuid);
+    }
+    mainRefs.push(uuid);
     if (step.fail.kind === "end") {
-      tokens.push(`${uuid}:E`);
+      edges.push({ from: uuid, to: "E", kind: "fail" });
     } else if (step.fail.kind === "work") {
       const failNode = workByClient(step.fail.clientId);
-      tokens.push(failNode ? `${uuid}:${failNode.uuid.toLowerCase()}` : `${uuid}:E`);
-    } else {
-      tokens.push(uuid);
+      if (failNode?.uuid) {
+        const failUuid = failNode.uuid.toLowerCase();
+        if (!nodes.includes(failUuid)) {
+          nodes.push(failUuid);
+        }
+        edges.push({ from: uuid, to: failUuid, kind: "fail" });
+      } else {
+        edges.push({ from: uuid, to: "E", kind: "fail" });
+      }
     }
   }
-  if (tokens.length === 0) {
-    return "S->E";
+
+  if (mainRefs.length === 0) {
+    mainRefs.push("S", "E");
   }
-  if (tokens[0] !== "S") {
-    tokens.unshift("S");
+  if (mainRefs[0] !== "S") {
+    mainRefs.unshift("S");
   }
-  if (tokens[tokens.length - 1] !== "E") {
-    tokens.push("E");
+  if (mainRefs[mainRefs.length - 1] !== "E") {
+    mainRefs.push("E");
   }
-  return tokens.join("->");
+  for (let i = 0; i < mainRefs.length - 1; i += 1) {
+    edges.push({ from: mainRefs[i], to: mainRefs[i + 1], kind: "success" });
+  }
+  return JSON.stringify({ version: 1, nodes, edges });
 }
 
 export function validateEditor(model: EditorModel): string | null {
   for (const step of model.main) {
     if (step.type === "hitl" && !step.userid.trim()) {
       return "승인자를 지정하세요.";
+    }
+    if (step.type === "hitl" && !step.uuid.trim()) {
+      return "승인 노드를 저장하세요.";
     }
     if (step.type === "work" && !step.uuid.trim()) {
       return "작업노드 uuid가 없습니다.";

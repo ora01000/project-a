@@ -2418,6 +2418,10 @@ left "작업 워크플로우 목록" 패널의 생성된 작업 워크플로우 
 
 - 작업 편집에서 메일주소 선택 UI는 대시보드>작업노트>나의작업결과>메일전송 팝업과 동일한 UI로 파업창을 띄우고 선택하도록 한다. 단 이 팝업에는 CC/BCC 는 없다
 
+# 사용자 별 작업 워크플로우, 작업(work_node) 의 upload 디렉토리 구별
+- 현재 모든 사용자가 사용하는 디렉토리가 동일하다. UPLOAD_HOME 아래 실행한 사용자의 users.userid 로 디렉토리를 생성하고 구별하여 저장한다
+
+
 
 # 전체 프레임 조정
 - 전체 UI 프레임 구조에서 최상단의 타이틀 영역을 삭제한다.
@@ -2454,19 +2458,45 @@ left "작업 워크플로우 목록" 패널의 생성된 작업 워크플로우 
         OKD dprv-k8s 클러스터의 tplssi 프로젝트의 Route 에서 인증서를 추출하고
         '''
 
+# (개선검토) 업로드의 기능을 재정의하고 이에 맞춰 workflow 표현식을 json 으로 통일하고자 한다.
+다음과 같은 문제가 있다. 문제를 분석하고 내가 생각하는 방향을 참고하여 개선 방향을 제안해 달라
+- workflow.workflow 에는 개발시 설계한 플로우 문자열로 저장이 되는데 범용성이 없어 보인다. workflow 를 에이전트에서 생성하는 json 포맷과 동일하게 하여 일관되게 하고싶다. 또한 현재는 runtime 시 status에 대한 기록이 불가한데, workflow 가 실행될때 흐름에 따라 발생하는 각 work_node의 status를 attribute로 추가할 수 있도록하여 runtime 에도 활용한다. 단 DB에는 이전과 동일하게 형상만 저장된다.
+  - 현재 설계된 workflow 문자열 포맷은 다음과 같다.
+    S->{uuid}->{uuid}:{uuid}->H:isyun->{uuid}->E
+  - 이를 구현하기 위해서는 "결재" 부분도 work_node 포맷으로 구성하는 것이 좋을 것 같다. 또한 이 경우 work_node에 이를 구분할 수 있는 컬럼이 필요할 것 같다. 예를 들면 아래와 같이 worker 컬럼을 두어 agent 가 수행할지 사람이 개입할지를 지정한다.
+    - worker = ['agent' | 'hitl']
+    - worker = 'hitl' 인 경우 worker_node의 json 포맷
+    '''
+    {
+      "work_name": "결재승인#1",
+      "work_description" : "결재제목#1",
+      "worker": "hitl",
+      "uuid": "결재승인#1 UUID",
+      "upload": [ true | false ], <- 승인단계에서 입력받는다.
+      "upload_path": ""  <- 업로드 시점의 타임스탬프를 넣는다. 워크플로우 생성시에는 공백이다.
+    }
+    '''
+    - worker = 'agent' 인 경우 기존 work_node json 블럭에 "worker": "agent" 가 추가된다.
+  - 기존 workflow.workflow 컬럼은 json 으로 저장
 
+      
+- 업로드 기능은 현재는 단순하게 work_node 편집 구성시 업로드파일을 올리도록 하고 있는데 구현하고자 하는 프로세스와 맞지 않다. 다음과 같은 시나리오로 구현하고자 한다.
+  - 시나리오(작업워크플로우) 예시
+    - 인증서 갱신을 예로 들면, 갱신할 인증서를 작업 워크플로우 과정에서 사람이 업로드해야 하는 경우가 있으며 이는 HITL 로 처리되어야 한다.
+    - 따라서 결재시 파일을 업로드 할 수 있어야 한다.
+    - 사용자 디렉토리 {UPLOAD_HOME}/{users.userid} 아래 모든 work_node 가 access 가능한 "attachment" 디렉토리를 생성한다. 실제 파일의 위치는 {UPLOAD_HOME}/{users.userid}/attachment/{업로드시점의 timestamp} 로 조립된다.
+    - 승인 단계에서 다음 work_node가 업로드 파일을 사용할지 말지를 지정하는 flag가 필요하고, 다음 work_node가 access 할 업로드 파일의 위치가 넘겨져야 한다. 이는 work_node.upload_path 로 조회가 가능할 것이다. 따라서 worker = 'hitl' 다음에 위치하는 worker = 'agent' 인 work_node는 이전 json 블럭의 정보를 참조해야 한다.
+      - 만약 그럴경우는 드물지만 worker = 'hitl' 이 연속으로 배치될 수도 있다. 이 경우는 바로직전 upload, upload_path만 참조하기로 한다.
+    - 다음 에이전트는 스크립트 처리시 보강하는 부분에 업로드 파일이 있으며 파일 목록과 내용을 에이전트에 전달하도록 추가 보강해야 한다.
+    - 업로드 파일의 정합성 체크는 에이전트에 맡긴다.
+    - UI 측면에서도 변경이 필요할 것이다.
+      - 현재는 결재승인시 jobs 에 Insert 한다. 이는 그대로 유지한다. 이 경우 대시보드 > 나의 작업검토에서 upload = true 인 경우 파일 업로드를 할 수 있도록 변경하고, 업로드가 있어야 결재가 되도록 한다.
+      - "작업 워크플로우" 메뉴에서도 승인을 할 수 있도록 추가한다.
+        - worker = hitl 인 work_node 에서 승인을 기다리는 상태가 되면 사용자가 "승인 대기중" 아이콘을 클릭했을 때 팝업을 띄우고 팝업에서의 처리는 다음과 같다.
+          - 승인/반려
+          - upload = true 시 파일 업로드
+    - 파일 업로드는 복수의 파일을 업로드 가능하다. 단 텍스트로 구성된 파일만 가능하다.
 
-
-
-# 로그 관리 보완 - 로직 확인이 필요하여 보류로 남김 - 260813
-사용자 대화 로그 보관 정책
-- USER_COMM_LOG_RETENTION_DAY 환경변수, default 30
-- USER_COMM_LOG_RETENTION_DAY 이전 로그는 삭제
-에이전트 로그 보관 정책
-- whatap 이벤트 수신을 제외한 에이전트 로그는 현재 코드에서 참조가 없을 경우(write 만 하는 경우) 수집하지 않음
-- whatap 이벤트 로그는 일별 로테이션
-- WHATAP_EVENT_LOG_RETENTION_DAY 환경변수, default 30
-- WHATAP_EVENT_LOG_RETENTION_DAY 이전 로그는 삭제
 
 
 

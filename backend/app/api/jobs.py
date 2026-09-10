@@ -50,6 +50,7 @@ from backend.app.db.users import get_user_by_userid
 from backend.app.services.user_signup import notify_signup_approved
 from backend.app.services.workflow_runner import (
     fail_workflow_after_rejection,
+    require_hitl_attachment_ready,
     resume_workflow_after_approval,
 )
 from backend.app.services.agent_runtime_client import AgentInvokeRequest
@@ -544,6 +545,12 @@ async def direct_approve_job_endpoint(
     body: DirectApproveJobRequest,
 ) -> JobRecordResponse:
     database_path = request.app.state.database_path
+    existing = get_job_by_idx(database_path, idx)
+    if existing is not None:
+        try:
+            require_hitl_attachment_ready(database_path, existing)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
     try:
         record = direct_approve_job(database_path, idx, approver_userid=body.actor_userid)
     except ValueError as exc:
@@ -575,6 +582,12 @@ async def approve_job_review(
     body: JobReviewActionRequest,
 ) -> JobRecordResponse:
     database_path = request.app.state.database_path
+    existing = get_job_by_idx(database_path, idx)
+    if existing is not None:
+        try:
+            require_hitl_attachment_ready(database_path, existing)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
     try:
         record = approve_assigned_job(database_path, idx, actor_userid=body.actor_userid)
     except ValueError as exc:
