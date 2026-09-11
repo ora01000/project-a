@@ -2570,8 +2570,11 @@ left "작업 워크플로우 목록" 패널의 생성된 작업 워크플로우 
   - U : "갱신"
   - D : "삭제"
   각각을 네모 박스 아이콘화하고 생성일자와 동일한 row 의 오른쪽 정렬로 배치한다.
-  
-  
+
+
+# 테마에 따른 icon asset 구분
+- 현재 생성된 icon asset 은 어두운 테마에서는 잘 보이나 밝은 테마에서는 가독성이 떨어진다. 밝은 테마에 맞춰 icon asset 을 한벌 더 생성하고 각 테마에 맞춰 선택하여 적용하게 한다
+  - 적용: `frontend/public/workflow-icons/`(dark) + `light/`(밝은 테마). `WorkflowIcon`·안내 MD 경로가 `data-theme`에 맞춰 선택
 
   
 

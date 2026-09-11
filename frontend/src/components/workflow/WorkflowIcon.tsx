@@ -1,5 +1,8 @@
 import type { ImgHTMLAttributes } from "react";
 
+import { useTheme } from "../../context/ThemeContext";
+import type { AppTheme } from "../../types/theme";
+
 /** Served from ``frontend/public/workflow-icons`` (Vite public root). */
 export const WORKFLOW_ICON_BASE = "/workflow-icons";
 
@@ -46,8 +49,20 @@ const SIZE_CLASS: Record<NonNullable<WorkflowIconProps["size"]>, string> = {
   lg: "h-5 w-5",
 };
 
-export function workflowIconSrc(name: WorkflowIconName): string {
+/** Dark-theme assets live at the icon root; light variants under ``light/``. */
+export function workflowIconSrc(name: WorkflowIconName, theme: AppTheme = "dark"): string {
+  if (theme === "light") {
+    return `${WORKFLOW_ICON_BASE}/light/${name}.svg`;
+  }
   return `${WORKFLOW_ICON_BASE}/${name}.svg`;
+}
+
+/** Rewrite markdown icon paths for the active theme (guide docs). */
+export function rewriteWorkflowIconPathsForTheme(markdown: string, theme: AppTheme): string {
+  if (theme !== "light") {
+    return markdown;
+  }
+  return markdown.replace(/\/workflow-icons\/(?!light\/)/g, "/workflow-icons/light/");
 }
 
 export function WorkflowIcon({
@@ -57,9 +72,10 @@ export function WorkflowIcon({
   className = "",
   ...rest
 }: WorkflowIconProps) {
+  const { theme } = useTheme();
   return (
     <img
-      src={workflowIconSrc(name)}
+      src={workflowIconSrc(name, theme)}
       alt={label ?? ""}
       aria-hidden={label ? undefined : true}
       className={`inline-block shrink-0 object-contain ${SIZE_CLASS[size]} ${className}`.trim()}

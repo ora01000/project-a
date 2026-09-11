@@ -1,7 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
+import { useTheme } from "../../context/ThemeContext";
 import { JOB_TYPE_WORKFLOW } from "../../types/job";
 import { JobContentView } from "../jobs/JobContentView";
+import { rewriteWorkflowIconPathsForTheme } from "./WorkflowIcon";
 
 async function parseError(response: Response, fallback: string): Promise<string> {
   const payload = (await response.json().catch(() => null)) as { detail?: string } | null;
@@ -10,9 +12,14 @@ async function parseError(response: Response, fallback: string): Promise<string>
 
 /** Idle-state guide: renders ``docs/workflow_front/workflow_front.md``. */
 export function WorkflowFrontGuidePanel() {
+  const { theme } = useTheme();
   const [content, setContent] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const themedContent = useMemo(
+    () => rewriteWorkflowIconPathsForTheme(content, theme),
+    [content, theme],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -53,9 +60,9 @@ export function WorkflowFrontGuidePanel() {
         ) : null}
         {error ? <p className="text-sm text-rose-300">{error}</p> : null}
         {!isLoading && !error ? (
-          content ? (
+          themedContent ? (
             <JobContentView
-              content={content}
+              content={themedContent}
               jobType={JOB_TYPE_WORKFLOW}
               className="rounded-md border border-slate-700/80 bg-slate-950/50 p-4 text-sm text-slate-200"
             />

@@ -66,6 +66,10 @@ verify_frontend_deploy_assets() {
     echo "frontend/public/workflow-icons has no *.svg files" >&2
     exit 1
   fi
+  if ! compgen -G "${ROOT_DIR}/frontend/public/workflow-icons/light/*.svg" > /dev/null; then
+    echo "frontend/public/workflow-icons/light has no *.svg files" >&2
+    exit 1
+  fi
 }
 
 ensure_builder() {
