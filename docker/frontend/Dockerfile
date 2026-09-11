@@ -5,6 +5,7 @@ WORKDIR /app
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
 
+# Includes public/workflow-icons (served as /workflow-icons/*.svg after Vite build)
 COPY frontend/ ./
 RUN npm run build
 

@@ -12,12 +12,19 @@ PLATFORMS="${PLATFORMS:-linux/amd64}"
 BUILDER_NAME="${BUILDER_NAME:-project-a-multiarch}"
 PUSH="${PUSH:-true}"
 
-# Backend image bundles agent prompts/skills/templates from docs/ (see docker/backend/Dockerfile).
-# workflow_template: copy whole directory — md files may be added or renamed freely.
+# Backend image bundles agent prompts/skills/templates/guides from docs/
+# (see docker/backend/Dockerfile).
+# workflow_template / workflow_front: copy whole directories — md files may be added or renamed freely.
 BACKEND_DEPLOY_DIRS=(
   docs/system-prompt
   docs/skill
   docs/workflow_template
+  docs/workflow_front
+)
+
+# Frontend Vite public assets (copied via COPY frontend/ in docker/frontend/Dockerfile).
+FRONTEND_DEPLOY_DIRS=(
+  frontend/public/workflow-icons
 )
 
 verify_backend_deploy_assets() {
@@ -35,6 +42,28 @@ verify_backend_deploy_assets() {
   # Do not pin filenames; any *.md under workflow_template is included by directory COPY.
   if ! compgen -G "${ROOT_DIR}/docs/workflow_template/*.md" > /dev/null; then
     echo "docs/workflow_template has no *.md files (directory is included as a whole at build)" >&2
+    exit 1
+  fi
+  if [[ ! -f "${ROOT_DIR}/docs/workflow_front/workflow_front.md" ]]; then
+    echo "docs/workflow_front/workflow_front.md is required for the workflow idle guide API" >&2
+    exit 1
+  fi
+}
+
+verify_frontend_deploy_assets() {
+  local missing=()
+  for dir in "${FRONTEND_DEPLOY_DIRS[@]}"; do
+    if [[ ! -d "${ROOT_DIR}/${dir}" ]]; then
+      missing+=("${dir}")
+    fi
+  done
+  if [[ ${#missing[@]} -gt 0 ]]; then
+    echo "Missing frontend deploy directories (required for Vite public assets):" >&2
+    printf '  - %s\n' "${missing[@]}" >&2
+    exit 1
+  fi
+  if ! compgen -G "${ROOT_DIR}/frontend/public/workflow-icons/*.svg" > /dev/null; then
+    echo "frontend/public/workflow-icons has no *.svg files" >&2
     exit 1
   fi
 }
@@ -77,6 +106,7 @@ build_image() {
 
 ensure_builder
 verify_backend_deploy_assets
+verify_frontend_deploy_assets
 build_image docker/backend/Dockerfile "${BACKEND_IMAGE}"
 build_image docker/frontend/Dockerfile "${FRONTEND_IMAGE}"
 

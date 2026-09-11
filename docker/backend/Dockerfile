@@ -28,6 +28,8 @@ COPY docs/system-prompt ./docs/system-prompt
 COPY docs/skill ./docs/skill
 # Entire dir (md files may be added/renamed freely; API lists *.md at runtime)
 COPY docs/workflow_template ./docs/workflow_template
+# Idle-state workflow guide markdown (GET /api/workflow-front)
+COPY docs/workflow_front ./docs/workflow_front
 COPY RELEASE.md ./RELEASE.md
 
 ENV PATH="/app/.venv/bin:${PATH}" \
