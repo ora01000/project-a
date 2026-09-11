@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 
 import type { WorkflowApprover } from "../../types/workflow";
+import { WorkflowIcon } from "./WorkflowIcon";
 
 interface WorkflowApproverPickModalProps {
   approvers: WorkflowApprover[];
@@ -91,7 +92,7 @@ export function WorkflowApproverPickModal({
                   className="rounded px-0.5 text-slate-300 hover:bg-slate-800 hover:text-white"
                   aria-label="결재자 선택 해제"
                 >
-                  ×
+                  <WorkflowIcon name="delete" size="xs" label="선택 해제" />
                 </button>
               </span>
             ) : (

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { AgentRuntimeRecord } from "../../types/agentruntime";
 import { assignableAgentId } from "../../types/agentruntime";
@@ -12,6 +12,7 @@ import {
   DEFAULT_WORK_NODE_CRON_EXPR,
   WorkNodeScheduleField,
 } from "./WorkNodeScheduleField";
+import { ScriptCodeEditor } from "./ScriptCodeEditor";
 
 interface WorkNodeEditPanelProps {
   node: WorkEditorNode;
@@ -222,6 +223,61 @@ function resolveChatAgentId(
   return agentId;
 }
 
+function looksLikeKubernetesYaml(script: string): boolean {
+  const trimmed = script.trim();
+  if (!trimmed) {
+    return false;
+  }
+  if (/^\s*kubectl\b/im.test(trimmed)) {
+    return false;
+  }
+  return (
+    /^apiVersion:\s*\S+/m.test(trimmed) ||
+    (/^kind:\s*\S+/m.test(trimmed) && /apiVersion:\s*\S+/m.test(trimmed))
+  );
+}
+
+const MUTATING_KUBECTL_RE =
+  /\b(apply|create|delete|patch|replace|edit|scale|annotate|label|taint|cordon|uncordon|drain|rollout\s+undo|set)\b/i;
+
+/** Ensure mutating kubectl lines carry ``--dry-run=server`` (before shell redirects). */
+function injectKubectlDryRun(line: string): string {
+  if (!/\bkubectl\b/i.test(line) || /--dry-run(=|\s|$)/i.test(line)) {
+    return line;
+  }
+  if (!MUTATING_KUBECTL_RE.test(line)) {
+    return line;
+  }
+  const redirectMatch = line.match(/(\s+(?:<<['"]?\w+['"]?|<[^=]|>>?).*)\s*$/);
+  if (redirectMatch?.[1]) {
+    const cut = line.length - redirectMatch[1].length;
+    return `${line.slice(0, cut)} --dry-run=server${line.slice(cut)}`;
+  }
+  return `${line.trimEnd()} --dry-run=server`;
+}
+
+/**
+ * Rewrite kubectl validation payload so CUD cannot hit the live cluster.
+ * Raw Deployment/YAML manifests become ``kubectl apply --dry-run=server -f -``.
+ */
+export function prepareKubectlValidationScript(script: string): string {
+  const trimmed = script.trim();
+  if (!trimmed) {
+    return trimmed;
+  }
+  if (looksLikeKubernetesYaml(trimmed)) {
+    return [
+      "kubectl apply --dry-run=server -o yaml -f - <<'EOF'",
+      trimmed,
+      "EOF",
+    ].join("\n");
+  }
+  return trimmed
+    .split("\n")
+    .map((line) => injectKubectlDryRun(line))
+    .join("\n");
+}
+
 function buildValidationMessage(scriptType: string, script: string): string {
   if (scriptType === "prompt") {
     return script;
@@ -237,14 +293,18 @@ function buildValidationMessage(scriptType: string, script: string): string {
     ].join("\n");
   }
   if (scriptType === "kubectl") {
+    const safeScript = prepareKubectlValidationScript(script);
     return [
-      "선제 조건문 : kubectl 명령어를 수행하기 전 get(ReadOnly) 인 경우는 바로 수행 가능하나 delete, edit, create, apply, patch 등 CUD 인 경우는 반드시 --dry-run 으로 수행 테스트만 진행한다. 결과는 다음 JSON만 출력한다.",
-      '{"valid": true | false, "message": "실행결과"}',
+      "【검증 전용 · 실제 변경 금지】",
+      "이 요청은 클러스터 검증만 수행한다. 리소스를 실제로 생성·변경·삭제하면 안 된다.",
+      "아래 명령을 그대로 실행하고 --dry-run 을 제거·우회하지 마라.",
+      "읽기 전용(get/describe/logs 등)만 dry-run 없이 허용한다. apply/create/delete/patch/replace 등은 반드시 --dry-run=server(또는 client) 포함.",
+      "YAML 매니페스트는 kubectl apply --dry-run=server -f - 형태만 허용한다.",
+      '결과는 다음 JSON만 출력한다: {"valid":true|false,"message":"실행결과"}',
       "",
-      "다음 kubectl 명령어를 위 선제 조건에 따라 검증/수행하라.",
-      "",
+      "【실행할 명령】",
       "```bash",
-      script,
+      safeScript,
       "```",
     ].join("\n");
   }
@@ -253,6 +313,34 @@ function buildValidationMessage(scriptType: string, script: string): string {
 
 function fileLabel(name: string): string {
   return name.trim().split(/[/\\]/).pop() || "";
+}
+
+const MIN_EDIT_PANEL_WIDTH = 240;
+const MIN_SCRIPT_PANEL_WIDTH = 260;
+const MIN_VALIDATION_PANEL_WIDTH = 220;
+const DEFAULT_EDIT_PANEL_WIDTH = 360;
+const DEFAULT_SCRIPT_PANEL_WIDTH = 420;
+const PANEL_RESIZE_HANDLE_WIDTH = 8;
+
+type PanelResizeMode = "edit-script" | "script-validation";
+
+function PanelColResizeHandle({
+  onMouseDown,
+  label,
+}: {
+  onMouseDown: (event: React.MouseEvent) => void;
+  label: string;
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      onMouseDown={onMouseDown}
+      className="group flex w-2 shrink-0 cursor-col-resize items-center justify-center self-stretch rounded-md border border-transparent hover:border-slate-600 hover:bg-slate-800/60"
+    >
+      <span className="h-12 w-1 rounded-full bg-slate-600 group-hover:bg-slate-400" />
+    </button>
+  );
 }
 
 export function WorkNodeEditPanel({
@@ -270,9 +358,61 @@ export function WorkNodeEditPanel({
   const [generateError, setGenerateError] = useState<string | null>(null);
   const [validateMessage, setValidateMessage] = useState<string | null>(null);
   const [validateResult, setValidateResult] = useState<string | null>(null);
+  const [isValidationPanelOpen, setIsValidationPanelOpen] = useState(false);
   const [isReportMailOpen, setIsReportMailOpen] = useState(false);
+  const [editPanelWidth, setEditPanelWidth] = useState(DEFAULT_EDIT_PANEL_WIDTH);
+  const [scriptPanelWidth, setScriptPanelWidth] = useState(DEFAULT_SCRIPT_PANEL_WIDTH);
+  const [forceScriptPanel, setForceScriptPanel] = useState(() => Boolean(node.workScript.trim()));
 
-  const hasGeneratedScript = Boolean(node.workScript.trim());
+  const layoutRef = useRef<HTMLDivElement>(null);
+  const isResizingRef = useRef(false);
+  const resizeModeRef = useRef<PanelResizeMode | null>(null);
+  const resizeStartXRef = useRef(0);
+  const resizeStartEditWidthRef = useRef(DEFAULT_EDIT_PANEL_WIDTH);
+  const resizeStartScriptWidthRef = useRef(DEFAULT_SCRIPT_PANEL_WIDTH);
+
+  const hasGeneratedScript = forceScriptPanel || Boolean(node.workScript.trim());
+  const showValidationPanel =
+    hasGeneratedScript &&
+    isValidationPanelOpen &&
+    Boolean(validateMessage || validateResult);
+
+  const clampPanelWidths = useCallback(
+    (nextEdit: number, nextScript: number, withValidation: boolean) => {
+      const containerWidth = layoutRef.current?.clientWidth ?? 960;
+      const handleBudget =
+        PANEL_RESIZE_HANDLE_WIDTH + (withValidation ? PANEL_RESIZE_HANDLE_WIDTH : 0);
+      const maxEdit = Math.max(
+        MIN_EDIT_PANEL_WIDTH,
+        containerWidth -
+          handleBudget -
+          MIN_SCRIPT_PANEL_WIDTH -
+          (withValidation ? MIN_VALIDATION_PANEL_WIDTH : 0),
+      );
+      const editWidth = Math.min(maxEdit, Math.max(MIN_EDIT_PANEL_WIDTH, nextEdit));
+      if (!withValidation) {
+        return { editWidth, scriptWidth: nextScript };
+      }
+      const remainingAfterEdit = containerWidth - handleBudget - editWidth;
+      const maxScript = Math.max(
+        MIN_SCRIPT_PANEL_WIDTH,
+        remainingAfterEdit - MIN_VALIDATION_PANEL_WIDTH,
+      );
+      const scriptWidth = Math.min(maxScript, Math.max(MIN_SCRIPT_PANEL_WIDTH, nextScript));
+      return { editWidth, scriptWidth };
+    },
+    [],
+  );
+
+  useEffect(() => {
+    setForceScriptPanel(Boolean(node.workScript.trim()));
+  }, [node.uuid]);
+
+  useEffect(() => {
+    if (node.workScript.trim()) {
+      setForceScriptPanel(true);
+    }
+  }, [node.workScript]);
 
   useEffect(() => {
     let cancelled = false;
@@ -282,6 +422,7 @@ export function WorkNodeEditPanel({
     if (!shouldLoad) {
       setValidateMessage(null);
       setValidateResult(null);
+      setIsValidationPanelOpen(false);
       return () => {
         cancelled = true;
       };
@@ -306,6 +447,7 @@ export function WorkNodeEditPanel({
         }
         setValidateMessage("저장된 검증 결과를 불러왔습니다.");
         setValidateResult(content);
+        setIsValidationPanelOpen(true);
       } catch {
         // Keep panel quiet when prior result file is unavailable.
       }
@@ -315,6 +457,62 @@ export function WorkNodeEditPanel({
       cancelled = true;
     };
   }, [node.uuid, node.testResult, node.validateDate]);
+
+  useEffect(() => {
+    const handleMouseMove = (event: MouseEvent) => {
+      if (!isResizingRef.current || !resizeModeRef.current) {
+        return;
+      }
+      const deltaX = event.clientX - resizeStartXRef.current;
+      if (resizeModeRef.current === "edit-script") {
+        const next = clampPanelWidths(
+          resizeStartEditWidthRef.current + deltaX,
+          resizeStartScriptWidthRef.current,
+          showValidationPanel,
+        );
+        setEditPanelWidth(next.editWidth);
+        if (showValidationPanel) {
+          setScriptPanelWidth(next.scriptWidth);
+        }
+        return;
+      }
+      const next = clampPanelWidths(
+        resizeStartEditWidthRef.current,
+        resizeStartScriptWidthRef.current + deltaX,
+        true,
+      );
+      setEditPanelWidth(next.editWidth);
+      setScriptPanelWidth(next.scriptWidth);
+    };
+
+    const handleMouseUp = () => {
+      if (!isResizingRef.current) {
+        return;
+      }
+      isResizingRef.current = false;
+      resizeModeRef.current = null;
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+    return () => {
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+    };
+  }, [clampPanelWidths, showValidationPanel]);
+
+  const beginPanelResize = (mode: PanelResizeMode, event: React.MouseEvent) => {
+    event.preventDefault();
+    isResizingRef.current = true;
+    resizeModeRef.current = mode;
+    resizeStartXRef.current = event.clientX;
+    resizeStartEditWidthRef.current = editPanelWidth;
+    resizeStartScriptWidthRef.current = scriptPanelWidth;
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+  };
 
   const requestScriptGeneration = async () => {
     const prompt = node.userPrompt.trim();
@@ -348,6 +546,7 @@ export function WorkNodeEditPanel({
     setGenerateError(null);
     setValidateMessage(null);
     setValidateResult(null);
+    setIsValidationPanelOpen(false);
 
     try {
       const raw = await streamAgentChat({
@@ -374,6 +573,8 @@ export function WorkNodeEditPanel({
   const handleDeleteScript = async () => {
     setValidateMessage(null);
     setValidateResult(null);
+    setIsValidationPanelOpen(false);
+    setForceScriptPanel(false);
     setGenerateError(null);
     await onPersistPatch({
       workScript: "",
@@ -382,9 +583,21 @@ export function WorkNodeEditPanel({
     });
   };
 
+  const handleSaveScript = async () => {
+    if (!window.confirm("수정한 스크립트를 저장하시겠습니까?")) {
+      return;
+    }
+    await onPersistPatch({
+      workScript: node.workScript,
+      scriptType: node.scriptType,
+      testResult: false,
+    });
+  };
+
   const handleScriptTypeChange = async (nextType: WorkScriptType) => {
     setValidateMessage(null);
     setValidateResult(null);
+    setIsValidationPanelOpen(false);
     onChange({ scriptType: nextType, testResult: false });
     await onPersistPatch({ scriptType: nextType, testResult: false });
   };
@@ -397,16 +610,19 @@ export function WorkNodeEditPanel({
     if (!script) {
       setValidateMessage("검증할 스크립트가 없습니다.");
       setValidateResult(null);
+      setIsValidationPanelOpen(true);
       return;
     }
     if (scriptType === "cli") {
       setValidateMessage("cli 스크립트 자동 검증은 아직 지원하지 않습니다.");
       setValidateResult(null);
+      setIsValidationPanelOpen(true);
       return;
     }
     if (scriptType !== "kubectl" && scriptType !== "ansible" && scriptType !== "prompt") {
       setValidateMessage("script_type이 kubectl, ansible, prompt 중 하나가 아닙니다.");
       setValidateResult(null);
+      setIsValidationPanelOpen(true);
       return;
     }
 
@@ -435,6 +651,7 @@ export function WorkNodeEditPanel({
     } catch (err) {
       setValidateMessage(err instanceof Error ? err.message : "검증 에이전트를 확인할 수 없습니다.");
       setValidateResult(null);
+      setIsValidationPanelOpen(true);
       return;
     }
 
@@ -452,6 +669,7 @@ export function WorkNodeEditPanel({
         const responseText = raw.trim() || "(빈 응답)";
         setValidateMessage("대상 에이전트 응답을 수신했습니다.");
         setValidateResult(responseText);
+        setIsValidationPanelOpen(true);
         await onPersistPatch(
           { testResult: true },
           { validationMessage: responseText },
@@ -460,6 +678,7 @@ export function WorkNodeEditPanel({
         const result = parseValidationPayload(raw);
         setValidateMessage(result.message);
         setValidateResult(raw.trim() || result.message);
+        setIsValidationPanelOpen(true);
         await onPersistPatch(
           { testResult: result.valid },
           result.valid ? { validationMessage: result.message } : undefined,
@@ -468,14 +687,22 @@ export function WorkNodeEditPanel({
     } catch (err) {
       setValidateMessage(err instanceof Error ? err.message : "검증 요청에 실패했습니다.");
       setValidateResult(null);
+      setIsValidationPanelOpen(true);
     } finally {
       setIsValidating(false);
     }
   };
 
   return (
-    <div className={`grid min-h-0 flex-1 gap-3 ${hasGeneratedScript ? "md:grid-cols-2" : ""}`}>
-      <div className="grid min-h-0 content-start gap-3 overflow-auto">
+    <div ref={layoutRef} className="flex min-h-0 flex-1 overflow-hidden">
+      <div
+        className="grid min-h-0 content-start gap-3 overflow-auto pr-1"
+        style={
+          hasGeneratedScript
+            ? { width: editPanelWidth, minWidth: MIN_EDIT_PANEL_WIDTH }
+            : { flex: "1 1 auto", minWidth: MIN_EDIT_PANEL_WIDTH }
+        }
+      >
         <label className="grid gap-1 text-xs text-slate-400">
           <span className="inline-flex items-center gap-1.5">
             <WorkflowIcon name="work-node" size="xs" />
@@ -712,104 +939,152 @@ export function WorkNodeEditPanel({
       </div>
 
       {hasGeneratedScript ? (
-        <section className="flex min-h-0 flex-col overflow-hidden rounded-md border border-slate-700 bg-slate-900/50">
-          <header className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-slate-700 px-3 py-2">
-            <div className="flex min-w-0 flex-wrap items-center gap-2">
-              <h4 className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-200">
-                <WorkflowIcon name="script" size="sm" />
-                생성된 스크립트
-              </h4>
-              <label className="flex items-center gap-1.5 text-[11px] text-slate-400">
-                스크립트 종류
-                <select
-                  value={
-                    WORK_SCRIPT_TYPE_OPTIONS.some((item) => item.value === node.scriptType)
-                      ? node.scriptType
-                      : ""
-                  }
-                  disabled={isValidating || isGenerating}
-                  onChange={(event) => {
-                    const next = event.target.value as WorkScriptType;
-                    void handleScriptTypeChange(next);
-                  }}
-                  className="rounded-md border border-slate-600 bg-slate-950 px-2 py-1 text-[11px] text-slate-100 disabled:opacity-50"
-                >
-                  <option value="" disabled>
-                    선택
-                  </option>
-                  {WORK_SCRIPT_TYPE_OPTIONS.map((item) => (
-                    <option key={item.value} value={item.value}>
-                      {item.label}
+        <>
+          <PanelColResizeHandle
+            label="작업 편집과 스크립트 패널 너비 조절"
+            onMouseDown={(event) => beginPanelResize("edit-script", event)}
+          />
+
+          <section
+            className="flex min-h-0 flex-col overflow-hidden rounded-md border border-slate-700 bg-slate-900/50"
+            style={
+              showValidationPanel
+                ? { width: scriptPanelWidth, minWidth: MIN_SCRIPT_PANEL_WIDTH }
+                : { flex: "1 1 auto", minWidth: MIN_SCRIPT_PANEL_WIDTH }
+            }
+          >
+            <header className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-slate-700 px-3 py-2">
+              <div className="flex min-w-0 flex-wrap items-center gap-2">
+                <h4 className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-200">
+                  <WorkflowIcon name="script" size="sm" />
+                  생성된 스크립트
+                </h4>
+                <label className="flex items-center gap-1.5 text-[11px] text-slate-400">
+                  스크립트 종류
+                  <select
+                    value={
+                      WORK_SCRIPT_TYPE_OPTIONS.some((item) => item.value === node.scriptType)
+                        ? node.scriptType
+                        : ""
+                    }
+                    disabled={isValidating || isGenerating}
+                    onChange={(event) => {
+                      const next = event.target.value as WorkScriptType;
+                      void handleScriptTypeChange(next);
+                    }}
+                    className="rounded-md border border-slate-600 bg-slate-950 px-2 py-1 text-[11px] text-slate-100 disabled:opacity-50"
+                  >
+                    <option value="" disabled>
+                      선택
                     </option>
-                  ))}
-                </select>
-              </label>
-            </div>
-            <div className="flex shrink-0 items-center gap-1.5">
-              {node.testResult ? (
-                <span
-                  className="inline-flex items-center gap-1 text-[11px] text-emerald-300"
-                  title={node.validateDate ? `검증 시각: ${node.validateDate}` : "검증 완료"}
+                    {WORK_SCRIPT_TYPE_OPTIONS.map((item) => (
+                      <option key={item.value} value={item.value}>
+                        {item.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+              <div className="flex shrink-0 items-center gap-1.5">
+                {node.testResult ? (
+                  <span
+                    className="inline-flex items-center gap-1 text-[11px] text-emerald-300"
+                    title={node.validateDate ? `검증 시각: ${node.validateDate}` : "검증 완료"}
+                  >
+                    <WorkflowIcon name="validate" size="xs" label="검증 완료" />
+                    {node.validateDate ? (
+                      <span className="tabular-nums text-emerald-200/90">{node.validateDate}</span>
+                    ) : null}
+                  </span>
+                ) : null}
+                <button
+                  type="button"
+                  disabled={isValidating || isGenerating}
+                  onClick={() => {
+                    void handleSaveScript();
+                  }}
+                  className="inline-flex items-center gap-1 rounded-md border border-sky-700 bg-sky-950/50 px-2.5 py-1 text-[11px] font-medium text-sky-100 hover:bg-sky-900/60 disabled:opacity-50"
                 >
-                  <WorkflowIcon name="validate" size="xs" label="검증 완료" />
-                  {node.validateDate ? (
-                    <span className="tabular-nums text-emerald-200/90">{node.validateDate}</span>
-                  ) : null}
-                </span>
-              ) : null}
-              <button
-                type="button"
-                disabled={isValidating || isGenerating}
-                onClick={() => {
-                  void handleDeleteScript();
-                }}
-                className="inline-flex items-center gap-1 rounded-md border border-rose-800 bg-rose-950/40 px-2.5 py-1 text-[11px] font-medium text-rose-100 hover:bg-rose-900/50 disabled:opacity-50"
-              >
-                <WorkflowIcon name="stop" size="xs" />
+                  <WorkflowIcon name="edit" size="xs" />
+                  저장
+                </button>
+                <button
+                  type="button"
+                  disabled={isValidating || isGenerating}
+                  onClick={() => {
+                    void handleDeleteScript();
+                  }}
+                  className="inline-flex items-center gap-1 rounded-md border border-rose-800 bg-rose-950/40 px-2.5 py-1 text-[11px] font-medium text-rose-100 hover:bg-rose-900/50 disabled:opacity-50"
+                >
+                <WorkflowIcon name="delete" size="xs" />
                 삭제
               </button>
-              <button
-                type="button"
-                disabled={isValidating || isGenerating}
-                title="검증 실행"
-                onClick={() => {
-                  void handleValidateScript();
-                }}
-                className="inline-flex items-center gap-1 rounded-md border border-emerald-700 bg-emerald-950/40 px-2.5 py-1 text-[11px] font-medium text-emerald-100 hover:bg-emerald-900/50 disabled:opacity-50"
-              >
-                <WorkflowIcon name="validate" size="xs" />
-                {isValidating ? "검증 중…" : "검증"}
-              </button>
-            </div>
-          </header>
-          <pre className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap px-3 py-2 text-[11px] text-slate-200">
-            {node.workScript}
-          </pre>
-          {validateMessage || validateResult ? (
-            <div className="shrink-0 border-t border-slate-700">
-              {validateMessage ? (
-                <p
-                  className={`px-3 py-2 text-[11px] ${
-                    node.testResult ? "text-emerald-300" : "text-amber-200"
-                  }`}
+                <button
+                  type="button"
+                  disabled={isValidating || isGenerating}
+                  title="검증 실행"
+                  onClick={() => {
+                    void handleValidateScript();
+                  }}
+                  className="inline-flex items-center gap-1 rounded-md border border-emerald-700 bg-emerald-950/40 px-2.5 py-1 text-[11px] font-medium text-emerald-100 hover:bg-emerald-900/50 disabled:opacity-50"
                 >
-                  {validateMessage}
-                </p>
-              ) : null}
-              {validateResult ? (
-                <div className="border-t border-slate-800 bg-slate-950/60 px-3 py-2">
-                  <h5 className="mb-1 inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
-                    <WorkflowIcon name="result" size="xs" />
-                    응답 결과
-                  </h5>
-                  <pre className="max-h-48 overflow-auto whitespace-pre-wrap text-[11px] text-slate-200">
-                    {validateResult}
-                  </pre>
+                  <WorkflowIcon name="validate" size="xs" />
+                  {isValidating ? "검증 중…" : "검증"}
+                </button>
+              </div>
+            </header>
+            <ScriptCodeEditor
+              value={node.workScript}
+              disabled={isValidating || isGenerating}
+              onChange={(next) => onChange({ workScript: next, testResult: false })}
+            />
+          </section>
+
+          {showValidationPanel ? (
+            <>
+              <PanelColResizeHandle
+                label="스크립트와 검증 결과 패널 너비 조절"
+                onMouseDown={(event) => beginPanelResize("script-validation", event)}
+              />
+              <section
+                className="flex min-h-0 min-w-[220px] flex-1 flex-col overflow-hidden rounded-md border border-slate-700 bg-slate-900/50"
+                style={{ minWidth: MIN_VALIDATION_PANEL_WIDTH }}
+              >
+                <header className="flex shrink-0 items-center justify-between gap-2 border-b border-slate-700 px-3 py-2">
+                  <h4 className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-200">
+                    <WorkflowIcon name="result" size="sm" />
+                    검증 응답 결과
+                  </h4>
+                  <button
+                    type="button"
+                    aria-label="검증 응답 결과 닫기"
+                    onClick={() => setIsValidationPanelOpen(false)}
+                    className="inline-flex items-center gap-1 rounded-md border border-slate-600 bg-slate-950/60 px-2.5 py-1 text-[11px] font-medium text-slate-200 hover:bg-slate-800"
+                  >
+                    <WorkflowIcon name="stop" size="xs" />
+                    닫기
+                  </button>
+                </header>
+                <div className="min-h-0 flex-1 overflow-auto px-3 py-2">
+                  {validateMessage ? (
+                    <p
+                      className={`mb-2 text-[11px] ${
+                        node.testResult ? "text-emerald-300" : "text-amber-200"
+                      }`}
+                    >
+                      {validateMessage}
+                    </p>
+                  ) : null}
+                  {validateResult ? (
+                    <pre className="whitespace-pre-wrap font-mono text-[11px] leading-5 text-slate-200">
+                      {validateResult}
+                    </pre>
+                  ) : null}
                 </div>
-              ) : null}
-            </div>
+              </section>
+            </>
           ) : null}
-        </section>
+        </>
       ) : null}
     </div>
   );

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState, type KeyboardEvent, type Rea
 
 import type { UserRecord } from "../../types/user";
 import { ROLE_PENDING } from "../../types/user";
+import { WorkflowIcon } from "../workflow/WorkflowIcon";
 
 export interface JobReportRequester {
   name: string;
@@ -391,7 +392,7 @@ export function JobReportEmailModal({
             className="rounded px-0.5 text-slate-300 hover:bg-slate-800 hover:text-white"
             aria-label="SR 기안자 제거"
           >
-            ×
+            <WorkflowIcon name="delete" size="xs" label="제거" />
           </button>
         </span>,
       );
@@ -415,7 +416,7 @@ export function JobReportEmailModal({
             className="rounded px-0.5 text-slate-300 hover:bg-slate-800 hover:text-white"
             aria-label={`${label} 제거`}
           >
-            ×
+            <WorkflowIcon name="delete" size="xs" label="제거" />
           </button>
         </span>,
       );
@@ -434,7 +435,7 @@ export function JobReportEmailModal({
             className="rounded px-0.5 text-slate-300 hover:bg-slate-800 hover:text-white"
             aria-label={`${email} 제거`}
           >
-            ×
+            <WorkflowIcon name="delete" size="xs" label="제거" />
           </button>
         </span>,
       );

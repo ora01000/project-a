@@ -2220,6 +2220,7 @@ Your sole task is to write high-quality, production-ready, and syntactically cor
                 }
                 '''
                 "
+                - 보완(2026-09): YAML 매니페스트/mutating kubectl 은 검증 전에 `--dry-run=server` 가 포함된 명령으로 재작성해 전달한다(실제 apply 방지).
                 
               2. ansible 
                 - 대상 에이전트로 lint 테스트를 수행하고 가능하면 dry-run 을 요청 : 이경우 대상 에이전트는 ansible-lint 가 가능한 에이전트가 될 것이다.
@@ -2576,9 +2577,15 @@ left "작업 워크플로우 목록" 패널의 생성된 작업 워크플로우 
 - 현재 생성된 icon asset 은 어두운 테마에서는 잘 보이나 밝은 테마에서는 가독성이 떨어진다. 밝은 테마에 맞춰 icon asset 을 한벌 더 생성하고 각 테마에 맞춰 선택하여 적용하게 한다
   - 적용: `frontend/public/workflow-icons/`(dark) + `light/`(밝은 테마). `WorkflowIcon`·안내 MD 경로가 `data-theme`에 맞춰 선택
 
-  
+# 작업 워크플로우 > 작업 편집 탭
+- 생성된 스크립트 패널은 사용자가 수정이 가능하도록 한다. 수정된 내용을 저장할 수 있도록 저장 버튼을 삭제 왼쪽에 추가한다. 저장시 저장할지 확인한다.
+  - 에디터 화면에서 라인 번호가 표시되게 개선이 가능한가?
+    - 적용: `ScriptCodeEditor` — 좌측 gutter 라인 번호 + scroll 동기화 (추가 에디터 의존성 없음)
+- 검증 응답 결과 패널은 생성된 스크립트의 오른쪽에 생성한다. 검증 응답 결과 패널은 닫기 버튼을 두어 닫을 수 있다.
+- 작업 편집 패널, 생성된 스크립트 패널, 가변으로 생성된 검증 응답 결과 패널은 가로 크기를 마우스 컨트롤로 조절 가능하다
+  - 적용: `WorkNodeEditPanel` — 스크립트 textarea 편집·확인 저장, 검증 결과 우측 패널+닫기, 패널 간 col-resize
 
-
-
+- 다이어그램, 워크플로우 목록 카드 등 모든 "X" 로 표현된 삭제 버튼을 icon asset으로 생성하여 대체한다.
+  - 적용: `workflow-icons/delete.svg`(+light) · `WorkflowEditor` DeleteBox · 목록 카드 · 결재자/메일 칩 제거
 
 

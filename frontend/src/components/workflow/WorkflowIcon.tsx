@@ -11,6 +11,7 @@ export const WORKFLOW_ICON_NAMES = [
   "approve",
   "clone",
   "connect",
+  "delete",
   "distribute",
   "edit",
   "fail-branch",

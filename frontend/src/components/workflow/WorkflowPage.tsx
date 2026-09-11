@@ -549,9 +549,9 @@ export function WorkflowPage({ agents, user, onChatComplete }: WorkflowPageProps
                           event.stopPropagation();
                           void handleDeleteWorkflow(item);
                         }}
-                        className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-sm bg-transparent text-[11px] font-semibold leading-none text-slate-300 hover:bg-rose-950/60 hover:text-rose-200 disabled:cursor-not-allowed disabled:opacity-40"
+                        className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-sm bg-transparent text-slate-300 hover:bg-rose-950/60 hover:text-rose-200 disabled:cursor-not-allowed disabled:opacity-40"
                       >
-                        X
+                        <WorkflowIcon name="delete" size="xs" label="삭제" />
                       </button>
                     ) : null}
                   </div>

@@ -205,9 +205,9 @@ function DeleteBox({ onClick, label }: { onClick: () => void; label: string }) {
         event.stopPropagation();
         onClick();
       }}
-      className="absolute right-1 top-1 z-10 flex h-5 w-5 items-center justify-center rounded-sm bg-transparent text-[11px] font-semibold leading-none text-slate-300 hover:bg-rose-950/60 hover:text-rose-200"
+      className="absolute right-1 top-1 z-10 flex h-5 w-5 items-center justify-center rounded-sm bg-transparent text-slate-300 hover:bg-rose-950/60 hover:text-rose-200"
     >
-      X
+      <WorkflowIcon name="delete" size="xs" label="삭제" />
     </button>
   );
 }
