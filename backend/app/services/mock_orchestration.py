@@ -13,6 +13,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 from backend.app.agents.base import AgentDefinition, AgentInvokeResult, ToolUsage, extract_token_usage_from_text
 from backend.app.agents.mock_platform_agents import (
+    WORKFLOW_AGENT_LOCAL_AGENT_ID,
     MockPlatformAgentSpec,
     get_mock_platform_agent_spec,
     resolve_callable_catalog_agent_ids,
@@ -24,6 +25,7 @@ from backend.app.logging.prompt_debug import (
     record_orchestration,
     wrap_llm_for_prompt_debug,
 )
+from backend.app.services.workflow_agent_enrich import enrich_workflow_agent_json
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +65,7 @@ def _extract_json_block(text: str) -> dict[str, Any] | None:
 
 
 def _build_routing_system_prompt(spec: MockPlatformAgentSpec) -> str:
-    return f"{spec.system_prompt.strip()}\n\n{_ROUTING_JSON_INSTRUCTION}"
+    return f"{spec.resolved_system_prompt().strip()}\n\n{_ROUTING_JSON_INSTRUCTION}"
 
 
 def _callable_catalog(
@@ -103,12 +105,14 @@ async def _direct_orchestrator_answer(
         )
         response = await llm.ainvoke(
             [
-                SystemMessage(content=spec.system_prompt.strip()),
+                SystemMessage(content=spec.resolved_system_prompt().strip()),
                 HumanMessage(content=message),
             ],
         )
 
     content = response.content if isinstance(response.content, str) else str(response.content)
+    if spec.agent_id == WORKFLOW_AGENT_LOCAL_AGENT_ID:
+        content = enrich_workflow_agent_json(content)
     input_tokens, output_tokens = extract_token_usage_from_text(message, content)
     record_orchestration(
         agent_id=spec.agent_id,

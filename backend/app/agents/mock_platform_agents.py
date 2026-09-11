@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from backend.app.agents.base import AgentDefinition
-from backend.app.agents.system_prompt_loader import load_system_prompt
+from backend.app.agents.system_prompt_loader import read_system_prompt
 from backend.app.db.agentruntime import ORCHESTRATOR_LOCAL_AGENT_IDS, MockAgentRuntimePreset
 
 CALLABLE_INFRA_AGENT_IDS: tuple[str, ...] = (
@@ -31,8 +31,11 @@ class MockPlatformAgentSpec:
     agent_id: str
     agent_name: str
     description: str
-    system_prompt: str
     callable_agent_ids: tuple[str, ...] = CALLABLE_INFRA_AGENT_IDS
+
+    def resolved_system_prompt(self) -> str:
+        """Load prompt from disk on each call so md edits apply without re-import."""
+        return read_system_prompt(self.agent_id)
 
     def to_agent_definition(self) -> AgentDefinition:
         return AgentDefinition(
@@ -40,7 +43,7 @@ class MockPlatformAgentSpec:
             name=self.agent_name,
             role=self.description,
             mcp_server_keys=[],
-            system_prompt=self.system_prompt,
+            system_prompt=self.resolved_system_prompt(),
         )
 
     def to_runtime_preset(self) -> MockAgentRuntimePreset:
@@ -56,35 +59,27 @@ JOB_AUDITOR_AXIT_LOCAL_AGENT_ID = "JOB_AUDITOR_AGENT"
 WORKFLOW_AGENT_LOCAL_AGENT_ID = "WORKFLOW_AGENT"
 
 
-def _mock_platform_system_prompt(agent_id: str) -> str:
-    return load_system_prompt(agent_id)
-
-
 MOCK_PLATFORM_AGENT_SPECS: tuple[MockPlatformAgentSpec, ...] = (
     MockPlatformAgentSpec(
         agent_id="archi-analysis",
         agent_name="아키텍처 분석",
         description="인프라의 설계 구성 분석/도식화",
-        system_prompt=_mock_platform_system_prompt("archi-analysis"),
     ),
     MockPlatformAgentSpec(
         agent_id="helpdesk",
         agent_name="헬프데스크",
         description="문의응대",
-        system_prompt=_mock_platform_system_prompt("helpdesk"),
     ),
     MockPlatformAgentSpec(
         agent_id=JOB_AUDITOR_LOCAL_AGENT_ID,
         agent_name="작업검토",
         description="작업 내용에 대한 검토를 수행하고 필요시 작업 계획서를 작성",
-        system_prompt=_mock_platform_system_prompt(JOB_AUDITOR_LOCAL_AGENT_ID),
         callable_agent_ids=(),
     ),
     MockPlatformAgentSpec(
         agent_id=WORKFLOW_AGENT_LOCAL_AGENT_ID,
         agent_name="작업 워크플로우 생성",
         description="사용자 요청을 분석해 작업 워크플로우와 작업노드 JSON을 생성",
-        system_prompt=_mock_platform_system_prompt(WORKFLOW_AGENT_LOCAL_AGENT_ID),
         callable_agent_ids=(),
     ),
 )
