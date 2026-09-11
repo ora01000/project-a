@@ -11,7 +11,7 @@ ANSIBLE_LINT_MCP_SERVER_KEY = "ansible_lint"
 ANSIBLE_LINT_AGENT = AgentDefinition(
     agent_id=ANSIBLE_LINT_LOCAL_AGENT_ID,
     name="Ansible Playbook 검토",
-    role="Ansible playbook 생성, 검증",
+    role="Ansible 2.9.18 playbook 생성, 검증",
     mcp_server_keys=[ANSIBLE_LINT_MCP_SERVER_KEY],
     system_prompt=load_system_prompt(ANSIBLE_LINT_LOCAL_AGENT_ID),
 )

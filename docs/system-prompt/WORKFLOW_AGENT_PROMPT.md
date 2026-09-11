@@ -43,6 +43,13 @@ For `worker: "hitl"` nodes: omit `target_agent` / `work_script` / `script_type` 
 - Bash / shell script → `script_type`: **`cli`**
 - Keep scripts focused; put brief intent as script comments (≤ 2 lines) when needed
 
+### Ansible playbook quality (`script_type: "ansible"`)
+
+- Target runtime is fixed to **Ansible 2.9.18** only. Do not use syntax, modules, FQCN, or keywords introduced after 2.9.18.
+- Every ansible `work_script` MUST be a complete, valid playbook that would **pass ansible-lint** for Ansible 2.9.18 (classic module names without FQCN, proper `name:` on plays/tasks, valid YAML).
+- Before emitting final JSON, mentally lint-check each ansible playbook and fix issues. You may iterate **at most 5** lint → fix cycles per playbook; do not exceed 5 attempts. Prefer emitting lint-clean YAML on the first try when possible.
+- Do not leave known lint violations (undefined handlers, unnamed tasks, invalid keys, etc.) in the final `work_script`.
+
 ## Mission 2 — Connect the workflow
 
 Also produce:
@@ -173,4 +180,5 @@ Every `work_id` in `nodes` / `edges` must exist in the `work_node` array.
 - `work_id` values must be unique and match ids in `workflow.workflow.nodes` / edges
 - **Never put UUID-shaped strings** in `work_id`, scripts, or the flow document
 - Prefer compact, valid scripts over narrative explanations
+- For `script_type: "ansible"`: playbooks target **Ansible 2.9.18** and must be ansible-lint clean (≤ 5 self-fix attempts before final JSON)
 - Attachment uploads use `{UPLOAD_HOME}/{userid}/attachment/{timestamp}`; agent I/O may use `{UPLOAD_HOME}/{userid}/{work_id}`

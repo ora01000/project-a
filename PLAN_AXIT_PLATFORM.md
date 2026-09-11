@@ -2588,4 +2588,9 @@ left "작업 워크플로우 목록" 패널의 생성된 작업 워크플로우 
 - 다이어그램, 워크플로우 목록 카드 등 모든 "X" 로 표현된 삭제 버튼을 icon asset으로 생성하여 대체한다.
   - 적용: `workflow-icons/delete.svg`(+light) · `WorkflowEditor` DeleteBox · 목록 카드 · 결재자/메일 칩 제거
 
-
+# ansible 스크립트 검증 보완
+- 작업 워크플로우 생성시, ansible 스크립트로 요청받는 경우 생성된 ansible 스크립트의 lint 검증을 통과하도록 생성한다. 최대 ansible-lint 검증/재생성 회수는 5회로 제한하도록 WORKFLOW_AGENT 의 시스템 프롬프트에 반영한다.
+  - 적용: `WORKFLOW_AGENT_PROMPT.md` Ansible playbook quality 절 + 작성요청 preamble
+  - Ansible 버전 **2.9.18 고정** (WORKFLOW_AGENT / 작성요청 / 검증 메시지 / ansible-lint 프롬프트)
+- ansible 스크립트 검증시 lint 테스트를 통해 반복적으로 재작성하도록 하고 lint 테스트를 통과한 ansible 스크립트로 대체하도록 한다.
+  - 적용: `WorkNodeEditPanel` — 최대 5회 lint→수정 루프, 통과 시에만 `work_script` 대체 저장

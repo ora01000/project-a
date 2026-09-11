@@ -45,6 +45,9 @@ const SCRIPT_GENERATION_PREAMBLES: Record<Exclude<WorkScriptType, "">, string> =
   ].join(" "),
   ansible: [
     "다음 질의를 분석하여 ansible playbook을 작성하시기 바랍니다.",
+    "대상 Ansible 버전은 2.9.18 로 고정이다. 2.9.18 이후 문법·모듈·FQCN 을 사용하지 마세요.",
+    "Ansible 2.9.18 스타일(FQCN 금지, classic module명)로 작성하고 ansible-lint 를 통과하도록 한다.",
+    "lint 실패 시 수정 후 재검증하되 검증/재작성은 최대 5회로 제한한다.",
     "문법 체크를 위한 ansible-lint 만 허용하고 그 외 도구를 사용해서 작업을 수행하지 마세요.",
     "답변에는 생성된 playbook 외 어떤 결과도 덧붙이지 마세요.",
     '결과는 다음 형태로만 응답하세요: {"script_type":"ansible","work_script":"생성된 playbook"}',
@@ -278,19 +281,93 @@ export function prepareKubectlValidationScript(script: string): string {
     .join("\n");
 }
 
+const MAX_ANSIBLE_LINT_ATTEMPTS = 5;
+
+function extractYamlPlaybook(raw: string): string | null {
+  const fenced = raw.match(/```(?:ya?ml)?\s*([\s\S]*?)```/i);
+  if (fenced?.[1]?.trim()) {
+    return fenced[1].trim();
+  }
+  const trimmed = raw.trim();
+  if (/^---\s*$/m.test(trimmed) || /^-\s+hosts:/m.test(trimmed)) {
+    return trimmed;
+  }
+  return null;
+}
+
+function parseAnsibleValidationPayload(raw: string): {
+  valid: boolean;
+  message: string;
+  workScript: string | null;
+} {
+  try {
+    const parsed = JSON.parse(extractJsonText(raw)) as {
+      valid?: unknown;
+      message?: unknown;
+      work_script?: unknown;
+      playbook?: unknown;
+    };
+    const coerced = coerceValidationFlag(parsed.valid);
+    const fromFields = String(parsed.work_script || parsed.playbook || "").trim();
+    const workScript = fromFields || extractYamlPlaybook(String(parsed.message || "")) || null;
+    if (coerced != null) {
+      return {
+        valid: coerced,
+        message: String(parsed.message || (coerced ? "검증 통과" : "검증 실패")),
+        workScript,
+      };
+    }
+  } catch {
+    // fall through
+  }
+  const base = parseValidationPayload(raw);
+  return {
+    valid: base.valid,
+    message: base.message,
+    workScript: extractYamlPlaybook(raw),
+  };
+}
+
+function buildAnsibleLintMessage(
+  script: string,
+  attempt: number,
+  previousLintMessage: string | null,
+): string {
+  const header =
+    attempt === 1
+      ? [
+          "대상 Ansible 버전은 2.9.18 로 고정이다. 2.9.18 호환 playbook만 허용한다.",
+          "다음 Ansible playbook에 대해 ansible-lint 검증을 수행하라.",
+          "가능하면 dry-run도 수행하라.",
+          "lint 실패 시 playbook을 Ansible 2.9.18 기준으로 수정한 뒤 다시 lint 하고, 통과한 최종 playbook을 반환하라.",
+          `이 요청은 1회 호출이다. 플랫폼이 최대 ${MAX_ANSIBLE_LINT_ATTEMPTS}회까지 재요청할 수 있다.`,
+        ]
+      : [
+          `이전 ansible-lint 결과가 실패했다 (시도 ${attempt}/${MAX_ANSIBLE_LINT_ATTEMPTS}).`,
+          "대상 Ansible 버전은 2.9.18 로 고정이다.",
+          "아래 lint 메시지를 반영해 playbook을 Ansible 2.9.18 호환으로 수정하고 다시 ansible-lint 를 수행하라.",
+          "통과할 때까지 수정하되, 이번 응답에 최신 playbook 전체를 포함하라.",
+          previousLintMessage ? `이전 lint 결과:\n${previousLintMessage}` : "",
+        ].filter(Boolean);
+
+  return [
+    ...header,
+    '결과는 다음 JSON만 출력한다: {"valid":true|false,"message":"lint/실행 요약","work_script":"전체 playbook YAML"}',
+    "valid 가 true 이면 work_script 는 lint 통과한 최종 playbook 이어야 한다.",
+    "valid 가 false 이어도 가능하면 수정 중인 playbook 을 work_script 에 넣는다.",
+    "",
+    "```yaml",
+    script,
+    "```",
+  ].join("\n");
+}
+
 function buildValidationMessage(scriptType: string, script: string): string {
   if (scriptType === "prompt") {
     return script;
   }
   if (scriptType === "ansible") {
-    return [
-      "다음 Ansible 스크립트에 대해 lint 검증을 수행하고, 가능하면 dry-run도 수행하라.",
-      '결과는 다음 JSON만 출력한다: {"valid":true|false,"message":"실행결과"}',
-      "",
-      "```yaml",
-      script,
-      "```",
-    ].join("\n");
+    return buildAnsibleLintMessage(script, 1, null);
   }
   if (scriptType === "kubectl") {
     const safeScript = prepareKubectlValidationScript(script);
@@ -660,12 +737,12 @@ export function WorkNodeEditPanel({
     setValidateResult(null);
 
     try {
-      const raw = await streamAgentChat({
-        agentId,
-        userid,
-        message: buildValidationMessage(scriptType, script),
-      });
       if (scriptType === "prompt") {
+        const raw = await streamAgentChat({
+          agentId,
+          userid,
+          message: buildValidationMessage(scriptType, script),
+        });
         const responseText = raw.trim() || "(빈 응답)";
         setValidateMessage("대상 에이전트 응답을 수신했습니다.");
         setValidateResult(responseText);
@@ -674,16 +751,93 @@ export function WorkNodeEditPanel({
           { testResult: true },
           { validationMessage: responseText },
         );
-      } else {
-        const result = parseValidationPayload(raw);
-        setValidateMessage(result.message);
-        setValidateResult(raw.trim() || result.message);
-        setIsValidationPanelOpen(true);
-        await onPersistPatch(
-          { testResult: result.valid },
-          result.valid ? { validationMessage: result.message } : undefined,
-        );
+        return;
       }
+
+      if (scriptType === "ansible") {
+        let currentScript = script;
+        let lastMessage = "";
+        const attemptLogs: string[] = [];
+        let passed = false;
+
+        for (let attempt = 1; attempt <= MAX_ANSIBLE_LINT_ATTEMPTS; attempt += 1) {
+          setValidateMessage(
+            `ansible-lint 검증 중… (${attempt}/${MAX_ANSIBLE_LINT_ATTEMPTS})`,
+          );
+          setIsValidationPanelOpen(true);
+
+          const raw = await streamAgentChat({
+            agentId,
+            userid,
+            message: buildAnsibleLintMessage(
+              currentScript,
+              attempt,
+              attempt === 1 ? null : lastMessage,
+            ),
+          });
+          const result = parseAnsibleValidationPayload(raw);
+          lastMessage = result.message;
+          attemptLogs.push(
+            `[시도 ${attempt}/${MAX_ANSIBLE_LINT_ATTEMPTS}] ${
+              result.valid ? "통과" : "실패"
+            }: ${result.message}`,
+          );
+          if (result.workScript?.trim()) {
+            currentScript = result.workScript.trim();
+          }
+
+          if (result.valid) {
+            passed = true;
+            const summary = [
+              `ansible-lint 통과 (시도 ${attempt}/${MAX_ANSIBLE_LINT_ATTEMPTS})`,
+              result.message,
+              "",
+              ...attemptLogs,
+            ].join("\n");
+            onChange({ workScript: currentScript, testResult: true });
+            setValidateMessage(
+              `ansible-lint 통과 (시도 ${attempt}/${MAX_ANSIBLE_LINT_ATTEMPTS})`,
+            );
+            setValidateResult(summary);
+            setIsValidationPanelOpen(true);
+            await onPersistPatch(
+              { workScript: currentScript, testResult: true },
+              { validationMessage: summary },
+            );
+            break;
+          }
+        }
+
+        if (!passed) {
+          const summary = [
+            `ansible-lint 미통과 (최대 ${MAX_ANSIBLE_LINT_ATTEMPTS}회 시도)`,
+            lastMessage,
+            "",
+            ...attemptLogs,
+          ].join("\n");
+          setValidateMessage(
+            `ansible-lint 미통과 (최대 ${MAX_ANSIBLE_LINT_ATTEMPTS}회). 스크립트는 대체하지 않았습니다.`,
+          );
+          setValidateResult(summary);
+          setIsValidationPanelOpen(true);
+          await onPersistPatch({ testResult: false });
+        }
+        return;
+      }
+
+      const raw = await streamAgentChat({
+        agentId,
+        userid,
+        message: buildValidationMessage(scriptType, script),
+      });
+      const result = parseValidationPayload(raw);
+      setValidateMessage(result.message);
+      setValidateResult(raw.trim() || result.message);
+      setIsValidationPanelOpen(true);
+      await onPersistPatch(
+        { testResult: result.valid },
+        result.valid ? { validationMessage: result.message } : undefined,
+      );
     } catch (err) {
       setValidateMessage(err instanceof Error ? err.message : "검증 요청에 실패했습니다.");
       setValidateResult(null);
