@@ -26,7 +26,7 @@ _WORK_NODE_SELECT = """
     script_type, test_result, files, create_date, validate_date,
     last_start_date, last_end_date, last_success, last_fail_reason,
     use_previous_work_result, work_report, cron, cron_expr, schedule_wait,
-    worker, upload, upload_path, approver_userid
+    worker, upload, upload_path, approver_userid, crud
 """
 
 _WORKFLOW_SELECT = """
@@ -38,6 +38,7 @@ _WORKFLOW_SELECT = """
 
 DEFAULT_WORKFLOW_CRON_EXPR = "0 9 * * *"  # daily 09:00
 DEFAULT_WORK_NODE_CRON_EXPR = "0 9 * * *"  # time-of-day default (daily 09:00)
+CRUD_LETTERS = ("c", "r", "u", "d")
 
 
 def normalize_script_type(value: str | None) -> str:
@@ -57,6 +58,37 @@ def normalize_worker(value: str | None) -> str:
     if normalized not in WORKER_TYPES:
         raise ValueError("worker는 agent 또는 hitl 이어야 합니다.")
     return normalized
+
+
+def normalize_crud(value: object | None) -> str:
+    """Normalize CRUD flags to a compact string in ``crud`` order (e.g. ``cru``).
+
+    Accepts a string (``"c,r"``, ``"CRU"``, ``"c r"``) or a list/tuple of letters.
+    """
+    letters: list[str] = []
+    if value is None:
+        raw_parts: list[str] = []
+    elif isinstance(value, (list, tuple, set)):
+        raw_parts = [str(item) for item in value]
+    else:
+        raw = str(value).strip().lower().replace(";", ",").replace("|", ",")
+        if "," in raw or " " in raw:
+            raw_parts = [part.strip() for part in raw.replace(" ", ",").split(",")]
+        else:
+            raw_parts = list(raw)
+
+    for part in raw_parts:
+        token = part.strip().lower()
+        if not token:
+            continue
+        if len(token) == 1 and token in CRUD_LETTERS:
+            letters.append(token)
+            continue
+        for ch in token:
+            if ch in CRUD_LETTERS:
+                letters.append(ch)
+    ordered = "".join(letter for letter in CRUD_LETTERS if letter in set(letters))
+    return ordered[:4]
 
 
 _UUID_PATTERN = re.compile(
@@ -331,7 +363,8 @@ def ensure_workflow_tables(connection) -> None:
             worker VARCHAR(10) NOT NULL DEFAULT 'agent',
             upload INTEGER NOT NULL DEFAULT 0,
             upload_path VARCHAR(500) NOT NULL DEFAULT '',
-            approver_userid VARCHAR(50) NOT NULL DEFAULT ''
+            approver_userid VARCHAR(50) NOT NULL DEFAULT '',
+            crud VARCHAR(4) NOT NULL DEFAULT ''
         )
         """
     )
@@ -453,6 +486,12 @@ def ensure_workflow_tables(connection) -> None:
         """
         ALTER TABLE work_node
             ADD COLUMN IF NOT EXISTS approver_userid VARCHAR(50) NOT NULL DEFAULT ''
+        """
+    )
+    connection.execute(
+        """
+        ALTER TABLE work_node
+            ADD COLUMN IF NOT EXISTS crud VARCHAR(4) NOT NULL DEFAULT ''
         """
     )
     _migrate_work_node_script_columns(connection)
@@ -640,6 +679,7 @@ class WorkNodeRecord:
     upload: bool = False
     upload_path: str = ""
     approver_userid: str = ""
+    crud: str = ""
 
 
 @dataclass(frozen=True)
@@ -709,6 +749,7 @@ def _row_to_work_node(row) -> WorkNodeRecord:
     upload = row["upload"] if "upload" in keys else 0
     upload_path = row["upload_path"] if "upload_path" in keys else ""
     approver_userid = row["approver_userid"] if "approver_userid" in keys else ""
+    crud = row["crud"] if "crud" in keys else ""
     try:
         script_type_norm = normalize_script_type(str(script_type or ""))
     except ValueError:
@@ -742,6 +783,7 @@ def _row_to_work_node(row) -> WorkNodeRecord:
         upload=bool(int(upload or 0)),
         upload_path=str(upload_path or "")[:500],
         approver_userid=str(approver_userid or "")[:50],
+        crud=normalize_crud(crud),
     )
 
 
@@ -864,6 +906,7 @@ def create_work_node(
     upload: bool = False,
     upload_path: str = "",
     approver_userid: str = "",
+    crud: str = "",
 ) -> WorkNodeRecord:
     from backend.app.db.k8s_inventory import validate_cron_expr
 
@@ -871,6 +914,7 @@ def create_work_node(
     validate_at = created_at if test_result else ""
     normalized_script_type = normalize_script_type(script_type)
     worker_type = normalize_worker(worker)
+    crud_flags = "" if worker_type == "hitl" else normalize_crud(crud)
     node_uuid = _normalize_uuid(uuid)
     enabled = bool(cron)
     expr = validate_cron_expr(cron_expr or DEFAULT_WORK_NODE_CRON_EXPR)
@@ -883,8 +927,8 @@ def create_work_node(
                 script_type, test_result, files, create_date, validate_date,
                 last_start_date, last_end_date, last_success, last_fail_reason,
                 use_previous_work_result, work_report, cron, cron_expr,
-                worker, upload, upload_path, approver_userid
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', '', 0, '', ?, ?, ?, ?, ?, ?, ?, ?)
+                worker, upload, upload_path, approver_userid, crud
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', '', 0, '', ?, ?, ?, ?, ?, ?, ?, ?, ?)
             RETURNING {_WORK_NODE_SELECT}
             """,
             (
@@ -907,6 +951,7 @@ def create_work_node(
                 1 if upload else 0,
                 (upload_path or "").strip()[:500],
                 (approver_userid or "").strip()[:50],
+                crud_flags,
             ),
         ).fetchone()
     return _row_to_work_node(row)
@@ -931,6 +976,7 @@ def update_work_node(
     upload: bool | None = None,
     upload_path: str | None = None,
     approver_userid: str | None = None,
+    crud: str | None = None,
 ) -> WorkNodeRecord | None:
     from backend.app.db.k8s_inventory import validate_cron_expr
 
@@ -958,6 +1004,12 @@ def update_work_node(
         if approver_userid is None
         else (approver_userid or "").strip()[:50]
     )
+    if next_worker == "hitl":
+        next_crud = ""
+    elif crud is None:
+        next_crud = existing.crud
+    else:
+        next_crud = normalize_crud(crud)
     with get_connection(database_path) as connection:
         ensure_workflow_tables(connection)
         connection.execute(
@@ -966,7 +1018,7 @@ def update_work_node(
             SET work_name = ?, work_description = ?, target_agent = ?, work_script = ?,
                 script_type = ?, test_result = ?, files = ?, validate_date = ?,
                 use_previous_work_result = ?, work_report = ?, cron = ?, cron_expr = ?,
-                worker = ?, upload = ?, upload_path = ?, approver_userid = ?
+                worker = ?, upload = ?, upload_path = ?, approver_userid = ?, crud = ?
             WHERE uuid = ?
             """,
             (
@@ -986,6 +1038,7 @@ def update_work_node(
                 1 if next_upload else 0,
                 next_upload_path,
                 next_approver,
+                next_crud,
                 existing.uuid,
             ),
         )
@@ -1265,6 +1318,7 @@ def clone_workflow(
             upload=node.upload,
             upload_path="",
             approver_userid=node.approver_userid,
+            crud=node.crud,
         )
         source_userid = resolve_work_node_upload_userid(database_path, node.owner)
         target_userid = resolve_work_node_upload_userid(database_path, owner_idx)

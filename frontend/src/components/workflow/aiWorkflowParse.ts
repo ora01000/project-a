@@ -17,6 +17,8 @@ export type AiWorkNodeDraft = {
   worker: "agent" | "hitl" | string;
   upload: boolean;
   approver_userid: string;
+  /** Compact CRUD flags e.g. ``cru`` (HITL empty). */
+  crud: string;
 };
 
 export type AiWorkflowDesignPayload = {
@@ -102,6 +104,47 @@ function asWorkNodeCronExpr(value: unknown): string {
   return `${safeMinute} ${safeHour} * * *`.slice(0, 20);
 }
 
+/** Normalize AI ``crud`` array/string to compact ``crud`` order (e.g. ``cru``). */
+export function normalizeCrudFlags(value: unknown): string {
+  const order = ["c", "r", "u", "d"] as const;
+  const found = new Set<string>();
+  const pushToken = (token: string) => {
+    const lower = token.trim().toLowerCase();
+    if (!lower) {
+      return;
+    }
+    if (lower.length === 1 && order.includes(lower as (typeof order)[number])) {
+      found.add(lower);
+      return;
+    }
+    for (const ch of lower) {
+      if (order.includes(ch as (typeof order)[number])) {
+        found.add(ch);
+      }
+    }
+  };
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      pushToken(String(item ?? ""));
+    }
+  } else {
+    const raw = String(value ?? "")
+      .trim()
+      .toLowerCase()
+      .replace(/[;|]/g, ",")
+      .replace(/\s+/g, ",");
+    if (raw.includes(",")) {
+      for (const part of raw.split(",")) {
+        pushToken(part);
+      }
+    } else {
+      pushToken(raw);
+    }
+  }
+  return order.filter((letter) => found.has(letter)).join("");
+}
+
 function newUuid(): string {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
     return crypto.randomUUID();
@@ -167,22 +210,7 @@ export function parseAiWorkflowDesignResponse(raw: string): AiWorkflowDesignPayl
 
   const seen = new Set<string>();
   const idToUuid: Record<string, string> = {};
-  const drafts: Array<{
-    logicalId: string;
-    uuid: string;
-    work_name: string;
-    work_description: string;
-    target_agent: string;
-    work_script: string;
-    script_type: string;
-    use_previous_work_result: boolean;
-    work_report: string;
-    cron: boolean;
-    cron_expr: string;
-    worker: string;
-    upload: boolean;
-    approver_userid: string;
-  }> = [];
+  const drafts: AiWorkNodeDraft[] = [];
 
   workList.forEach((item, index) => {
     if (!item || typeof item !== "object") {
@@ -221,6 +249,7 @@ export function parseAiWorkflowDesignResponse(raw: string): AiWorkflowDesignPayl
       worker,
       upload: worker === "hitl" ? asBoolean(row.upload, false) : false,
       approver_userid: worker === "hitl" ? asString(row.approver_userid) : "",
+      crud: worker === "hitl" ? "" : normalizeCrudFlags(row.crud),
     });
   });
 

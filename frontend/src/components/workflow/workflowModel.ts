@@ -62,6 +62,8 @@ export type WorkEditorNode = {
   upload: boolean;
   uploadPath: string;
   approverUserid: string;
+  /** Compact CRUD flags e.g. ``cru``. */
+  crud: string;
   fail: FailSpec;
 };
 
@@ -129,6 +131,7 @@ export function workFieldsFromItem(
     upload: Boolean(item.upload),
     uploadPath: item.upload_path || "",
     approverUserid: item.approver_userid || "",
+    crud: (item.crud || "").replace(/[^crud]/gi, "").toLowerCase(),
   };
 }
 
@@ -164,6 +167,7 @@ export function workNodeWriteBody(
     upload: Boolean(node.upload),
     upload_path: node.uploadPath || "",
     approver_userid: node.approverUserid || "",
+    crud: node.crud || "",
     ...(extras?.validation_message != null
       ? { validation_message: extras.validation_message }
       : {}),
@@ -187,6 +191,7 @@ export function hitlNodeWriteBody(node: HitlEditorNode) {
     upload: Boolean(node.upload),
     upload_path: "",
     approver_userid: node.userid || "",
+    crud: "",
   };
 }
 
@@ -351,6 +356,7 @@ export function hydrateEditor(
       upload: false,
       uploadPath: "",
       approverUserid: "",
+      crud: "",
       fail,
     };
   };

@@ -6,7 +6,7 @@ import json
 import logging
 from typing import Any
 
-from backend.app.db.workflow import WorkNodeRecord, WorkflowRecord, normalize_script_type
+from backend.app.db.workflow import WorkNodeRecord, WorkflowRecord, normalize_crud, normalize_script_type
 from backend.app.services.redis_client import get_redis
 from backend.app.services.workflow_graph import parse_workflow_tokens
 
@@ -80,6 +80,11 @@ def work_node_to_dict(record: WorkNodeRecord) -> dict[str, Any]:
         "cron": record.cron,
         "cron_expr": record.cron_expr,
         "schedule_wait": record.schedule_wait,
+        "worker": record.worker,
+        "upload": record.upload,
+        "upload_path": record.upload_path,
+        "approver_userid": record.approver_userid,
+        "crud": record.crud,
     }
 
 
@@ -108,6 +113,11 @@ def work_node_from_dict(data: dict[str, Any]) -> WorkNodeRecord:
         cron_expr=str(data.get("cron_expr") or "0 9 * * *")[:20],
         schedule_wait=bool(data.get("schedule_wait")),
         owner=int(data.get("owner") or 0),
+        worker=str(data.get("worker") or "agent"),
+        upload=bool(data.get("upload")),
+        upload_path=str(data.get("upload_path") or "")[:500],
+        approver_userid=str(data.get("approver_userid") or "")[:50],
+        crud=normalize_crud(data.get("crud")),
     )
 
 

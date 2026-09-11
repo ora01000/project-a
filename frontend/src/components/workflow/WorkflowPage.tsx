@@ -14,8 +14,69 @@ import { WorkflowIcon } from "./WorkflowIcon";
 import { WorkflowListPanel } from "./WorkflowListPanel";
 import { describeCronExpr } from "./WorkflowScheduleField";
 import { isRunInProgress } from "./workflowModel";
+import { normalizeCrudFlags } from "./aiWorkflowParse";
 
 const WORKFLOW_AGENT_ID = "WORKFLOW_AGENT";
+
+const CRUD_BADGE_META: { key: "c" | "r" | "u" | "d"; label: string }[] = [
+  { key: "c", label: "생성" },
+  { key: "r", label: "읽기" },
+  { key: "u", label: "갱신" },
+  { key: "d", label: "삭제" },
+];
+
+function collectWorkUuidsFromWorkflowDoc(workflow: string): Set<string> {
+  const uuids = new Set<string>();
+  const raw = (workflow || "").trim();
+  if (!raw) {
+    return uuids;
+  }
+  try {
+    const parsed = JSON.parse(raw) as { nodes?: unknown };
+    if (Array.isArray(parsed.nodes)) {
+      for (const node of parsed.nodes) {
+        const id = String(node ?? "").trim().toLowerCase();
+        if (id && id !== "s" && id !== "e") {
+          uuids.add(id);
+        }
+      }
+    }
+  } catch {
+    const uuidRe =
+      /[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/g;
+    for (const match of raw.matchAll(uuidRe)) {
+      uuids.add(match[0].toLowerCase());
+    }
+  }
+  return uuids;
+}
+
+function aggregateWorkflowCrud(
+  workflow: string,
+  workNodes: WorkNodeItem[],
+): Array<"c" | "r" | "u" | "d"> {
+  const referenced = collectWorkUuidsFromWorkflowDoc(workflow);
+  if (referenced.size === 0) {
+    return [];
+  }
+  const byUuid = new Map(
+    workNodes.map((node) => [node.uuid.trim().toLowerCase(), node]),
+  );
+  const merged = new Set<string>();
+  for (const uuid of referenced) {
+    const node = byUuid.get(uuid);
+    if (!node) {
+      continue;
+    }
+    if ((node.worker || "agent").toLowerCase() === "hitl") {
+      continue;
+    }
+    for (const ch of normalizeCrudFlags(node.crud)) {
+      merged.add(ch);
+    }
+  }
+  return CRUD_BADGE_META.map((item) => item.key).filter((key) => merged.has(key));
+}
 
 interface WorkflowPageProps {
   agents: AgentInfo[];
@@ -454,6 +515,7 @@ export function WorkflowPage({ agents, user, onChatComplete }: WorkflowPageProps
               const isAwaitingApproval = Boolean(item.awaiting_approval);
               const isRunning = runningUuid === item.uuid || dbRunning || isAwaitingApproval;
               const canRun = !dbRunning && !isAwaitingApproval;
+              const crudFlags = aggregateWorkflowCrud(item.workflow, workNodes);
               return (
                 <div
                   key={item.uuid}
@@ -500,9 +562,29 @@ export function WorkflowPage({ agents, user, onChatComplete }: WorkflowPageProps
                     }}
                     className="flex min-w-0 w-full flex-col gap-1 text-left"
                   >
-                    <p className="truncate text-[11px] text-slate-400" title={item.create_date || undefined}>
-                      {item.create_date || "생성일 없음"}
-                    </p>
+                    <div className="flex min-w-0 items-center justify-between gap-2">
+                      <p
+                        className="min-w-0 truncate text-[11px] text-slate-400"
+                        title={item.create_date || undefined}
+                      >
+                        {item.create_date || "생성일 없음"}
+                      </p>
+                      {crudFlags.length > 0 ? (
+                        <div className="flex shrink-0 items-center gap-1">
+                          {CRUD_BADGE_META.filter((meta) => crudFlags.includes(meta.key)).map(
+                            (meta) => (
+                              <span
+                                key={meta.key}
+                                title={meta.label}
+                                className="inline-flex h-5 min-w-5 items-center justify-center rounded border border-slate-500 bg-slate-900/80 px-1 text-[10px] font-semibold uppercase tracking-wide text-slate-100"
+                              >
+                                {meta.key.toUpperCase()}
+                              </span>
+                            ),
+                          )}
+                        </div>
+                      ) : null}
+                    </div>
                     <div className="flex min-w-0 items-center gap-1.5 text-[11px] text-slate-300">
                       <span aria-hidden="true" className="inline-flex">
                         {tested ? (

@@ -48,6 +48,7 @@ from backend.app.db.workflow import (
     list_work_nodes_visible,
     list_workflow_history,
     list_workflows_visible,
+    normalize_crud,
     normalize_script_type,
     resolve_work_node_upload_userid,
     set_workflow_distribute,
@@ -170,6 +171,7 @@ class WorkNodeResponse(BaseModel):
     upload: bool = False
     upload_path: str = ""
     approver_userid: str = ""
+    crud: str = ""
     is_draft: bool = False
 
     @classmethod
@@ -207,6 +209,7 @@ class WorkNodeResponse(BaseModel):
             upload=bool(getattr(record, "upload", False)),
             upload_path=str(getattr(record, "upload_path", None) or ""),
             approver_userid=str(getattr(record, "approver_userid", None) or ""),
+            crud=str(getattr(record, "crud", None) or ""),
             is_draft=False,
         )
 
@@ -228,6 +231,7 @@ class WorkNodeWriteRequest(BaseModel):
     upload: bool | None = None
     upload_path: str | None = Field(default=None, max_length=500)
     approver_userid: str | None = Field(default=None, max_length=50)
+    crud: str | None = Field(default=None, max_length=20)
     validation_message: str | None = None
 
 
@@ -614,6 +618,7 @@ async def api_create_work_node(body: WorkNodeWriteRequest, request: Request) -> 
             upload=bool(body.upload) if body.upload is not None else False,
             upload_path=body.upload_path or "",
             approver_userid=body.approver_userid or "",
+            crud=normalize_crud(body.crud) if body.crud is not None else "",
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -660,6 +665,7 @@ async def api_update_work_node(
             upload=body.upload,
             upload_path=body.upload_path,
             approver_userid=body.approver_userid,
+            crud=body.crud,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

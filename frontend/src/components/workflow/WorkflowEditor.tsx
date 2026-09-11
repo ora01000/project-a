@@ -599,6 +599,7 @@ export const WorkflowEditor = forwardRef<WorkflowEditorHandle, WorkflowEditorPro
               upload: Boolean(draft.upload),
               upload_path: "",
               approver_userid: draft.approver_userid || "",
+              crud: draft.worker === "hitl" ? "" : draft.crud || "",
             }),
           });
           if (!response.ok) {

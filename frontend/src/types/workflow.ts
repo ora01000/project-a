@@ -33,6 +33,8 @@ export interface WorkNodeItem {
   upload?: boolean;
   upload_path?: string;
   approver_userid?: string;
+  /** Compact CRUD flags e.g. ``cru`` (HITL empty). */
+  crud?: string;
 }
 
 export interface WorkflowApprover {
