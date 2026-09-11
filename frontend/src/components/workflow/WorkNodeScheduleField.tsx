@@ -1,5 +1,7 @@
 import { useMemo } from "react";
 
+import { WorkflowIcon } from "./WorkflowIcon";
+
 export const DEFAULT_WORK_NODE_CRON_EXPR = "0 9 * * *";
 
 export type WorkNodeScheduleDraft = {
@@ -71,7 +73,10 @@ export function WorkNodeScheduleField({
   return (
     <div className="grid gap-2 text-xs text-slate-400">
       <div className="flex items-center justify-between gap-3">
-        <span>스케줄링</span>
+        <span className="inline-flex items-center gap-1.5">
+          <WorkflowIcon name="history" size="xs" />
+          스케줄링
+        </span>
         <button
           type="button"
           role="switch"
@@ -93,7 +98,10 @@ export function WorkNodeScheduleField({
 
       {enabled ? (
         <div className="rounded-lg border border-slate-700 bg-slate-950/70 p-3">
-          <p className="text-[11px] text-slate-400">실행 시각 (1회)</p>
+          <p className="inline-flex items-center gap-1.5 text-[11px] text-slate-400">
+            <WorkflowIcon name="run" size="xs" />
+            실행 시각 (1회)
+          </p>
           <div className="mt-2 flex flex-wrap items-center gap-1.5">
             <select
               value={draft.hour}

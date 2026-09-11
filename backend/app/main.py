@@ -69,8 +69,9 @@ from backend.app.db.agentruntime import (
 )
 from backend.app.disabled_features import filter_agent_definitions
 from backend.app.logging.prompt_debug import bind_token_tracker
-from backend.app.logging.agent_logger import ensure_agent_logs_dir, log_agent_error
+from backend.app.logging.agent_logger import ensure_agent_logs_dir, initialize_agent_logs, log_agent_error
 from backend.app.logging.user_comm_logger import initialize_user_comm_logs
+from backend.app.logging.workflow_logger import initialize_workflow_logs
 from backend.app.services.job_decision_loop import run_job_decision_loop
 from backend.app.services.job_processor_loop import run_job_processor_loop
 from backend.app.services.k8s_scrape_scheduler import run_k8s_scrape_scheduler_loop
@@ -406,6 +407,8 @@ async def _health_check_loop(manager: AgentManager, interval_seconds: int) -> No
 async def lifespan(app: FastAPI):
     logging.basicConfig(level=logging.INFO)
     ensure_agent_logs_dir()
+    initialize_agent_logs()
+    initialize_workflow_logs()
     initialize_user_comm_logs()
     _, server_settings, _, database_path = load_settings()
     runtime_mode = normalize_runtime_mode(server_settings.agent_runtime_mode)

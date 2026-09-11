@@ -76,9 +76,15 @@ class WhatapSettings(BaseModel):
 
 class UserCommLogSettings(BaseModel):
     log_dir: str = "data/user_comm_logs"
-    retention_days: int = 30
+    keep_count: int = 3
+    archive_keep_count: int = 3
     # file: local JSON files (single-pod). stdout: structured JSON lines for cluster logging.
     backend: str = "file"
+
+
+class AgentLogSettings(BaseModel):
+    keep_count: int = 3
+    archive_keep_count: int = 3
 
 
 class JobRequesterSettings(BaseModel):
@@ -189,8 +195,17 @@ class AppSettings(BaseSettings):
     whatap_webhook_secret: str = Field(default="", alias="WHATAP_WEBHOOK_SECRET")
 
     user_comm_log: str = Field(default="data/user_comm_logs", alias="USER_COMM_LOG")
-    user_comm_retention: int = Field(default=30, alias="USER_COMM_RETENTION")
+    user_comm_keep_count: int | None = Field(default=None, alias="USER_COMM_KEEP_COUNT")
+    user_comm_archive_keep_count: int | None = Field(
+        default=None, alias="USER_COMM_ARCHIVE_KEEP_COUNT"
+    )
+    # Legacy alias for USER_COMM_KEEP_COUNT (plain daily JSON keep count).
+    user_comm_retention: int | None = Field(default=None, alias="USER_COMM_RETENTION")
     user_comm_log_backend: str | None = Field(default=None, alias="USER_COMM_LOG_BACKEND")
+    agent_log_keep_count: int | None = Field(default=None, alias="AGENT_LOG_KEEP_COUNT")
+    agent_log_archive_keep_count: int | None = Field(
+        default=None, alias="AGENT_LOG_ARCHIVE_KEEP_COUNT"
+    )
 
     mynotes_content_backend: str | None = Field(
         default=None,
@@ -494,11 +509,36 @@ def load_user_comm_log_settings() -> UserCommLogSettings:
     comm_yaml = yaml_settings.get("user_comm_log", {})
     env_settings = AppSettings()
 
-    retention_raw = env_settings.user_comm_retention or comm_yaml.get("retention_days", 30)
-    try:
-        retention_days = int(retention_raw)
-    except (TypeError, ValueError):
-        retention_days = 30
+    keep_candidates = [
+        env_settings.user_comm_keep_count,
+        env_settings.user_comm_retention,
+        comm_yaml.get("keep_count"),
+        3,
+    ]
+    keep_count = 3
+    for candidate in keep_candidates:
+        if candidate is None:
+            continue
+        try:
+            keep_count = int(candidate)
+            break
+        except (TypeError, ValueError):
+            continue
+
+    archive_candidates = [
+        env_settings.user_comm_archive_keep_count,
+        comm_yaml.get("archive_keep_count"),
+        3,
+    ]
+    archive_keep_count = 3
+    for candidate in archive_candidates:
+        if candidate is None:
+            continue
+        try:
+            archive_keep_count = int(candidate)
+            break
+        except (TypeError, ValueError):
+            continue
 
     backend = (
         env_settings.user_comm_log_backend
@@ -509,8 +549,50 @@ def load_user_comm_log_settings() -> UserCommLogSettings:
 
     return UserCommLogSettings(
         log_dir=env_settings.user_comm_log or comm_yaml.get("log_dir", "data/user_comm_logs"),
-        retention_days=max(1, retention_days),
+        keep_count=max(0, keep_count),
+        archive_keep_count=max(0, archive_keep_count),
         backend=backend,
+    )
+
+
+def load_agent_log_settings() -> AgentLogSettings:
+    yaml_settings = _load_yaml(CONFIG_DIR / "settings.yaml")
+    agent_yaml = yaml_settings.get("agent_log", {})
+    env_settings = AppSettings()
+
+    keep_candidates = [
+        env_settings.agent_log_keep_count,
+        agent_yaml.get("keep_count"),
+        3,
+    ]
+    keep_count = 3
+    for candidate in keep_candidates:
+        if candidate is None:
+            continue
+        try:
+            keep_count = int(candidate)
+            break
+        except (TypeError, ValueError):
+            continue
+
+    archive_candidates = [
+        env_settings.agent_log_archive_keep_count,
+        agent_yaml.get("archive_keep_count"),
+        3,
+    ]
+    archive_keep_count = 3
+    for candidate in archive_candidates:
+        if candidate is None:
+            continue
+        try:
+            archive_keep_count = int(candidate)
+            break
+        except (TypeError, ValueError):
+            continue
+
+    return AgentLogSettings(
+        keep_count=max(0, keep_count),
+        archive_keep_count=max(0, archive_keep_count),
     )
 
 

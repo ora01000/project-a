@@ -33,6 +33,13 @@ const markdownComponents: Components = {
       {children}
     </a>
   ),
+  img: ({ src, alt }) => (
+    <img
+      src={src}
+      alt={alt || ""}
+      className="mr-1.5 inline-block h-[1.1em] w-[1.1em] align-[-0.15em]"
+    />
+  ),
   table: ({ children }) => (
     <div className="overflow-x-auto">
       <table className="min-w-full border-collapse text-xs">{children}</table>

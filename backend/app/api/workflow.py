@@ -59,6 +59,7 @@ from backend.app.db.workflow import (
     work_uuids_from_expression,
 )
 from backend.app.middleware.session_auth import get_request_auth_user
+from backend.app.logging.workflow_logger import read_work_node_agent_log
 from backend.app.services.workflow_graph import build_workflow_graph
 from backend.app.services.workflow_document import validate_workflow_document
 from backend.app.services.workflow_runner import (
@@ -73,6 +74,8 @@ router = APIRouter(tags=["workflow"])
 logger = logging.getLogger(__name__)
 
 WORKFLOW_TEMPLATE_DIR = PROJECT_ROOT / "docs" / "workflow_template"
+WORKFLOW_FRONT_DIR = PROJECT_ROOT / "docs" / "workflow_front"
+WORKFLOW_FRONT_MD = WORKFLOW_FRONT_DIR / "workflow_front.md"
 
 
 class WorkflowTemplateListItem(BaseModel):
@@ -81,6 +84,10 @@ class WorkflowTemplateListItem(BaseModel):
 
 class WorkflowTemplateResponse(BaseModel):
     name: str
+    content: str
+
+
+class WorkflowFrontGuideResponse(BaseModel):
     content: str
 
 
@@ -121,6 +128,20 @@ async def api_get_workflow_template(name: str, request: Request) -> WorkflowTemp
         name=path.name,
         content=path.read_text(encoding="utf-8"),
     )
+
+
+@router.get("/workflow-front", response_model=WorkflowFrontGuideResponse)
+async def api_get_workflow_front_guide(request: Request) -> WorkflowFrontGuideResponse:
+    """Return the idle-state workflow screen guide markdown."""
+    get_request_auth_user(request)
+    path = WORKFLOW_FRONT_MD.resolve()
+    try:
+        path.relative_to(WORKFLOW_FRONT_DIR.resolve())
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="안내 문서를 찾을 수 없습니다.") from exc
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="안내 문서를 찾을 수 없습니다.")
+    return WorkflowFrontGuideResponse(content=path.read_text(encoding="utf-8"))
 
 
 class WorkNodeResponse(BaseModel):
@@ -740,6 +761,26 @@ async def api_get_work_node_validation_result(
         "content": content,
         "filename": resolved_name,
         "validate_date": record.validate_date or record.last_end_date or "",
+    }
+
+
+@router.get("/work-nodes/{node_uuid}/agent-log")
+async def api_get_work_node_agent_log(
+    node_uuid: str,
+    request: Request,
+    limit: int = 200,
+) -> dict[str, object]:
+    """Return work_node agent interaction / failure log entries (JSONL)."""
+    record = _require_visible_work_node(request, node_uuid)
+    upload_userid = resolve_work_node_upload_userid(
+        request.app.state.database_path, record.owner
+    )
+    capped = max(1, min(int(limit or 200), 1000))
+    entries = read_work_node_agent_log(upload_userid, record.uuid, limit=capped)
+    return {
+        "items": entries,
+        "work_name": record.work_name,
+        "last_fail_reason": record.last_fail_reason or "",
     }
 
 

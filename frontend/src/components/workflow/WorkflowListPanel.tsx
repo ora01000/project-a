@@ -1,5 +1,7 @@
 import { useState, type ReactNode } from "react";
 
+import { WorkflowIcon } from "./WorkflowIcon";
+
 interface WorkflowListPanelProps {
   children: ReactNode;
   className?: string;
@@ -97,8 +99,9 @@ export function WorkflowListPanel({
             <button
               type="button"
               onClick={onCreate}
-              className="w-full rounded-md border border-sky-700 bg-sky-950/50 px-3 py-2 text-sm font-medium text-sky-100 hover:bg-sky-900/60"
+              className="inline-flex w-full items-center justify-center gap-1.5 rounded-md border border-sky-700 bg-sky-950/50 px-3 py-2 text-sm font-medium text-sky-100 hover:bg-sky-900/60"
             >
+              <WorkflowIcon name="edit" size="sm" label="새로운 작업 워크플로우" />
               새로운 작업 워크플로우
             </button>
           </div>

@@ -15,6 +15,7 @@ from backend.app.db.users import parse_agent_ids
 from backend.app.disabled_features import is_removed_agent_id, raise_disabled_feature
 from backend.app.logging.agent_logger import log_agent_interaction
 from backend.app.logging.user_comm_logger import list_user_communications, log_user_communication
+from backend.app.logging.workflow_logger import log_workflow_agent_interaction
 from backend.app.middleware.session_auth import get_request_auth_user
 from backend.app.services.agent_runtime_client import AgentInvokeRequest
 from backend.app.services.axit_platform_client import format_axit_invoke_error
@@ -35,6 +36,8 @@ class ChatRequest(BaseModel):
     message: str = Field(min_length=1)
     userid: str | None = Field(default=None, max_length=50)
     session_id: str | None = Field(default=None, max_length=100)
+    # WORKFLOW_AGENT: prefer real workflow uuid; create flow may omit (session used).
+    workflow_uuid: str | None = Field(default=None, max_length=64)
 
 
 class UserCommLogEntry(BaseModel):
@@ -174,27 +177,43 @@ async def chat_with_agent(agent_id: str, payload: ChatRequest, request: Request)
             async for event in _stream_response(result):
                 yield event
 
-            log_agent_interaction(
-                agent_id=agent_id,
-                input_message=payload.message,
-                output_message=result.content,
-                tools_used=result.tools_used,
-                user_id=auth_user.userid,
-                user_name=auth_user.username,
-            )
-
-            try:
-                definition = manager.get_definition(agent_id)
-                log_user_communication(
-                    auth_user.userid,
-                    agent_id=agent_id,
-                    agent_name=definition.name,
-                    user_message=payload.message,
-                    assistant_message=result.content,
-                    tools_used=result.tools_used,
+            if agent_id == WORKFLOW_AGENT_LOCAL_AGENT_ID:
+                workflow_key = (
+                    (payload.workflow_uuid or "").strip()
+                    or (payload.session_id or "").strip()
+                    or "unknown"
                 )
-            except ValueError as exc:
-                logger.warning("Skipped user comm log for %s: %s", auth_user.userid, exc)
+                log_workflow_agent_interaction(
+                    userid=auth_user.userid,
+                    workflow_key=workflow_key,
+                    agent_id=agent_id,
+                    input_message=payload.message,
+                    output_message=result.content,
+                    tools_used=result.tools_used,
+                    user_name=auth_user.username,
+                )
+            else:
+                log_agent_interaction(
+                    agent_id=agent_id,
+                    input_message=payload.message,
+                    output_message=result.content,
+                    tools_used=result.tools_used,
+                    user_id=auth_user.userid,
+                    user_name=auth_user.username,
+                )
+
+                try:
+                    definition = manager.get_definition(agent_id)
+                    log_user_communication(
+                        auth_user.userid,
+                        agent_id=agent_id,
+                        agent_name=definition.name,
+                        user_message=payload.message,
+                        assistant_message=result.content,
+                        tools_used=result.tools_used,
+                    )
+                except ValueError as exc:
+                    logger.warning("Skipped user comm log for %s: %s", auth_user.userid, exc)
         except Exception as exc:
             error_message = format_axit_invoke_error(exc)
             manager.mark_agent_error(agent_id, error_message, input_message=payload.message)
@@ -237,6 +256,7 @@ async def get_user_chat_logs(
         )
         for entry in payload.get("entries", [])
         if isinstance(entry, dict)
+        and str(entry.get("agent_id") or "").strip() != WORKFLOW_AGENT_LOCAL_AGENT_ID
     ]
 
     return UserCommLogResponse(

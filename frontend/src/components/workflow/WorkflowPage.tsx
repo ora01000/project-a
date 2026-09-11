@@ -10,6 +10,7 @@ import { createSessionId } from "../../utils/sessionId";
 import { parseAiWorkflowDesignResponse } from "./aiWorkflowParse";
 import { WorkflowDesignPanel } from "./WorkflowDesignPanel";
 import type { DiagramAgentEvent } from "./WorkflowEditor";
+import { WorkflowIcon } from "./WorkflowIcon";
 import { WorkflowListPanel } from "./WorkflowListPanel";
 import { describeCronExpr } from "./WorkflowScheduleField";
 import { isRunInProgress } from "./workflowModel";
@@ -43,6 +44,7 @@ async function streamWorkflowAgentChat(params: {
   userid: string;
   message: string;
   sessionId: string;
+  workflowUuid?: string | null;
 }): Promise<string> {
   const response = await fetch(`/api/agents/${encodeURIComponent(params.agentId)}/chat`, {
     method: "POST",
@@ -51,6 +53,7 @@ async function streamWorkflowAgentChat(params: {
       message: params.message,
       userid: params.userid,
       session_id: params.sessionId,
+      workflow_uuid: params.workflowUuid || undefined,
     }),
   });
 
@@ -206,6 +209,7 @@ export function WorkflowPage({ agents, user, onChatComplete }: WorkflowPageProps
           userid: user.userid,
           message: prompt,
           sessionId: agentSessionIdRef.current,
+          workflowUuid: selectedUuid,
         });
         applyAssistantWorkflowPayload(content);
         onChatComplete();
@@ -220,7 +224,14 @@ export function WorkflowPage({ agents, user, onChatComplete }: WorkflowPageProps
         pushDiagramAgentEvent("error", message);
       }
     },
-    [agents, applyAssistantWorkflowPayload, onChatComplete, pushDiagramAgentEvent, user.userid],
+    [
+      agents,
+      applyAssistantWorkflowPayload,
+      onChatComplete,
+      pushDiagramAgentEvent,
+      selectedUuid,
+      user.userid,
+    ],
   );
 
   const handleDiagramGenerate = useCallback(
@@ -493,36 +504,49 @@ export function WorkflowPage({ agents, user, onChatComplete }: WorkflowPageProps
                       {item.create_date || "생성일 없음"}
                     </p>
                     <div className="flex min-w-0 items-center gap-1.5 text-[11px] text-slate-300">
-                      <span aria-hidden="true">{tested ? "✅" : "⬜"}</span>
+                      <span aria-hidden="true" className="inline-flex">
+                        {tested ? (
+                          <WorkflowIcon name="approve" size="sm" />
+                        ) : (
+                          <WorkflowIcon name="list" size="sm" className="opacity-40" />
+                        )}
+                      </span>
                       <span className="min-w-0 flex-1 truncate">
                         {tested ? item.validate_date || "검증됨" : "테스트 미실행"}
                       </span>
                       {isRunning ? (
-                        <span className="shrink-0 rounded-full border border-rose-500/80 bg-rose-950/70 px-2 py-0.5 text-[10px] font-semibold text-rose-100">
+                        <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-rose-500/80 bg-rose-950/70 px-2 py-0.5 text-[10px] font-semibold text-rose-100">
+                          <WorkflowIcon
+                            name={isAwaitingApproval ? "approve" : "run"}
+                            size="xs"
+                          />
                           {isAwaitingApproval ? "승인 대기" : "실행 중"}
                         </span>
                       ) : null}
                       {isDistributed ? (
                         <span
                           title="배포됨"
-                          className="shrink-0 rounded-full border border-sky-600/70 bg-sky-950/60 px-2 py-0.5 text-[10px] font-medium text-sky-100"
+                          className="inline-flex shrink-0 items-center gap-1 rounded-full border border-sky-600/70 bg-sky-950/60 px-2 py-0.5 text-[10px] font-medium text-sky-100"
                         >
+                          <WorkflowIcon name="distribute" size="xs" label="배포" />
                           배포
                         </span>
                       ) : null}
                       {item.cron ? (
                         <span
                           title={`스케줄: ${describeCronExpr(item.cron_expr)} (${item.cron_expr || ""})`}
-                          className="shrink-0 truncate rounded-full border border-violet-600/70 bg-violet-950/50 px-2 py-0.5 text-[10px] font-medium text-violet-100"
+                          className="inline-flex shrink-0 items-center gap-1 truncate rounded-full border border-violet-600/70 bg-violet-950/50 px-2 py-0.5 text-[10px] font-medium text-violet-100"
                         >
+                          <WorkflowIcon name="history" size="xs" label="스케줄" />
                           {describeCronExpr(item.cron_expr)}
                         </span>
                       ) : null}
                       {ownerName ? (
                         <span
                           title={isMine ? "내 작업 워크플로우" : `소유자: ${ownerName}`}
-                          className="inline-block max-w-[40%] shrink-0 truncate rounded-full border border-slate-600 bg-slate-900/80 px-2.5 py-1 text-center text-[11px] font-medium text-slate-200"
+                          className="inline-flex max-w-[40%] shrink-0 items-center gap-1 truncate rounded-full border border-slate-600 bg-slate-900/80 px-2.5 py-1 text-center text-[11px] font-medium text-slate-200"
                         >
+                          <WorkflowIcon name="owner" size="xs" />
                           {isMine ? "나" : ownerName}
                         </span>
                       ) : null}
@@ -537,8 +561,9 @@ export function WorkflowPage({ agents, user, onChatComplete }: WorkflowPageProps
                         event.stopPropagation();
                         void handleRunWorkflow(item);
                       }}
-                      className="rounded-md border border-emerald-700 bg-emerald-950/50 px-2.5 py-1 text-[11px] font-medium text-emerald-100 hover:bg-emerald-900/60 disabled:cursor-not-allowed disabled:opacity-40"
+                      className="inline-flex items-center gap-1 rounded-md border border-emerald-700 bg-emerald-950/50 px-2.5 py-1 text-[11px] font-medium text-emerald-100 hover:bg-emerald-900/60 disabled:cursor-not-allowed disabled:opacity-40"
                     >
+                      <WorkflowIcon name="run" size="xs" label="실행" />
                       {isRunning ? "실행 중…" : "실행"}
                     </button>
                   </div>

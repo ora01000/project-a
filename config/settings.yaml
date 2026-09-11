@@ -39,7 +39,15 @@ whatap:
 # 통합 채팅 사용자 대화 로그
 user_comm_log:
   log_dir: "data/user_comm_logs"
-  retention_days: 30
+  keep_count: 3
+  archive_keep_count: 3
+  # file | stdout (multi-pod: stdout → 클러스터 로깅)
+  backend: file
+
+# 에이전트 파일 로그 (logs/agents) 일 단위 로테이션 보관
+agent_log:
+  keep_count: 3
+  archive_keep_count: 3
 
 # 작업요청자 데몬 (수동 "테스트 작업 발송"으로 대체됨, 기본 중지)
 job_requester:
@@ -71,13 +79,6 @@ mynotes:
   initial_delay_seconds: 0
   # file | database (multi-pod: database + PostgreSQL 권장)
   content_backend: file
-
-# 사용자 대화 로그
-user_comm_log:
-  log_dir: data/user_comm_logs
-  retention_days: 30
-  # file | stdout (multi-pod: stdout → 클러스터 로깅)
-  backend: file
 
 # K8S 인프라 scrape (관리자 UI 수동 수집 + cron 스케줄)
 # http 모드: /etc/k8s/kubeconfig 마운트 필요

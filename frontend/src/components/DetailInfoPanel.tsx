@@ -24,7 +24,7 @@ const ALL_TABS: { id: DetailTab; label: string; adminOnly?: boolean }[] = [
   { id: "job-mgmt", label: "작업 관리" },
 ];
 
-const GENERAL_LOG_EXCLUDE_AGENT_IDS = [WHATAP_EVENT_LOG_SOURCE];
+const GENERAL_LOG_EXCLUDE_AGENT_IDS = [WHATAP_EVENT_LOG_SOURCE, "WORKFLOW_AGENT"];
 const DEFAULT_HEIGHT = 400;
 const MIN_HEIGHT = 200;
 const MAX_HEIGHT_RATIO = 0.85;
@@ -59,7 +59,7 @@ export function DetailInfoPanel({
   const [internalActiveTab, setInternalActiveTab] = useState<DetailTab>("workflow");
   const activeTab = controlledActiveTab ?? internalActiveTab;
   const [height, setHeight] = useState(DEFAULT_HEIGHT);
-  const [uncontrolledCollapsed, setUncontrolledCollapsed] = useState(false);
+  const [uncontrolledCollapsed, setUncontrolledCollapsed] = useState(true);
   const isCollapsed = controlledCollapsed ?? uncontrolledCollapsed;
   const isDraggingRef = useRef(false);
   const startYRef = useRef(0);

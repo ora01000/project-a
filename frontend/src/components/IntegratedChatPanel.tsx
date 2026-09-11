@@ -36,6 +36,27 @@ interface IntegratedChatPanelProps {
   expandUserInput?: boolean;
   /** Fixed user input height when expandUserInput is true. Default 300. */
   userInputHeightPx?: number;
+  collapsed?: boolean;
+  onCollapsedChange?: (collapsed: boolean) => void;
+}
+
+function PanelCollapseRightIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="h-4 w-4"
+      aria-hidden="true"
+    >
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <path d="M15 4v16" />
+      <path d="M9 9l3 3-3 3" />
+    </svg>
+  );
 }
 
 function createResponseId(): string {
@@ -116,7 +137,19 @@ export function IntegratedChatPanel({
   onChatSettled,
   expandUserInput = false,
   userInputHeightPx = 300,
+  collapsed: controlledCollapsed,
+  onCollapsedChange,
 }: IntegratedChatPanelProps) {
+  const [uncontrolledCollapsed, setUncontrolledCollapsed] = useState(true);
+  const isCollapsed = !isFullscreen && (controlledCollapsed ?? uncontrolledCollapsed);
+
+  const setCollapsed = (next: boolean) => {
+    if (controlledCollapsed === undefined) {
+      setUncontrolledCollapsed(next);
+    }
+    onCollapsedChange?.(next);
+  };
+
   const [selectedAgentId, setSelectedAgentId] = useState("");
   const [input, setInput] = useState("");
   const [responses, setResponses] = useState<IntegratedChatResponse[]>([]);
@@ -209,6 +242,8 @@ export function IntegratedChatPanel({
   };
 
   const chatAgents = useMemo(() => {
+    const withoutWorkflow = (list: AgentInfo[]) =>
+      list.filter((agent) => agent.id.trim() !== "WORKFLOW_AGENT");
     if (allowedAgentIds && allowedAgentIds.length > 0) {
       const allowed = new Set(allowedAgentIds.map((id) => id.trim()).filter(Boolean));
       const matched = agents.filter((agent) => allowed.has(agent.id));
@@ -217,7 +252,7 @@ export function IntegratedChatPanel({
       const ordered = allowedAgentIds
         .map((id) => byId.get(id.trim()))
         .filter((agent): agent is AgentInfo => Boolean(agent));
-      return ordered;
+      return withoutWorkflow(ordered);
     }
     const assignedIds = new Set(
       (user.agent_ids ?? []).map((id) => id.trim()).filter(Boolean),
@@ -228,7 +263,9 @@ export function IntegratedChatPanel({
       }
       return assignedIds.has(agent.id);
     });
-    return [...enabled].sort((left, right) => left.name.localeCompare(right.name, "ko"));
+    return withoutWorkflow(
+      [...enabled].sort((left, right) => left.name.localeCompare(right.name, "ko")),
+    );
   }, [agents, allowedAgentIds, user.agent_ids]);
 
   const selectedAgent = useMemo(
@@ -255,7 +292,9 @@ export function IntegratedChatPanel({
           return;
         }
 
-        const restored = (payload.entries ?? []).map(mapLogEntryToResponse);
+        const restored = (payload.entries ?? [])
+          .filter((entry) => entry.agent_id !== "WORKFLOW_AGENT")
+          .map(mapLogEntryToResponse);
         setResponses(keepRecentResponses(restored));
       } catch {
         if (!cancelled) {
@@ -621,26 +660,67 @@ export function IntegratedChatPanel({
   };
 
   return (
-    <aside
-      ref={layoutRef}
-      style={isFullscreen ? undefined : { width: panelWidth }}
-      className={`flex self-stretch flex-col overflow-hidden rounded-xl border border-slate-700 bg-slate-900/90 shadow-lg ${
-        isFullscreen ? "min-h-0 w-full" : "min-h-0 shrink-0"
+    <div
+      className={`relative flex self-stretch overflow-hidden transition-[width] duration-300 ease-in-out ${
+        isFullscreen ? "min-h-0 w-full" : isCollapsed ? "w-9 shrink-0" : "min-h-0 shrink-0"
       }`}
+      style={isFullscreen || isCollapsed ? undefined : { width: panelWidth }}
     >
+      {!isFullscreen ? (
+        <button
+          type="button"
+          onClick={() => setCollapsed(false)}
+          aria-label="대화형 터미널 펼치기"
+          aria-hidden={!isCollapsed}
+          tabIndex={isCollapsed ? 0 : -1}
+          className={`absolute inset-y-0 right-0 z-20 flex w-9 flex-col items-center justify-center rounded-xl border border-slate-700 bg-slate-900/90 shadow-lg transition-opacity duration-300 hover:border-slate-500 hover:bg-slate-800/70 ${
+            isCollapsed ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0"
+          }`}
+        >
+          <span className="select-none text-xs font-semibold tracking-wide text-slate-200 [writing-mode:vertical-rl]">
+            대화형 터미널
+          </span>
+        </button>
+      ) : null}
+
+      <aside
+        ref={layoutRef}
+        aria-hidden={isCollapsed}
+        style={isFullscreen ? undefined : { width: panelWidth }}
+        className={`flex h-full min-h-0 flex-col overflow-hidden rounded-xl border border-slate-700 bg-slate-900/90 shadow-lg transition-transform duration-300 ease-in-out ${
+          isFullscreen
+            ? "w-full"
+            : isCollapsed
+              ? "pointer-events-none translate-x-full"
+              : "translate-x-0"
+        }`}
+      >
       <header className="flex h-[100px] shrink-0 items-center justify-between border-b border-slate-700 px-4">
         <div className="min-w-0">
           <h2 className="text-lg font-semibold text-slate-100">대화형 터미널</h2>
           <p className="mt-1 text-sm text-slate-400">에이전트를 선택해 메시지를 전송하세요.</p>
         </div>
-        <button
-          type="button"
-          onClick={onToggleFullscreen}
-          title={isFullscreen ? "원복" : "전체화면"}
-          className="shrink-0 rounded-md border border-slate-600 px-3 py-1.5 text-sm text-slate-200 hover:bg-slate-800"
-        >
-          {isFullscreen ? "원복" : "전체화면"}
-        </button>
+        <div className="flex shrink-0 items-center gap-2">
+          {!isFullscreen ? (
+            <button
+              type="button"
+              onClick={() => setCollapsed(true)}
+              aria-label="대화형 터미널 접기"
+              title="패널 접기"
+              className="rounded-md border border-slate-700 bg-slate-800/60 p-1.5 text-slate-400 transition-colors hover:border-slate-500 hover:bg-slate-800 hover:text-slate-200"
+            >
+              <PanelCollapseRightIcon />
+            </button>
+          ) : null}
+          <button
+            type="button"
+            onClick={onToggleFullscreen}
+            title={isFullscreen ? "원복" : "전체화면"}
+            className="rounded-md border border-slate-600 px-3 py-1.5 text-sm text-slate-200 hover:bg-slate-800"
+          >
+            {isFullscreen ? "원복" : "전체화면"}
+          </button>
+        </div>
       </header>
 
       <div className="flex min-h-0 flex-1 flex-col">
@@ -885,5 +965,6 @@ export function IntegratedChatPanel({
         />
       ) : null}
     </aside>
+    </div>
   );
 }

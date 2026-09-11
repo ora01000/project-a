@@ -2,12 +2,18 @@ import json
 import logging
 import re
 import threading
-from datetime import date, datetime, timedelta
+from datetime import date
 from pathlib import Path
 from typing import Any
 
 from backend.app.agents.base import ToolUsage
 from backend.app.config import PROJECT_ROOT, UserCommLogSettings, load_user_comm_log_settings
+from backend.app.logging.log_retention import (
+    date_json_sort_key,
+    enforce_named_retention,
+    is_date_json_gz_name,
+    is_date_json_name,
+)
 from backend.app.timezone import now_display_datetime
 
 logger = logging.getLogger(__name__)
@@ -70,30 +76,44 @@ def _load_log_file(path: Path, user_id: str, log_date: date) -> dict[str, Any]:
 
 
 def cleanup_expired_logs(settings: UserCommLogSettings | None = None) -> int:
+    """Keep newest daily JSON files per user; gzip older; trim archives.
+
+    Returns the number of plain files gzipped (best-effort metric).
+    """
     settings = settings or load_user_comm_log_settings()
     log_dir = _resolve_log_dir(settings)
     if not log_dir.exists():
         return 0
 
-    retention_days = max(1, settings.retention_days)
-    cutoff = _local_date() - timedelta(days=retention_days)
-    removed = 0
-
+    archived = 0
     for user_dir in log_dir.iterdir():
         if not user_dir.is_dir():
             continue
 
-        for log_file in user_dir.glob("*.json"):
-            try:
-                file_date = date.fromisoformat(log_file.stem)
-            except ValueError:
-                continue
-            if file_date < cutoff:
-                try:
-                    log_file.unlink()
-                    removed += 1
-                except OSError as exc:
-                    logger.warning("Failed to remove expired comm log %s: %s", log_file, exc)
+        plain_files = [
+            path
+            for path in user_dir.iterdir()
+            if path.is_file() and is_date_json_name(path.name)
+        ]
+        before_gz = {
+            path.name
+            for path in user_dir.iterdir()
+            if path.is_file() and is_date_json_gz_name(path.name)
+        }
+        enforce_named_retention(
+            plain_files,
+            keep_count=settings.keep_count,
+            archive_keep_count=settings.archive_keep_count,
+            plain_sort_key=date_json_sort_key,
+            archive_glob="*.json.gz",
+            directories=[user_dir],
+        )
+        after_gz = {
+            path.name
+            for path in user_dir.iterdir()
+            if path.is_file() and is_date_json_gz_name(path.name)
+        }
+        archived += max(0, len(after_gz - before_gz))
 
         try:
             if user_dir.exists() and not any(user_dir.iterdir()):
@@ -101,9 +121,9 @@ def cleanup_expired_logs(settings: UserCommLogSettings | None = None) -> int:
         except OSError:
             pass
 
-    if removed:
-        logger.info("Removed %s expired user comm log file(s)", removed)
-    return removed
+    if archived:
+        logger.info("Archived %s user comm log file(s) to gz", archived)
+    return archived
 
 
 def _maybe_cleanup_retention(settings: UserCommLogSettings) -> None:

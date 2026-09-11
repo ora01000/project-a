@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { JobContentView } from "../jobs/JobContentView";
 import { JOB_TYPE_WORKFLOW } from "../../types/job";
+import { WorkflowIcon } from "./WorkflowIcon";
 
 export interface WorkNodeResultListItem {
   uuid: string;
@@ -16,6 +17,18 @@ interface ResultFileItem {
   mtime: number;
   size: number;
   is_latest: boolean;
+}
+
+interface AgentLogEntry {
+  timestamp?: string;
+  agent_id?: string;
+  event?: string;
+  status?: string;
+  fail_reason?: string;
+  input_message?: string;
+  output_message?: string;
+  workflow_uuid?: string;
+  [key: string]: unknown;
 }
 
 interface WorkNodeResultsPanelProps {
@@ -61,6 +74,48 @@ function formatResultFilename(filename: string, isLatest: boolean): string {
   return filename;
 }
 
+function formatLogTimestamp(value: string | undefined): string {
+  const raw = (value || "").trim();
+  if (!raw) {
+    return "-";
+  }
+  try {
+    const date = new Date(raw);
+    if (Number.isNaN(date.getTime())) {
+      return raw;
+    }
+    return date.toLocaleString();
+  } catch {
+    return raw;
+  }
+}
+
+function formatAgentLogEntry(entry: AgentLogEntry): string {
+  const lines: string[] = [];
+  lines.push(`[${formatLogTimestamp(entry.timestamp)}]`);
+  if (entry.event) {
+    lines.push(`event: ${entry.event}`);
+  }
+  if (entry.status) {
+    lines.push(`status: ${entry.status}`);
+  }
+  if (entry.agent_id) {
+    lines.push(`agent: ${entry.agent_id}`);
+  }
+  if (entry.fail_reason) {
+    lines.push(`fail_reason: ${entry.fail_reason}`);
+  }
+  if (entry.input_message) {
+    lines.push("--- input ---");
+    lines.push(String(entry.input_message));
+  }
+  if (entry.output_message) {
+    lines.push("--- output ---");
+    lines.push(String(entry.output_message));
+  }
+  return lines.join("\n");
+}
+
 export function WorkNodeResultsPanel({
   workNodes,
   selectedWorkUuid,
@@ -79,9 +134,12 @@ export function WorkNodeResultsPanel({
   const [resultFiles, setResultFiles] = useState<ResultFileItem[]>([]);
   const [selectedFilename, setSelectedFilename] = useState<string | null>(null);
   const [resultContent, setResultContent] = useState("");
+  const [agentLogText, setAgentLogText] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [logError, setLogError] = useState<string | null>(null);
   const [isLoadingList, setIsLoadingList] = useState(false);
   const [isLoadingResult, setIsLoadingResult] = useState(false);
+  const [isLoadingLog, setIsLoadingLog] = useState(false);
 
   useEffect(() => {
     if (isNodeListMode) {
@@ -123,6 +181,33 @@ export function WorkNodeResultsPanel({
     }
   }, []);
 
+  const loadAgentLog = useCallback(async (nodeUuid: string) => {
+    setIsLoadingLog(true);
+    setLogError(null);
+    try {
+      const response = await fetch(`/api/work-nodes/${nodeUuid}/agent-log?limit=200`);
+      if (!response.ok) {
+        throw new Error(await parseError(response, "에이전트 로그를 불러오지 못했습니다."));
+      }
+      const data = (await response.json()) as {
+        items?: AgentLogEntry[];
+        last_fail_reason?: string;
+      };
+      const items = Array.isArray(data.items) ? data.items : [];
+      const blocks = items.map((entry) => formatAgentLogEntry(entry));
+      const failReason = (data.last_fail_reason || "").trim();
+      if (failReason && !items.some((entry) => entry.fail_reason === failReason)) {
+        blocks.push(`[DB] fail_reason: ${failReason}`);
+      }
+      setAgentLogText(blocks.join("\n\n"));
+    } catch (err) {
+      setAgentLogText("");
+      setLogError(err instanceof Error ? err.message : "에이전트 로그를 불러오지 못했습니다.");
+    } finally {
+      setIsLoadingLog(false);
+    }
+  }, []);
+
   useEffect(() => {
     if (!isNodeListMode && selectedNodeUuid) {
       void loadResultFiles(selectedNodeUuid);
@@ -131,6 +216,15 @@ export function WorkNodeResultsPanel({
     setResultFiles([]);
     setSelectedFilename(null);
   }, [isNodeListMode, selectedNodeUuid, loadResultFiles]);
+
+  useEffect(() => {
+    if (!selectedNodeUuid) {
+      setAgentLogText("");
+      setLogError(null);
+      return;
+    }
+    void loadAgentLog(selectedNodeUuid);
+  }, [selectedNodeUuid, loadAgentLog]);
 
   useEffect(() => {
     const nodeUuid = selectedNodeUuid;
@@ -187,17 +281,31 @@ export function WorkNodeResultsPanel({
   const listTitle = isNodeListMode ? "작업 노드" : "작업 결과";
   const selectedNode = filteredNodes.find((node) => node.uuid === selectedNodeUuid);
 
+  const refreshSelected = () => {
+    if (!selectedNodeUuid) {
+      return;
+    }
+    if (!isNodeListMode) {
+      void loadResultFiles(selectedNodeUuid);
+    }
+    void loadAgentLog(selectedNodeUuid);
+  };
+
   return (
     <div className="flex min-h-0 flex-1 gap-3 overflow-hidden p-3">
       <aside className="flex w-[260px] shrink-0 flex-col border-r border-slate-700/80 pr-3">
         <div className="mb-2 flex items-center justify-between gap-2">
-          <h4 className="text-[11px] font-semibold text-slate-300">{listTitle}</h4>
-          {!isNodeListMode && selectedNodeUuid ? (
+          <h4 className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-slate-300">
+            <WorkflowIcon name={isNodeListMode ? "work-node" : "result"} size="sm" />
+            {listTitle}
+          </h4>
+          {selectedNodeUuid ? (
             <button
               type="button"
-              onClick={() => void loadResultFiles(selectedNodeUuid)}
-              className="rounded border border-slate-600 px-1.5 py-0.5 text-[10px] text-slate-300 hover:bg-slate-800"
+              onClick={refreshSelected}
+              className="inline-flex items-center gap-1 rounded border border-slate-600 px-1.5 py-0.5 text-[10px] text-slate-300 hover:bg-slate-800"
             >
+              <WorkflowIcon name="refresh" size="xs" label="새로고침" />
               새로고침
             </button>
           ) : null}
@@ -234,8 +342,18 @@ export function WorkNodeResultsPanel({
                       <span className="min-w-0 truncate" title={dateLabel}>
                         {dateLabel}
                       </span>
-                      <span>
-                        {node.lastSuccess == null ? "-" : node.lastSuccess ? "성공" : "실패"}
+                      <span className="inline-flex items-center gap-1">
+                        {node.lastSuccess == null ? (
+                          "-"
+                        ) : (
+                          <>
+                            <WorkflowIcon
+                              name={node.lastSuccess ? "approve" : "fail-branch"}
+                              size="xs"
+                            />
+                            {node.lastSuccess ? "성공" : "실패"}
+                          </>
+                        )}
                       </span>
                     </div>
                   </button>
@@ -276,25 +394,47 @@ export function WorkNodeResultsPanel({
           )}
         </div>
       </aside>
-      <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-        <h4 className="mb-2 shrink-0 text-[11px] font-semibold text-slate-300">결과 내용</h4>
-        {error ? <p className="mb-2 shrink-0 text-[11px] text-rose-300">{error}</p> : null}
-        {isLoadingResult ? (
-          <p className="text-[11px] text-slate-500">결과 불러오는 중…</p>
-        ) : (
-          <div className="min-h-0 flex-1 overflow-y-auto">
-            {resultContent ? (
-              <JobContentView content={resultContent} jobType={JOB_TYPE_WORKFLOW} />
-            ) : (
-              <p className="text-[11px] text-slate-500">
-                {isNodeListMode
-                  ? "작업 노드를 선택하면 결과가 표시됩니다."
-                  : "결과를 선택하면 내용이 표시됩니다."}
-              </p>
-            )}
-          </div>
-        )}
-      </section>
+      <div className="flex min-h-0 min-w-0 flex-1 gap-3 overflow-hidden">
+        <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-md border border-slate-700/70 bg-slate-950/40 p-2">
+          <h4 className="mb-2 inline-flex shrink-0 items-center gap-1.5 text-[11px] font-semibold text-slate-300">
+            <WorkflowIcon name="result" size="sm" label="결과 내용" />
+            결과 내용
+          </h4>
+          {error ? <p className="mb-2 shrink-0 text-[11px] text-rose-300">{error}</p> : null}
+          {isLoadingResult ? (
+            <p className="text-[11px] text-slate-500">결과 불러오는 중…</p>
+          ) : (
+            <div className="min-h-0 flex-1 overflow-y-auto">
+              {resultContent ? (
+                <JobContentView content={resultContent} jobType={JOB_TYPE_WORKFLOW} />
+              ) : (
+                <p className="text-[11px] text-slate-500">
+                  {isNodeListMode
+                    ? "작업 노드를 선택하면 결과가 표시됩니다."
+                    : "결과를 선택하면 내용이 표시됩니다."}
+                </p>
+              )}
+            </div>
+          )}
+        </section>
+        <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-md border border-slate-700/70 bg-slate-950/40 p-2">
+          <h4 className="mb-2 inline-flex shrink-0 items-center gap-1.5 text-[11px] font-semibold text-slate-300">
+            <WorkflowIcon name="log" size="sm" label="에이전트 로그" />
+            에이전트 로그
+          </h4>
+          {logError ? <p className="mb-2 shrink-0 text-[11px] text-rose-300">{logError}</p> : null}
+          {isLoadingLog ? (
+            <p className="text-[11px] text-slate-500">로그 불러오는 중…</p>
+          ) : (
+            <pre className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-slate-300">
+              {agentLogText ||
+                (selectedNodeUuid
+                  ? "기록된 에이전트 로그가 없습니다."
+                  : "작업 노드를 선택하면 로그가 표시됩니다.")}
+            </pre>
+          )}
+        </section>
+      </div>
     </div>
   );
 }

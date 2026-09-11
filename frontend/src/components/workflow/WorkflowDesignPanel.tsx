@@ -3,7 +3,9 @@ import { useCallback, useRef, useState } from "react";
 import type { AuthUser } from "../../types/auth";
 import type { WorkNodeItem, WorkflowItem } from "../../types/workflow";
 import { WorkflowEditor, type DiagramAgentEvent, type WorkflowEditorHandle } from "./WorkflowEditor";
+import { WorkflowFrontGuidePanel } from "./WorkflowFrontGuidePanel";
 import { WorkflowHitlApproveModal } from "./WorkflowHitlApproveModal";
+import { WorkflowIcon } from "./WorkflowIcon";
 import { DEFAULT_WORKFLOW_CRON_EXPR } from "./WorkflowScheduleField";
 import { isRunInProgress } from "./workflowModel";
 
@@ -78,13 +80,7 @@ export function WorkflowDesignPanel({
   );
 
   if (mode === "idle") {
-    return (
-      <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-xl border border-slate-700 bg-slate-900/50 shadow-inner">
-        <div className="flex h-full items-center justify-center text-sm text-slate-500">
-          작업 워크플로우를 선택하거나 새로 만드세요.
-        </div>
-      </section>
-    );
+    return <WorkflowFrontGuidePanel />;
   }
 
   if (mode === "create" || (mode === "edit" && selected)) {
@@ -178,12 +174,13 @@ export function WorkflowDesignPanel({
                 onClick={() => {
                   void handleDistribute(!isDistributed);
                 }}
-                className={`rounded-md border px-3 py-1.5 text-sm font-medium disabled:opacity-50 ${
+                className={`inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm font-medium disabled:opacity-50 ${
                   isDistributed
                     ? "border-amber-700/80 bg-amber-950/40 text-amber-100 hover:bg-amber-900/50"
                     : "border-sky-700 bg-sky-950/50 text-sky-100 hover:bg-sky-900/60"
                 }`}
               >
+                <WorkflowIcon name="distribute" size="sm" label="배포" />
                 {isBusy ? "처리 중…" : isDistributed ? "배포 취소" : "배포"}
               </button>
             ) : null}
@@ -194,8 +191,9 @@ export function WorkflowDesignPanel({
                 onClick={() => {
                   void handleClone();
                 }}
-                className="rounded-md border border-slate-600 bg-slate-900/70 px-3 py-1.5 text-sm font-medium text-slate-100 hover:bg-slate-800 disabled:opacity-50"
+                className="inline-flex items-center gap-1.5 rounded-md border border-slate-600 bg-slate-900/70 px-3 py-1.5 text-sm font-medium text-slate-100 hover:bg-slate-800 disabled:opacity-50"
               >
+                <WorkflowIcon name="clone" size="sm" label="복제" />
                 복제
               </button>
             ) : null}
@@ -206,8 +204,9 @@ export function WorkflowDesignPanel({
                 onClick={() => {
                   void editorRef.current?.save();
                 }}
-                className="rounded-md border border-sky-700 bg-sky-950/50 px-3 py-1.5 text-sm font-medium text-sky-100 hover:bg-sky-900/60 disabled:opacity-50"
+                className="inline-flex items-center gap-1.5 rounded-md border border-sky-700 bg-sky-950/50 px-3 py-1.5 text-sm font-medium text-sky-100 hover:bg-sky-900/60 disabled:opacity-50"
               >
+                <WorkflowIcon name="edit" size="sm" label="저장" />
                 {saveState.isSaving ? "저장 중…" : "저장"}
               </button>
             ) : null}
@@ -261,11 +260,5 @@ export function WorkflowDesignPanel({
     );
   }
 
-  return (
-    <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-xl border border-slate-700 bg-slate-900/50 shadow-inner">
-      <div className="flex h-full items-center justify-center text-sm text-slate-500">
-        작업 워크플로우를 선택하거나 새로 만드세요.
-      </div>
-    </section>
-  );
+  return <WorkflowFrontGuidePanel />;
 }

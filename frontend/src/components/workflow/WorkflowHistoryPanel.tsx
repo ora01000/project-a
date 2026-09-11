@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import { JobContentView } from "../jobs/JobContentView";
 import { JOB_TYPE_WORKFLOW } from "../../types/job";
+import { WorkflowIcon } from "./WorkflowIcon";
 
 export interface WorkflowHistoryItem {
   idx: number;
@@ -144,12 +145,16 @@ export function WorkflowHistoryPanel({ workflowUuid }: WorkflowHistoryPanelProps
     <div className="flex min-h-0 flex-1 gap-3 overflow-hidden p-3">
       <aside className="flex w-[240px] shrink-0 flex-col border-r border-slate-700/80 pr-3">
         <div className="mb-2 flex items-center justify-between gap-2">
-          <h4 className="text-[11px] font-semibold text-slate-300">실행 이력</h4>
+          <h4 className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-slate-300">
+            <WorkflowIcon name="history" size="sm" label="실행 이력" />
+            실행 이력
+          </h4>
           <button
             type="button"
             onClick={() => void loadHistory()}
-            className="rounded border border-slate-600 px-1.5 py-0.5 text-[10px] text-slate-300 hover:bg-slate-800"
+            className="inline-flex items-center gap-1 rounded border border-slate-600 px-1.5 py-0.5 text-[10px] text-slate-300 hover:bg-slate-800"
           >
+            <WorkflowIcon name="refresh" size="xs" label="새로고침" />
             새로고침
           </button>
         </div>
@@ -181,8 +186,15 @@ export function WorkflowHistoryPanel({ workflowUuid }: WorkflowHistoryPanelProps
                   <span className="text-slate-500">소요시간</span> {durationLabel}
                 </div>
                 <div className="mt-0.5 flex items-center justify-between gap-2 text-[10px] text-slate-400">
-                  <span>{item.finish_success ? "성공" : "실패"}</span>
-                  <span className="min-w-0 truncate text-right" title={executorLabel}>
+                  <span className="inline-flex items-center gap-1">
+                    <WorkflowIcon
+                      name={item.finish_success ? "approve" : "fail-branch"}
+                      size="xs"
+                    />
+                    {item.finish_success ? "성공" : "실패"}
+                  </span>
+                  <span className="inline-flex min-w-0 items-center gap-1 truncate text-right" title={executorLabel}>
+                    <WorkflowIcon name="owner" size="xs" />
                     {executorLabel}
                   </span>
                 </div>
@@ -192,7 +204,10 @@ export function WorkflowHistoryPanel({ workflowUuid }: WorkflowHistoryPanelProps
         </div>
       </aside>
       <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-        <h4 className="mb-2 shrink-0 text-[11px] font-semibold text-slate-300">최종 결과</h4>
+        <h4 className="mb-2 inline-flex shrink-0 items-center gap-1.5 text-[11px] font-semibold text-slate-300">
+          <WorkflowIcon name="result" size="sm" label="최종 결과" />
+          최종 결과
+        </h4>
         {error ? <p className="mb-2 shrink-0 text-[11px] text-rose-300">{error}</p> : null}
         {isLoadingResult ? (
           <p className="text-[11px] text-slate-500">결과 불러오는 중…</p>

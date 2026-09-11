@@ -43,6 +43,7 @@ from backend.app.db.workflow import (
     set_work_node_schedule_wait,
     work_uuids_from_expression,
 )
+from backend.app.logging.workflow_logger import log_work_node_agent_interaction
 from backend.app.notifications.email_sender import (
     load_email_settings_from_db,
     resolve_recipient_email,
@@ -567,6 +568,69 @@ def _resolve_invoke_agent_id(database_path: Path | str, target_agent: int) -> st
     return agent_id
 
 
+def _safe_log_work_node(
+    database_path: Path | str,
+    node: WorkNodeRecord,
+    *,
+    agent_id: str = "",
+    input_message: str = "",
+    output_message: str = "",
+    workflow_uuid: str = "",
+    event: str | None = None,
+    fail_reason: str | None = None,
+    status: str | None = None,
+    tools_used: list | None = None,
+) -> None:
+    try:
+        userid = resolve_work_node_upload_userid(database_path, node.owner)
+        log_work_node_agent_interaction(
+            userid=userid,
+            work_uuid=node.uuid,
+            agent_id=agent_id,
+            input_message=input_message,
+            output_message=output_message,
+            tools_used=tools_used,
+            workflow_uuid=workflow_uuid or None,
+            event=event,
+            fail_reason=fail_reason,
+            status=status,
+        )
+    except Exception:
+        logger.exception(
+            "failed to write work_node agent log uuid=%s workflow=%s event=%s",
+            node.uuid,
+            workflow_uuid,
+            event,
+        )
+
+
+def _mark_work_node_failed(
+    database_path: Path | str,
+    node: WorkNodeRecord,
+    *,
+    fail_reason: str,
+    workflow_uuid: str = "",
+    agent_id: str = "",
+    input_message: str = "",
+    output_message: str = "",
+) -> None:
+    reason = (fail_reason or "").strip()[:200]
+    mark_work_node_run_finished(
+        database_path, node.uuid, success=False, fail_reason=reason
+    )
+    _safe_log_work_node(
+        database_path,
+        node,
+        agent_id=agent_id,
+        input_message=input_message,
+        output_message=output_message or reason,
+        workflow_uuid=workflow_uuid,
+        event="failure",
+        fail_reason=reason,
+        status="failed",
+    )
+
+
 async def _invoke_work_node(
     *,
     database_path: Path | str,
@@ -584,30 +648,68 @@ async def _invoke_work_node(
             agentruntime_idx=int(node.target_agent),
         )
     )
-    if not workflow_uuid:
-        result = await invoke_coro
-    else:
-        task = asyncio.ensure_future(invoke_coro)
-        try:
-            while not task.done():
-                _raise_if_work_node_stopped(workflow_uuid, node.uuid)
-                done, _ = await asyncio.wait({task}, timeout=0.5)
-                if done:
-                    break
-            result = await task
-        except WorkflowStopRequested:
-            task.cancel()
+    try:
+        if not workflow_uuid:
+            result = await invoke_coro
+        else:
+            task = asyncio.ensure_future(invoke_coro)
             try:
-                await task
-            except (asyncio.CancelledError, Exception):
-                pass
-            raise
-    content = str(getattr(result, "content", "") or "").strip()
-    if not content:
-        raise ValueError("에이전트 응답이 비어 있습니다.")
-    if workflow_uuid:
-        _raise_if_work_node_stopped(workflow_uuid, node.uuid)
-    return content
+                while not task.done():
+                    _raise_if_work_node_stopped(workflow_uuid, node.uuid)
+                    done, _ = await asyncio.wait({task}, timeout=0.5)
+                    if done:
+                        break
+                result = await task
+            except WorkflowStopRequested:
+                task.cancel()
+                try:
+                    await task
+                except (asyncio.CancelledError, Exception):
+                    pass
+                _safe_log_work_node(
+                    database_path,
+                    node,
+                    agent_id=agent_id,
+                    input_message=message,
+                    output_message=USER_STOP_REASON,
+                    workflow_uuid=workflow_uuid,
+                    event="stopped",
+                    status="failed",
+                )
+                raise
+        content = str(getattr(result, "content", "") or "").strip()
+        if not content:
+            reason = "에이전트 응답이 비어 있습니다."
+            _safe_log_work_node(
+                database_path,
+                node,
+                agent_id=agent_id,
+                input_message=message,
+                output_message="",
+                workflow_uuid=workflow_uuid,
+                event="empty_response",
+                status="failed",
+            )
+            raise ValueError(reason)
+        if workflow_uuid:
+            _raise_if_work_node_stopped(workflow_uuid, node.uuid)
+        _safe_log_work_node(
+            database_path,
+            node,
+            agent_id=agent_id,
+            input_message=message,
+            output_message=content,
+            workflow_uuid=workflow_uuid,
+            status="ok",
+            tools_used=list(getattr(result, "tools_used", None) or []),
+        )
+        return content
+    except WorkflowStopRequested:
+        raise
+    except Exception:
+        # empty_response already logged; other invoke errors are logged with
+        # last_fail_reason in the caller via _mark_work_node_failed.
+        raise
 
 
 def _finalize_user_stop(
@@ -623,9 +725,14 @@ def _finalize_user_stop(
     clear_work_node_stop(workflow.uuid)
     current_node = get_work_node_by_uuid(database_path, node.uuid) or node
     if _is_work_node_run_in_progress(current_node):
-        mark_work_node_run_finished(
-            database_path, node.uuid, success=False, fail_reason=reason
+        _mark_work_node_failed(
+            database_path,
+            node,
+            fail_reason=reason,
+            workflow_uuid=workflow.uuid,
+            output_message=reason,
         )
+    # else: stop API already marked DB and logged last_fail_reason.
     if not any(
         step.work_uuid == node.uuid and step.status == "failed" and step.detail == reason
         for step in steps
@@ -966,8 +1073,12 @@ async def _execute_from_index(
             )
         except Exception as exc:
             reason = str(exc)[:200]
-            mark_work_node_run_finished(
-                database_path, node.uuid, success=False, fail_reason=reason
+            _mark_work_node_failed(
+                database_path,
+                node,
+                fail_reason=reason,
+                workflow_uuid=workflow.uuid,
+                output_message=reason,
             )
             steps.append(
                 WorkflowRunStep(
@@ -1058,11 +1169,12 @@ async def _execute_from_index(
                     )
                 except Exception as fail_exc:
                     fail_reason = str(fail_exc)[:200]
-                    mark_work_node_run_finished(
+                    _mark_work_node_failed(
                         database_path,
-                        fail_node.uuid,
-                        success=False,
+                        fail_node,
                         fail_reason=fail_reason,
+                        workflow_uuid=workflow.uuid,
+                        output_message=fail_reason,
                     )
                     steps.append(
                         WorkflowRunStep(
@@ -1223,8 +1335,12 @@ def stop_running_work_node(
         raise ValueError("실행 중인 작업노드가 아닙니다.")
 
     request_work_node_stop(workflow.uuid, node.uuid)
-    mark_work_node_run_finished(
-        database_path, node.uuid, success=False, fail_reason=USER_STOP_REASON
+    _mark_work_node_failed(
+        database_path,
+        node,
+        fail_reason=USER_STOP_REASON,
+        workflow_uuid=workflow.uuid,
+        output_message=USER_STOP_REASON,
     )
     finished = mark_workflow_run_finished(database_path, workflow.uuid, success=False)
     if finished is None:

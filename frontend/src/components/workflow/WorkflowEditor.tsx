@@ -26,8 +26,10 @@ import {
 import { parseWorkNodeCronExpr } from "./WorkNodeScheduleField";
 import { WorkNodeEditPanel } from "./WorkNodeEditPanel";
 import { WorkNodeResultsPanel } from "./WorkNodeResultsPanel";
+import { TemplateVariableInputs } from "./TemplateVariableInputs";
 import { WorkflowApproverPickModal } from "./WorkflowApproverPickModal";
 import { WorkflowHistoryPanel } from "./WorkflowHistoryPanel";
+import { WorkflowIcon } from "./WorkflowIcon";
 import {
   applyTemplateVariables,
   extractTemplateVariableNames,
@@ -121,9 +123,9 @@ function PlusCircle({
       type="button"
       aria-label={label}
       onClick={onClick}
-      className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-sky-400 bg-slate-900 text-lg leading-none text-sky-200 hover:bg-sky-950"
+      className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-sky-400 bg-slate-900 text-sky-200 hover:bg-sky-950"
     >
-      +
+      <WorkflowIcon name="connect" size="sm" label={label} />
     </button>
   );
 }
@@ -184,10 +186,11 @@ function FlowDownArrow({ tone = "fail" }: { tone?: "fail" | "report" }) {
 function MailReportBadge() {
   return (
     <div
-      className="flex h-10 min-w-10 items-center justify-center rounded-full border border-emerald-400 bg-slate-950 px-2 text-[10px] font-semibold text-emerald-100"
+      className="flex h-10 min-w-10 items-center justify-center gap-1 rounded-full border border-emerald-400 bg-slate-950 px-2 text-[10px] font-semibold text-emerald-100"
       title="작업 완료 후 결과 메일 전송"
     >
-      메일전송
+      <WorkflowIcon name="mail" size="sm" label="메일전송" />
+      <span>메일</span>
     </div>
   );
 }
@@ -220,8 +223,9 @@ function StopBox({ onClick, disabled }: { onClick: () => void; disabled?: boolea
         event.stopPropagation();
         onClick();
       }}
-      className="absolute right-1 top-1 z-10 rounded-sm border border-rose-500/80 bg-rose-950/80 px-1.5 py-0.5 text-[9px] font-semibold leading-none text-rose-100 hover:bg-rose-900 disabled:cursor-not-allowed disabled:opacity-50"
+      className="absolute right-1 top-1 z-10 inline-flex items-center gap-1 rounded-sm border border-rose-500/80 bg-rose-950/80 px-1.5 py-0.5 text-[9px] font-semibold leading-none text-rose-100 hover:bg-rose-900 disabled:cursor-not-allowed disabled:opacity-50"
     >
+      <WorkflowIcon name="stop" size="xs" label="중지" />
       중지
     </button>
   );
@@ -1115,38 +1119,42 @@ export const WorkflowEditor = forwardRef<WorkflowEditorHandle, WorkflowEditorPro
         <PlusCircle onClick={onPlus} label={kind === "start" ? "작업노드 추가" : "다음 단계 추가"} />
         <FlowArrow />
         {isOpen ? (
-          <div className="absolute left-1/2 top-8 z-30 w-36 -translate-x-1/2 rounded-md border border-slate-600 bg-slate-800 py-1 shadow-xl">
+          <div className="absolute left-1/2 top-8 z-30 w-40 -translate-x-1/2 rounded-md border border-slate-600 bg-slate-800 py-1 shadow-xl">
             <button
               type="button"
-              className="block w-full px-3 py-1.5 text-left text-xs text-slate-100 hover:bg-slate-700"
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-slate-100 hover:bg-slate-700"
               onClick={() => void handleAddWork(stepId)}
             >
+              <WorkflowIcon name="work-node" size="xs" />
               다음 작업노드
             </button>
             {kind === "work" ? (
               <>
                 <button
                   type="button"
-                  className="block w-full px-3 py-1.5 text-left text-xs text-slate-100 hover:bg-slate-700"
+                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-slate-100 hover:bg-slate-700"
                   onClick={() => handleAddHitl(stepId)}
                 >
+                  <WorkflowIcon name="approve" size="xs" />
                   승인자 지정
                 </button>
                 <button
                   type="button"
-                  className="block w-full px-3 py-1.5 text-left text-xs text-slate-100 hover:bg-slate-700"
+                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-slate-100 hover:bg-slate-700"
                   onClick={() => void handleAddFailWork(stepId)}
                 >
+                  <WorkflowIcon name="fail-branch" size="xs" />
                   실패시 작업노드
                 </button>
                 <button
                   type="button"
-                  className="block w-full px-3 py-1.5 text-left text-xs text-slate-100 hover:bg-slate-700"
+                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-slate-100 hover:bg-slate-700"
                   onClick={() => {
                     setOpenMenuId(null);
                     setModel((current) => terminateAfter(current, stepId));
                   }}
                 >
+                  <WorkflowIcon name="stop" size="xs" />
                   종료
                 </button>
               </>
@@ -1188,10 +1196,11 @@ export const WorkflowEditor = forwardRef<WorkflowEditorHandle, WorkflowEditorPro
         <div className="absolute left-1.5 top-1.5 flex max-w-[calc(100%-2rem)] flex-wrap gap-1">
           {isAwaiting ? (
             <span
-              className={`rounded-full border border-rose-500/80 bg-rose-950/80 px-1.5 py-0.5 text-[9px] font-semibold text-rose-100 ${
+              className={`inline-flex items-center gap-1 rounded-full border border-rose-500/80 bg-rose-950/80 px-1.5 py-0.5 text-[9px] font-semibold text-rose-100 ${
                 canOpenHitlApprove ? "ring-1 ring-rose-300/60" : ""
               }`}
             >
+              <WorkflowIcon name="approve" size="xs" label="승인 대기" />
               승인 대기
             </span>
           ) : null}
@@ -1203,9 +1212,10 @@ export const WorkflowEditor = forwardRef<WorkflowEditorHandle, WorkflowEditorPro
           </span>
           {upload ? (
             <span
-              className="shrink-0 rounded-md border border-sky-500/80 bg-sky-950/50 px-2.5 py-1 text-[11px] font-medium text-sky-100"
+              className="inline-flex shrink-0 items-center gap-1 rounded-md border border-sky-500/80 bg-sky-950/50 px-2.5 py-1 text-[11px] font-medium text-sky-100"
               title="승인 시 파일 업로드 필수"
             >
+              <WorkflowIcon name="upload" size="xs" label="업로드" />
               업로드
             </span>
           ) : null}
@@ -1214,13 +1224,14 @@ export const WorkflowEditor = forwardRef<WorkflowEditorHandle, WorkflowEditorPro
               type="button"
               aria-label="결재자 선택"
               title="결재자 선택"
-              className="shrink-0 rounded-md border border-emerald-700/80 bg-emerald-950/40 px-2.5 py-1 text-[11px] font-medium text-emerald-100 hover:bg-emerald-900/50"
+              className="inline-flex shrink-0 items-center gap-1 rounded-md border border-emerald-700/80 bg-emerald-950/40 px-2.5 py-1 text-[11px] font-medium text-emerald-100 hover:bg-emerald-900/50"
               onClick={(event) => {
                 event.stopPropagation();
                 setOpenMenuId(null);
                 setApproverPickClientId(clientId);
               }}
             >
+              <WorkflowIcon name="owner" size="xs" label="결재자" />
               결재자
             </button>
           )}
@@ -1345,11 +1356,13 @@ export const WorkflowEditor = forwardRef<WorkflowEditorHandle, WorkflowEditorPro
         }`}
       >
         {isScheduleWaiting ? (
-          <span className="absolute left-1.5 top-1.5 rounded-full border border-amber-500/80 bg-amber-950/80 px-1.5 py-0.5 text-[9px] font-semibold text-amber-100">
+          <span className="absolute left-1.5 top-1.5 inline-flex items-center gap-1 rounded-full border border-amber-500/80 bg-amber-950/80 px-1.5 py-0.5 text-[9px] font-semibold text-amber-100">
+            <WorkflowIcon name="history" size="xs" label="예약대기중" />
             예약대기중
           </span>
         ) : isNodeRunning ? (
-          <span className="absolute left-1.5 top-1.5 rounded-full border border-rose-500/80 bg-rose-950/80 px-1.5 py-0.5 text-[9px] font-semibold text-rose-100">
+          <span className="absolute left-1.5 top-1.5 inline-flex items-center gap-1 rounded-full border border-rose-500/80 bg-rose-950/80 px-1.5 py-0.5 text-[9px] font-semibold text-rose-100">
+            <WorkflowIcon name="run" size="xs" label="실행 중" />
             실행 중
           </span>
         ) : null}
@@ -1397,17 +1410,18 @@ export const WorkflowEditor = forwardRef<WorkflowEditorHandle, WorkflowEditorPro
             <p className="text-[10px] text-slate-500">작업 스크립트</p>
             <div className="flex min-w-0 items-center justify-between gap-2">
               {hasScript ? (
-                <span className="text-sm leading-none" title="실행 결과 있음" aria-label="실행 결과 있음">
-                  ✅
+                <span className="inline-flex items-center" title="실행 결과 있음" aria-label="실행 결과 있음">
+                  <WorkflowIcon name="approve" size="sm" label="실행 결과 있음" />
                 </span>
               ) : (
                 <TextLabelChip title="미실행">미실행</TextLabelChip>
               )}
               {isCronEnabled ? (
                 <span
-                  className="shrink-0 text-[10px] font-medium text-amber-200/90"
+                  className="inline-flex shrink-0 items-center gap-1 text-[10px] font-medium text-amber-200/90"
                   title={scheduleLabel}
                 >
+                  <WorkflowIcon name="history" size="xs" label="스케줄" />
                   {scheduleLabel}
                 </span>
               ) : null}
@@ -1416,8 +1430,8 @@ export const WorkflowEditor = forwardRef<WorkflowEditorHandle, WorkflowEditorPro
           {hasFile ? (
             <div className="flex items-center justify-between gap-2">
               <p className="text-[10px] text-slate-500">첨부 유무</p>
-              <span className="text-sm leading-none" title="첨부 있음" aria-label="첨부 있음">
-                ✅
+              <span className="inline-flex items-center" title="첨부 있음" aria-label="첨부 있음">
+                <WorkflowIcon name="upload" size="sm" label="첨부 있음" />
               </span>
             </div>
           ) : null}
@@ -1465,14 +1479,18 @@ export const WorkflowEditor = forwardRef<WorkflowEditorHandle, WorkflowEditorPro
           <div className={`min-w-0 ${cronEnabled ? "basis-[40%] flex-[2]" : "flex-1"}`}>
             <div className="grid gap-1 text-xs text-slate-400">
               <div className="flex items-center justify-between gap-2">
-                <span>다이어그램 생성 프롬프트</span>
+                <span className="inline-flex items-center gap-1.5">
+                  <WorkflowIcon name="ai" size="sm" label="다이어그램 생성" />
+                  다이어그램 생성 프롬프트
+                </span>
                 {diagramPanelState === "STATE_RESPONSE_SUCCESS" ? (
                   <button
                     type="button"
                     disabled={readOnly}
                     onClick={handleDiagramRegenerate}
-                    className="shrink-0 rounded-md border border-slate-600 bg-slate-900 px-3 py-1 text-[11px] font-medium text-slate-100 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="inline-flex shrink-0 items-center gap-1 rounded-md border border-slate-600 bg-slate-900 px-3 py-1 text-[11px] font-medium text-slate-100 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
                   >
+                    <WorkflowIcon name="quickstart" size="xs" />
                     다시생성하기
                   </button>
                 ) : (
@@ -1487,9 +1505,10 @@ export const WorkflowEditor = forwardRef<WorkflowEditorHandle, WorkflowEditorPro
                         : !diagramPrompt.trim() || hasEmptyTemplateVars)
                     }
                     onClick={handleDiagramGenerate}
-                    className="shrink-0 rounded-md border border-slate-600 bg-slate-900 px-3 py-1 text-[11px] font-medium text-slate-100 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="inline-flex shrink-0 items-center gap-1 rounded-md border border-slate-600 bg-slate-900 px-3 py-1 text-[11px] font-medium text-slate-100 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
                     title="대화형 터미널로 전송"
                   >
+                    <WorkflowIcon name="ai" size="xs" />
                     {isDiagramBusy ? "생성 중…" : "생성"}
                   </button>
                 )}
@@ -1563,30 +1582,17 @@ export const WorkflowEditor = forwardRef<WorkflowEditorHandle, WorkflowEditorPro
                         rows={8}
                       />
                       {templateVarNames.length > 0 ? (
-                        <div className="mt-1 grid gap-2">
-                          {templateVarNames.map((varName) => (
-                            <label
-                              key={varName}
-                              className="grid gap-1 text-xs text-slate-400"
-                            >
-                              {varName}
-                              <input
-                                value={templateVarValues[varName] ?? ""}
-                                onChange={(event) => {
-                                  const nextValue = event.target.value;
-                                  setTemplateVarValues((current) => ({
-                                    ...current,
-                                    [varName]: nextValue,
-                                  }));
-                                }}
-                                readOnly={isDiagramInputLocked}
-                                disabled={isDiagramInputLocked}
-                                placeholder={`{${varName}}`}
-                                className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1.5 text-xs text-slate-100 disabled:opacity-80"
-                              />
-                            </label>
-                          ))}
-                        </div>
+                        <TemplateVariableInputs
+                          varNames={templateVarNames}
+                          values={templateVarValues}
+                          locked={isDiagramInputLocked}
+                          onChange={(varName, value) => {
+                            setTemplateVarValues((current) => ({
+                              ...current,
+                              [varName]: value,
+                            }));
+                          }}
+                        />
                       ) : null}
                     </>
                   )}
@@ -1716,34 +1722,37 @@ export const WorkflowEditor = forwardRef<WorkflowEditorHandle, WorkflowEditorPro
                 <button
                   type="button"
                   onClick={() => setBottomTab("results")}
-                  className={`rounded-md px-2.5 py-1 text-[11px] font-medium ${
+                  className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-medium ${
                     bottomTab === "results"
                       ? "bg-slate-800 text-slate-100"
                       : "text-slate-400 hover:bg-slate-900 hover:text-slate-200"
                   }`}
                 >
+                  <WorkflowIcon name="history" size="xs" label="작업결과" />
                   작업 워크플로우 작업결과
                 </button>
                 <button
                   type="button"
                   onClick={() => setBottomTab("work-results")}
-                  className={`rounded-md px-2.5 py-1 text-[11px] font-medium ${
+                  className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-medium ${
                     bottomTab === "work-results"
                       ? "bg-slate-800 text-slate-100"
                       : "text-slate-400 hover:bg-slate-900 hover:text-slate-200"
                   }`}
                 >
+                  <WorkflowIcon name="result" size="xs" label="작업 결과" />
                   작업 결과
                 </button>
                 <button
                   type="button"
                   onClick={() => setBottomTab("edit")}
-                  className={`rounded-md px-2.5 py-1 text-[11px] font-medium ${
+                  className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-medium ${
                     bottomTab === "edit"
                       ? "bg-slate-800 text-slate-100"
                       : "text-slate-400 hover:bg-slate-900 hover:text-slate-200"
                   }`}
                 >
+                  <WorkflowIcon name="edit" size="xs" label="작업 편집" />
                   작업 편집
                 </button>
               </header>
@@ -1769,11 +1778,13 @@ export const WorkflowEditor = forwardRef<WorkflowEditorHandle, WorkflowEditorPro
                   />
                 ) : selectedHitlNode && !readOnly ? (
                   <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-auto p-4 text-[11px] text-slate-300">
-                    <p>
+                    <p className="inline-flex items-center gap-1.5">
+                      <WorkflowIcon name="approve" size="sm" />
                       <span className="text-slate-500">승인 노드</span>{" "}
                       {selectedHitlNode.name || selectedHitlNode.uuid}
                     </p>
-                    <p>
+                    <p className="inline-flex items-center gap-1.5">
+                      <WorkflowIcon name="owner" size="sm" />
                       <span className="text-slate-500">승인자</span>{" "}
                       {selectedHitlNode.username || selectedHitlNode.userid || "(미지정)"}
                     </p>
@@ -1809,6 +1820,7 @@ export const WorkflowEditor = forwardRef<WorkflowEditorHandle, WorkflowEditorPro
                           }
                         }}
                       />
+                      <WorkflowIcon name="upload" size="sm" />
                       승인 시 파일 업로드 필수
                     </label>
                   </div>
