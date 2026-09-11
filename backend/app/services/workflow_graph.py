@@ -58,6 +58,7 @@ class GraphNode:
     label: str
     work_uuid: str | None = None
     userid: str | None = None
+    upload: bool = False
     cx: float = 0
     cy: float = 0
     width: int = WORK_W
@@ -149,6 +150,7 @@ def build_workflow_graph(
     work_report_uuids: set[str] | None = None,
     worker_by_uuid: dict[str, str] | None = None,
     approver_by_uuid: dict[str, str] | None = None,
+    upload_by_uuid: dict[str, bool] | None = None,
 ) -> dict[str, Any]:
     from backend.app.services.workflow_document import parse_workflow_document
 
@@ -165,6 +167,9 @@ def build_workflow_graph(
     }
     approvers = {
         str(k).lower(): str(v or "").strip() for k, v in (approver_by_uuid or {}).items()
+    }
+    uploads = {
+        str(k).lower(): bool(v) for k, v in (upload_by_uuid or {}).items()
     }
     nodes: list[GraphNode] = []
     edges: list[GraphEdge] = []
@@ -197,6 +202,13 @@ def build_workflow_graph(
         if token.kind == "hitl" and token.work_uuid and token.work_uuid in names:
             label = names[token.work_uuid]
         width, height = _token_size(token.kind)
+        is_upload = bool(
+            token.kind == "hitl"
+            and token.work_uuid
+            and uploads.get(token.work_uuid.lower(), False)
+        )
+        if is_upload:
+            height = max(height, 28)
         nodes.append(
             GraphNode(
                 id=node_id,
@@ -204,6 +216,7 @@ def build_workflow_graph(
                 label=label,
                 work_uuid=token.work_uuid,
                 userid=token.userid,
+                upload=is_upload,
                 cx=ORIGIN_X + index * H_GAP,
                 cy=MAIN_Y,
                 width=width,
@@ -283,6 +296,7 @@ def build_workflow_graph(
                 "label": node.label,
                 "work_uuid": node.work_uuid,
                 "userid": node.userid,
+                "upload": bool(node.upload),
                 "cx": node.cx,
                 "cy": node.cy,
                 "width": node.width,

@@ -1,8 +1,7 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 
 import type { AuthUser } from "../../types/auth";
 import type { WorkNodeItem, WorkflowItem } from "../../types/workflow";
-import { WorkflowDiagram } from "./WorkflowDiagram";
 import { WorkflowEditor, type DiagramAgentEvent, type WorkflowEditorHandle } from "./WorkflowEditor";
 import { WorkflowHitlApproveModal } from "./WorkflowHitlApproveModal";
 import { DEFAULT_WORKFLOW_CRON_EXPR } from "./WorkflowScheduleField";
@@ -54,36 +53,6 @@ export function WorkflowDesignPanel({
   const handleSaveStateChange = useCallback((state: { canSave: boolean; isSaving: boolean }) => {
     setSaveState(state);
   }, []);
-
-  const workRunDates = useMemo(() => {
-    const map: Record<
-      string,
-      { last_start_date?: string; last_end_date?: string; schedule_wait?: boolean }
-    > = {};
-    for (const node of workNodes) {
-      map[node.uuid] = {
-        last_start_date: node.last_start_date,
-        last_end_date: node.last_end_date,
-        schedule_wait: node.schedule_wait,
-      };
-    }
-    return map;
-  }, [workNodes]);
-
-  const diagramHasRunning = useMemo(
-    () =>
-      Boolean(selected?.awaiting_approval) ||
-      Boolean(
-        selected?.graph?.nodes.some((node) => {
-          if (!node.work_uuid) {
-            return false;
-          }
-          const dates = workRunDates[node.work_uuid];
-          return isRunInProgress(dates?.last_start_date, dates?.last_end_date);
-        }),
-      ),
-    [selected?.awaiting_approval, selected?.graph, workRunDates],
-  );
 
   const isWorkflowRunning =
     mode === "edit" &&
@@ -244,26 +213,6 @@ export function WorkflowDesignPanel({
             ) : null}
           </div>
         </header>
-        {mode === "edit" && selected?.graph && selected.graph.nodes.length > 0 ? (
-          <div
-            className={`shrink-0 border-b border-slate-700/80 px-3 py-2 ${
-              diagramHasRunning ? "bg-rose-950/20" : "bg-slate-950/40"
-            }`}
-            style={{ height: 148 }}
-          >
-            <WorkflowDiagram
-              graph={selected.graph}
-              workRunDates={workRunDates}
-              awaitingHitlNodeId={selected.awaiting_hitl_node_id || null}
-              awaitingHitlUserid={selected.awaiting_hitl_userid || null}
-              onAwaitingHitlClick={
-                selected.awaiting_job_idx != null
-                  ? () => setHitlJobIdx(selected.awaiting_job_idx ?? null)
-                  : undefined
-              }
-            />
-          </div>
-        ) : null}
         <WorkflowEditor
           ref={editorRef}
           sessionKey={editorSessionKey}

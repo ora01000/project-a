@@ -128,10 +128,37 @@ function PlusCircle({
   );
 }
 
+function FlowDashLine({ widthClass = "w-4" }: { widthClass?: string }) {
+  return (
+    <svg
+      viewBox="0 0 16 12"
+      className={`h-3 ${widthClass} shrink-0 text-slate-400`}
+      aria-hidden="true"
+      preserveAspectRatio="none"
+    >
+      <path
+        d="M0 6 H16"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeDasharray="3 2"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
 function FlowArrow() {
   return (
     <svg viewBox="0 0 28 12" className="h-3 w-7 shrink-0 text-slate-400" aria-hidden="true">
-      <path d="M1 6 H20" fill="none" stroke="currentColor" strokeWidth="1.5" />
+      <path
+        d="M1 6 H20"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeDasharray="3 2"
+        strokeLinecap="round"
+      />
       <path d="M18 1.5 L26 6 L18 10.5 Z" fill="currentColor" />
     </svg>
   );
@@ -1067,7 +1094,7 @@ export const WorkflowEditor = forwardRef<WorkflowEditorHandle, WorkflowEditorPro
     if (readOnly) {
       return (
         <div className="relative mx-1 flex items-center gap-0.5">
-          <div className="h-px w-4 bg-slate-500" />
+          <FlowDashLine />
           <FlowArrow />
         </div>
       );
@@ -1084,7 +1111,7 @@ export const WorkflowEditor = forwardRef<WorkflowEditorHandle, WorkflowEditorPro
     };
     return (
       <div className="relative mx-1 flex items-center gap-0.5">
-        <div className="h-px w-4 bg-slate-500" />
+        <FlowDashLine />
         <PlusCircle onClick={onPlus} label={kind === "start" ? "작업노드 추가" : "다음 단계 추가"} />
         <FlowArrow />
         {isOpen ? (
@@ -1130,7 +1157,12 @@ export const WorkflowEditor = forwardRef<WorkflowEditorHandle, WorkflowEditorPro
     );
   };
 
-  const renderApproverCard = (clientId: string, username: string, userid: string) => {
+  const renderApproverCard = (
+    clientId: string,
+    username: string,
+    userid: string,
+    upload = false,
+  ) => {
     const display = username || userid || "미지정";
     const isAwaiting =
       Boolean(awaitingHitlUserid) &&
@@ -1153,20 +1185,30 @@ export const WorkflowEditor = forwardRef<WorkflowEditorHandle, WorkflowEditorPro
             : undefined
         }
       >
-        {isAwaiting ? (
-          <span
-            className={`absolute left-1.5 top-1.5 rounded-full border border-rose-500/80 bg-rose-950/80 px-1.5 py-0.5 text-[9px] font-semibold text-rose-100 ${
-              canOpenHitlApprove ? "ring-1 ring-rose-300/60" : ""
-            }`}
-          >
-            승인 대기
-          </span>
-        ) : null}
+        <div className="absolute left-1.5 top-1.5 flex max-w-[calc(100%-2rem)] flex-wrap gap-1">
+          {isAwaiting ? (
+            <span
+              className={`rounded-full border border-rose-500/80 bg-rose-950/80 px-1.5 py-0.5 text-[9px] font-semibold text-rose-100 ${
+                canOpenHitlApprove ? "ring-1 ring-rose-300/60" : ""
+              }`}
+            >
+              승인 대기
+            </span>
+          ) : null}
+        </div>
         {readOnly ? null : <DeleteBox onClick={() => handleRemoveNode(clientId)} label="승인자 삭제" />}
         <div className="flex min-w-0 items-center gap-1.5">
           <span className="min-w-0 flex-1 truncate">
             <TextLabelChip title={display}>{display}</TextLabelChip>
           </span>
+          {upload ? (
+            <span
+              className="shrink-0 rounded-md border border-sky-500/80 bg-sky-950/50 px-2.5 py-1 text-[11px] font-medium text-sky-100"
+              title="승인 시 파일 업로드 필수"
+            >
+              업로드
+            </span>
+          ) : null}
           {readOnly ? null : (
             <button
               type="button"
@@ -1556,7 +1598,11 @@ export const WorkflowEditor = forwardRef<WorkflowEditorHandle, WorkflowEditorPro
 
           <div
             className={`min-w-0 ${
-              cronEnabled ? "basis-[20%] flex-1" : "w-auto shrink-0 self-start"
+              cronEnabled
+                ? showDiagramPromptPanel
+                  ? "basis-[20%] flex-1"
+                  : "w-[30%] shrink-0"
+                : "w-auto shrink-0 self-start"
             }`}
           >
             <WorkflowScheduleField
@@ -1599,7 +1645,12 @@ export const WorkflowEditor = forwardRef<WorkflowEditorHandle, WorkflowEditorPro
                       </div>
                     ) : null}
                     {step.type === "hitl" ? (
-                      renderApproverCard(step.clientId, step.username, step.userid)
+                      renderApproverCard(
+                        step.clientId,
+                        step.username,
+                        step.userid,
+                        Boolean(step.upload),
+                      )
                     ) : null}
                     {step.type === "work" ? renderWorkCard(step) : null}
                     {step.type === "work" &&

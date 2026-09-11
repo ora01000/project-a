@@ -448,10 +448,13 @@ def _graph_for(
         names.update(extra_work_names)
     worker_by_uuid: dict[str, str] = {}
     approver_by_uuid: dict[str, str] = {}
+    upload_by_uuid: dict[str, bool] = {}
     for node in list_work_nodes_visible(database_path, user_idx):
         worker_by_uuid[node.uuid] = node.worker or "agent"
         if (node.approver_userid or "").strip():
             approver_by_uuid[node.uuid] = node.approver_userid.strip()
+        if bool(getattr(node, "upload", False)):
+            upload_by_uuid[node.uuid] = True
     try:
         return build_workflow_graph(
             expression,
@@ -460,6 +463,7 @@ def _graph_for(
             work_report_uuids=_visible_work_reports(database_path, user_idx),
             worker_by_uuid=worker_by_uuid,
             approver_by_uuid=approver_by_uuid,
+            upload_by_uuid=upload_by_uuid,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

@@ -47,6 +47,7 @@ export interface WorkflowGraphNode {
   label: string;
   work_uuid: string | null;
   userid: string | null;
+  upload?: boolean;
   cx: number;
   cy: number;
   width: number;
