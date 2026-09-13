@@ -116,5 +116,5 @@ redis:
 
 # Bearer 세션 (B-2): 슬라이딩 TTL + 절대 상한
 auth_session:
-  ttl_seconds: 3600
+  ttl_seconds: 7200
   absolute_max_seconds: 28800

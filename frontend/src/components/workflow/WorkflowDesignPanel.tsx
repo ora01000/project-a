@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { AuthUser } from "../../types/auth";
 import type { WorkNodeItem, WorkflowItem } from "../../types/workflow";
@@ -8,6 +8,10 @@ import { WorkflowHitlApproveModal } from "./WorkflowHitlApproveModal";
 import { WorkflowIcon } from "./WorkflowIcon";
 import { DEFAULT_WORKFLOW_CRON_EXPR } from "./WorkflowScheduleField";
 import { isRunInProgress } from "./workflowModel";
+
+function canViewWorkflowJson(role: number): boolean {
+  return role === 0 || role === 100;
+}
 
 interface WorkflowDesignPanelProps {
   mode: "idle" | "create" | "edit";
@@ -51,7 +55,24 @@ export function WorkflowDesignPanel({
   const [isBusy, setIsBusy] = useState(false);
   const [saveState, setSaveState] = useState({ canSave: false, isSaving: false });
   const [hitlJobIdx, setHitlJobIdx] = useState<number | null>(null);
+  const [jsonPanelOpen, setJsonPanelOpen] = useState(false);
+  const [jsonText, setJsonText] = useState("");
   const editorRef = useRef<WorkflowEditorHandle>(null);
+  const showJsonButton = canViewWorkflowJson(Number(user.role));
+
+  const refreshWorkflowJson = useCallback(() => {
+    setJsonText(editorRef.current?.getWorkflowJson?.() ?? "");
+  }, []);
+
+  useEffect(() => {
+    if (!jsonPanelOpen) {
+      return;
+    }
+    refreshWorkflowJson();
+    const timer = window.setInterval(refreshWorkflowJson, 800);
+    return () => window.clearInterval(timer);
+  }, [jsonPanelOpen, refreshWorkflowJson, editorSessionKey]);
+
   const handleSaveStateChange = useCallback((state: { canSave: boolean; isSaving: boolean }) => {
     setSaveState(state);
   }, []);
@@ -151,100 +172,156 @@ export function WorkflowDesignPanel({
     };
 
     return (
-      <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-xl border border-slate-700 bg-slate-900/50 shadow-inner">
-        <header className="flex shrink-0 items-start justify-between gap-3 border-b border-slate-700/80 px-4 py-3">
-          <div className="min-w-0">
-            <h2 className="truncate text-sm font-semibold text-slate-200">
-              {mode === "create" ? "새로운 작업 워크플로우" : selected?.workflow_name ?? "작업 워크플로우 편집"}
-            </h2>
-            {mode === "edit" ? (
-              <p className="mt-0.5 text-[11px] text-slate-500">
-                {canEdit
-                  ? `소유자 · ${ownerLabel}${isDistributed ? " · 배포됨" : " · 미배포"}`
-                  : `읽기 모드 · ${ownerLabel} 소유${isDistributed ? " · 배포됨" : ""}`}
-              </p>
-            ) : null}
-            {actionError ? <p className="mt-0.5 text-[11px] text-rose-300">{actionError}</p> : null}
-          </div>
-          <div className="flex shrink-0 items-center gap-1.5">
-            {mode === "edit" && isOwner ? (
-              <button
-                type="button"
-                disabled={isBusy}
-                onClick={() => {
-                  void handleDistribute(!isDistributed);
-                }}
-                className={`inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm font-medium disabled:opacity-50 ${
-                  isDistributed
-                    ? "border-amber-700/80 bg-amber-950/40 text-amber-100 hover:bg-amber-900/50"
-                    : "border-sky-700 bg-sky-950/50 text-sky-100 hover:bg-sky-900/60"
-                }`}
-              >
-                <WorkflowIcon name="distribute" size="sm" label="배포" />
-                {isBusy ? "처리 중…" : isDistributed ? "배포 취소" : "배포"}
-              </button>
-            ) : null}
-            {mode === "edit" && selected ? (
-              <button
-                type="button"
-                disabled={isBusy}
-                onClick={() => {
-                  void handleClone();
-                }}
-                className="inline-flex items-center gap-1.5 rounded-md border border-slate-600 bg-slate-900/70 px-3 py-1.5 text-sm font-medium text-slate-100 hover:bg-slate-800 disabled:opacity-50"
-              >
-                <WorkflowIcon name="clone" size="sm" label="복제" />
-                복제
-              </button>
-            ) : null}
-            {canEdit ? (
-              <button
-                type="button"
-                disabled={isBusy || saveState.isSaving || !saveState.canSave}
-                onClick={() => {
-                  void editorRef.current?.save();
-                }}
-                className="inline-flex items-center gap-1.5 rounded-md border border-sky-700 bg-sky-950/50 px-3 py-1.5 text-sm font-medium text-sky-100 hover:bg-sky-900/60 disabled:opacity-50"
-              >
-                <WorkflowIcon name="edit" size="sm" label="저장" />
-                {saveState.isSaving ? "저장 중…" : "저장"}
-              </button>
-            ) : null}
-          </div>
-        </header>
-        <WorkflowEditor
-          ref={editorRef}
-          sessionKey={editorSessionKey}
-          user={user}
-          workNodes={workNodes}
-          awaitingHitlUserid={selected?.awaiting_hitl_userid || ""}
-          awaitingJobIdx={selected?.awaiting_job_idx ?? null}
-          onAwaitingHitlApprove={
-            selected?.awaiting_job_idx != null
-              ? () => setHitlJobIdx(selected.awaiting_job_idx ?? null)
-              : undefined
-          }
-          initialName={mode === "edit" ? selected?.workflow_name ?? "" : ""}
-          initialExpression={mode === "edit" ? selected?.workflow ?? "" : ""}
-          initialDescription={mode === "edit" ? selected?.workflow_description ?? "" : ""}
-          initialCron={mode === "edit" ? Boolean(selected?.cron) : false}
-          initialCronExpr={
-            mode === "edit"
-              ? selected?.cron_expr || DEFAULT_WORKFLOW_CRON_EXPR
-              : DEFAULT_WORKFLOW_CRON_EXPR
-          }
-          workflowUuid={mode === "edit" ? selected?.uuid : undefined}
-          readOnly={editorReadOnly}
-          onSaved={onSaved}
-          onWorkNodesChanged={onWorkNodesChanged}
-          onStopWorkNode={isWorkflowRunning ? handleStopWorkNode : undefined}
-          onSaveStateChange={handleSaveStateChange}
-          aiImportRequest={aiImportRequest}
-          onAiImportHandled={onAiImportHandled}
-          diagramAgentEvent={diagramAgentEvent}
-          onDiagramAgentEventHandled={onDiagramAgentEventHandled}
-          onDiagramGenerate={onDiagramGenerate}
-        />
+      <section className="flex min-h-0 min-w-0 flex-1 overflow-hidden rounded-xl border border-slate-700 bg-slate-900/50 shadow-inner">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+          <header className="flex shrink-0 items-start justify-between gap-3 border-b border-slate-700/80 px-4 py-3">
+            <div className="min-w-0">
+              <h2 className="truncate text-sm font-semibold text-slate-200">
+                {mode === "create" ? "새로운 작업 워크플로우" : selected?.workflow_name ?? "작업 워크플로우 편집"}
+              </h2>
+              {mode === "edit" ? (
+                <p className="mt-0.5 text-[11px] text-slate-500">
+                  {canEdit
+                    ? `소유자 · ${ownerLabel}${isDistributed ? " · 배포됨" : " · 미배포"}`
+                    : `읽기 모드 · ${ownerLabel} 소유${isDistributed ? " · 배포됨" : ""}`}
+                </p>
+              ) : null}
+              {actionError ? <p className="mt-0.5 text-[11px] text-rose-300">{actionError}</p> : null}
+            </div>
+            <div className="flex shrink-0 items-center gap-1.5">
+              {mode === "edit" && isOwner ? (
+                <button
+                  type="button"
+                  disabled={isBusy}
+                  onClick={() => {
+                    void handleDistribute(!isDistributed);
+                  }}
+                  className={`inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm font-medium disabled:opacity-50 ${
+                    isDistributed
+                      ? "border-amber-700/80 bg-amber-950/40 text-amber-100 hover:bg-amber-900/50"
+                      : "border-sky-700 bg-sky-950/50 text-sky-100 hover:bg-sky-900/60"
+                  }`}
+                >
+                  <WorkflowIcon name="distribute" size="sm" label="배포" />
+                  {isBusy ? "처리 중…" : isDistributed ? "배포 취소" : "배포"}
+                </button>
+              ) : null}
+              {mode === "edit" && selected ? (
+                <button
+                  type="button"
+                  disabled={isBusy}
+                  onClick={() => {
+                    void handleClone();
+                  }}
+                  className="inline-flex items-center gap-1.5 rounded-md border border-slate-600 bg-slate-900/70 px-3 py-1.5 text-sm font-medium text-slate-100 hover:bg-slate-800 disabled:opacity-50"
+                >
+                  <WorkflowIcon name="clone" size="sm" label="복제" />
+                  복제
+                </button>
+              ) : null}
+              {canEdit ? (
+                <button
+                  type="button"
+                  disabled={isBusy || saveState.isSaving || !saveState.canSave}
+                  onClick={() => {
+                    void editorRef.current?.save();
+                  }}
+                  className="inline-flex items-center gap-1.5 rounded-md border border-sky-700 bg-sky-950/50 px-3 py-1.5 text-sm font-medium text-sky-100 hover:bg-sky-900/60 disabled:opacity-50"
+                >
+                  <WorkflowIcon name="edit" size="sm" label="저장" />
+                  {saveState.isSaving ? "저장 중…" : "저장"}
+                </button>
+              ) : null}
+              {showJsonButton ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setJsonPanelOpen((open) => {
+                      const next = !open;
+                      if (next) {
+                        refreshWorkflowJson();
+                      }
+                      return next;
+                    });
+                  }}
+                  className={`inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm font-medium ${
+                    jsonPanelOpen
+                      ? "border-violet-600 bg-violet-950/50 text-violet-100"
+                      : "border-slate-600 bg-slate-900/70 text-slate-100 hover:bg-slate-800"
+                  }`}
+                  title="워크플로 JSON 전문"
+                >
+                  JSON
+                </button>
+              ) : null}
+            </div>
+          </header>
+          <WorkflowEditor
+            ref={editorRef}
+            sessionKey={editorSessionKey}
+            user={user}
+            workNodes={workNodes}
+            awaitingHitlUserid={selected?.awaiting_hitl_userid || ""}
+            awaitingJobIdx={selected?.awaiting_job_idx ?? null}
+            onAwaitingHitlApprove={
+              selected?.awaiting_job_idx != null
+                ? () => setHitlJobIdx(selected.awaiting_job_idx ?? null)
+                : undefined
+            }
+            initialName={mode === "edit" ? selected?.workflow_name ?? "" : ""}
+            initialExpression={mode === "edit" ? selected?.workflow ?? "" : ""}
+            initialDescription={mode === "edit" ? selected?.workflow_description ?? "" : ""}
+            initialCron={mode === "edit" ? Boolean(selected?.cron) : false}
+            initialCronExpr={
+              mode === "edit"
+                ? selected?.cron_expr || DEFAULT_WORKFLOW_CRON_EXPR
+                : DEFAULT_WORKFLOW_CRON_EXPR
+            }
+            initialMergeWorkResult={mode === "edit" ? selected?.merge_work_result || "" : ""}
+            workflowUuid={mode === "edit" ? selected?.uuid : undefined}
+            historyRefreshToken={
+              mode === "edit"
+                ? `${selected?.uuid || ""}:${selected?.last_end_date || ""}:${selected?.last_start_date || ""}`
+                : ""
+            }
+            readOnly={editorReadOnly}
+            onSaved={onSaved}
+            onWorkNodesChanged={onWorkNodesChanged}
+            onStopWorkNode={isWorkflowRunning ? handleStopWorkNode : undefined}
+            onSaveStateChange={handleSaveStateChange}
+            aiImportRequest={aiImportRequest}
+            onAiImportHandled={onAiImportHandled}
+            diagramAgentEvent={diagramAgentEvent}
+            onDiagramAgentEventHandled={onDiagramAgentEventHandled}
+            onDiagramGenerate={onDiagramGenerate}
+          />
+        </div>
+        {showJsonButton && jsonPanelOpen ? (
+          <aside className="flex w-[30%] min-w-[240px] shrink-0 flex-col border-l border-slate-700 bg-slate-950/80">
+            <div className="flex shrink-0 items-center justify-between gap-2 border-b border-slate-700/80 px-3 py-2">
+              <h3 className="text-xs font-semibold text-slate-300">Workflow JSON</h3>
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={refreshWorkflowJson}
+                  className="rounded border border-slate-600 px-2 py-0.5 text-[10px] text-slate-300 hover:bg-slate-800"
+                >
+                  새로고침
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setJsonPanelOpen(false)}
+                  className="rounded border border-slate-600 px-2 py-0.5 text-[10px] text-slate-300 hover:bg-slate-800"
+                >
+                  닫기
+                </button>
+              </div>
+            </div>
+            <pre className="min-h-0 flex-1 overflow-auto whitespace-pre p-3 font-mono text-[11px] leading-relaxed text-slate-200">
+              {jsonText || "(비어 있음)"}
+            </pre>
+          </aside>
+        ) : null}
         {hitlJobIdx != null ? (
           <WorkflowHitlApproveModal
             jobIdx={hitlJobIdx}

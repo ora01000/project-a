@@ -8,6 +8,7 @@ export const WORK_SCRIPT_TYPE_OPTIONS: { value: Exclude<WorkScriptType, "">; lab
 ];
 
 export interface WorkNodeItem {
+  idx?: number;
   uuid: string;
   owner?: number;
   work_name: string;
@@ -70,6 +71,7 @@ export interface WorkflowGraph {
 }
 
 export interface WorkflowItem {
+  idx?: number;
   uuid: string;
   owner?: number;
   owner_username?: string;
@@ -83,12 +85,9 @@ export interface WorkflowItem {
   validate_date?: string;
   last_start_date?: string;
   last_end_date?: string;
-  run_count?: number;
-  sucess_count?: number;
-  fail_count?: number;
-  last_success?: boolean;
   cron?: boolean;
   cron_expr?: string;
+  merge_work_result?: string;
   awaiting_approval?: boolean;
   awaiting_hitl_node_id?: string;
   awaiting_hitl_userid?: string;

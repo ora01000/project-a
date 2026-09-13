@@ -159,7 +159,7 @@ class JobIntakeRequest(BaseModel):
     madang_id: str = Field(min_length=1, max_length=50)
     team_id: str = Field(min_length=1, max_length=50)
     channel_id: str = Field(min_length=1, max_length=120)
-    message_id: str = Field(min_length=1, max_length=50)
+    message_id: str = Field(min_length=1, max_length=120)
 
 
 class JobRecordResponse(BaseModel):

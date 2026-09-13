@@ -859,7 +859,7 @@ class RedisSettings(BaseModel):
 
 
 class AuthSessionSettings(BaseModel):
-    ttl_seconds: int = 3600
+    ttl_seconds: int = 7200
     absolute_max_seconds: int = 28800
 
 
@@ -898,7 +898,7 @@ def load_auth_session_settings() -> AuthSessionSettings:
     ttl_raw = (
         env_settings.auth_session_ttl_seconds
         if env_settings.auth_session_ttl_seconds is not None
-        else session_yaml.get("ttl_seconds", 3600)
+        else session_yaml.get("ttl_seconds", 7200)
     )
     absolute_raw = (
         env_settings.auth_session_absolute_max_seconds
@@ -909,7 +909,7 @@ def load_auth_session_settings() -> AuthSessionSettings:
     try:
         ttl_seconds = int(ttl_raw)
     except (TypeError, ValueError):
-        ttl_seconds = 3600
+        ttl_seconds = 7200
     try:
         absolute_max_seconds = int(absolute_raw)
     except (TypeError, ValueError):
@@ -1200,8 +1200,208 @@ def resolve_attachment_dir(upload_path: str | None) -> Path | None:
     return resolved
 
 
-def work_node_upload_dir(node_uuid: str, *, userid: str) -> Path:
-    """Per-user per-node upload directory: ``{UPLOAD_HOME}/{userid}/{work_node.uuid}``."""
+WORKFLOW_HISTORY_RESULT_FILENAME = "result.out"
+WORK_NODE_RUN_RESULT_FILENAME = "result.out"
+
+
+def workflow_upload_root(workflow_uuid: str, *, userid: str) -> Path:
+    """``{UPLOAD_HOME}/{userid}/{workflow.uuid}`` — covers history + all work_node dirs."""
+    user_key = sanitize_upload_userid(userid)
+    if not user_key:
+        raise ValueError("upload userid가 비어 있습니다.")
+    wf = (workflow_uuid or "").strip().lower()
+    if not wf:
+        raise ValueError("workflow uuid가 비어 있습니다.")
+    return resolve_upload_home() / user_key / wf
+
+
+def _is_under_upload_home(path: Path) -> bool:
+    home = resolve_upload_home().resolve()
+    try:
+        path.resolve().relative_to(home)
+        return True
+    except (OSError, ValueError):
+        return False
+
+
+def remove_upload_path(path: Path | None) -> bool:
+    """Remove a file/dir under UPLOAD_HOME. Returns True when something was removed."""
+    if path is None:
+        return False
+    try:
+        resolved = path.resolve()
+    except OSError:
+        return False
+    if not _is_under_upload_home(resolved):
+        return False
+    if resolved.is_dir():
+        try:
+            import shutil
+
+            shutil.rmtree(resolved)
+            return True
+        except OSError:
+            return False
+    if resolved.is_file():
+        try:
+            resolved.unlink()
+            return True
+        except OSError:
+            return False
+    return False
+
+
+def remove_workflow_upload_dirs(workflow_uuid: str, *, userids: list[str] | set[str]) -> None:
+    """Delete ``{userid}/{workflow.uuid}/`` for each userid (normalized + history tree)."""
+    seen: set[str] = set()
+    for raw in userids:
+        key = sanitize_upload_userid(raw)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        try:
+            root = workflow_upload_root(workflow_uuid, userid=key)
+        except ValueError:
+            continue
+        remove_upload_path(root)
+
+
+def remove_work_node_upload_dirs(
+    work_uuid: str,
+    *,
+    userids: list[str] | set[str],
+    workflow_uuid: str | None = None,
+) -> None:
+    """Delete workflow-scoped and legacy work_node upload directories."""
+    seen: set[str] = set()
+    wf = (workflow_uuid or "").strip()
+    for raw in userids:
+        key = sanitize_upload_userid(raw)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        if wf:
+            try:
+                remove_upload_path(work_node_edit_upload_dir(wf, work_uuid, userid=key))
+            except ValueError:
+                pass
+        try:
+            remove_upload_path(work_node_upload_dir(work_uuid, userid=key))
+        except ValueError:
+            pass
+        # Flat legacy: {UPLOAD_HOME}/{work_uuid}
+        flat = resolve_upload_home() / (work_uuid or "").strip().lower()
+        if flat.name:
+            remove_upload_path(flat)
+
+
+def work_node_edit_upload_dir(
+    workflow_uuid: str,
+    work_uuid: str,
+    *,
+    userid: str,
+) -> Path:
+    """Edit-time uploads: ``{UPLOAD_HOME}/{userid}/{workflow.uuid}/{work_node.uuid}``."""
+    user_key = sanitize_upload_userid(userid)
+    if not user_key:
+        raise ValueError("upload userid가 비어 있습니다.")
+    wf = (workflow_uuid or "").strip().lower()
+    wn = (work_uuid or "").strip().lower()
+    if not wf:
+        raise ValueError("workflow uuid가 비어 있습니다.")
+    if not wn:
+        raise ValueError("work_node uuid가 비어 있습니다.")
+    return resolve_upload_home() / user_key / wf / wn
+
+
+def work_node_run_upload_dir(
+    workflow_uuid: str,
+    work_uuid: str,
+    workflow_history_idx: int,
+    work_node_history_idx: int,
+    *,
+    userid: str,
+) -> Path:
+    """Run-scoped dir: ``.../{workflow.uuid}/{work_node.uuid}/{wh_idx}/{wnh_idx}``."""
+    base = work_node_edit_upload_dir(workflow_uuid, work_uuid, userid=userid)
+    wh = int(workflow_history_idx or 0)
+    wnh = int(work_node_history_idx or 0)
+    if wh <= 0:
+        raise ValueError("workflow_history idx가 올바르지 않습니다.")
+    if wnh <= 0:
+        raise ValueError("work_node_history idx가 올바르지 않습니다.")
+    return base / str(wh) / str(wnh)
+
+
+def work_node_run_result_path(
+    workflow_uuid: str,
+    work_uuid: str,
+    workflow_history_idx: int,
+    work_node_history_idx: int,
+    *,
+    userid: str,
+) -> Path:
+    return (
+        work_node_run_upload_dir(
+            workflow_uuid,
+            work_uuid,
+            workflow_history_idx,
+            work_node_history_idx,
+            userid=userid,
+        )
+        / WORK_NODE_RUN_RESULT_FILENAME
+    )
+
+
+def write_work_node_run_result(
+    workflow_uuid: str,
+    work_uuid: str,
+    workflow_history_idx: int,
+    work_node_history_idx: int,
+    *,
+    userid: str,
+    content: str,
+) -> Path:
+    path = work_node_run_result_path(
+        workflow_uuid,
+        work_uuid,
+        workflow_history_idx,
+        work_node_history_idx,
+        userid=userid,
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content or "", encoding="utf-8")
+    return path
+
+
+def read_work_node_run_result(
+    workflow_uuid: str,
+    work_uuid: str,
+    workflow_history_idx: int,
+    work_node_history_idx: int,
+    *,
+    userid: str,
+) -> str | None:
+    path = work_node_run_result_path(
+        workflow_uuid,
+        work_uuid,
+        workflow_history_idx,
+        work_node_history_idx,
+        userid=userid,
+    )
+    if not path.is_file():
+        return None
+    return path.read_text(encoding="utf-8")
+
+
+def work_node_upload_dir(node_uuid: str, *, userid: str, workflow_uuid: str | None = None) -> Path:
+    """Per-node upload directory.
+
+    Prefer ``{UPLOAD_HOME}/{userid}/{workflow.uuid}/{work_node.uuid}`` when
+    ``workflow_uuid`` is provided; otherwise legacy ``{UPLOAD_HOME}/{userid}/{work_node.uuid}``.
+    """
+    if (workflow_uuid or "").strip():
+        return work_node_edit_upload_dir(workflow_uuid or "", node_uuid, userid=userid)
     user_key = sanitize_upload_userid(userid)
     if not user_key:
         raise ValueError("upload userid가 비어 있습니다.")
@@ -1211,16 +1411,27 @@ def work_node_upload_dir(node_uuid: str, *, userid: str) -> Path:
     return resolve_upload_home() / user_key / key
 
 
-def find_work_node_upload_dir(node_uuid: str, *, userid: str) -> Path:
-    """Resolve upload dir, preferring per-user path; fall back to legacy flat path."""
-    preferred = work_node_upload_dir(node_uuid, userid=userid)
-    if preferred.is_dir():
-        return preferred
+def find_work_node_upload_dir(
+    node_uuid: str,
+    *,
+    userid: str,
+    workflow_uuid: str | None = None,
+) -> Path:
+    """Resolve upload dir, preferring workflow-scoped path then legacy flat paths."""
+    if (workflow_uuid or "").strip():
+        preferred = work_node_edit_upload_dir(workflow_uuid or "", node_uuid, userid=userid)
+        if preferred.is_dir():
+            return preferred
+    legacy_user = work_node_upload_dir(node_uuid, userid=userid)
+    if legacy_user.is_dir():
+        return legacy_user
     key = (node_uuid or "").strip().lower()
-    legacy = resolve_upload_home() / key
-    if legacy.is_dir():
-        return legacy
-    return preferred
+    legacy_flat = resolve_upload_home() / key
+    if legacy_flat.is_dir():
+        return legacy_flat
+    if (workflow_uuid or "").strip():
+        return work_node_edit_upload_dir(workflow_uuid or "", node_uuid, userid=userid)
+    return legacy_user
 
 
 def normalize_work_node_filename(value: str | None) -> str:
@@ -1239,12 +1450,15 @@ def work_node_file_path(
     filename: str | None,
     *,
     userid: str,
+    workflow_uuid: str | None = None,
 ) -> Path | None:
     """Absolute path under the work-node upload directory (legacy-aware)."""
     name = normalize_work_node_filename(filename)
     if not name:
         return None
-    return find_work_node_upload_dir(node_uuid, userid=userid) / name
+    return find_work_node_upload_dir(
+        node_uuid, userid=userid, workflow_uuid=workflow_uuid
+    ) / name
 
 
 RESULT_LATEST_FILENAME = "result_latest.out"
@@ -1268,9 +1482,10 @@ def write_work_node_validation_output(
     userid: str,
     validate_date: str,
     message: str,
+    workflow_uuid: str | None = None,
 ) -> str:
     """Write message to ``result_latest.out`` and a timestamped archive. Returns latest filename."""
-    directory = work_node_upload_dir(node_uuid, userid=userid)
+    directory = work_node_upload_dir(node_uuid, userid=userid, workflow_uuid=workflow_uuid)
     directory.mkdir(parents=True, exist_ok=True)
     text = message or ""
     latest = directory / RESULT_LATEST_FILENAME
@@ -1296,9 +1511,12 @@ def list_work_node_result_outputs(
     node_uuid: str,
     *,
     userid: str,
+    workflow_uuid: str | None = None,
 ) -> list[dict[str, object]]:
     """List saved run/validation outputs for a work node (newest archives after latest)."""
-    directory = find_work_node_upload_dir(node_uuid, userid=userid)
+    directory = find_work_node_upload_dir(
+        node_uuid, userid=userid, workflow_uuid=workflow_uuid
+    )
     if not directory.is_dir():
         return []
     items: list[dict[str, object]] = []
@@ -1317,6 +1535,33 @@ def list_work_node_result_outputs(
                 "is_latest": path.name == RESULT_LATEST_FILENAME,
             }
         )
+    # Also list per-run result.out under {wh_idx}/{wnh_idx}/
+    try:
+        for wh_dir in directory.iterdir():
+            if not wh_dir.is_dir() or not wh_dir.name.isdigit():
+                continue
+            for wnh_dir in wh_dir.iterdir():
+                if not wnh_dir.is_dir() or not wnh_dir.name.isdigit():
+                    continue
+                result = wnh_dir / WORK_NODE_RUN_RESULT_FILENAME
+                if not result.is_file():
+                    continue
+                try:
+                    stat = result.stat()
+                except OSError:
+                    continue
+                items.append(
+                    {
+                        "filename": f"{wh_dir.name}/{wnh_dir.name}/{WORK_NODE_RUN_RESULT_FILENAME}",
+                        "mtime": float(stat.st_mtime),
+                        "size": int(stat.st_size),
+                        "is_latest": False,
+                        "workflow_history_idx": int(wh_dir.name),
+                        "work_node_history_idx": int(wnh_dir.name),
+                    }
+                )
+    except OSError:
+        pass
     items.sort(
         key=lambda row: (
             0 if bool(row.get("is_latest")) else 1,
@@ -1331,12 +1576,33 @@ def read_work_node_result_output(
     filename: str,
     *,
     userid: str,
+    workflow_uuid: str | None = None,
 ) -> str | None:
-    """Read a specific result output file under the work-node upload directory."""
-    name = normalize_work_node_filename(filename)
+    """Read a specific result output file under the work-node upload directory.
+
+    ``filename`` may be a bare ``result_*.out`` / ``result_latest.out``, or a
+    run-scoped relative path ``{wh_idx}/{wnh_idx}/result.out``.
+    """
+    text = (filename or "").strip().replace("\\", "/")
+    if not text:
+        raise ValueError("허용되지 않는 결과 파일입니다.")
+    parts = [p for p in text.split("/") if p and p not in {".", ".."}]
+    if len(parts) == 3 and parts[0].isdigit() and parts[1].isdigit() and parts[2] == WORK_NODE_RUN_RESULT_FILENAME:
+        if not (workflow_uuid or "").strip():
+            raise ValueError("workflow uuid가 필요합니다.")
+        return read_work_node_run_result(
+            workflow_uuid or "",
+            node_uuid,
+            int(parts[0]),
+            int(parts[1]),
+            userid=userid,
+        )
+    name = normalize_work_node_filename(text)
     if not is_work_node_result_filename(name):
         raise ValueError("허용되지 않는 결과 파일입니다.")
-    path = work_node_file_path(node_uuid, name, userid=userid)
+    path = work_node_file_path(
+        node_uuid, name, userid=userid, workflow_uuid=workflow_uuid
+    )
     if path is None or not path.is_file():
         return None
     return path.read_text(encoding="utf-8")
@@ -1347,18 +1613,90 @@ def read_work_node_validation_output(
     *,
     userid: str,
     validate_date: str | None = None,
+    workflow_uuid: str | None = None,
 ) -> str | None:
     """Load ``result_latest.out``; fall back to timestamped archive when needed."""
     import re
 
-    latest = work_node_file_path(node_uuid, RESULT_LATEST_FILENAME, userid=userid)
+    latest = work_node_file_path(
+        node_uuid,
+        RESULT_LATEST_FILENAME,
+        userid=userid,
+        workflow_uuid=workflow_uuid,
+    )
     if latest is not None and latest.is_file():
         return latest.read_text(encoding="utf-8")
 
     digits = re.sub(r"\D", "", (validate_date or "").strip())
     if not digits:
         return None
-    path = work_node_file_path(node_uuid, f"result_{digits}.out", userid=userid)
+    path = work_node_file_path(
+        node_uuid,
+        f"result_{digits}.out",
+        userid=userid,
+        workflow_uuid=workflow_uuid,
+    )
     if path is None or not path.is_file():
+        return None
+    return path.read_text(encoding="utf-8")
+
+
+WORKFLOW_HISTORY_RESULT_FILENAME = "result.out"
+
+
+def workflow_history_upload_dir(
+    workflow_uuid: str,
+    history_idx: int,
+    *,
+    userid: str,
+) -> Path:
+    """``{UPLOAD_HOME}/{userid}/{workflow.uuid}/{workflow_history.idx}``."""
+    user_key = sanitize_upload_userid(userid)
+    if not user_key:
+        raise ValueError("upload userid가 비어 있습니다.")
+    key = (workflow_uuid or "").strip().lower()
+    if not key:
+        raise ValueError("workflow uuid가 비어 있습니다.")
+    idx = int(history_idx or 0)
+    if idx <= 0:
+        raise ValueError("workflow_history idx가 올바르지 않습니다.")
+    return resolve_upload_home() / user_key / key / str(idx)
+
+
+def workflow_history_result_path(
+    workflow_uuid: str,
+    history_idx: int,
+    *,
+    userid: str,
+) -> Path:
+    """Normalized final result path: ``.../{idx}/result.out``."""
+    return workflow_history_upload_dir(
+        workflow_uuid, history_idx, userid=userid
+    ) / WORKFLOW_HISTORY_RESULT_FILENAME
+
+
+def write_workflow_history_result(
+    workflow_uuid: str,
+    history_idx: int,
+    *,
+    userid: str,
+    content: str,
+) -> Path:
+    """Persist a per-run workflow result snapshot under the normalized path."""
+    path = workflow_history_result_path(workflow_uuid, history_idx, userid=userid)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content or "", encoding="utf-8")
+    return path
+
+
+def read_workflow_history_result(
+    workflow_uuid: str,
+    history_idx: int,
+    *,
+    userid: str,
+) -> str | None:
+    """Load ``result.out`` for a workflow history row, if present."""
+    path = workflow_history_result_path(workflow_uuid, history_idx, userid=userid)
+    if not path.is_file():
         return None
     return path.read_text(encoding="utf-8")

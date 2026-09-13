@@ -35,6 +35,7 @@ interface WorkNodeResultsPanelProps {
   workNodes: WorkNodeResultListItem[];
   /** Canvas에서 선택된 work_node uuid. 없으면 전체 노드 목록 모드. */
   selectedWorkUuid: string | null;
+  workflowUuid?: string;
 }
 
 async function parseError(response: Response, fallback: string): Promise<string> {
@@ -119,6 +120,7 @@ function formatAgentLogEntry(entry: AgentLogEntry): string {
 export function WorkNodeResultsPanel({
   workNodes,
   selectedWorkUuid,
+  workflowUuid = "",
 }: WorkNodeResultsPanelProps) {
   const filteredNodes = useMemo(() => {
     const uuid = (selectedWorkUuid || "").trim();
@@ -140,6 +142,7 @@ export function WorkNodeResultsPanel({
   const [isLoadingList, setIsLoadingList] = useState(false);
   const [isLoadingResult, setIsLoadingResult] = useState(false);
   const [isLoadingLog, setIsLoadingLog] = useState(false);
+  const [contentRefreshToken, setContentRefreshToken] = useState(0);
 
   useEffect(() => {
     if (isNodeListMode) {
@@ -158,7 +161,14 @@ export function WorkNodeResultsPanel({
     setIsLoadingList(true);
     setError(null);
     try {
-      const response = await fetch(`/api/work-nodes/${nodeUuid}/results`);
+      const params = new URLSearchParams();
+      if (workflowUuid) {
+        params.set("workflow_uuid", workflowUuid);
+      }
+      const query = params.toString();
+      const response = await fetch(
+        `/api/work-nodes/${nodeUuid}/results${query ? `?${query}` : ""}`,
+      );
       if (!response.ok) {
         throw new Error(await parseError(response, "결과 목록을 불러오지 못했습니다."));
       }
@@ -179,7 +189,7 @@ export function WorkNodeResultsPanel({
     } finally {
       setIsLoadingList(false);
     }
-  }, []);
+  }, [workflowUuid]);
 
   const loadAgentLog = useCallback(async (nodeUuid: string) => {
     setIsLoadingLog(true);
@@ -242,6 +252,9 @@ export function WorkNodeResultsPanel({
         if (!isNodeListMode && selectedFilename) {
           params.set("filename", selectedFilename);
         }
+        if (workflowUuid) {
+          params.set("workflow_uuid", workflowUuid);
+        }
         const query = params.toString();
         const url = `/api/work-nodes/${nodeUuid}/validation-result${query ? `?${query}` : ""}`;
         const response = await fetch(url);
@@ -276,7 +289,7 @@ export function WorkNodeResultsPanel({
     return () => {
       cancelled = true;
     };
-  }, [selectedNodeUuid, selectedFilename, isNodeListMode]);
+  }, [selectedNodeUuid, selectedFilename, isNodeListMode, workflowUuid, contentRefreshToken]);
 
   const listTitle = isNodeListMode ? "작업 노드" : "작업 결과";
   const selectedNode = filteredNodes.find((node) => node.uuid === selectedNodeUuid);
@@ -288,6 +301,7 @@ export function WorkNodeResultsPanel({
     if (!isNodeListMode) {
       void loadResultFiles(selectedNodeUuid);
     }
+    setContentRefreshToken((value) => value + 1);
     void loadAgentLog(selectedNodeUuid);
   };
 

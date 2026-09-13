@@ -41,9 +41,10 @@ def work_uuids_from_expression(expression: str) -> set[str]:
 
 def workflow_to_dict(record: WorkflowRecord) -> dict[str, Any]:
     return {
+        "idx": int(getattr(record, "idx", 0) or 0),
         "uuid": record.uuid,
-        "checkin_user": record.checkin_user,
-        "checkin_time": record.checkin_time,
+        "owner": int(getattr(record, "owner", 0) or 0),
+        "distribute": bool(getattr(record, "distribute", False)),
         "workflow_name": record.workflow_name,
         "workflow_description": record.workflow_description,
         "workflow": record.workflow,
@@ -52,16 +53,17 @@ def workflow_to_dict(record: WorkflowRecord) -> dict[str, Any]:
         "validate_date": record.validate_date,
         "last_start_date": record.last_start_date,
         "last_end_date": record.last_end_date,
-        "run_count": record.run_count,
-        "sucess_count": record.sucess_count,
-        "fail_count": record.fail_count,
-        "last_success": record.last_success,
+        "cron": bool(getattr(record, "cron", False)),
+        "cron_expr": str(getattr(record, "cron_expr", None) or "0 9 * * *"),
+        "merge_work_result": str(getattr(record, "merge_work_result", None) or ""),
     }
 
 
 def work_node_to_dict(record: WorkNodeRecord) -> dict[str, Any]:
     return {
+        "idx": int(getattr(record, "idx", 0) or 0),
         "uuid": record.uuid,
+        "owner": int(getattr(record, "owner", 0) or 0),
         "work_name": record.work_name,
         "work_description": record.work_description,
         "target_agent": record.target_agent,
@@ -93,6 +95,7 @@ def work_node_from_dict(data: dict[str, Any]) -> WorkNodeRecord:
     if work_script is None:
         work_script = data.get("agent_response") or ""
     return WorkNodeRecord(
+        idx=int(data.get("idx") or 0),
         uuid=str(data.get("uuid") or ""),
         work_name=str(data.get("work_name") or ""),
         work_description=str(data.get("work_description") or ""),
@@ -123,9 +126,8 @@ def work_node_from_dict(data: dict[str, Any]) -> WorkNodeRecord:
 
 def workflow_from_dict(data: dict[str, Any]) -> WorkflowRecord:
     return WorkflowRecord(
+        idx=int(data.get("idx") or 0),
         uuid=str(data.get("uuid") or ""),
-        checkin_user=int(data.get("checkin_user") or 0),
-        checkin_time=str(data.get("checkin_time") or ""),
         workflow_name=str(data.get("workflow_name") or ""),
         workflow_description=str(data.get("workflow_description") or ""),
         workflow=str(data.get("workflow") or ""),
@@ -134,10 +136,11 @@ def workflow_from_dict(data: dict[str, Any]) -> WorkflowRecord:
         validate_date=str(data.get("validate_date") or ""),
         last_start_date=str(data.get("last_start_date") or ""),
         last_end_date=str(data.get("last_end_date") or ""),
-        run_count=int(data.get("run_count") or 0),
-        sucess_count=int(data.get("sucess_count") or 0),
-        fail_count=int(data.get("fail_count") or 0),
-        last_success=bool(data.get("last_success")),
+        owner=int(data.get("owner") or 0),
+        distribute=bool(data.get("distribute")),
+        cron=bool(data.get("cron")),
+        cron_expr=str(data.get("cron_expr") or "0 9 * * *")[:20],
+        merge_work_result=str(data.get("merge_work_result") or "")[:2000],
     )
 
 

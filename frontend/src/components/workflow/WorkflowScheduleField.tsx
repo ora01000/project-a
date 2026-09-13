@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, type ReactNode } from "react";
 
 export const DEFAULT_WORKFLOW_CRON_EXPR = "0 9 * * *";
 
@@ -148,6 +148,8 @@ type WorkflowScheduleFieldProps = {
   cronExpr: string;
   readOnly?: boolean;
   onChange: (next: { enabled: boolean; cronExpr: string }) => void;
+  /** Rendered directly under the scheduling on/off row (e.g. merge toggle). */
+  afterToggle?: ReactNode;
 };
 
 const PRESET_OPTIONS: { value: SchedulePreset; label: string }[] = [
@@ -163,6 +165,7 @@ export function WorkflowScheduleField({
   cronExpr,
   readOnly = false,
   onChange,
+  afterToggle,
 }: WorkflowScheduleFieldProps) {
   const draft = useMemo(() => parseCronExpr(cronExpr), [cronExpr]);
 
@@ -209,6 +212,8 @@ export function WorkflowScheduleField({
           />
         </button>
       </div>
+
+      {afterToggle}
 
       {enabled ? (
         <div className="rounded-lg border border-slate-700 bg-slate-950/70 p-3">

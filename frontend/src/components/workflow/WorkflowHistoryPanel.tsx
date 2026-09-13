@@ -9,14 +9,15 @@ export interface WorkflowHistoryItem {
   uuid: string;
   start_date: string;
   end_date: string;
-  finish_success: boolean;
-  result_file: string;
+  success: boolean;
   user_idx?: number;
   username?: string;
 }
 
 interface WorkflowHistoryPanelProps {
   workflowUuid: string;
+  /** Bump after a run so the list reloads without remounting the editor. */
+  refreshToken?: number | string;
 }
 
 async function parseError(response: Response, fallback: string): Promise<string> {
@@ -60,7 +61,7 @@ function formatDurationLabel(startDate: string, endDate: string): string {
   return `${seconds}초`;
 }
 
-export function WorkflowHistoryPanel({ workflowUuid }: WorkflowHistoryPanelProps) {
+export function WorkflowHistoryPanel({ workflowUuid, refreshToken = 0 }: WorkflowHistoryPanelProps) {
   const [items, setItems] = useState<WorkflowHistoryItem[]>([]);
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
   const [resultContent, setResultContent] = useState<string>("");
@@ -98,7 +99,7 @@ export function WorkflowHistoryPanel({ workflowUuid }: WorkflowHistoryPanelProps
     } finally {
       setIsLoading(false);
     }
-  }, [workflowUuid]);
+  }, [workflowUuid, refreshToken]);
 
   useEffect(() => {
     void loadHistory();
@@ -188,10 +189,10 @@ export function WorkflowHistoryPanel({ workflowUuid }: WorkflowHistoryPanelProps
                 <div className="mt-0.5 flex items-center justify-between gap-2 text-[10px] text-slate-400">
                   <span className="inline-flex items-center gap-1">
                     <WorkflowIcon
-                      name={item.finish_success ? "approve" : "fail-branch"}
+                      name={item.success ? "approve" : "fail-branch"}
                       size="xs"
                     />
-                    {item.finish_success ? "성공" : "실패"}
+                    {item.success ? "성공" : "실패"}
                   </span>
                   <span className="inline-flex min-w-0 items-center gap-1 truncate text-right" title={executorLabel}>
                     <WorkflowIcon name="owner" size="xs" />

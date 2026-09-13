@@ -2588,9 +2588,66 @@ left "작업 워크플로우 목록" 패널의 생성된 작업 워크플로우 
 - 다이어그램, 워크플로우 목록 카드 등 모든 "X" 로 표현된 삭제 버튼을 icon asset으로 생성하여 대체한다.
   - 적용: `workflow-icons/delete.svg`(+light) · `WorkflowEditor` DeleteBox · 목록 카드 · 결재자/메일 칩 제거
 
+- 워크플로우에서 다음 work_node 를 추가하는 + 버튼의 icon 밖의 round 는 없애고 + icon 을 현재 크기 대비 100% 키운다
+- 시작 / 종료 를 icon asset 으로 작성하고 워크플로욷 다이어그램에서 icon 으로 대체한다
+
 # ansible 스크립트 검증 보완
 - 작업 워크플로우 생성시, ansible 스크립트로 요청받는 경우 생성된 ansible 스크립트의 lint 검증을 통과하도록 생성한다. 최대 ansible-lint 검증/재생성 회수는 5회로 제한하도록 WORKFLOW_AGENT 의 시스템 프롬프트에 반영한다.
   - 적용: `WORKFLOW_AGENT_PROMPT.md` Ansible playbook quality 절 + 작성요청 preamble
   - Ansible 버전 **2.9.18 고정** (WORKFLOW_AGENT / 작성요청 / 검증 메시지 / ansible-lint 프롬프트)
 - ansible 스크립트 검증시 lint 테스트를 통해 반복적으로 재작성하도록 하고 lint 테스트를 통과한 ansible 스크립트로 대체하도록 한다.
   - 적용: `WorkNodeEditPanel` — 최대 5회 lint→수정 루프, 통과 시에만 `work_script` 대체 저장
+
+# 작업 편집
+- 작업 편집에 다음을 편집할 수 있도록 추가한다.
+  - DB컬럼 : work_node.crud, 표시명 : "작업유형"
+  - C, R, U, D icon 중에서 선택하게 하고 복수 선택 가능하다.
+  - 적용: `WorkNodeEditPanel` — 작업유형 CRUD 토글(복수), 변경 시 `crud` 즉시 저장
+  
+
+# 로그인 세션 타임아웃 
+- 2시간으로 변경
+
+# workflow, workflow_history
+- workflow.last_success, success_count, fail_count, run_count 를 drop 한다. 대신 workflow_history 에서 이 컬럼 정보를 추출할 수 있게 한다.
+  - workflow_history.success boolean 컬럼 추가
+  - drop 컬럼 삭제시 대안
+    - last_success : workflow_history 에서 동일 uuid 중 가장 최근 실행이력의 success 로 값을 찾을 수 있다.
+    - run_count : 현재 사용하지 않는것 같다. 대신, 사용하더라도 workflow_history 에서 동일 uuid count 로 값을 찾을 수 있다.
+    - success_count : 현재 사용하지 않는것 같다. 대신, 사용하더라도 workflow_history 에서 동일 uuid 의 success = true 인 레코드 count로 찾을 수 있다.
+    - fail_count : 현재 사용하지 않는것 같다. 대신, 사용하더라도 workflow_history 에서 동일 uuid 의 success = false 인 레코드 count로 찾을 수 있다.
+
+- workflow 결과 파일에 대한 처리가 개선이 필요하다.
+  - 현재 구조는 마지막 work_node 의 결과 파일 경로를 저장하는 구조이다. 이 구조는 모두 result_latest.out 으로 모든 workflow 이력의 결과가 동일하다.
+  - workflow 종료시, 최종 결과(마지막 work_node의 result_lates.out)를 다음 경로로 저장한다. 경로를 정규화해서 workflow_history.result_file 컬럼을 drop 한다.
+    - workflow의 최종 결과 : {UPLOAD_PATH}/{users.userid}/{workflow.uuid}/{workflow_history.idx}/result.out
+    - UI에서 workflow 와 지난이력 참조는 위 정규화된 result.out 경로를 사용
+
+# work_node, work_node_history
+- work_node 실행시마다 work_node_history 테이블에 이력을 넣고 관리한다.
+  - work_node_history
+    - idx int primary key
+    - uuid varchar <- work_node.uuid
+    - start_date datetime
+    - end_date datetime
+    - success boolean
+    - workflow_history_idx int <- work_node를 호출한 workflow 의 현재 workflow_history.idx
+    - user_idx int <- 워크플로우 실행 user id
+- work_node 의 작업 결과는 아래 경로로 정규화한다.
+  - {UPLOAD_PATH}/{users.userid}/{workflow.uuid}/{work_node.uuid}/{work_node_history.workflow_history_idx}/{work_node_history.idx}/result.out
+
+- 현재 work_node 작업시 결재 과정에서 업로드가 필요한경우 디렉토리는 {UPLOAD_PATH}/{users.userid}/{workflow.uuid}/{work_node.uuid}/{work_node_history.workflow_history_idx}/{work_node_history.idx} 로 변경한다.
+- 기존 work_node 편집시 업로드는 {UPLOAD_PATH}/{users.userid}/{workflow.uuid}/{work_node.uuid} 이다.
+
+
+- workflow, work_node 삭제시 uuid 를 기준으로 workflow_history, work_node_history 의 기록도 삭제한다
+
+# workflow 에 다음 컬럼을 넣고 기능을 부여한다.
+- merge_work_result varchar <- {work_node.uuid},{work_node.uuid},... 로 결과(result)를 merge 할 대상 work_node
+
+# 작업 결과 merge 패널 배치 변경
+- 스케줄링과 유사하게 "결과 취합" "on/off" 버튼을 둔다. on 이 되면 현재 구현된 패널이 표기된다.
+- on/off 버튼과 레이블은 스케줄링 on/off 버튼 아래 행에 둔다
+
+
+

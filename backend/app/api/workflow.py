@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 
 from backend.app.config import (
     PROJECT_ROOT,
+    WORKFLOW_HISTORY_RESULT_FILENAME,
     attachment_dir,
     attachment_relative_path,
     find_work_node_upload_dir,
@@ -18,9 +19,16 @@ from backend.app.config import (
     new_attachment_timestamp,
     normalize_work_node_filename,
     read_work_node_result_output,
+    read_work_node_run_result,
     read_work_node_validation_output,
+    read_workflow_history_result,
+    remove_work_node_upload_dirs,
+    remove_workflow_upload_dirs,
     resolve_attachment_dir,
+    sanitize_upload_userid,
+    work_node_run_upload_dir,
     work_node_upload_dir,
+    workflow_history_result_path,
     write_work_node_validation_output,
 )
 from backend.app.db.agentruntime import get_agentruntime_by_idx
@@ -45,12 +53,16 @@ from backend.app.db.workflow import (
     get_work_node_by_uuid,
     get_workflow_by_uuid,
     get_workflow_history_by_idx,
+    list_work_node_history,
     list_work_nodes_visible,
     list_workflow_history,
     list_workflows_visible,
     normalize_crud,
     normalize_script_type,
     resolve_work_node_upload_userid,
+    resolve_workflow_history_userid,
+    find_workflow_uuid_for_work_node,
+    get_work_node_history_by_idx,
     set_workflow_distribute,
     set_work_node_upload_path,
     update_work_node,
@@ -146,6 +158,7 @@ async def api_get_workflow_front_guide(request: Request) -> WorkflowFrontGuideRe
 
 
 class WorkNodeResponse(BaseModel):
+    idx: int = 0
     uuid: str
     owner: int = 0
     work_name: str
@@ -184,6 +197,7 @@ class WorkNodeResponse(BaseModel):
     ) -> "WorkNodeResponse":
         _ = is_draft
         return cls(
+            idx=int(getattr(record, "idx", 0) or 0),
             uuid=record.uuid,
             owner=int(getattr(record, "owner", 0) or 0),
             work_name=record.work_name,
@@ -267,6 +281,7 @@ class WorkflowGraph(BaseModel):
 
 
 class WorkflowResponse(BaseModel):
+    idx: int = 0
     uuid: str
     owner: int = 0
     owner_username: str = ""
@@ -280,12 +295,9 @@ class WorkflowResponse(BaseModel):
     validate_date: str = ""
     last_start_date: str = ""
     last_end_date: str = ""
-    run_count: int = 0
-    sucess_count: int = 0
-    fail_count: int = 0
-    last_success: bool = False
     cron: bool = False
     cron_expr: str = "0 9 * * *"
+    merge_work_result: str = ""
     awaiting_approval: bool = False
     awaiting_hitl_node_id: str = ""
     awaiting_hitl_userid: str = ""
@@ -306,6 +318,7 @@ class WorkflowResponse(BaseModel):
         awaiting_job_idx: int | None = None,
     ) -> "WorkflowResponse":
         return cls(
+            idx=int(getattr(record, "idx", 0) or 0),
             uuid=record.uuid,
             owner=int(getattr(record, "owner", 0) or 0),
             owner_username=owner_username,
@@ -319,12 +332,9 @@ class WorkflowResponse(BaseModel):
             validate_date=record.validate_date,
             last_start_date=record.last_start_date,
             last_end_date=record.last_end_date,
-            run_count=record.run_count,
-            sucess_count=record.sucess_count,
-            fail_count=record.fail_count,
-            last_success=record.last_success,
             cron=bool(getattr(record, "cron", False)),
             cron_expr=str(getattr(record, "cron_expr", None) or "0 9 * * *")[:20],
+            merge_work_result=str(getattr(record, "merge_work_result", None) or "")[:2000],
             awaiting_approval=awaiting_approval,
             awaiting_hitl_node_id=awaiting_hitl_node_id,
             awaiting_hitl_userid=awaiting_hitl_userid,
@@ -340,6 +350,7 @@ class WorkflowWriteRequest(BaseModel):
     workflow: str = ""
     cron: bool | None = None
     cron_expr: str | None = Field(default=None, max_length=20)
+    merge_work_result: str | None = Field(default=None, max_length=2000)
 
 
 class WorkflowDistributeRequest(BaseModel):
@@ -351,8 +362,7 @@ class WorkflowHistoryResponse(BaseModel):
     uuid: str
     start_date: str = ""
     end_date: str = ""
-    finish_success: bool = False
-    result_file: str = ""
+    success: bool = False
     user_idx: int = 1
     username: str = ""
 
@@ -368,8 +378,7 @@ class WorkflowHistoryResponse(BaseModel):
             uuid=record.uuid,
             start_date=record.start_date,
             end_date=record.end_date,
-            finish_success=record.finish_success,
-            result_file=record.result_file,
+            success=record.success,
             user_idx=int(record.user_idx or 1),
             username=username,
         )
@@ -408,12 +417,14 @@ def _write_validation_output_if_needed(
     text = (message or "").strip()
     if not text:
         return
+    workflow_uuid = find_workflow_uuid_for_work_node(database_path, record.uuid)
     try:
         write_work_node_validation_output(
             record.uuid,
             userid=resolve_work_node_upload_userid(database_path, record.owner),
             validate_date=record.validate_date or now_job_datetime(),
             message=text,
+            workflow_uuid=workflow_uuid or None,
         )
     except (ValueError, OSError):
         return
@@ -685,8 +696,16 @@ async def api_delete_work_node(node_uuid: str, request: Request) -> dict[str, bo
     if existing is None:
         raise HTTPException(status_code=404, detail="워크 노드를 찾을 수 없습니다.")
     _require_own_work_node(existing, auth_user.idx)
+    workflow_uuid = find_workflow_uuid_for_work_node(database_path, existing.uuid)
+    owner_userid = resolve_work_node_upload_userid(database_path, existing.owner)
+    userids = {owner_userid, sanitize_upload_userid(auth_user.userid) or auth_user.userid}
     if not delete_work_node(database_path, node_uuid):
         raise HTTPException(status_code=404, detail="워크 노드를 찾을 수 없습니다.")
+    remove_work_node_upload_dirs(
+        existing.uuid,
+        userids=userids,
+        workflow_uuid=workflow_uuid or None,
+    )
     return {"ok": True}
 
 
@@ -713,18 +732,64 @@ def _require_visible_work_node(request: Request, node_uuid: str) -> WorkNodeReco
     return record
 
 
+def _latest_work_node_run_result_content(
+    database_path,
+    *,
+    workflow_uuid: str,
+    work_uuid: str,
+    userid: str,
+) -> str | None:
+    """Newest run-scoped ``result.out`` for this node in the workflow's latest runs."""
+    wf = (workflow_uuid or "").strip()
+    wn = (work_uuid or "").strip()
+    if not wf or not wn:
+        return None
+    histories = list_workflow_history(database_path, wf)
+    # Prefer finished runs, then any open run that already has node output.
+    ordered = sorted(
+        histories,
+        key=lambda row: (0 if (row.end_date or "").strip() else 1, -int(row.idx or 0)),
+    )
+    for history in ordered:
+        try:
+            node_histories = list_work_node_history(
+                database_path, wn, workflow_history_idx=int(history.idx)
+            )
+        except Exception:
+            continue
+        for node_history in node_histories:
+            try:
+                content = read_work_node_run_result(
+                    wf,
+                    wn,
+                    int(history.idx),
+                    int(node_history.idx),
+                    userid=userid,
+                )
+            except (ValueError, OSError):
+                continue
+            if content is not None and content.strip():
+                return content
+    return None
+
+
 @router.get("/work-nodes/{node_uuid}/results")
 async def api_list_work_node_results(
     node_uuid: str,
     request: Request,
+    workflow_uuid: str | None = None,
 ) -> dict[str, object]:
-    """List saved work-node result files (``result_latest.out`` and archives)."""
+    """List saved work-node result files (run-scoped ``result.out`` and legacy archives)."""
     record = _require_visible_work_node(request, node_uuid)
-    upload_userid = resolve_work_node_upload_userid(
-        request.app.state.database_path, record.owner
+    database_path = request.app.state.database_path
+    upload_userid = resolve_work_node_upload_userid(database_path, record.owner)
+    wf = (workflow_uuid or "").strip() or find_workflow_uuid_for_work_node(
+        database_path, record.uuid
     )
     try:
-        items = list_work_node_result_outputs(record.uuid, userid=upload_userid)
+        items = list_work_node_result_outputs(
+            record.uuid, userid=upload_userid, workflow_uuid=wf or None
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {
@@ -732,6 +797,7 @@ async def api_list_work_node_results(
         "work_name": record.work_name,
         "validate_date": record.validate_date or record.last_end_date or "",
         "last_success": bool(record.last_success),
+        "workflow_uuid": wf,
     }
 
 
@@ -740,33 +806,53 @@ async def api_get_work_node_validation_result(
     node_uuid: str,
     request: Request,
     filename: str | None = None,
+    workflow_uuid: str | None = None,
 ) -> dict[str, str]:
-    """Return saved validation/run output (``result_latest.out``, with archive fallback)."""
+    """Return saved run/validation output (run-scoped ``result.out``, with legacy fallback)."""
     record = _require_visible_work_node(request, node_uuid)
-    upload_userid = resolve_work_node_upload_userid(
-        request.app.state.database_path, record.owner
+    database_path = request.app.state.database_path
+    upload_userid = resolve_work_node_upload_userid(database_path, record.owner)
+    wf = (workflow_uuid or "").strip() or find_workflow_uuid_for_work_node(
+        database_path, record.uuid
     )
     try:
         if filename and filename.strip():
             content = read_work_node_result_output(
-                record.uuid, filename, userid=upload_userid
-            )
-            resolved_name = normalize_work_node_filename(filename)
-        else:
-            content = read_work_node_validation_output(
                 record.uuid,
+                filename,
                 userid=upload_userid,
-                validate_date=record.validate_date or record.last_end_date,
+                workflow_uuid=wf or None,
             )
+            resolved_name = filename.strip()
+        else:
+            # Prefer last workflow-run result when scoped; fall back to legacy validation files.
+            content = None
             resolved_name = ""
+            if wf:
+                content = _latest_work_node_run_result_content(
+                    database_path,
+                    workflow_uuid=wf,
+                    work_uuid=record.uuid,
+                    userid=upload_userid,
+                )
+                if content is not None:
+                    resolved_name = "result.out"
+            if content is None:
+                content = read_work_node_validation_output(
+                    record.uuid,
+                    userid=upload_userid,
+                    validate_date=record.validate_date or record.last_end_date,
+                    workflow_uuid=wf or None,
+                )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     if content is None:
-        raise HTTPException(status_code=404, detail="검증 결과 파일을 찾을 수 없습니다.")
+        raise HTTPException(status_code=404, detail="결과 파일을 찾을 수 없습니다.")
     return {
         "content": content,
         "filename": resolved_name,
         "validate_date": record.validate_date or record.last_end_date or "",
+        "workflow_uuid": wf,
     }
 
 
@@ -795,6 +881,7 @@ async def api_upload_work_node_file(
     node_uuid: str,
     request: Request,
     file: UploadFile = File(...),
+    workflow_uuid: str | None = None,
 ) -> WorkNodeResponse:
     auth_user = get_request_auth_user(request)
     database_path = request.app.state.database_path
@@ -804,10 +891,14 @@ async def api_upload_work_node_file(
     _require_own_work_node(record, auth_user.idx)
     raw_name = (file.filename or "upload.bin").replace("/", "_").replace("\\", "_")
     safe_name = raw_name.strip()[:180] or "upload.bin"
+    wf = (workflow_uuid or "").strip() or find_workflow_uuid_for_work_node(
+        database_path, record.uuid
+    )
     try:
         directory = work_node_upload_dir(
             record.uuid,
             userid=resolve_work_node_upload_userid(database_path, record.owner),
+            workflow_uuid=wf or None,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -882,6 +973,7 @@ async def api_create_workflow(body: WorkflowWriteRequest, request: Request) -> W
             distribute=False,
             cron=bool(body.cron) if body.cron is not None else False,
             cron_expr=body.cron_expr,
+            merge_work_result=body.merge_work_result or "",
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -915,6 +1007,7 @@ async def api_update_workflow(
             workflow=(body.workflow or "").strip(),
             cron=body.cron,
             cron_expr=body.cron_expr,
+            merge_work_result=body.merge_work_result,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -986,21 +1079,17 @@ async def api_get_workflow_history_result(
     history = get_workflow_history_by_idx(database_path, history_idx)
     if history is None or history.uuid != existing.uuid:
         raise HTTPException(status_code=404, detail="이력을 찾을 수 없습니다.")
-    path_text = (history.result_file or "").strip()
-    if not path_text:
+    userid = resolve_workflow_history_userid(database_path, history.user_idx)
+    content = read_workflow_history_result(existing.uuid, history.idx, userid=userid)
+    if content is None:
         raise HTTPException(status_code=404, detail="결과 파일이 없습니다.")
-    path = Path(path_text)
-    if not path.is_file():
-        raise HTTPException(status_code=404, detail="결과 파일을 찾을 수 없습니다.")
-    try:
-        content = path.read_text(encoding="utf-8")
-    except OSError as exc:
-        raise HTTPException(status_code=500, detail=f"결과 파일을 읽지 못했습니다: {exc}") from exc
+    result_path = workflow_history_result_path(existing.uuid, history.idx, userid=userid)
     return {
         "idx": history.idx,
         "content": content,
-        "result_file": history.result_file,
-        "finish_success": history.finish_success,
+        "result_file": str(result_path),
+        "filename": WORKFLOW_HISTORY_RESULT_FILENAME,
+        "success": history.success,
     }
 
 
@@ -1114,22 +1203,41 @@ async def api_delete_workflow(workflow_uuid: str, request: Request) -> dict[str,
     _require_own_workflow(existing, auth_user.idx)
 
     referenced = sorted(work_uuids_from_expression(existing.workflow))
-    if not delete_workflow(database_path, existing.uuid):
-        raise HTTPException(status_code=404, detail="작업 워크플로우를 찾을 수 없습니다.")
+    userids: set[str] = set()
+    owner_user = get_user_by_idx(database_path, int(existing.owner or 0))
+    if owner_user is not None:
+        key = sanitize_upload_userid(owner_user.userid)
+        if key:
+            userids.add(key)
+    auth_key = sanitize_upload_userid(auth_user.userid)
+    if auth_key:
+        userids.add(auth_key)
 
+    node_owners: list[tuple[str, str]] = []
     for node_uuid in referenced:
         node = get_work_node_by_uuid(database_path, node_uuid)
         upload_userid = resolve_work_node_upload_userid(
             database_path,
             node.owner if node is not None else auth_user.idx,
         )
+        if upload_userid:
+            userids.add(upload_userid)
+        node_owners.append((node_uuid, upload_userid))
+
+    if not delete_workflow(database_path, existing.uuid):
+        raise HTTPException(status_code=404, detail="작업 워크플로우를 찾을 수 없습니다.")
+
+    # Remove the whole workflow tree first (edit + run results + history snapshots).
+    remove_workflow_upload_dirs(existing.uuid, userids=userids)
+
+    for node_uuid, upload_userid in node_owners:
         delete_work_node(database_path, node_uuid)
-        upload_dir = find_work_node_upload_dir(node_uuid, userid=upload_userid)
-        if upload_dir.is_dir():
-            try:
-                shutil.rmtree(upload_dir)
-            except OSError:
-                logger.warning("failed to remove work_node upload dir %s", upload_dir)
+        # Legacy flat / per-node paths outside the workflow tree.
+        remove_work_node_upload_dirs(
+            node_uuid,
+            userids={upload_userid, *userids},
+            workflow_uuid=existing.uuid,
+        )
 
     return {"ok": True}
 
@@ -1176,7 +1284,7 @@ async def api_get_workflow_job_hitl(job_idx: int, request: Request) -> dict[str,
     parsed = parse_workflow_job_message_id(job.message_id)
     if parsed is None:
         raise HTTPException(status_code=400, detail="워크플로우 승인 작업이 올바르지 않습니다.")
-    workflow_uuid, _ = parsed
+    workflow_uuid = parsed.workflow_uuid
     workflow = get_workflow_by_uuid(database_path, workflow_uuid)
     if workflow is None:
         raise HTTPException(status_code=404, detail="작업 워크플로우를 찾을 수 없습니다.")
@@ -1226,7 +1334,7 @@ async def api_upload_workflow_job_attachments(
     parsed = parse_workflow_job_message_id(job.message_id)
     if parsed is None:
         raise HTTPException(status_code=400, detail="워크플로우 승인 작업이 올바르지 않습니다.")
-    workflow_uuid, _ = parsed
+    workflow_uuid = parsed.workflow_uuid
     workflow = get_workflow_by_uuid(database_path, workflow_uuid)
     if workflow is None:
         raise HTTPException(status_code=404, detail="작업 워크플로우를 찾을 수 없습니다.")
@@ -1245,13 +1353,32 @@ async def api_upload_workflow_job_attachments(
     if not files:
         raise HTTPException(status_code=400, detail="업로드할 파일이 없습니다.")
 
-    stamp = new_attachment_timestamp()
+    cursor = parsed
+    wnh_idx = int(cursor.work_node_history_idx or 0)
+    history = get_work_node_history_by_idx(database_path, wnh_idx) if wnh_idx > 0 else None
+    if history is None or history.uuid.lower() != node.uuid.lower():
+        raise HTTPException(
+            status_code=400,
+            detail="승인 단계 업로드 경로를 위한 work_node_history를 찾을 수 없습니다.",
+        )
     try:
-        relative = attachment_relative_path(auth_user.userid, stamp)
-        directory = attachment_dir(auth_user.userid, stamp)
+        directory = work_node_run_upload_dir(
+            workflow_uuid,
+            node.uuid,
+            history.workflow_history_idx,
+            history.idx,
+            userid=sanitize_upload_userid(auth_user.userid) or auth_user.userid,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     directory.mkdir(parents=True, exist_ok=True)
+    # Store path relative to UPLOAD_HOME for resolve_attachment_dir compatibility.
+    from backend.app.config import resolve_upload_home
+
+    try:
+        relative = str(directory.resolve().relative_to(resolve_upload_home().resolve()))
+    except ValueError:
+        relative = str(directory)
     saved: list[str] = []
     for upload in files:
         raw_name = (upload.filename or "upload.txt").replace("/", "_").replace("\\", "_")

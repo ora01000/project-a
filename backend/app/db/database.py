@@ -81,6 +81,10 @@ def init_database(database_path: str | Path | None = None) -> Path:
             connection.executescript(schema_sql)
             # Legacy chat-notification table; signup now uses jobs (job_type=10).
             connection.execute("DROP TABLE IF EXISTS signup_notifications")
+            # workflow message_id includes uuid + optional :wnh:{idx} (>50 chars).
+            connection.execute(
+                "ALTER TABLE jobs ALTER COLUMN message_id TYPE VARCHAR(120)"
+            )
             seed_initial_users(connection)
     logger.info("PostgreSQL database initialized via DATABASE_URL")
     return POSTGRES_STATE_TOKEN

@@ -14,10 +14,9 @@ from typing import Any
 from croniter import croniter
 
 from backend.app.config import (
-    RESULT_LATEST_FILENAME,
-    read_work_node_validation_output,
-    write_work_node_validation_output,
-    work_node_file_path,
+    read_work_node_run_result,
+    write_work_node_run_result,
+    write_workflow_history_result,
 )
 from backend.app.db.agentruntime import catalog_agent_id, get_agentruntime_by_idx
 from backend.app.db.job_datetime import now_job_datetime
@@ -32,14 +31,22 @@ from backend.app.db.users import User, get_user_by_userid
 from backend.app.db.workflow import (
     WorkNodeRecord,
     WorkflowRecord,
+    finish_work_node_history,
+    finish_workflow_history,
+    get_open_workflow_history,
     get_work_node_by_uuid,
+    get_work_node_history_by_idx,
     get_workflow_by_uuid,
+    insert_work_node_history,
     insert_workflow_history,
+    list_work_node_history,
     mark_work_node_run_finished,
     mark_work_node_run_started,
     mark_workflow_run_finished,
-    resolve_work_node_upload_userid,
     mark_workflow_run_started,
+    parse_merge_work_result_uuids,
+    resolve_work_node_upload_userid,
+    resolve_workflow_history_userid,
     set_work_node_schedule_wait,
     work_uuids_from_expression,
 )
@@ -58,7 +65,7 @@ from backend.app.timezone import DISPLAY_TIMEZONE, now_display_datetime
 logger = logging.getLogger(__name__)
 
 _WORKFLOW_JOB_MESSAGE_RE = re.compile(
-    r"^workflow:(?P<uuid>[0-9a-fA-F-]{36}):(?P<index>\d+)$"
+    r"^workflow:(?P<uuid>[0-9a-fA-F-]{36}):(?P<index>\d+)(?:\:wnh:(?P<wnh>\d+))?$"
 )
 
 # workflow_uuid(lower) → work_node uuid(lower) requested to stop
@@ -184,15 +191,36 @@ class WorkflowRunResult:
     job_idx: int | None = None
 
 
-def encode_workflow_job_message_id(workflow_uuid: str, resume_index: int) -> str:
-    return f"workflow:{workflow_uuid.strip().lower()}:{int(resume_index)}"
+@dataclass(frozen=True)
+class WorkflowJobCursor:
+    workflow_uuid: str
+    resume_index: int
+    work_node_history_idx: int | None = None
 
 
-def parse_workflow_job_message_id(message_id: str) -> tuple[str, int] | None:
+def encode_workflow_job_message_id(
+    workflow_uuid: str,
+    resume_index: int,
+    *,
+    work_node_history_idx: int | None = None,
+) -> str:
+    base = f"workflow:{workflow_uuid.strip().lower()}:{int(resume_index)}"
+    wnh = int(work_node_history_idx or 0)
+    if wnh > 0:
+        return f"{base}:wnh:{wnh}"
+    return base
+
+
+def parse_workflow_job_message_id(message_id: str) -> WorkflowJobCursor | None:
     match = _WORKFLOW_JOB_MESSAGE_RE.match((message_id or "").strip())
     if not match:
         return None
-    return match.group("uuid").lower(), int(match.group("index"))
+    wnh_raw = match.group("wnh")
+    return WorkflowJobCursor(
+        workflow_uuid=match.group("uuid").lower(),
+        resume_index=int(match.group("index")),
+        work_node_history_idx=int(wnh_raw) if wnh_raw else None,
+    )
 
 
 def _hitl_info_for_token(
@@ -228,7 +256,7 @@ def resolve_awaiting_hitl_from_job(
     parsed = parse_workflow_job_message_id(message_id)
     if parsed is None:
         return None
-    _, resume_index = parsed
+    resume_index = parsed.resume_index
     hitl_index = int(resume_index) - 1
     if hitl_index < 0:
         return None
@@ -259,7 +287,7 @@ def resolve_hitl_work_uuid_from_job(
     parsed = parse_workflow_job_message_id(message_id)
     if parsed is None:
         return None
-    _, resume_index = parsed
+    resume_index = parsed.resume_index
     hitl_index = int(resume_index) - 1
     if hitl_index < 0:
         return None
@@ -279,7 +307,7 @@ def require_hitl_attachment_ready(database_path: Path | str, job: JobRecord) -> 
     parsed = parse_workflow_job_message_id(job.message_id)
     if parsed is None:
         return
-    workflow_uuid, _ = parsed
+    workflow_uuid = parsed.workflow_uuid
     workflow = get_workflow_by_uuid(database_path, workflow_uuid)
     if workflow is None:
         return
@@ -712,6 +740,140 @@ async def _invoke_work_node(
         raise
 
 
+def _open_workflow_history_idx(database_path: Path | str, workflow_uuid: str) -> int:
+    """Resolve the in-progress ``workflow_history.idx`` of a workflow (0 when absent)."""
+    try:
+        history = get_open_workflow_history(database_path, workflow_uuid)
+    except Exception:
+        logger.exception("failed to resolve open workflow_history uuid=%s", workflow_uuid)
+        return 0
+    return int(history.idx) if history is not None else 0
+
+
+def _executor_user_idx(requester: User | None) -> int:
+    return int(getattr(requester, "idx", 0) or 0) or 1
+
+
+def _start_work_node_history(
+    database_path: Path | str,
+    node: WorkNodeRecord,
+    *,
+    workflow_history_idx: int,
+    start_date: str,
+    user_idx: int,
+) -> int:
+    """Open a ``work_node_history`` row for this run; return its idx (0 on failure)."""
+    if int(workflow_history_idx or 0) <= 0:
+        return 0
+    try:
+        history = insert_work_node_history(
+            database_path,
+            work_uuid=node.uuid,
+            start_date=start_date,
+            workflow_history_idx=int(workflow_history_idx),
+            user_idx=int(user_idx or 0) or 1,
+        )
+    except Exception:
+        logger.exception("failed to insert work_node_history uuid=%s", node.uuid)
+        return 0
+    return int(history.idx)
+
+
+def _close_work_node_history(
+    database_path: Path | str,
+    work_node_history_idx: int,
+    *,
+    end_date: str,
+    success: bool,
+) -> None:
+    if int(work_node_history_idx or 0) <= 0:
+        return
+    try:
+        finish_work_node_history(
+            database_path,
+            int(work_node_history_idx),
+            end_date=end_date,
+            success=success,
+        )
+    except Exception:
+        logger.exception(
+            "failed to finish work_node_history idx=%s", work_node_history_idx
+        )
+
+
+def _close_pending_work_node_history(
+    database_path: Path | str,
+    work_node_history_idx: int,
+    *,
+    success: bool,
+) -> None:
+    """Close a still-open history row referenced by an approval job cursor."""
+    idx = int(work_node_history_idx or 0)
+    if idx <= 0:
+        return
+    try:
+        history = get_work_node_history_by_idx(database_path, idx)
+    except Exception:
+        logger.exception("failed to load work_node_history idx=%s", idx)
+        return
+    if history is None or (history.end_date or "").strip():
+        return
+    _close_work_node_history(
+        database_path, idx, end_date=now_job_datetime(), success=success
+    )
+
+
+def _close_open_work_node_history_for_node(
+    database_path: Path | str,
+    *,
+    work_uuid: str,
+    workflow_history_idx: int,
+    success: bool,
+) -> None:
+    """Close the newest still-open history row of a node within the current run."""
+    if int(workflow_history_idx or 0) <= 0:
+        return
+    try:
+        histories = list_work_node_history(
+            database_path, work_uuid, workflow_history_idx=int(workflow_history_idx)
+        )
+    except Exception:
+        logger.exception("failed to list work_node_history uuid=%s", work_uuid)
+        return
+    for history in histories:
+        if (history.end_date or "").strip():
+            continue
+        _close_work_node_history(
+            database_path, history.idx, end_date=now_job_datetime(), success=success
+        )
+        return
+
+
+def _store_work_node_run_result(
+    database_path: Path | str,
+    node: WorkNodeRecord,
+    *,
+    workflow_uuid: str,
+    workflow_history_idx: int,
+    work_node_history_idx: int,
+    content: str,
+) -> None:
+    """Persist the run-scoped result under ``{workflow}/{node}/{wh_idx}/{wnh_idx}``."""
+    if int(workflow_history_idx or 0) <= 0 or int(work_node_history_idx or 0) <= 0:
+        return
+    try:
+        write_work_node_run_result(
+            workflow_uuid,
+            node.uuid,
+            int(workflow_history_idx),
+            int(work_node_history_idx),
+            userid=resolve_work_node_upload_userid(database_path, node.owner),
+            content=content,
+        )
+    except (ValueError, OSError):
+        logger.exception("failed to write work_node run result uuid=%s", node.uuid)
+
+
 def _finalize_user_stop(
     database_path: Path | str,
     *,
@@ -720,9 +882,14 @@ def _finalize_user_stop(
     node: WorkNodeRecord,
     steps: list[WorkflowRunStep],
     requester: User | None,
+    workflow_history_idx: int = 0,
+    work_node_history_idx: int = 0,
 ) -> WorkflowRunResult:
     reason = USER_STOP_REASON
     clear_work_node_stop(workflow.uuid)
+    history_idx = int(workflow_history_idx or 0) or _open_workflow_history_idx(
+        database_path, workflow.uuid
+    )
     current_node = get_work_node_by_uuid(database_path, node.uuid) or node
     if _is_work_node_run_in_progress(current_node):
         _mark_work_node_failed(
@@ -733,6 +900,13 @@ def _finalize_user_stop(
             output_message=reason,
         )
     # else: stop API already marked DB and logged last_fail_reason.
+    stopped_node = get_work_node_by_uuid(database_path, node.uuid) or current_node
+    _close_work_node_history(
+        database_path,
+        work_node_history_idx,
+        end_date=(stopped_node.last_end_date or "").strip() or now_job_datetime(),
+        success=False,
+    )
     if not any(
         step.work_uuid == node.uuid and step.status == "failed" and step.detail == reason
         for step in steps
@@ -749,13 +923,13 @@ def _finalize_user_stop(
     current_wf = get_workflow_by_uuid(database_path, workflow.uuid) or workflow
     wf_end = (current_wf.last_end_date or "").strip()
     if not wf_end:
-        finished = mark_workflow_run_finished(database_path, workflow.uuid, success=False)
-        _record_workflow_history_on_end(
+        finished = _finish_workflow_with_history(
             database_path,
-            workflow_uuid=workflow.uuid,
+            workflow=workflow,
             tokens=tokens,
             success=False,
-            user_idx=int(requester.idx) if requester is not None else 1,
+            requester=requester,
+            workflow_history_idx=history_idx,
         )
     else:
         finished = current_wf
@@ -767,19 +941,48 @@ def _finalize_user_stop(
     )
 
 
-def _load_node_result_text(database_path: Path | str, node: WorkNodeRecord) -> str:
-    text = read_work_node_validation_output(
-        node.uuid,
-        userid=resolve_work_node_upload_userid(database_path, node.owner),
-        validate_date=node.last_end_date or node.validate_date,
-    )
-    if text and text.strip():
-        return text.strip()
+def _load_node_result_text(
+    database_path: Path | str,
+    node: WorkNodeRecord,
+    *,
+    workflow_uuid: str = "",
+    workflow_history_idx: int = 0,
+) -> str:
+    """Load the newest run-scoped ``result.out`` for this node in the current history."""
+    wh = int(workflow_history_idx or 0)
+    if not workflow_uuid or wh <= 0:
+        return ""
+    try:
+        histories = list_work_node_history(
+            database_path, node.uuid, workflow_history_idx=wh
+        )
+    except Exception:
+        logger.exception("failed to list work_node_history uuid=%s", node.uuid)
+        return ""
+    userid = resolve_work_node_upload_userid(database_path, node.owner)
+    for history in histories:
+        try:
+            content = read_work_node_run_result(
+                workflow_uuid,
+                node.uuid,
+                wh,
+                int(history.idx),
+                userid=userid,
+            )
+        except (ValueError, OSError):
+            continue
+        if content and content.strip():
+            return content.strip()
     return ""
 
 
 def _previous_result_before_index(
-    database_path: Path | str, tokens: list[FlowToken], index: int
+    database_path: Path | str,
+    tokens: list[FlowToken],
+    index: int,
+    *,
+    workflow_uuid: str = "",
+    workflow_history_idx: int = 0,
 ) -> str:
     for token in reversed(tokens[: max(0, index)]):
         if token.kind != "work" or not token.work_uuid:
@@ -787,7 +990,12 @@ def _previous_result_before_index(
         node = get_work_node_by_uuid(database_path, token.work_uuid)
         if node is None:
             continue
-        text = _load_node_result_text(database_path, node)
+        text = _load_node_result_text(
+            database_path,
+            node,
+            workflow_uuid=workflow_uuid,
+            workflow_history_idx=workflow_history_idx,
+        )
         if text:
             return text
     return ""
@@ -802,10 +1010,24 @@ async def _notify_hitl_approval(
     diagram: str,
     previous_result: str,
     resume_index: int,
+    workflow_history_idx: int = 0,
+    hitl_work_uuid: str | None = None,
 ) -> int:
     approver = get_user_by_userid(database_path, approver_userid)
     if approver is None:
         raise ValueError(f"승인자를 찾을 수 없습니다: {approver_userid}")
+
+    work_node_history_idx = 0
+    if hitl_work_uuid:
+        hitl_node = get_work_node_by_uuid(database_path, hitl_work_uuid)
+        if hitl_node is not None:
+            work_node_history_idx = _start_work_node_history(
+                database_path,
+                hitl_node,
+                workflow_history_idx=workflow_history_idx,
+                start_date=now_job_datetime(),
+                user_idx=_executor_user_idx(requester),
+            )
 
     title = f"[작업 워크플로우] {workflow.workflow_name} - 승인을 요청합니다."
     body_md = (
@@ -828,7 +1050,11 @@ async def _notify_hitl_approval(
             madang_id=(requester.userid or "").strip(),
             team_id="",
             channel_id="",
-            message_id=encode_workflow_job_message_id(workflow.uuid, resume_index),
+            message_id=encode_workflow_job_message_id(
+                workflow.uuid,
+                resume_index,
+                work_node_history_idx=work_node_history_idx,
+            ),
             job_type=JOB_TYPE_WORKFLOW,
         ),
     )
@@ -862,24 +1088,59 @@ async def _notify_hitl_approval(
     return job.idx
 
 
-def _last_work_result_file_path(
+def _last_run_result_content(
     database_path: Path | str,
     tokens: list[FlowToken],
+    *,
+    workflow_uuid: str,
+    workflow_history_idx: int,
 ) -> str:
+    """Last run-scoped ``work_node_history`` result recorded for this workflow run."""
+    if int(workflow_history_idx or 0) <= 0:
+        return ""
     for token in reversed(tokens):
         if token.kind != "work" or not token.work_uuid:
             continue
         node = get_work_node_by_uuid(database_path, token.work_uuid)
         if node is None:
             continue
-        path = work_node_file_path(
-            token.work_uuid,
-            RESULT_LATEST_FILENAME,
-            userid=resolve_work_node_upload_userid(database_path, node.owner),
+        content = _load_node_result_text(
+            database_path,
+            node,
+            workflow_uuid=workflow_uuid,
+            workflow_history_idx=workflow_history_idx,
         )
-        if path is not None and path.is_file():
-            return str(path.resolve())
+        if content:
+            return content
     return ""
+
+
+def _merged_run_result_content(
+    database_path: Path | str,
+    *,
+    workflow: WorkflowRecord,
+    workflow_history_idx: int,
+) -> str:
+    """Merge run-scoped results for uuids listed in ``workflow.merge_work_result``."""
+    uuids = parse_merge_work_result_uuids(workflow.merge_work_result)
+    if not uuids or int(workflow_history_idx or 0) <= 0:
+        return ""
+    sections: list[str] = []
+    for work_uuid in uuids:
+        node = get_work_node_by_uuid(database_path, work_uuid)
+        if node is None:
+            continue
+        body = _load_node_result_text(
+            database_path,
+            node,
+            workflow_uuid=workflow.uuid,
+            workflow_history_idx=workflow_history_idx,
+        )
+        if not body:
+            continue
+        title = (node.work_name or work_uuid).strip() or work_uuid
+        sections.append(f"===== {title} ({node.uuid}) =====\n{body}")
+    return "\n\n".join(sections).strip()
 
 
 def _record_workflow_history_on_end(
@@ -888,23 +1149,75 @@ def _record_workflow_history_on_end(
     workflow_uuid: str,
     tokens: list[FlowToken],
     success: bool,
+    workflow_history_idx: int = 0,
     user_idx: int = 1,
 ) -> None:
+    """Close the ``workflow_history`` row opened at run start and snapshot its result."""
+    history_idx = int(workflow_history_idx or 0) or _open_workflow_history_idx(
+        database_path, workflow_uuid
+    )
+    if history_idx <= 0:
+        logger.warning(
+            "workflow_history row missing on run end uuid=%s", workflow_uuid
+        )
+        return
     finished = get_workflow_by_uuid(database_path, workflow_uuid)
     if finished is None:
         return
     try:
-        insert_workflow_history(
+        history = finish_workflow_history(
             database_path,
-            workflow_uuid=finished.uuid,
-            start_date=finished.last_start_date,
+            history_idx,
             end_date=finished.last_end_date,
-            finish_success=success,
-            result_file=_last_work_result_file_path(database_path, tokens),
-            user_idx=user_idx,
+            success=success,
         )
+        executor_idx = int(history.user_idx if history is not None else user_idx) or 1
+        userid = resolve_workflow_history_userid(database_path, executor_idx)
+        content = _merged_run_result_content(
+            database_path,
+            workflow=finished,
+            workflow_history_idx=history_idx,
+        ) or _last_run_result_content(
+            database_path,
+            tokens,
+            workflow_uuid=finished.uuid,
+            workflow_history_idx=history_idx,
+        )
+        if content:
+            write_workflow_history_result(
+                finished.uuid,
+                history_idx,
+                userid=userid,
+                content=content,
+            )
     except Exception:
-        logger.exception("failed to insert workflow_history uuid=%s", workflow_uuid)
+        logger.exception("failed to finish workflow_history uuid=%s", workflow_uuid)
+
+
+def _finish_workflow_with_history(
+    database_path: Path | str,
+    *,
+    workflow: WorkflowRecord,
+    tokens: list[FlowToken],
+    success: bool,
+    requester: User | None,
+    workflow_history_idx: int = 0,
+    user_idx: int | None = None,
+) -> WorkflowRecord | None:
+    """Mark workflow finished and close the run's ``workflow_history`` row."""
+    finished = mark_workflow_run_finished(database_path, workflow.uuid, success=success)
+    executor = user_idx
+    if executor is None:
+        executor = int(requester.idx) if requester is not None else 1
+    _record_workflow_history_on_end(
+        database_path,
+        workflow_uuid=workflow.uuid,
+        tokens=tokens,
+        success=success,
+        workflow_history_idx=int(workflow_history_idx or 0),
+        user_idx=int(executor or 1),
+    )
+    return finished or get_workflow_by_uuid(database_path, workflow.uuid)
 
 
 async def _execute_from_index(
@@ -916,6 +1229,7 @@ async def _execute_from_index(
     start_index: int,
     previous_result: str,
     requester: User | None,
+    workflow_history_idx: int,
     steps: list[WorkflowRunStep] | None = None,
     mark_hitl_approved: bool = False,
 ) -> WorkflowRunResult:
@@ -925,6 +1239,8 @@ async def _execute_from_index(
     previous = previous_result or ""
     index = max(0, int(start_index))
     visited_fail: set[str] = set()
+    history_idx = int(workflow_history_idx or 0)
+    executor_idx = _executor_user_idx(requester)
 
     if mark_hitl_approved:
         steps.append(
@@ -944,13 +1260,13 @@ async def _execute_from_index(
             continue
         if token.kind == "end":
             steps.append(WorkflowRunStep(kind="end", label="종료", status="ok"))
-            finished = mark_workflow_run_finished(database_path, workflow.uuid, success=True)
-            _record_workflow_history_on_end(
+            finished = _finish_workflow_with_history(
                 database_path,
-                workflow_uuid=workflow.uuid,
+                workflow=workflow,
                 tokens=tokens,
                 success=True,
-                user_idx=int(requester.idx) if requester is not None else 1,
+                requester=requester,
+                workflow_history_idx=history_idx,
             )
             return WorkflowRunResult(
                 status="success",
@@ -980,6 +1296,8 @@ async def _execute_from_index(
                 diagram=diagram,
                 previous_result=previous,
                 resume_index=index + 1,
+                workflow_history_idx=history_idx,
+                hitl_work_uuid=hitl_work_uuid,
             )
             current = get_workflow_by_uuid(database_path, workflow.uuid)
             return WorkflowRunResult(
@@ -1005,7 +1323,14 @@ async def _execute_from_index(
                     work_uuid=token.work_uuid,
                 )
             )
-            finished = mark_workflow_run_finished(database_path, workflow.uuid, success=False)
+            finished = _finish_workflow_with_history(
+                database_path,
+                workflow=workflow,
+                tokens=tokens,
+                success=False,
+                requester=requester,
+                workflow_history_idx=history_idx,
+            )
             return WorkflowRunResult(
                 status="failed",
                 message=reason,
@@ -1013,7 +1338,18 @@ async def _execute_from_index(
                 steps=steps,
             )
 
-        mark_work_node_run_started(database_path, node.uuid)
+        started_node = mark_work_node_run_started(database_path, node.uuid)
+        node_history_idx = _start_work_node_history(
+            database_path,
+            node,
+            workflow_history_idx=history_idx,
+            start_date=(
+                started_node.last_start_date
+                if started_node is not None
+                else now_job_datetime()
+            ),
+            user_idx=executor_idx,
+        )
         try:
             await _await_work_node_schedule_if_needed(
                 database_path, node, workflow_uuid=workflow.uuid
@@ -1038,15 +1374,17 @@ async def _execute_from_index(
                 if finished_node is not None
                 else now_job_datetime()
             )
-            try:
-                write_work_node_validation_output(
-                    node.uuid,
-                    userid=resolve_work_node_upload_userid(database_path, node.owner),
-                    validate_date=stamp,
-                    message=content,
-                )
-            except (ValueError, OSError):
-                logger.exception("failed to write work_node result uuid=%s", node.uuid)
+            _close_work_node_history(
+                database_path, node_history_idx, end_date=stamp, success=True
+            )
+            _store_work_node_run_result(
+                database_path,
+                node,
+                workflow_uuid=workflow.uuid,
+                workflow_history_idx=history_idx,
+                work_node_history_idx=node_history_idx,
+                content=content,
+            )
             await _maybe_send_work_report_email(
                 database_path, node=node, result_content=content
             )
@@ -1070,6 +1408,8 @@ async def _execute_from_index(
                 node=node,
                 steps=steps,
                 requester=requester,
+                workflow_history_idx=history_idx,
+                work_node_history_idx=node_history_idx,
             )
         except Exception as exc:
             reason = str(exc)[:200]
@@ -1079,6 +1419,20 @@ async def _execute_from_index(
                 fail_reason=reason,
                 workflow_uuid=workflow.uuid,
                 output_message=reason,
+            )
+            _close_work_node_history(
+                database_path,
+                node_history_idx,
+                end_date=now_job_datetime(),
+                success=False,
+            )
+            _store_work_node_run_result(
+                database_path,
+                node,
+                workflow_uuid=workflow.uuid,
+                workflow_history_idx=history_idx,
+                work_node_history_idx=node_history_idx,
+                content=reason,
             )
             steps.append(
                 WorkflowRunStep(
@@ -1093,8 +1447,13 @@ async def _execute_from_index(
                 visited_fail.add(token.fail_work_uuid)
                 fail_node = get_work_node_by_uuid(database_path, token.fail_work_uuid)
                 if fail_node is None:
-                    finished = mark_workflow_run_finished(
-                        database_path, workflow.uuid, success=False
+                    finished = _finish_workflow_with_history(
+                        database_path,
+                        workflow=workflow,
+                        tokens=tokens,
+                        success=False,
+                        requester=requester,
+                        workflow_history_idx=history_idx,
                     )
                     return WorkflowRunResult(
                         status="failed",
@@ -1102,7 +1461,18 @@ async def _execute_from_index(
                         workflow=finished,
                         steps=steps,
                     )
-                mark_work_node_run_started(database_path, fail_node.uuid)
+                started_fail = mark_work_node_run_started(database_path, fail_node.uuid)
+                fail_history_idx = _start_work_node_history(
+                    database_path,
+                    fail_node,
+                    workflow_history_idx=history_idx,
+                    start_date=(
+                        started_fail.last_start_date
+                        if started_fail is not None
+                        else now_job_datetime()
+                    ),
+                    user_idx=executor_idx,
+                )
                 try:
                     await _await_work_node_schedule_if_needed(
                         database_path, fail_node, workflow_uuid=workflow.uuid
@@ -1130,19 +1500,17 @@ async def _execute_from_index(
                         if finished_fail is not None
                         else now_job_datetime()
                     )
-                    try:
-                        write_work_node_validation_output(
-                            fail_node.uuid,
-                            userid=resolve_work_node_upload_userid(
-                                database_path, fail_node.owner
-                            ),
-                            validate_date=stamp,
-                            message=fail_content,
-                        )
-                    except (ValueError, OSError):
-                        logger.exception(
-                            "failed to write fail-branch result uuid=%s", fail_node.uuid
-                        )
+                    _close_work_node_history(
+                        database_path, fail_history_idx, end_date=stamp, success=True
+                    )
+                    _store_work_node_run_result(
+                        database_path,
+                        fail_node,
+                        workflow_uuid=workflow.uuid,
+                        workflow_history_idx=history_idx,
+                        work_node_history_idx=fail_history_idx,
+                        content=fail_content,
+                    )
                     await _maybe_send_work_report_email(
                         database_path, node=fail_node, result_content=fail_content
                     )
@@ -1166,6 +1534,8 @@ async def _execute_from_index(
                         node=fail_node,
                         steps=steps,
                         requester=requester,
+                        workflow_history_idx=history_idx,
+                        work_node_history_idx=fail_history_idx,
                     )
                 except Exception as fail_exc:
                     fail_reason = str(fail_exc)[:200]
@@ -1176,6 +1546,20 @@ async def _execute_from_index(
                         workflow_uuid=workflow.uuid,
                         output_message=fail_reason,
                     )
+                    _close_work_node_history(
+                        database_path,
+                        fail_history_idx,
+                        end_date=now_job_datetime(),
+                        success=False,
+                    )
+                    _store_work_node_run_result(
+                        database_path,
+                        fail_node,
+                        workflow_uuid=workflow.uuid,
+                        workflow_history_idx=history_idx,
+                        work_node_history_idx=fail_history_idx,
+                        content=fail_reason,
+                    )
                     steps.append(
                         WorkflowRunStep(
                             kind="work",
@@ -1185,8 +1569,13 @@ async def _execute_from_index(
                             work_uuid=fail_node.uuid,
                         )
                     )
-                    finished = mark_workflow_run_finished(
-                        database_path, workflow.uuid, success=False
+                    finished = _finish_workflow_with_history(
+                        database_path,
+                        workflow=workflow,
+                        tokens=tokens,
+                        success=False,
+                        requester=requester,
+                        workflow_history_idx=history_idx,
                     )
                     return WorkflowRunResult(
                         status="failed",
@@ -1194,7 +1583,14 @@ async def _execute_from_index(
                         workflow=finished,
                         steps=steps,
                     )
-            finished = mark_workflow_run_finished(database_path, workflow.uuid, success=False)
+            finished = _finish_workflow_with_history(
+                database_path,
+                workflow=workflow,
+                tokens=tokens,
+                success=False,
+                requester=requester,
+                workflow_history_idx=history_idx,
+            )
             return WorkflowRunResult(
                 status="failed",
                 message=reason,
@@ -1202,7 +1598,14 @@ async def _execute_from_index(
                 steps=steps,
             )
 
-    finished = mark_workflow_run_finished(database_path, workflow.uuid, success=False)
+    finished = _finish_workflow_with_history(
+        database_path,
+        workflow=workflow,
+        tokens=tokens,
+        success=False,
+        requester=requester,
+        workflow_history_idx=history_idx,
+    )
     return WorkflowRunResult(
         status="failed",
         message="작업 워크플로우가 종료 토큰 없이 중단되었습니다.",
@@ -1233,6 +1636,15 @@ async def run_workflow(
         raise ValueError("작업 워크플로우 실행 시작 기록에 실패했습니다.")
     clear_work_node_stop(workflow.uuid)
 
+    history = insert_workflow_history(
+        database_path,
+        workflow_uuid=started.uuid,
+        start_date=started.last_start_date,
+        end_date="",
+        success=False,
+        user_idx=_executor_user_idx(requester),
+    )
+
     return await _execute_from_index(
         database_path=database_path,
         agent_runtime=agent_runtime,
@@ -1241,6 +1653,7 @@ async def run_workflow(
         start_index=0,
         previous_result="",
         requester=requester,
+        workflow_history_idx=history.idx,
     )
 
 
@@ -1260,7 +1673,8 @@ async def resume_workflow_after_approval(
     if parsed is None:
         logger.warning("workflow job missing resume cursor job=%s message_id=%s", job.idx, job.message_id)
         return None
-    workflow_uuid, resume_index = parsed
+    workflow_uuid = parsed.workflow_uuid
+    resume_index = parsed.resume_index
     workflow = get_workflow_by_uuid(database_path, workflow_uuid)
     if workflow is None:
         raise ValueError(f"승인 재개 대상 작업 워크플로우를 찾을 수 없습니다: {workflow_uuid}")
@@ -1271,7 +1685,27 @@ async def resume_workflow_after_approval(
         raise ValueError(f"승인 재개 위치가 올바르지 않습니다: {resume_index}")
 
     requester = get_user_by_userid(database_path, (job.madang_id or "").strip())
-    previous = _previous_result_before_index(database_path, tokens, resume_index)
+    history_idx = _open_workflow_history_idx(database_path, workflow.uuid)
+    if history_idx <= 0:
+        history = insert_workflow_history(
+            database_path,
+            workflow_uuid=workflow.uuid,
+            start_date=(workflow.last_start_date or "").strip() or now_job_datetime(),
+            end_date="",
+            success=False,
+            user_idx=_executor_user_idx(requester),
+        )
+        history_idx = int(history.idx)
+    _close_pending_work_node_history(
+        database_path, parsed.work_node_history_idx or 0, success=True
+    )
+    previous = _previous_result_before_index(
+        database_path,
+        tokens,
+        resume_index,
+        workflow_uuid=workflow.uuid,
+        workflow_history_idx=history_idx,
+    )
     return await _execute_from_index(
         database_path=database_path,
         agent_runtime=agent_runtime,
@@ -1280,6 +1714,7 @@ async def resume_workflow_after_approval(
         start_index=resume_index,
         previous_result=previous,
         requester=requester,
+        workflow_history_idx=history_idx,
         mark_hitl_approved=True,
     )
 
@@ -1291,9 +1726,25 @@ def fail_workflow_after_rejection(database_path: Path | str, job: JobRecord) -> 
     parsed = parse_workflow_job_message_id(job.message_id)
     if parsed is None:
         return None
-    workflow_uuid, _ = parsed
+    workflow_uuid = parsed.workflow_uuid
     clear_work_node_stop(workflow_uuid)
-    return mark_workflow_run_finished(database_path, workflow_uuid, success=False)
+    workflow = get_workflow_by_uuid(database_path, workflow_uuid)
+    if workflow is None:
+        return None
+    tokens = parse_workflow_document(workflow.workflow)
+    history_idx = _open_workflow_history_idx(database_path, workflow.uuid)
+    _close_pending_work_node_history(
+        database_path, parsed.work_node_history_idx or 0, success=False
+    )
+    return _finish_workflow_with_history(
+        database_path,
+        workflow=workflow,
+        tokens=tokens,
+        success=False,
+        requester=None,
+        workflow_history_idx=history_idx,
+        user_idx=int(getattr(workflow, "owner", 1) or 1),
+    )
 
 
 def _is_work_node_run_in_progress(node: WorkNodeRecord) -> bool:
@@ -1342,6 +1793,13 @@ def stop_running_work_node(
         workflow_uuid=workflow.uuid,
         output_message=USER_STOP_REASON,
     )
+    history_idx = _open_workflow_history_idx(database_path, workflow.uuid)
+    _close_open_work_node_history_for_node(
+        database_path,
+        work_uuid=node.uuid,
+        workflow_history_idx=history_idx,
+        success=False,
+    )
     finished = mark_workflow_run_finished(database_path, workflow.uuid, success=False)
     if finished is None:
         raise ValueError("작업 워크플로우 종료 기록에 실패했습니다.")
@@ -1351,6 +1809,7 @@ def stop_running_work_node(
         workflow_uuid=workflow.uuid,
         tokens=tokens,
         success=False,
+        workflow_history_idx=history_idx,
         user_idx=int(getattr(workflow, "owner", 1) or 1),
     )
-    return finished
+    return finished or get_workflow_by_uuid(database_path, workflow.uuid)

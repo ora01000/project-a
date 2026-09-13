@@ -82,6 +82,7 @@ interface WorkflowEditorProps {
   initialDescription?: string;
   initialCron?: boolean;
   initialCronExpr?: string;
+  initialMergeWorkResult?: string;
   readOnly?: boolean;
   /** Changes only when starting a new create/edit session — not on create→edit after save. */
   sessionKey: string;
@@ -99,10 +100,14 @@ interface WorkflowEditorProps {
   onDiagramAgentEventHandled?: () => void;
   onDiagramGenerate?: (prompt: string) => void;
   onSaveStateChange?: (state: { canSave: boolean; isSaving: boolean }) => void;
+  /** Changes when a run finishes so history list reloads. */
+  historyRefreshToken?: string | number;
 }
 
 export type WorkflowEditorHandle = {
   save: () => Promise<void>;
+  /** Pretty-printed workflow design JSON for admin debug (role 0/100). */
+  getWorkflowJson: () => string;
 };
 
 
@@ -123,9 +128,9 @@ function PlusCircle({
       type="button"
       aria-label={label}
       onClick={onClick}
-      className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-sky-400 bg-slate-900 text-sky-200 hover:bg-sky-950"
+      className="flex shrink-0 items-center justify-center bg-transparent p-0 hover:opacity-80"
     >
-      <WorkflowIcon name="connect" size="sm" label={label} />
+      <WorkflowIcon name="connect" size="sm" className="!h-7 !w-7" label={label} />
     </button>
   );
 }
@@ -251,6 +256,7 @@ export const WorkflowEditor = forwardRef<WorkflowEditorHandle, WorkflowEditorPro
     initialDescription = "",
     initialCron = false,
     initialCronExpr = DEFAULT_WORKFLOW_CRON_EXPR,
+    initialMergeWorkResult = "",
     readOnly = false,
     sessionKey,
     onSaved,
@@ -266,6 +272,7 @@ export const WorkflowEditor = forwardRef<WorkflowEditorHandle, WorkflowEditorPro
     onDiagramAgentEventHandled,
     onDiagramGenerate,
     onSaveStateChange,
+    historyRefreshToken = "",
   },
   ref,
 ) {
@@ -273,6 +280,10 @@ export const WorkflowEditor = forwardRef<WorkflowEditorHandle, WorkflowEditorPro
   const [description, setDescription] = useState(initialDescription);
   const [cronEnabled, setCronEnabled] = useState(initialCron);
   const [cronExpr, setCronExpr] = useState(initialCronExpr || DEFAULT_WORKFLOW_CRON_EXPR);
+  const [mergeWorkResult, setMergeWorkResult] = useState(initialMergeWorkResult || "");
+  const [mergeEnabled, setMergeEnabled] = useState(
+    () => Boolean((initialMergeWorkResult || "").trim()),
+  );
   const [diagramPrompt, setDiagramPrompt] = useState("");
   const [templateNames, setTemplateNames] = useState<string[]>([]);
   const [selectedTemplate, setSelectedTemplate] = useState("");
@@ -522,6 +533,68 @@ export const WorkflowEditor = forwardRef<WorkflowEditorHandle, WorkflowEditorPro
   }, [initialCron, initialCronExpr]);
 
   useEffect(() => {
+    const next = initialMergeWorkResult || "";
+    setMergeWorkResult(next);
+    setMergeEnabled(Boolean(next.trim()));
+  }, [initialMergeWorkResult]);
+
+  const mergeCandidates = useMemo(() => {
+    const items: { uuid: string; name: string }[] = [];
+    const seen = new Set<string>();
+    const pushWork = (step: { type: string; worker?: string; uuid?: string; name?: string }) => {
+      if (step.type !== "work") {
+        return;
+      }
+      if ((step.worker || "agent") === "hitl") {
+        return;
+      }
+      const uuid = (step.uuid || "").trim().toLowerCase();
+      if (!uuid || seen.has(uuid)) {
+        return;
+      }
+      seen.add(uuid);
+      items.push({ uuid, name: (step.name || "").trim() || uuid });
+    };
+    for (const step of model.main) {
+      pushWork(step);
+    }
+    for (const step of Object.values(model.extras)) {
+      pushWork(step);
+    }
+    return items;
+  }, [model]);
+
+  const selectedMergeUuids = useMemo(
+    () =>
+      mergeWorkResult
+        .split(",")
+        .map((part) => part.trim().toLowerCase())
+        .filter(Boolean),
+    [mergeWorkResult],
+  );
+
+  const toggleMergeUuid = useCallback((uuid: string, checked: boolean) => {
+    const key = uuid.trim().toLowerCase();
+    if (!key) {
+      return;
+    }
+    setMergeWorkResult((current) => {
+      const parts = current
+        .split(",")
+        .map((part) => part.trim().toLowerCase())
+        .filter(Boolean);
+      if (checked) {
+        if (!parts.includes(key)) {
+          parts.push(key);
+        }
+      } else {
+        return parts.filter((part) => part !== key).join(",");
+      }
+      return parts.join(",");
+    });
+  }, []);
+
+  useEffect(() => {
     if (readOnly) {
       setSelectedNodeId(null);
       setOpenMenuId(null);
@@ -623,6 +696,8 @@ export const WorkflowEditor = forwardRef<WorkflowEditorHandle, WorkflowEditorPro
         setDescription(payload.workflow_description);
         setCronEnabled(Boolean(payload.cron));
         setCronExpr((payload.cron_expr || DEFAULT_WORKFLOW_CRON_EXPR).slice(0, 20));
+        setMergeWorkResult(payload.merge_work_result || "");
+        setMergeEnabled(Boolean((payload.merge_work_result || "").trim()));
         setModel(hydrateEditor(remapped, mergedNodes, userNames));
         setSelectedNodeId(null);
         skipNextHydrateRef.current = true;
@@ -635,6 +710,7 @@ export const WorkflowEditor = forwardRef<WorkflowEditorHandle, WorkflowEditorPro
           workflow: remapped,
           cron: Boolean(payload.cron),
           cron_expr: (payload.cron_expr || DEFAULT_WORKFLOW_CRON_EXPR).slice(0, 20),
+          merge_work_result: payload.merge_work_result || "",
         };
         if (isCreate) {
           saveBody.uuid = payload.workflow_uuid;
@@ -1057,6 +1133,7 @@ export const WorkflowEditor = forwardRef<WorkflowEditorHandle, WorkflowEditorPro
           workflow: expression,
           cron: cronEnabled,
           cron_expr: (cronExpr || DEFAULT_WORKFLOW_CRON_EXPR).slice(0, 20),
+          merge_work_result: mergeEnabled ? mergeWorkResult : "",
         }),
       });
       if (!response.ok) {
@@ -1072,13 +1149,90 @@ export const WorkflowEditor = forwardRef<WorkflowEditorHandle, WorkflowEditorPro
     cronEnabled,
     cronExpr,
     description,
+    mergeEnabled,
+    mergeWorkResult,
     model,
     name,
     onSaved,
     workflowUuid,
   ]);
 
-  useImperativeHandle(ref, () => ({ save: handleSave }), [handleSave]);
+  const getWorkflowJson = useCallback(() => {
+    const expression = serializeEditor(model);
+    let workflowDoc: unknown = expression;
+    try {
+      workflowDoc = JSON.parse(expression);
+    } catch {
+      // keep raw string when not JSON
+    }
+    const work_node: Record<string, unknown>[] = [];
+    const seen = new Set<string>();
+    const pushNode = (step: WorkEditorNode | HitlEditorNode) => {
+      const uuid = (step.uuid || "").trim().toLowerCase();
+      if (!uuid || seen.has(uuid)) {
+        return;
+      }
+      seen.add(uuid);
+      if (step.type === "hitl") {
+        work_node.push({
+          uuid,
+          ...hitlNodeWriteBody(step),
+        });
+        return;
+      }
+      work_node.push({
+        uuid,
+        ...workNodeWriteBody(step),
+      });
+    };
+    for (const step of model.main) {
+      if (step.type === "work" || step.type === "hitl") {
+        pushNode(step);
+      }
+    }
+    for (const step of Object.values(model.extras)) {
+      pushNode(step);
+    }
+    return JSON.stringify(
+      {
+        work_node,
+        workflow: {
+          uuid: workflowUuid || "",
+          workflow_name: name,
+          workflow_description: description,
+          workflow: workflowDoc,
+          cron: cronEnabled,
+          cron_expr: (cronExpr || DEFAULT_WORKFLOW_CRON_EXPR).slice(0, 20),
+          merge_work_result: mergeEnabled
+            ? mergeWorkResult
+                .split(",")
+                .map((part) => part.trim())
+                .filter(Boolean)
+            : [],
+        },
+      },
+      null,
+      2,
+    );
+  }, [
+    cronEnabled,
+    cronExpr,
+    description,
+    mergeEnabled,
+    mergeWorkResult,
+    model,
+    name,
+    workflowUuid,
+  ]);
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      save: handleSave,
+      getWorkflowJson,
+    }),
+    [getWorkflowJson, handleSave],
+  );
 
   useEffect(() => {
     onSaveStateChange?.({
@@ -1301,7 +1455,10 @@ export const WorkflowEditor = forwardRef<WorkflowEditorHandle, WorkflowEditorPro
     }
     const body = new FormData();
     body.append("file", file);
-    const response = await fetch(`/api/work-nodes/${selectedWorkNode.uuid}/file`, {
+    const query = workflowUuid
+      ? `?workflow_uuid=${encodeURIComponent(workflowUuid)}`
+      : "";
+    const response = await fetch(`/api/work-nodes/${selectedWorkNode.uuid}/file${query}`, {
       method: "POST",
       body,
     });
@@ -1605,7 +1762,7 @@ export const WorkflowEditor = forwardRef<WorkflowEditorHandle, WorkflowEditorPro
 
           <div
             className={`min-w-0 ${
-              cronEnabled
+              cronEnabled || mergeEnabled
                 ? showDiagramPromptPanel
                   ? "basis-[20%] flex-1"
                   : "w-[30%] shrink-0"
@@ -1620,7 +1777,74 @@ export const WorkflowEditor = forwardRef<WorkflowEditorHandle, WorkflowEditorPro
                 setCronEnabled(enabled);
                 setCronExpr(nextExpr);
               }}
+              afterToggle={
+                <div className="flex items-center justify-between gap-3">
+                  <span>결과 취합</span>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={mergeEnabled}
+                    disabled={readOnly || mergeCandidates.length === 0}
+                    onClick={() => {
+                      setMergeEnabled((current) => {
+                        const next = !current;
+                        if (!next) {
+                          setMergeWorkResult("");
+                        }
+                        return next;
+                      });
+                    }}
+                    className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full border transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                      mergeEnabled
+                        ? "border-sky-500/80 bg-sky-700/70"
+                        : "border-slate-600 bg-slate-800"
+                    }`}
+                    title={mergeEnabled ? "결과 취합 ON" : "결과 취합 OFF"}
+                  >
+                    <span
+                      className={`inline-block h-4 w-4 transform rounded-full bg-white transition ${
+                        mergeEnabled ? "translate-x-5" : "translate-x-1"
+                      }`}
+                    />
+                  </button>
+                </div>
+              }
             />
+            {mergeEnabled && mergeCandidates.length > 0 ? (
+              <div className="mt-2 rounded-lg border border-slate-700 bg-slate-950/70 px-3 py-2">
+                <p className="mb-2 text-[10px] text-slate-500">
+                  선택한 작업노드 결과를 순서대로 합쳐 워크플로 최종 result.out에 저장합니다. 미선택 시
+                  마지막 작업 결과만 사용합니다.
+                </p>
+                <ul className="max-h-36 space-y-1 overflow-auto">
+                  {mergeCandidates.map((item) => {
+                    const checked = selectedMergeUuids.includes(item.uuid);
+                    return (
+                      <li key={item.uuid}>
+                        <label
+                          className={`flex items-center gap-2 text-[11px] ${
+                            readOnly
+                              ? "cursor-default text-slate-500"
+                              : "cursor-pointer text-slate-200"
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            className="rounded border-slate-600"
+                            checked={checked}
+                            disabled={readOnly}
+                            onChange={(event) =>
+                              toggleMergeUuid(item.uuid, event.target.checked)
+                            }
+                          />
+                          <span className="truncate">{item.name}</span>
+                        </label>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            ) : null}
           </div>
         </div>
       </div>
@@ -1647,9 +1871,12 @@ export const WorkflowEditor = forwardRef<WorkflowEditorHandle, WorkflowEditorPro
                 <div key={step.clientId} className="flex items-center self-center">
                   <div className="relative flex items-center">
                     {step.type === "start" || step.type === "end" ? (
-                      <div className="flex h-10 min-w-10 items-center justify-center rounded-full border border-sky-300 bg-slate-950 px-2 text-xs font-semibold text-slate-100">
-                        {step.type === "start" ? "시작" : "종료"}
-                      </div>
+                      <WorkflowIcon
+                        name={step.type === "start" ? "start" : "end"}
+                        size="lg"
+                        label={step.type === "start" ? "시작" : "종료"}
+                        className="!h-10 !w-10"
+                      />
                     ) : null}
                     {step.type === "hitl" ? (
                       renderApproverCard(
@@ -1688,9 +1915,12 @@ export const WorkflowEditor = forwardRef<WorkflowEditorHandle, WorkflowEditorPro
                         {step.fail.kind === "end" ? (
                           <>
                             <FlowDownArrow tone="fail" />
-                            <div className="flex h-10 min-w-10 items-center justify-center rounded-full border border-rose-300 bg-slate-950 px-2 text-xs font-semibold text-rose-100">
-                              종료
-                            </div>
+                            <WorkflowIcon
+                              name="end-fail"
+                              size="lg"
+                              label="실패 종료"
+                              className="!h-10 !w-10"
+                            />
                           </>
                         ) : null}
                       </div>
@@ -1760,7 +1990,10 @@ export const WorkflowEditor = forwardRef<WorkflowEditorHandle, WorkflowEditorPro
               <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
                 {bottomTab === "results" ? (
                   workflowUuid ? (
-                    <WorkflowHistoryPanel workflowUuid={workflowUuid} />
+                    <WorkflowHistoryPanel
+                      workflowUuid={workflowUuid}
+                      refreshToken={historyRefreshToken}
+                    />
                   ) : (
                     <div className="flex h-full items-center justify-center p-4 text-[11px] text-slate-500">
                       작업 워크플로우를 선택하면 작업결과를 확인할 수 있습니다.
@@ -1776,6 +2009,7 @@ export const WorkflowEditor = forwardRef<WorkflowEditorHandle, WorkflowEditorPro
                       lastSuccess: node.lastSuccess,
                     }))}
                     selectedWorkUuid={selectedWorkNode?.uuid?.trim() || null}
+                    workflowUuid={workflowUuid || ""}
                   />
                 ) : selectedHitlNode && !readOnly ? (
                   <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-auto p-4 text-[11px] text-slate-300">

@@ -3,8 +3,8 @@ import { bandLabel } from "../types/user";
 
 const AUTH_SESSION_KEY = "project-a-auth-user";
 
-/** Default session TTL when server does not provide expires_in (1 hour). */
-export const AUTH_SESSION_TIMEOUT_MS = 60 * 60 * 1000;
+/** Default session TTL when server does not provide expires_in (2 hours). */
+export const AUTH_SESSION_TIMEOUT_MS = 2 * 60 * 60 * 1000;
 
 interface AuthSessionPayload {
   accessToken: string;

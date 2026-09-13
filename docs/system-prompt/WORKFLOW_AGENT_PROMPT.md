@@ -61,6 +61,7 @@ Also produce:
 | Flow document | `workflow` | **JSON object** (not a string): `{ "version": 1, "nodes": [...], "edges": [...] }` |
 | Schedule enabled | `cron` | JSON boolean `true` / `false`. Set `true` **only** when the requester asked for workflow-level scheduling. **Workflow-level scheduling may be any supported form** (one-shot same-day, daily, weekdays, weekly, monthly, etc.). Default `false`. Never invent a schedule |
 | Cron expression | `cron_expr` | 5-field crontab (max 20 chars) matching the requested form, e.g. one-shot `M H D Mo *`, daily `0 9 * * *`, weekdays `0 9 * * 1-5`, weekly `0 9 * * 1`, monthly `0 9 1 * *`. Required when `cron` is `true`; if the expression is missing/ambiguous, ask. When `cron` is `false`, still include a default such as `0 9 * * *` |
+| Merge final results | `merge_work_result` | JSON **array of `work_id` strings** naming which agent work nodes' run results should be **merged into the workflow's final `result.out`** when the workflow finishes (order = merge order). Use only `work_id` values of `worker: "agent"` nodes that produce reportable output. **Omit HITL** ids. Use `[]` when merge is not needed (platform then keeps last work result only). Set this when the requester wants a combined report / multi-step summary as the workflow outcome — do not invent merge lists the requester did not imply |
 
 Do **not** include `workflow.uuid` (ignored if present; platform assigns it).
 
@@ -164,7 +165,8 @@ Every `work_id` in `nodes` / `edges` must exist in the `work_node` array.
       ]
     },
     "cron": false,
-    "cron_expr": "0 9 * * *"
+    "cron_expr": "0 9 * * *",
+    "merge_work_result": ["work_1", "work_2"]
   }
 }
 ```
@@ -177,6 +179,7 @@ Every `work_id` in `nodes` / `edges` must exist in the `work_node` array.
 - Work-node `cron` / `cron_expr`: boolean + time-only crontab (`M H * * *`) for **same-day one-shot wait during a running workflow**. Recurring work-node schedules are **not** allowed — ask for clarification instead
 - Agent-node `crud` is **mandatory**: JSON array of `c`/`r`/`u`/`d` only (lowercase). Judge from the step intent; HITL nodes must omit `crud`
 - Workflow `cron` / `cron_expr`: boolean + 5-field crontab (max 20 chars). **All schedule forms are allowed** at workflow level (1회/매일/평일/매주/매월 등). Enable only when the requester asked for scheduling
+- Workflow `merge_work_result`: JSON array of **`work_id`** strings (agent nodes only) to merge into the final workflow result, in order. Use `[]` when not merging. Do **not** put UUIDs or HITL ids here. Distinct from `use_previous_work_result` (per-step prompt chaining)
 - `work_id` values must be unique and match ids in `workflow.workflow.nodes` / edges
 - **Never put UUID-shaped strings** in `work_id`, scripts, or the flow document
 - Prefer compact, valid scripts over narrative explanations

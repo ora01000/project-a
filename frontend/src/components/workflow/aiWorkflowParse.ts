@@ -29,6 +29,8 @@ export type AiWorkflowDesignPayload = {
   workflow: string;
   cron: boolean;
   cron_expr: string;
+  /** Comma-separated platform work_node UUIDs (remapped from AI ``work_id`` list). */
+  merge_work_result: string;
 };
 
 const SCRIPT_TYPES = new Set(["kubectl", "ansible", "cli", "prompt"]);
@@ -89,6 +91,65 @@ function asWorkReport(value: unknown): string {
 function asCronExpr(value: unknown): string {
   const text = asString(value) || DEFAULT_CRON_EXPR;
   return text.slice(0, 20);
+}
+
+/** Parse AI ``merge_work_result`` (work_id array or comma string) into remapped UUID CSV. */
+function asMergeWorkResult(
+  value: unknown,
+  idToUuid: Record<string, string>,
+  drafts: AiWorkNodeDraft[],
+): string {
+  const agentIds = new Set(
+    drafts.filter((draft) => draft.worker !== "hitl").map((draft) => draft.logicalId.toLowerCase()),
+  );
+  const tokens: string[] = [];
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const text = asString(item);
+      if (text) {
+        tokens.push(text);
+      }
+    }
+  } else {
+    const raw = asString(value);
+    if (raw) {
+      for (const part of raw.replace(/[;|]/g, ",").split(",")) {
+        const text = part.trim();
+        if (text) {
+          tokens.push(text);
+        }
+      }
+    }
+  }
+  const uuids: string[] = [];
+  const seen = new Set<string>();
+  for (const token of tokens) {
+    let uuid = "";
+    if (Object.prototype.hasOwnProperty.call(idToUuid, token)) {
+      uuid = idToUuid[token];
+    } else {
+      const lowered = token.toLowerCase();
+      const hit = Object.entries(idToUuid).find(([logical]) => logical.toLowerCase() === lowered);
+      if (hit) {
+        uuid = hit[1];
+      }
+    }
+    if (!uuid) {
+      continue;
+    }
+    const logicalLower = token.toLowerCase();
+    const matchedLogical =
+      Object.keys(idToUuid).find((logical) => logical.toLowerCase() === logicalLower) || token;
+    if (!agentIds.has(matchedLogical.toLowerCase())) {
+      continue;
+    }
+    if (seen.has(uuid)) {
+      continue;
+    }
+    seen.add(uuid);
+    uuids.push(uuid);
+  }
+  return uuids.join(",").slice(0, 2000);
 }
 
 /** Work-node schedules are time-of-day one-shot only: ``M H * * *``. */
@@ -280,6 +341,7 @@ export function parseAiWorkflowDesignResponse(raw: string): AiWorkflowDesignPayl
     workflow: workflowText,
     cron: asBoolean(workflowObj.cron, false),
     cron_expr: asCronExpr(workflowObj.cron_expr),
+    merge_work_result: asMergeWorkResult(workflowObj.merge_work_result, idToUuid, drafts),
   };
 }
 

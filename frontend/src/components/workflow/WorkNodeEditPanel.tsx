@@ -13,6 +13,7 @@ import {
   WorkNodeScheduleField,
 } from "./WorkNodeScheduleField";
 import { ScriptCodeEditor } from "./ScriptCodeEditor";
+import { normalizeCrudFlags } from "./aiWorkflowParse";
 
 interface WorkNodeEditPanelProps {
   node: WorkEditorNode;
@@ -26,6 +27,24 @@ interface WorkNodeEditPanelProps {
     extras?: { validationMessage?: string },
   ) => Promise<void>;
   onUploadFile: (file: File) => Promise<void>;
+}
+
+const WORK_TYPE_CRUD_OPTIONS: { key: "c" | "r" | "u" | "d"; label: string }[] = [
+  { key: "c", label: "생성" },
+  { key: "r", label: "읽기" },
+  { key: "u", label: "갱신" },
+  { key: "d", label: "삭제" },
+];
+
+function toggleCrudLetter(current: string, letter: "c" | "r" | "u" | "d"): string {
+  const order = ["c", "r", "u", "d"] as const;
+  const selected = new Set(normalizeCrudFlags(current).split("").filter(Boolean));
+  if (selected.has(letter)) {
+    selected.delete(letter);
+  } else {
+    selected.add(letter);
+  }
+  return order.filter((ch) => selected.has(ch)).join("");
 }
 
 const ALLOWED_SCRIPT_TYPES = new Set(["kubectl", "ansible", "cli", "prompt"]);
@@ -869,6 +888,43 @@ export function WorkNodeEditPanel({
             className="rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100"
           />
         </label>
+
+        <div className="grid gap-1 text-xs text-slate-400">
+          <span className="inline-flex items-center gap-1.5">
+            <WorkflowIcon name="list" size="xs" />
+            작업유형
+          </span>
+          <div className="flex flex-wrap items-center gap-1.5">
+            {WORK_TYPE_CRUD_OPTIONS.map((opt) => {
+              const selected = normalizeCrudFlags(node.crud).includes(opt.key);
+              return (
+                <button
+                  key={opt.key}
+                  type="button"
+                  title={opt.label}
+                  aria-label={`작업유형 ${opt.label}`}
+                  aria-pressed={selected}
+                  disabled={isGenerating || isValidating}
+                  onClick={() => {
+                    const next = toggleCrudLetter(node.crud, opt.key);
+                    onChange({ crud: next });
+                    void onPersistPatch({ crud: next });
+                  }}
+                  className={`inline-flex h-7 min-w-7 items-center justify-center rounded border px-1.5 text-[11px] font-semibold uppercase tracking-wide disabled:cursor-not-allowed disabled:opacity-50 ${
+                    selected
+                      ? "border-sky-500 bg-sky-950/60 text-sky-100"
+                      : "border-slate-600 bg-slate-950/70 text-slate-400 hover:border-slate-500 hover:text-slate-200"
+                  }`}
+                >
+                  {opt.key.toUpperCase()}
+                </button>
+              );
+            })}
+          </div>
+          <span className="text-[11px] text-slate-500">
+            C 생성 · R 읽기 · U 갱신 · D 삭제 (복수 선택 가능)
+          </span>
+        </div>
 
         <label className="grid gap-1 text-xs text-slate-400">
           <span className="inline-flex items-center gap-1.5">

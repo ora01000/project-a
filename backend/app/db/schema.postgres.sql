@@ -57,7 +57,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     madang_id VARCHAR(50) NOT NULL,
     team_id VARCHAR(50) NOT NULL,
     channel_id VARCHAR(120) NOT NULL,
-    message_id VARCHAR(50) NOT NULL,
+    message_id VARCHAR(120) NOT NULL,
     received_at TEXT NOT NULL,
     reject_reason VARCHAR(200) NOT NULL DEFAULT '',
     drop_reason VARCHAR(200) NOT NULL DEFAULT '',
@@ -168,7 +168,8 @@ ALTER TABLE received_mail
 -- key) happens in ensure_workflow_tables() because the expression rewrite needs
 -- the idx -> uuid mapping in Python.
 CREATE TABLE IF NOT EXISTS work_node (
-    uuid VARCHAR(36) PRIMARY KEY,
+    idx SERIAL PRIMARY KEY,
+    uuid VARCHAR(36) NOT NULL UNIQUE,
     owner INTEGER NOT NULL DEFAULT 1,
     work_name VARCHAR(100) NOT NULL,
     work_description VARCHAR(500) NOT NULL DEFAULT '',
@@ -239,7 +240,8 @@ BEGIN
 END $$;
 
 CREATE TABLE IF NOT EXISTS workflow (
-    uuid VARCHAR(36) PRIMARY KEY,
+    idx SERIAL PRIMARY KEY,
+    uuid VARCHAR(36) NOT NULL UNIQUE,
     owner INTEGER NOT NULL DEFAULT 1,
     distribute BOOLEAN NOT NULL DEFAULT FALSE,
     workflow_name VARCHAR(100) NOT NULL,
@@ -249,7 +251,8 @@ CREATE TABLE IF NOT EXISTS workflow (
     test_result INTEGER NOT NULL DEFAULT 0,
     validate_date TEXT NOT NULL DEFAULT '',
     cron INTEGER NOT NULL DEFAULT 0,
-    cron_expr VARCHAR(20) NOT NULL DEFAULT '0 9 * * *'
+    cron_expr VARCHAR(20) NOT NULL DEFAULT '0 9 * * *',
+    merge_work_result VARCHAR(2000) NOT NULL DEFAULT ''
 );
 
 ALTER TABLE workflow
@@ -268,6 +271,8 @@ ALTER TABLE workflow
     ADD COLUMN IF NOT EXISTS cron INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE workflow
     ADD COLUMN IF NOT EXISTS cron_expr VARCHAR(20) NOT NULL DEFAULT '0 9 * * *';
+ALTER TABLE workflow
+    ADD COLUMN IF NOT EXISTS merge_work_result VARCHAR(2000) NOT NULL DEFAULT '';
 -- Legacy checkin columns (owner/distribute model); drop if present
 ALTER TABLE workflow DROP COLUMN IF EXISTS checkin_user;
 ALTER TABLE workflow DROP COLUMN IF EXISTS checkin_time;
