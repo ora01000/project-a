@@ -498,11 +498,11 @@ export function WorkflowPage({ agents, user, onChatComplete }: WorkflowPageProps
           onCreate={() => {
             beginCreateSession();
           }}
+          statusMessage={error || runMessage || null}
+          statusTone={error ? "error" : runMessage ? "success" : "neutral"}
         >
-          {error ? <p className="text-xs text-rose-300">{error}</p> : null}
-          {runMessage ? <p className="text-xs text-emerald-300">{runMessage}</p> : null}
           <div className="flex w-full flex-col gap-3">
-            {items.length === 0 && !error ? (
+            {items.length === 0 ? (
               <p className="text-xs text-slate-500">등록된 작업 워크플로우가 없습니다.</p>
             ) : null}
             {items.map((item) => {

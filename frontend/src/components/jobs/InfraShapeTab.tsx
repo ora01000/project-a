@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { useTheme } from "../../context/ThemeContext";
+import { WorkflowIcon } from "../workflow/WorkflowIcon";
 import {
   ClusterCapacityPanel,
   NodeCapacityPanel,
@@ -559,14 +560,21 @@ export function InfraShapeTab({
                   type="button"
                   disabled={!selectedName || isGapAnalyzing}
                   onClick={() => void runGapAnalysis()}
-                  className="rounded border border-sky-700 bg-sky-950/50 px-2 py-0.5 text-[11px] font-medium text-sky-200 hover:bg-sky-900/60 disabled:cursor-not-allowed disabled:opacity-40"
+                  className="inline-flex items-center gap-1 rounded border border-sky-700 bg-sky-950/50 px-2 py-0.5 text-[11px] font-medium text-sky-200 hover:bg-sky-900/60 disabled:cursor-not-allowed disabled:opacity-40"
                   title={
                     selectedName
                       ? `${selectedName} (${selectedInfraType}) AI 갭분석`
                       : "클러스터를 선택해 주세요"
                   }
+                  aria-busy={isGapAnalyzing}
                 >
-                  {isGapAnalyzing ? "분석 중..." : "AI갭분석"}
+                  <WorkflowIcon
+                    name={isGapAnalyzing ? "refresh" : "ai"}
+                    size="xs"
+                    className={isGapAnalyzing ? "animate-spin" : undefined}
+                    label={isGapAnalyzing ? "분석 중" : undefined}
+                  />
+                  {isGapAnalyzing ? "분석 중…" : "AI갭분석"}
                 </button>
               ) : null}
             </div>

@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 
 import { WorkflowIcon } from "./WorkflowIcon";
 
@@ -8,6 +8,9 @@ interface WorkflowListPanelProps {
   collapsed?: boolean;
   onCollapsedChange?: (collapsed: boolean) => void;
   onCreate: () => void;
+  /** 실행/오류 등 목록 하단 상태 메시지 */
+  statusMessage?: string | null;
+  statusTone?: "error" | "success" | "neutral";
 }
 
 function PanelCollapseIcon() {
@@ -35,9 +38,15 @@ export function WorkflowListPanel({
   collapsed: controlledCollapsed,
   onCollapsedChange,
   onCreate,
+  statusMessage = null,
+  statusTone = "neutral",
 }: WorkflowListPanelProps) {
   const [uncontrolledCollapsed, setUncontrolledCollapsed] = useState(false);
   const isCollapsed = controlledCollapsed ?? uncontrolledCollapsed;
+  const [statusFolded, setStatusFolded] = useState(true);
+  const [statusPanelHeight, setStatusPanelHeight] = useState(0);
+  const lastOpenedMessageRef = useRef<string | null>(null);
+  const statusContentRef = useRef<HTMLDivElement>(null);
 
   const setCollapsed = (next: boolean) => {
     if (controlledCollapsed === undefined) {
@@ -45,6 +54,43 @@ export function WorkflowListPanel({
     }
     onCollapsedChange?.(next);
   };
+
+  useEffect(() => {
+    const msg = (statusMessage || "").trim();
+    if (!msg) {
+      setStatusFolded(true);
+      lastOpenedMessageRef.current = null;
+      return;
+    }
+    if (msg !== lastOpenedMessageRef.current) {
+      lastOpenedMessageRef.current = msg;
+      setStatusFolded(false);
+    }
+  }, [statusMessage]);
+
+  const statusToneClass =
+    statusTone === "error"
+      ? "text-rose-300"
+      : statusTone === "success"
+        ? "text-emerald-300"
+        : "text-slate-300";
+  const hasStatus = Boolean((statusMessage || "").trim());
+  const isStatusOpen = hasStatus && !statusFolded;
+
+  useLayoutEffect(() => {
+    const el = statusContentRef.current;
+    if (!isStatusOpen || !el) {
+      setStatusPanelHeight(0);
+      return;
+    }
+    const updateHeight = () => {
+      setStatusPanelHeight(el.scrollHeight);
+    };
+    updateHeight();
+    const observer = new ResizeObserver(updateHeight);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [isStatusOpen, statusMessage]);
 
   return (
     <div
@@ -107,6 +153,45 @@ export function WorkflowListPanel({
           </div>
 
           <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4">{children}</div>
+
+          <div
+            className={`shrink-0 overflow-hidden transition-[max-height,opacity] duration-300 ease-in-out ${
+              isStatusOpen ? "opacity-100" : "opacity-0"
+            }`}
+            style={{ maxHeight: isStatusOpen ? statusPanelHeight : 0 }}
+            aria-hidden={!isStatusOpen}
+          >
+            <div ref={statusContentRef} className="relative px-3 pb-2 pt-1">
+              <button
+                type="button"
+                onClick={() => setStatusFolded(true)}
+                aria-label="결과 메시지 접기"
+                title="접기"
+                tabIndex={isStatusOpen ? 0 : -1}
+                className="absolute right-3 top-1 z-10 rounded p-1 text-slate-400 hover:bg-slate-800/80 hover:text-slate-200"
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="h-3.5 w-3.5"
+                  aria-hidden="true"
+                >
+                  <path d="M6 9l6 6 6-6" />
+                </svg>
+              </button>
+              <div className="pr-6" role="status" aria-live="polite">
+                {hasStatus ? (
+                  <p className={`whitespace-pre-wrap break-words text-xs ${statusToneClass}`}>
+                    {statusMessage}
+                  </p>
+                ) : null}
+              </div>
+            </div>
+          </div>
         </div>
       </section>
     </div>

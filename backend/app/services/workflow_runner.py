@@ -1029,14 +1029,20 @@ async def _notify_hitl_approval(
                 user_idx=_executor_user_idx(requester),
             )
 
+    result_heading, result_body = _hitl_approval_result_section(
+        database_path,
+        workflow=workflow,
+        workflow_history_idx=workflow_history_idx,
+        previous_result=previous_result,
+    )
     title = f"[작업 워크플로우] {workflow.workflow_name} - 승인을 요청합니다."
     body_md = (
         f"## 작업 워크플로우 승인 요청\n\n"
         f"- 작업 워크플로우: **{workflow.workflow_name}**\n"
         f"- 요청자: {requester.username or requester.userid}\n"
         f"- 단계:\n\n```\n{diagram}\n```\n\n"
-        f"## 이전 작업 결과\n\n"
-        f"{(previous_result or '(결과 없음)').strip()}\n"
+        f"## {result_heading}\n\n"
+        f"{result_body}\n"
     )
     job = create_job_from_intake(
         database_path,
@@ -1141,6 +1147,26 @@ def _merged_run_result_content(
         title = (node.work_name or work_uuid).strip() or work_uuid
         sections.append(f"===== {title} ({node.uuid}) =====\n{body}")
     return "\n\n".join(sections).strip()
+
+
+def _hitl_approval_result_section(
+    database_path: Path | str,
+    *,
+    workflow: WorkflowRecord,
+    workflow_history_idx: int,
+    previous_result: str,
+) -> tuple[str, str]:
+    """Build HITL job result section: merge first when configured, else last work result."""
+    if parse_merge_work_result_uuids(workflow.merge_work_result):
+        merged = _merged_run_result_content(
+            database_path,
+            workflow=workflow,
+            workflow_history_idx=workflow_history_idx,
+        )
+        if merged.strip():
+            return ("취합 결과", merged.strip())
+    prior = (previous_result or "").strip()
+    return ("이전 작업 결과", prior or "(결과 없음)")
 
 
 def _record_workflow_history_on_end(

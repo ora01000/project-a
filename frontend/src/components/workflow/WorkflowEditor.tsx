@@ -1665,8 +1665,14 @@ export const WorkflowEditor = forwardRef<WorkflowEditorHandle, WorkflowEditorPro
                     onClick={handleDiagramGenerate}
                     className="inline-flex shrink-0 items-center gap-1 rounded-md border border-slate-600 bg-slate-900 px-3 py-1 text-[11px] font-medium text-slate-100 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
                     title="대화형 터미널로 전송"
+                    aria-busy={isDiagramBusy}
                   >
-                    <WorkflowIcon name="ai" size="xs" />
+                    <WorkflowIcon
+                      name={isDiagramBusy ? "refresh" : "ai"}
+                      size="xs"
+                      className={isDiagramBusy ? "animate-spin" : undefined}
+                      label={isDiagramBusy ? "생성 중" : undefined}
+                    />
                     {isDiagramBusy ? "생성 중…" : "생성"}
                   </button>
                 )}
@@ -2001,13 +2007,17 @@ export const WorkflowEditor = forwardRef<WorkflowEditorHandle, WorkflowEditorPro
                   )
                 ) : bottomTab === "work-results" ? (
                   <WorkNodeResultsPanel
-                    workNodes={workflowWorkNodes.map((node) => ({
-                      uuid: node.uuid,
-                      name: node.name,
-                      validateDate: node.validateDate,
-                      lastEndDate: node.lastEndDate,
-                      lastSuccess: node.lastSuccess,
-                    }))}
+                    workNodes={workflowWorkNodes.map((node) => {
+                      const live = workNodes.find((item) => item.uuid === node.uuid);
+                      return {
+                        uuid: node.uuid,
+                        name: node.name,
+                        validateDate: live?.validate_date ?? node.validateDate,
+                        lastStartDate: live?.last_start_date ?? node.lastStartDate,
+                        lastEndDate: live?.last_end_date ?? node.lastEndDate,
+                        lastSuccess: live?.last_success ?? node.lastSuccess,
+                      };
+                    })}
                     selectedWorkUuid={selectedWorkNode?.uuid?.trim() || null}
                     workflowUuid={workflowUuid || ""}
                   />

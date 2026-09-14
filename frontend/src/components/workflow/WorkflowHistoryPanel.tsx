@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import { JobContentView } from "../jobs/JobContentView";
 import { JOB_TYPE_WORKFLOW } from "../../types/job";
+import { isRunInProgress } from "./workflowModel";
 import { WorkflowIcon } from "./WorkflowIcon";
 
 export interface WorkflowHistoryItem {
@@ -166,9 +167,18 @@ export function WorkflowHistoryPanel({ workflowUuid, refreshToken = 0 }: Workflo
           ) : null}
           {items.map((item) => {
             const selected = item.idx === selectedIdx;
-            const endLabel = item.end_date || "-";
-            const durationLabel = formatDurationLabel(item.start_date, item.end_date);
+            const inProgress = isRunInProgress(item.start_date, item.end_date);
+            const endLabel = inProgress ? "진행중" : item.end_date || "-";
+            const durationLabel = inProgress
+              ? "진행중"
+              : formatDurationLabel(item.start_date, item.end_date);
             const executorLabel = item.username || (item.user_idx ? `user#${item.user_idx}` : "-");
+            const statusLabel = inProgress ? "진행중" : item.success ? "성공" : "실패";
+            const statusIcon = inProgress
+              ? ("run" as const)
+              : item.success
+                ? ("approve" as const)
+                : ("fail-branch" as const);
             return (
               <button
                 key={item.idx}
@@ -187,12 +197,13 @@ export function WorkflowHistoryPanel({ workflowUuid, refreshToken = 0 }: Workflo
                   <span className="text-slate-500">소요시간</span> {durationLabel}
                 </div>
                 <div className="mt-0.5 flex items-center justify-between gap-2 text-[10px] text-slate-400">
-                  <span className="inline-flex items-center gap-1">
-                    <WorkflowIcon
-                      name={item.success ? "approve" : "fail-branch"}
-                      size="xs"
-                    />
-                    {item.success ? "성공" : "실패"}
+                  <span
+                    className={`inline-flex items-center gap-1 ${
+                      inProgress ? "text-amber-300" : ""
+                    }`}
+                  >
+                    <WorkflowIcon name={statusIcon} size="xs" />
+                    {statusLabel}
                   </span>
                   <span className="inline-flex min-w-0 items-center gap-1 truncate text-right" title={executorLabel}>
                     <WorkflowIcon name="owner" size="xs" />

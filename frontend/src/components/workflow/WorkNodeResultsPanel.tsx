@@ -2,12 +2,14 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { JobContentView } from "../jobs/JobContentView";
 import { JOB_TYPE_WORKFLOW } from "../../types/job";
+import { isRunInProgress } from "./workflowModel";
 import { WorkflowIcon } from "./WorkflowIcon";
 
 export interface WorkNodeResultListItem {
   uuid: string;
   name: string;
   validateDate?: string;
+  lastStartDate?: string;
   lastEndDate?: string;
   lastSuccess?: boolean;
 }
@@ -337,7 +339,22 @@ export function WorkNodeResultsPanel({
               ) : null}
               {filteredNodes.map((node) => {
                 const selected = node.uuid === selectedNodeUuid;
-                const dateLabel = node.validateDate || node.lastEndDate || "-";
+                const inProgress = isRunInProgress(node.lastStartDate, node.lastEndDate);
+                const dateLabel = inProgress
+                  ? node.lastStartDate || "-"
+                  : node.validateDate || node.lastEndDate || "-";
+                const statusLabel = inProgress
+                  ? "진행중"
+                  : node.lastSuccess == null
+                    ? "-"
+                    : node.lastSuccess
+                      ? "성공"
+                      : "실패";
+                const statusIcon = inProgress
+                  ? ("run" as const)
+                  : node.lastSuccess
+                    ? ("approve" as const)
+                    : ("fail-branch" as const);
                 return (
                   <button
                     key={node.uuid}
@@ -356,16 +373,17 @@ export function WorkNodeResultsPanel({
                       <span className="min-w-0 truncate" title={dateLabel}>
                         {dateLabel}
                       </span>
-                      <span className="inline-flex items-center gap-1">
-                        {node.lastSuccess == null ? (
+                      <span
+                        className={`inline-flex items-center gap-1 ${
+                          inProgress ? "text-amber-300" : ""
+                        }`}
+                      >
+                        {statusLabel === "-" ? (
                           "-"
                         ) : (
                           <>
-                            <WorkflowIcon
-                              name={node.lastSuccess ? "approve" : "fail-branch"}
-                              size="xs"
-                            />
-                            {node.lastSuccess ? "성공" : "실패"}
+                            <WorkflowIcon name={statusIcon} size="xs" />
+                            {statusLabel}
                           </>
                         )}
                       </span>
