@@ -16,6 +16,41 @@ export function isRunInProgress(
   return start > end;
 }
 
+export type RunStatusKind = "idle" | "running" | "success" | "failed";
+
+/** start/end/success 로 표시용 실행 상태 판별 (진행중 vs 실패 구분) */
+export function resolveRunStatus(
+  startDate?: string | null,
+  endDate?: string | null,
+  success?: boolean | null,
+): RunStatusKind {
+  if (isRunInProgress(startDate, endDate)) {
+    return "running";
+  }
+  const start = (startDate || "").trim();
+  const end = (endDate || "").trim();
+  if (!start && !end) {
+    return "idle";
+  }
+  if (!end) {
+    return "running";
+  }
+  return success ? "success" : "failed";
+}
+
+export function runStatusLabel(kind: RunStatusKind): string {
+  switch (kind) {
+    case "running":
+      return "진행중";
+    case "success":
+      return "성공";
+    case "failed":
+      return "실패";
+    default:
+      return "-";
+  }
+}
+
 export type FailSpec =
   | { kind: "none" }
   | { kind: "end" }

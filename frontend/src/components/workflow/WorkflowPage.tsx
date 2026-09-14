@@ -12,9 +12,11 @@ import { WorkflowDesignPanel } from "./WorkflowDesignPanel";
 import type { DiagramAgentEvent } from "./WorkflowEditor";
 import { WorkflowIcon } from "./WorkflowIcon";
 import { WorkflowListPanel } from "./WorkflowListPanel";
+import { WorkflowTemplateEditorPanel } from "./WorkflowTemplateEditorPanel";
 import { describeCronExpr } from "./WorkflowScheduleField";
 import { isRunInProgress } from "./workflowModel";
 import { normalizeCrudFlags } from "./aiWorkflowParse";
+import { canManageWorkflowTemplates } from "../../types/user";
 
 const WORKFLOW_AGENT_ID = "WORKFLOW_AGENT";
 
@@ -170,7 +172,9 @@ export function WorkflowPage({ agents, user, onChatComplete }: WorkflowPageProps
   const [items, setItems] = useState<WorkflowItem[]>([]);
   const [workNodes, setWorkNodes] = useState<WorkNodeItem[]>([]);
   const [selectedUuid, setSelectedUuid] = useState<string | null>(null);
-  const [mode, setMode] = useState<"idle" | "create" | "edit">("idle");
+  const [mode, setMode] = useState<"idle" | "create" | "edit" | "template" | "template-edit">(
+    "idle",
+  );
   /** Stable across create→edit after first AI/manual save so the editor is not remounted. */
   const [editorSessionKey, setEditorSessionKey] = useState("idle");
   const [error, setError] = useState<string | null>(null);
@@ -343,6 +347,18 @@ export function WorkflowPage({ agents, user, onChatComplete }: WorkflowPageProps
     setMode("create");
   }, []);
 
+  const beginTemplateSession = useCallback(() => {
+    setSelectedUuid(null);
+    setEditorSessionKey(`template-${Date.now()}`);
+    setMode("template");
+  }, []);
+
+  const beginTemplateEditSession = useCallback(() => {
+    setSelectedUuid(null);
+    setEditorSessionKey(`template-edit-${Date.now()}`);
+    setMode("template-edit");
+  }, []);
+
   const beginEditSession = useCallback((uuid: string) => {
     setSelectedUuid(uuid);
     setEditorSessionKey(`edit-${uuid}`);
@@ -498,6 +514,9 @@ export function WorkflowPage({ agents, user, onChatComplete }: WorkflowPageProps
           onCreate={() => {
             beginCreateSession();
           }}
+          showCreateTemplate={canManageWorkflowTemplates(Number(user.role))}
+          onCreateTemplate={beginTemplateSession}
+          onEditTemplate={beginTemplateEditSession}
           statusMessage={error || runMessage || null}
           statusTone={error ? "error" : runMessage ? "success" : "neutral"}
         >
@@ -655,24 +674,39 @@ export function WorkflowPage({ agents, user, onChatComplete }: WorkflowPageProps
           </div>
         </WorkflowListPanel>
 
-        <WorkflowDesignPanel
-          mode={mode}
-          selected={selected}
-          workNodes={workNodes}
-          user={user}
-          editorSessionKey={editorSessionKey}
-          onSaved={handleSaved}
-          onWorkNodesChanged={refreshWorkflowData}
-          onDistributed={handleDistributed}
-          onCloned={handleCloned}
-          aiImportRequest={aiImportRequest}
-          onAiImportHandled={handleAiImportHandled}
-          diagramAgentEvent={diagramAgentEvent}
-          onDiagramAgentEventHandled={handleDiagramAgentEventHandled}
-          onDiagramGenerate={(prompt) => {
-            void handleDiagramGenerate(prompt);
-          }}
-        />
+        {mode === "template" || mode === "template-edit" ? (
+          <WorkflowTemplateEditorPanel
+            mode={mode === "template-edit" ? "edit" : "create"}
+            onClose={() => setMode("idle")}
+            onSaved={() => {
+              setRunMessage(
+                mode === "template-edit"
+                  ? "템플릿이 수정되었습니다."
+                  : "템플릿이 저장되었습니다.",
+              );
+              setError(null);
+            }}
+          />
+        ) : (
+          <WorkflowDesignPanel
+            mode={mode}
+            selected={selected}
+            workNodes={workNodes}
+            user={user}
+            editorSessionKey={editorSessionKey}
+            onSaved={handleSaved}
+            onWorkNodesChanged={refreshWorkflowData}
+            onDistributed={handleDistributed}
+            onCloned={handleCloned}
+            aiImportRequest={aiImportRequest}
+            onAiImportHandled={handleAiImportHandled}
+            diagramAgentEvent={diagramAgentEvent}
+            onDiagramAgentEventHandled={handleDiagramAgentEventHandled}
+            onDiagramGenerate={(prompt) => {
+              void handleDiagramGenerate(prompt);
+            }}
+          />
+        )}
       </div>
 
       {billingConfirmPrompt ? (

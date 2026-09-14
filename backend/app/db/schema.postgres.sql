@@ -292,3 +292,13 @@ UPDATE workflow_history
 SET user_idx = 1
 WHERE user_idx IS NULL OR user_idx <= 0;
 CREATE INDEX IF NOT EXISTS ix_workflow_history_uuid ON workflow_history (uuid);
+
+CREATE TABLE IF NOT EXISTS workflow_template (
+    idx SERIAL PRIMARY KEY,
+    template_name VARCHAR(70) NOT NULL UNIQUE,
+    template_filename VARCHAR(200) NOT NULL UNIQUE,
+    update_date TEXT NOT NULL DEFAULT '',
+    created_by INTEGER NOT NULL DEFAULT 1
+);
+CREATE INDEX IF NOT EXISTS ix_workflow_template_name ON workflow_template (template_name);
+CREATE INDEX IF NOT EXISTS ix_workflow_template_filename ON workflow_template (template_filename);

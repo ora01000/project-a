@@ -60,6 +60,11 @@ export function canRunGapAnalysis(role: number): boolean {
   return hasAdminAccess(role) || role === ROLE_INFRAADMIN;
 }
 
+/** Diagram template create/edit (admin / infraadmin / superadmin). */
+export function canManageWorkflowTemplates(role: number): boolean {
+  return role === ROLE_ADMIN || role === ROLE_INFRAADMIN || role === ROLE_SUPERADMIN;
+}
+
 /** IP masking in infra shape detail applies only to ordinary users. */
 export function shouldMaskIps(role: number): boolean {
   return role === ROLE_USER;

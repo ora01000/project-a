@@ -285,7 +285,9 @@ export const WorkflowEditor = forwardRef<WorkflowEditorHandle, WorkflowEditorPro
     () => Boolean((initialMergeWorkResult || "").trim()),
   );
   const [diagramPrompt, setDiagramPrompt] = useState("");
-  const [templateNames, setTemplateNames] = useState<string[]>([]);
+  const [templateOptions, setTemplateOptions] = useState<
+    { template_name: string; template_filename: string }[]
+  >([]);
   const [selectedTemplate, setSelectedTemplate] = useState("");
   const [isLoadingTemplate, setIsLoadingTemplate] = useState(false);
   const [templateVarValues, setTemplateVarValues] = useState<Record<string, string>>({});
@@ -770,9 +772,19 @@ export const WorkflowEditor = forwardRef<WorkflowEditorHandle, WorkflowEditorPro
         }
       }
       if (templateRes.ok) {
-        const data = (await templateRes.json()) as { name: string }[];
+        const data = (await templateRes.json()) as {
+          template_name?: string;
+          template_filename?: string;
+          name?: string;
+        }[];
         if (!cancelled) {
-          setTemplateNames(data.map((item) => item.name));
+          setTemplateOptions(
+            (Array.isArray(data) ? data : []).map((item) => {
+              const filename = (item.template_filename || item.name || "").trim();
+              const label = (item.template_name || "").trim() || filename;
+              return { template_name: label, template_filename: filename };
+            }).filter((item) => item.template_filename),
+          );
         }
       }
     };
@@ -1698,9 +1710,9 @@ export const WorkflowEditor = forwardRef<WorkflowEditorHandle, WorkflowEditorPro
                     aria-label="다이어그램 생성 양식"
                   >
                     <option value="">양식 선택</option>
-                    {templateNames.map((templateName) => (
-                      <option key={templateName} value={templateName}>
-                        {templateName}
+                    {templateOptions.map((item) => (
+                      <option key={item.template_filename} value={item.template_filename}>
+                        {item.template_name}
                       </option>
                     ))}
                   </select>

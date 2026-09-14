@@ -1697,12 +1697,29 @@ def get_workflow_run_stats(
             """
             SELECT
                 COUNT(*)::int AS run_count,
-                COALESCE(SUM(CASE WHEN success <> 0 THEN 1 ELSE 0 END), 0)::int AS success_count,
-                COALESCE(SUM(CASE WHEN success = 0 THEN 1 ELSE 0 END), 0)::int AS fail_count,
+                COALESCE(
+                    SUM(
+                        CASE
+                            WHEN success <> 0 AND COALESCE(end_date, '') <> '' THEN 1
+                            ELSE 0
+                        END
+                    ),
+                    0
+                )::int AS success_count,
+                COALESCE(
+                    SUM(
+                        CASE
+                            WHEN success = 0 AND COALESCE(end_date, '') <> '' THEN 1
+                            ELSE 0
+                        END
+                    ),
+                    0
+                )::int AS fail_count,
                 (
                     SELECT success
                     FROM workflow_history
                     WHERE uuid = ?
+                      AND COALESCE(end_date, '') <> ''
                     ORDER BY idx DESC
                     LIMIT 1
                 ) AS last_success

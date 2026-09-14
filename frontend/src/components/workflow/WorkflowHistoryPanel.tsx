@@ -2,8 +2,8 @@ import { useCallback, useEffect, useState } from "react";
 
 import { JobContentView } from "../jobs/JobContentView";
 import { JOB_TYPE_WORKFLOW } from "../../types/job";
-import { isRunInProgress } from "./workflowModel";
-import { WorkflowIcon } from "./WorkflowIcon";
+import { resolveRunStatus, runStatusLabel } from "./workflowModel";
+import { WorkflowIcon, type WorkflowIconName } from "./WorkflowIcon";
 
 export interface WorkflowHistoryItem {
   idx: number;
@@ -49,17 +49,27 @@ function formatDurationLabel(startDate: string, endDate: string): string {
   if (ms < 0) {
     return "-";
   }
-  const totalSeconds = Math.floor(ms / 1000);
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const seconds = totalSeconds % 60;
-  if (hours > 0) {
-    return `${hours}시간 ${minutes}분 ${seconds}초`;
+  const totalSec = Math.floor(ms / 1000);
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  if (h > 0) {
+    return `${h}시간 ${m}분 ${s}초`;
   }
-  if (minutes > 0) {
-    return `${minutes}분 ${seconds}초`;
+  if (m > 0) {
+    return `${m}분 ${s}초`;
   }
-  return `${seconds}초`;
+  return `${s}초`;
+}
+
+function historyStatusIcon(kind: ReturnType<typeof resolveRunStatus>): WorkflowIconName {
+  if (kind === "running") {
+    return "run";
+  }
+  if (kind === "success") {
+    return "approve";
+  }
+  return "fail-branch";
 }
 
 export function WorkflowHistoryPanel({ workflowUuid, refreshToken = 0 }: WorkflowHistoryPanelProps) {
@@ -167,18 +177,13 @@ export function WorkflowHistoryPanel({ workflowUuid, refreshToken = 0 }: Workflo
           ) : null}
           {items.map((item) => {
             const selected = item.idx === selectedIdx;
-            const inProgress = isRunInProgress(item.start_date, item.end_date);
-            const endLabel = inProgress ? "진행중" : item.end_date || "-";
-            const durationLabel = inProgress
-              ? "진행중"
-              : formatDurationLabel(item.start_date, item.end_date);
+            const statusKind = resolveRunStatus(item.start_date, item.end_date, item.success);
+            const endLabel = statusKind === "running" ? "진행중" : item.end_date || "-";
+            const durationLabel =
+              statusKind === "running"
+                ? "진행중"
+                : formatDurationLabel(item.start_date, item.end_date);
             const executorLabel = item.username || (item.user_idx ? `user#${item.user_idx}` : "-");
-            const statusLabel = inProgress ? "진행중" : item.success ? "성공" : "실패";
-            const statusIcon = inProgress
-              ? ("run" as const)
-              : item.success
-                ? ("approve" as const)
-                : ("fail-branch" as const);
             return (
               <button
                 key={item.idx}
@@ -199,11 +204,11 @@ export function WorkflowHistoryPanel({ workflowUuid, refreshToken = 0 }: Workflo
                 <div className="mt-0.5 flex items-center justify-between gap-2 text-[10px] text-slate-400">
                   <span
                     className={`inline-flex items-center gap-1 ${
-                      inProgress ? "text-amber-300" : ""
+                      statusKind === "running" ? "text-amber-300" : ""
                     }`}
                   >
-                    <WorkflowIcon name={statusIcon} size="xs" />
-                    {statusLabel}
+                    <WorkflowIcon name={historyStatusIcon(statusKind)} size="xs" />
+                    {runStatusLabel(statusKind)}
                   </span>
                   <span className="inline-flex min-w-0 items-center gap-1 truncate text-right" title={executorLabel}>
                     <WorkflowIcon name="owner" size="xs" />

@@ -17,6 +17,11 @@ def can_run_gap_analysis(role: int) -> bool:
     return is_admin_role(role) or role == ROLE_INFRAADMIN
 
 
+def can_manage_workflow_templates(role: int) -> bool:
+    """Admin / infraadmin / superadmin may create and edit diagram templates."""
+    return role in {ROLE_ADMIN, ROLE_INFRAADMIN, ROLE_SUPERADMIN}
+
+
 def is_assignable_role(role: int) -> bool:
     return role in ASSIGNABLE_ROLES
 

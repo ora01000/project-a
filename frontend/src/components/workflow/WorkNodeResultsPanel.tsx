@@ -2,8 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { JobContentView } from "../jobs/JobContentView";
 import { JOB_TYPE_WORKFLOW } from "../../types/job";
-import { isRunInProgress } from "./workflowModel";
-import { WorkflowIcon } from "./WorkflowIcon";
+import { resolveRunStatus, runStatusLabel } from "./workflowModel";
+import { WorkflowIcon, type WorkflowIconName } from "./WorkflowIcon";
 
 export interface WorkNodeResultListItem {
   uuid: string;
@@ -19,6 +19,12 @@ interface ResultFileItem {
   mtime: number;
   size: number;
   is_latest: boolean;
+  success?: boolean;
+  in_progress?: boolean;
+  start_date?: string;
+  end_date?: string;
+  workflow_history_idx?: number;
+  work_node_history_idx?: number;
 }
 
 interface AgentLogEntry {
@@ -75,6 +81,43 @@ function formatResultFilename(filename: string, isLatest: boolean): string {
     return `${y}-${mo}-${d} ${h}:${mi}:${s}`;
   }
   return filename;
+}
+
+function statusIconName(kind: ReturnType<typeof resolveRunStatus>): WorkflowIconName | null {
+  switch (kind) {
+    case "running":
+      return "run";
+    case "success":
+      return "approve";
+    case "failed":
+      return "fail-branch";
+    default:
+      return null;
+  }
+}
+
+function RunStatusBadge({
+  kind,
+  className = "",
+}: {
+  kind: ReturnType<typeof resolveRunStatus>;
+  className?: string;
+}) {
+  const label = runStatusLabel(kind);
+  const icon = statusIconName(kind);
+  if (kind === "idle" || !icon) {
+    return <span className={className}>-</span>;
+  }
+  return (
+    <span
+      className={`inline-flex items-center gap-1 ${
+        kind === "running" ? "text-amber-300" : ""
+      } ${className}`.trim()}
+    >
+      <WorkflowIcon name={icon} size="xs" />
+      {label}
+    </span>
+  );
 }
 
 function formatLogTimestamp(value: string | undefined): string {
@@ -146,6 +189,10 @@ export function WorkNodeResultsPanel({
   const [isLoadingLog, setIsLoadingLog] = useState(false);
   const [contentRefreshToken, setContentRefreshToken] = useState(0);
 
+  const selectedNode = useMemo(
+    () => filteredNodes.find((node) => node.uuid === selectedNodeUuid),
+    [filteredNodes, selectedNodeUuid],
+  );
   useEffect(() => {
     if (isNodeListMode) {
       setSelectedNodeUuid((current) => {
@@ -227,7 +274,14 @@ export function WorkNodeResultsPanel({
     }
     setResultFiles([]);
     setSelectedFilename(null);
-  }, [isNodeListMode, selectedNodeUuid, loadResultFiles]);
+  }, [
+    isNodeListMode,
+    selectedNodeUuid,
+    loadResultFiles,
+    selectedNode?.lastStartDate,
+    selectedNode?.lastEndDate,
+    selectedNode?.lastSuccess,
+  ]);
 
   useEffect(() => {
     if (!selectedNodeUuid) {
@@ -294,7 +348,6 @@ export function WorkNodeResultsPanel({
   }, [selectedNodeUuid, selectedFilename, isNodeListMode, workflowUuid, contentRefreshToken]);
 
   const listTitle = isNodeListMode ? "작업 노드" : "작업 결과";
-  const selectedNode = filteredNodes.find((node) => node.uuid === selectedNodeUuid);
 
   const refreshSelected = () => {
     if (!selectedNodeUuid) {
@@ -327,9 +380,18 @@ export function WorkNodeResultsPanel({
           ) : null}
         </div>
         {!isNodeListMode && selectedNode ? (
-          <p className="mb-2 truncate text-[10px] text-slate-500" title={selectedNode.name}>
-            {selectedNode.name || selectedNode.uuid}
-          </p>
+          <div className="mb-2 flex min-w-0 items-center justify-between gap-2">
+            <p className="min-w-0 truncate text-[10px] text-slate-500" title={selectedNode.name}>
+              {selectedNode.name || selectedNode.uuid}
+            </p>
+            <RunStatusBadge
+              kind={resolveRunStatus(
+                selectedNode.lastStartDate,
+                selectedNode.lastEndDate,
+                selectedNode.lastSuccess,
+              )}
+            />
+          </div>
         ) : null}
         <div className="min-h-0 flex-1 space-y-1.5 overflow-y-auto">
           {isNodeListMode ? (
@@ -339,22 +401,15 @@ export function WorkNodeResultsPanel({
               ) : null}
               {filteredNodes.map((node) => {
                 const selected = node.uuid === selectedNodeUuid;
-                const inProgress = isRunInProgress(node.lastStartDate, node.lastEndDate);
-                const dateLabel = inProgress
-                  ? node.lastStartDate || "-"
-                  : node.validateDate || node.lastEndDate || "-";
-                const statusLabel = inProgress
-                  ? "진행중"
-                  : node.lastSuccess == null
-                    ? "-"
-                    : node.lastSuccess
-                      ? "성공"
-                      : "실패";
-                const statusIcon = inProgress
-                  ? ("run" as const)
-                  : node.lastSuccess
-                    ? ("approve" as const)
-                    : ("fail-branch" as const);
+                const statusKind = resolveRunStatus(
+                  node.lastStartDate,
+                  node.lastEndDate,
+                  node.lastSuccess,
+                );
+                const dateLabel =
+                  statusKind === "running"
+                    ? node.lastStartDate || "-"
+                    : node.validateDate || node.lastEndDate || "-";
                 return (
                   <button
                     key={node.uuid}
@@ -373,20 +428,7 @@ export function WorkNodeResultsPanel({
                       <span className="min-w-0 truncate" title={dateLabel}>
                         {dateLabel}
                       </span>
-                      <span
-                        className={`inline-flex items-center gap-1 ${
-                          inProgress ? "text-amber-300" : ""
-                        }`}
-                      >
-                        {statusLabel === "-" ? (
-                          "-"
-                        ) : (
-                          <>
-                            <WorkflowIcon name={statusIcon} size="xs" />
-                            {statusLabel}
-                          </>
-                        )}
-                      </span>
+                      <RunStatusBadge kind={statusKind} />
                     </div>
                   </button>
                 );
@@ -402,6 +444,13 @@ export function WorkNodeResultsPanel({
                 const selected = item.filename === selectedFilename;
                 const label = formatResultFilename(item.filename, item.is_latest);
                 const mtimeLabel = formatMtime(item.mtime);
+                const fileStatus = item.in_progress
+                  ? ("running" as const)
+                  : resolveRunStatus(item.start_date, item.end_date, item.success);
+                const hasHistoryMeta =
+                  Boolean(item.work_node_history_idx) ||
+                  item.in_progress === true ||
+                  typeof item.success === "boolean";
                 return (
                   <button
                     key={item.filename}
@@ -416,8 +465,11 @@ export function WorkNodeResultsPanel({
                     <div className="truncate font-medium" title={label}>
                       {label}
                     </div>
-                    <div className="mt-0.5 truncate text-[10px] text-slate-400" title={mtimeLabel}>
-                      {mtimeLabel}
+                    <div className="mt-0.5 flex items-center justify-between gap-2 text-[10px] text-slate-400">
+                      <span className="min-w-0 truncate" title={mtimeLabel}>
+                        {mtimeLabel}
+                      </span>
+                      {hasHistoryMeta ? <RunStatusBadge kind={fileStatus} /> : null}
                     </div>
                   </button>
                 );

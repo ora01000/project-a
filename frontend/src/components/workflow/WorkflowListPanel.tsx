@@ -11,6 +11,10 @@ interface WorkflowListPanelProps {
   /** 실행/오류 등 목록 하단 상태 메시지 */
   statusMessage?: string | null;
   statusTone?: "error" | "success" | "neutral";
+  /** role 0|2|100 only — show template create button */
+  showCreateTemplate?: boolean;
+  onCreateTemplate?: () => void;
+  onEditTemplate?: () => void;
 }
 
 function PanelCollapseIcon() {
@@ -40,6 +44,9 @@ export function WorkflowListPanel({
   onCreate,
   statusMessage = null,
   statusTone = "neutral",
+  showCreateTemplate = false,
+  onCreateTemplate,
+  onEditTemplate,
 }: WorkflowListPanelProps) {
   const [uncontrolledCollapsed, setUncontrolledCollapsed] = useState(false);
   const isCollapsed = controlledCollapsed ?? uncontrolledCollapsed;
@@ -192,6 +199,31 @@ export function WorkflowListPanel({
               </div>
             </div>
           </div>
+
+          {showCreateTemplate && (onCreateTemplate || onEditTemplate) ? (
+            <div className="flex shrink-0 flex-col gap-2 px-4 pb-3 pt-1">
+              {onEditTemplate ? (
+                <button
+                  type="button"
+                  onClick={onEditTemplate}
+                  className="inline-flex w-full items-center justify-center gap-1.5 rounded-md border border-sky-700 bg-sky-950/50 px-3 py-2 text-sm font-medium text-sky-100 hover:bg-sky-900/60"
+                >
+                  <WorkflowIcon name="edit" size="sm" label="템플릿 수정" />
+                  템플릿 수정
+                </button>
+              ) : null}
+              {onCreateTemplate ? (
+                <button
+                  type="button"
+                  onClick={onCreateTemplate}
+                  className="inline-flex w-full items-center justify-center gap-1.5 rounded-md border border-sky-700 bg-sky-950/50 px-3 py-2 text-sm font-medium text-sky-100 hover:bg-sky-900/60"
+                >
+                  <WorkflowIcon name="template" size="sm" label="새로운 템플릿" />
+                  새로운 템플릿
+                </button>
+              ) : null}
+            </div>
+          ) : null}
         </div>
       </section>
     </div>

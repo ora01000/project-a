@@ -1133,6 +1133,18 @@ def resolve_upload_home() -> Path:
     return fallback
 
 
+def workflow_template_dir() -> Path:
+    """``{UPLOAD_HOME}/workflow_template`` — runtime diagram template markdown store."""
+    path = resolve_upload_home() / "workflow_template"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def docs_workflow_template_dir() -> Path:
+    """Bundled seed templates under ``docs/workflow_template`` (read-only source)."""
+    return PROJECT_ROOT / "docs" / "workflow_template"
+
+
 def _ensure_upload_home(path: Path) -> bool:
     try:
         path.mkdir(parents=True, exist_ok=True)

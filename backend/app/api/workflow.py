@@ -29,6 +29,7 @@ from backend.app.config import (
     work_node_run_upload_dir,
     work_node_upload_dir,
     workflow_history_result_path,
+    workflow_template_dir,
     write_work_node_validation_output,
 )
 from backend.app.db.agentruntime import get_agentruntime_by_idx
@@ -39,7 +40,7 @@ from backend.app.db.jobs import (
     get_job_by_idx,
     map_pending_workflow_approval_jobs,
 )
-from backend.app.db.roles import ROLE_ADMIN, ROLE_INFRAADMIN
+from backend.app.db.roles import ROLE_ADMIN, ROLE_INFRAADMIN, can_manage_workflow_templates
 from backend.app.db.users import get_user_by_idx, list_users
 from backend.app.db.workflow import (
     WorkNodeRecord,
@@ -71,6 +72,19 @@ from backend.app.db.workflow import (
     user_owns_workflow,
     work_uuids_from_expression,
 )
+from backend.app.db.workflow_template import (
+    create_workflow_template,
+    get_workflow_template_by_filename,
+    get_workflow_template_by_idx,
+    get_workflow_template_by_name,
+    list_workflow_templates,
+    read_workflow_template_content,
+    sanitize_template_filename,
+    sanitize_template_name,
+    seed_workflow_templates_from_docs,
+    sync_disk_templates_to_db,
+    update_workflow_template,
+)
 from backend.app.middleware.session_auth import get_request_auth_user
 from backend.app.logging.workflow_logger import read_work_node_agent_log
 from backend.app.services.workflow_graph import build_workflow_graph
@@ -82,64 +96,277 @@ from backend.app.services.workflow_runner import (
     run_workflow,
     stop_running_work_node,
 )
+from backend.app.services.workflow_template_cache import (
+    add_template_to_cache,
+    cached_template_filename_exists,
+    cached_template_name_exists,
+    refresh_workflow_template_cache,
+    replace_template_in_cache,
+)
 
 router = APIRouter(tags=["workflow"])
 logger = logging.getLogger(__name__)
 
-WORKFLOW_TEMPLATE_DIR = PROJECT_ROOT / "docs" / "workflow_template"
 WORKFLOW_FRONT_DIR = PROJECT_ROOT / "docs" / "workflow_front"
 WORKFLOW_FRONT_MD = WORKFLOW_FRONT_DIR / "workflow_front.md"
 
 
 class WorkflowTemplateListItem(BaseModel):
-    name: str
+    idx: int = 0
+    template_name: str
+    template_filename: str
+    # Backward-compatible alias used by older clients (filename).
+    name: str = ""
 
 
 class WorkflowTemplateResponse(BaseModel):
+    idx: int = 0
+    template_name: str = ""
+    template_filename: str = ""
     name: str
     content: str
+    update_date: str = ""
+    created_by: int = 0
+
+
+class WorkflowTemplateWriteRequest(BaseModel):
+    template_name: str = Field(min_length=1, max_length=70)
+    template_filename: str = Field(min_length=1, max_length=200)
+    content: str = ""
+
+
+class WorkflowTemplateCheckResponse(BaseModel):
+    template_name: str = ""
+    template_filename: str = ""
+    name_available: bool = True
+    filename_available: bool = True
+    name_error: str = ""
+    filename_error: str = ""
 
 
 class WorkflowFrontGuideResponse(BaseModel):
     content: str
 
 
-def _resolve_workflow_template_path(name: str) -> Path:
-    normalized = Path(name).name.strip()
-    if not normalized or normalized != name.strip() or not normalized.endswith(".md"):
-        raise HTTPException(status_code=400, detail="Invalid template name")
-    if "/" in name or "\\" in name or ".." in name:
-        raise HTTPException(status_code=400, detail="Invalid template name")
-    path = (WORKFLOW_TEMPLATE_DIR / normalized).resolve()
-    try:
-        path.relative_to(WORKFLOW_TEMPLATE_DIR.resolve())
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail="Invalid template name") from exc
-    if not path.is_file():
-        raise HTTPException(status_code=404, detail="Template not found")
-    return path
+def _ensure_templates_ready(database_path) -> None:
+    seeded = seed_workflow_templates_from_docs(database_path)
+    synced = sync_disk_templates_to_db(database_path)
+    if seeded or synced:
+        logger.info(
+            "workflow templates ready seeded=%s synced=%s",
+            seeded,
+            synced,
+        )
+
+
+def _template_list_item(record) -> WorkflowTemplateListItem:
+    return WorkflowTemplateListItem(
+        idx=record.idx,
+        template_name=record.template_name,
+        template_filename=record.template_filename,
+        name=record.template_filename,
+    )
 
 
 @router.get("/workflow-templates", response_model=list[WorkflowTemplateListItem])
 async def api_list_workflow_templates(request: Request) -> list[WorkflowTemplateListItem]:
     get_request_auth_user(request)
-    if not WORKFLOW_TEMPLATE_DIR.is_dir():
-        return []
-    names = sorted(
-        path.name
-        for path in WORKFLOW_TEMPLATE_DIR.iterdir()
-        if path.is_file() and path.suffix.lower() == ".md"
+    database_path = request.app.state.database_path
+    _ensure_templates_ready(database_path)
+    records = list_workflow_templates(database_path)
+    try:
+        await refresh_workflow_template_cache(database_path)
+    except Exception:
+        logger.exception("workflow template cache refresh failed")
+    return [_template_list_item(row) for row in records]
+
+
+@router.get("/workflow-templates/check", response_model=WorkflowTemplateCheckResponse)
+async def api_check_workflow_template(
+    request: Request,
+    template_name: str = "",
+    template_filename: str = "",
+    exclude_idx: int = 0,
+) -> WorkflowTemplateCheckResponse:
+    auth_user = get_request_auth_user(request)
+    if not can_manage_workflow_templates(int(auth_user.role)):
+        raise HTTPException(status_code=403, detail="템플릿을 관리할 권한이 없습니다.")
+    database_path = request.app.state.database_path
+    _ensure_templates_ready(database_path)
+    skip_idx = int(exclude_idx or 0)
+    result = WorkflowTemplateCheckResponse(
+        template_name=(template_name or "").strip(),
+        template_filename=(template_filename or "").strip(),
     )
-    return [WorkflowTemplateListItem(name=name) for name in names]
+    if result.template_name:
+        try:
+            sanitize_template_name(result.template_name)
+        except ValueError as exc:
+            result.name_available = False
+            result.name_error = str(exc)
+        else:
+            conflict = get_workflow_template_by_name(database_path, result.template_name)
+            taken = conflict is not None and (skip_idx <= 0 or conflict.idx != skip_idx)
+            if not taken and skip_idx <= 0:
+                taken = await cached_template_name_exists(database_path, result.template_name)
+                if taken:
+                    conflict = get_workflow_template_by_name(database_path, result.template_name)
+                    taken = conflict is not None
+            if taken:
+                result.name_available = False
+                result.name_error = f"이미 존재하는 양식 이름입니다: {result.template_name}"
+    if result.template_filename:
+        try:
+            normalized = sanitize_template_filename(result.template_filename)
+            result.template_filename = normalized
+        except ValueError as exc:
+            result.filename_available = False
+            result.filename_error = str(exc)
+        else:
+            conflict = get_workflow_template_by_filename(database_path, normalized)
+            taken = conflict is not None and (skip_idx <= 0 or conflict.idx != skip_idx)
+            if not taken and skip_idx <= 0:
+                taken = await cached_template_filename_exists(database_path, normalized)
+                if taken:
+                    conflict = get_workflow_template_by_filename(database_path, normalized)
+                    taken = conflict is not None
+            if taken:
+                result.filename_available = False
+                result.filename_error = f"이미 존재하는 파일명입니다: {normalized}"
+    return result
+
+
+@router.post("/workflow-templates", response_model=WorkflowTemplateResponse, status_code=201)
+async def api_create_workflow_template(
+    body: WorkflowTemplateWriteRequest,
+    request: Request,
+) -> WorkflowTemplateResponse:
+    auth_user = get_request_auth_user(request)
+    if not can_manage_workflow_templates(int(auth_user.role)):
+        raise HTTPException(status_code=403, detail="템플릿을 관리할 권한이 없습니다.")
+    database_path = request.app.state.database_path
+    _ensure_templates_ready(database_path)
+    try:
+        name = sanitize_template_name(body.template_name)
+        filename = sanitize_template_filename(body.template_filename)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if await cached_template_name_exists(database_path, name):
+        raise HTTPException(status_code=409, detail=f"이미 존재하는 양식 이름입니다: {name}")
+    if await cached_template_filename_exists(database_path, filename):
+        raise HTTPException(status_code=409, detail=f"이미 존재하는 파일명입니다: {filename}")
+    try:
+        record = create_workflow_template(
+            database_path,
+            template_name=name,
+            template_filename=filename,
+            created_by=int(auth_user.idx),
+            content=body.content or "",
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    await add_template_to_cache(
+        template_name=record.template_name,
+        template_filename=record.template_filename,
+    )
+    try:
+        content = read_workflow_template_content(record)
+    except FileNotFoundError:
+        content = body.content or ""
+    return WorkflowTemplateResponse(
+        idx=record.idx,
+        template_name=record.template_name,
+        template_filename=record.template_filename,
+        name=record.template_filename,
+        content=content,
+        update_date=record.update_date,
+        created_by=record.created_by,
+    )
+
+
+@router.put("/workflow-templates/{template_idx}", response_model=WorkflowTemplateResponse)
+async def api_update_workflow_template(
+    template_idx: int,
+    body: WorkflowTemplateWriteRequest,
+    request: Request,
+) -> WorkflowTemplateResponse:
+    auth_user = get_request_auth_user(request)
+    if not can_manage_workflow_templates(int(auth_user.role)):
+        raise HTTPException(status_code=403, detail="템플릿을 관리할 권한이 없습니다.")
+    database_path = request.app.state.database_path
+    _ensure_templates_ready(database_path)
+    existing = get_workflow_template_by_idx(database_path, int(template_idx))
+    if existing is None:
+        raise HTTPException(status_code=404, detail="템플릿을 찾을 수 없습니다.")
+    try:
+        record = update_workflow_template(
+            database_path,
+            int(template_idx),
+            template_name=body.template_name,
+            template_filename=body.template_filename,
+            content=body.content or "",
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    await replace_template_in_cache(
+        old_template_name=existing.template_name,
+        old_template_filename=existing.template_filename,
+        template_name=record.template_name,
+        template_filename=record.template_filename,
+    )
+    try:
+        content = read_workflow_template_content(record)
+    except FileNotFoundError:
+        content = body.content or ""
+    return WorkflowTemplateResponse(
+        idx=record.idx,
+        template_name=record.template_name,
+        template_filename=record.template_filename,
+        name=record.template_filename,
+        content=content,
+        update_date=record.update_date,
+        created_by=record.created_by,
+    )
 
 
 @router.get("/workflow-templates/{name}", response_model=WorkflowTemplateResponse)
 async def api_get_workflow_template(name: str, request: Request) -> WorkflowTemplateResponse:
     get_request_auth_user(request)
-    path = _resolve_workflow_template_path(name)
+    database_path = request.app.state.database_path
+    _ensure_templates_ready(database_path)
+    try:
+        filename = sanitize_template_filename(name)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    record = get_workflow_template_by_filename(database_path, filename)
+    if record is None:
+        # Allow reading an on-disk file that is not yet registered (http manual drop).
+        directory = workflow_template_dir()
+        path = (directory / filename).resolve()
+        try:
+            path.relative_to(directory.resolve())
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="Invalid template name") from exc
+        if not path.is_file():
+            raise HTTPException(status_code=404, detail="Template not found")
+        return WorkflowTemplateResponse(
+            name=filename,
+            template_filename=filename,
+            template_name=path.stem,
+            content=path.read_text(encoding="utf-8"),
+        )
+    try:
+        content = read_workflow_template_content(record)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     return WorkflowTemplateResponse(
-        name=path.name,
-        content=path.read_text(encoding="utf-8"),
+        idx=record.idx,
+        template_name=record.template_name,
+        template_filename=record.template_filename,
+        name=record.template_filename,
+        content=content,
+        update_date=record.update_date,
+        created_by=record.created_by,
     )
 
 
@@ -792,11 +1019,30 @@ async def api_list_work_node_results(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    enriched: list[dict[str, object]] = []
+    for item in items:
+        row = dict(item)
+        wnh_idx = int(row.get("work_node_history_idx") or 0)
+        if wnh_idx > 0:
+            history = get_work_node_history_by_idx(database_path, wnh_idx)
+            if history is not None and history.uuid == record.uuid:
+                in_progress = not (history.end_date or "").strip()
+                row["start_date"] = history.start_date
+                row["end_date"] = history.end_date
+                row["in_progress"] = in_progress
+                row["success"] = False if in_progress else bool(history.success)
+        enriched.append(row)
+    node_in_progress = bool((record.last_start_date or "").strip()) and not bool(
+        (record.last_end_date or "").strip()
+    )
     return {
-        "items": items,
+        "items": enriched,
         "work_name": record.work_name,
         "validate_date": record.validate_date or record.last_end_date or "",
+        "last_start_date": record.last_start_date or "",
+        "last_end_date": record.last_end_date or "",
         "last_success": bool(record.last_success),
+        "in_progress": node_in_progress,
         "workflow_uuid": wf,
     }
 
