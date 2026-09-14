@@ -5,7 +5,6 @@
 <%@ page import="javax.net.ssl.*" %>
 <%@ page import="java.security.cert.*" %>
 <%@ page import="java.security.cert.*" %>
-<%@ page import="com.Sha512" %>
 <%@ page import="org.owasp.validator.html.*" %>
 <%@ page import="org.apache.xml.serialize.HTMLSerializer" %>
 <%@ page import="net.sf.json.*" %>
@@ -28,19 +27,12 @@
 
     if (values != null) {
 	    String uname = values[0];
-	    String passSha512 = values[1];
+	    String password = values[1];
 	    
 	    uname = antiSamy.scan(uname, policy).getCleanHTML(); // XSS 방지
-	    passSha512 = antiSamy.scan(passSha512, policy).getCleanHTML(); // XSS 방지
-	    
-	    // Sha512 암호화
-	 	Sha512 sha512 = new Sha512();
-		try {
-			passSha512 = sha512.SHA_512(passSha512, 128);
-			
-		} catch (Exception e) {
-			e.printStackTrace();
-		}	
+	    password = antiSamy.scan(password, policy).getCleanHTML(); // XSS 방지
+
+	    // Auth-provider policy: send password in plaintext (no SHA-512).
 	  
 	    String client_id = System.getenv("OAUTH_CLIENT_ID");
 	    String client_secret = System.getenv("OAUTH_CLIENT_SECRET");
@@ -85,28 +77,35 @@
 	    });
         
         
-	    // SSL setting
-	    SSLContext ctx = SSLContext.getInstance("TLS");
+	    // SSL setting — TLS 1.2+ required for APIM
+	    SSLContext ctx = SSLContext.getInstance("TLSv1.2");
 	    ctx.init(null, new TrustManager[]{
 	        new javax.net.ssl.X509TrustManager() {
-	
+
 	            @Override
 	            public X509Certificate[] getAcceptedIssuers() {
 	                return null;
 	            }
-	
+
 	            @Override
 	            public void checkServerTrusted(X509Certificate[] chain, String authType) throws CertificateException {
 	            }
-	
+
 	            @Override
 	            public void checkClientTrusted(X509Certificate[] chain, String authType) throws CertificateException {
 	            }
 	        }
 	    }, null);
 	    con.setSSLSocketFactory(ctx.getSocketFactory());
-	
-	
+	    try {
+	        SSLParameters params = ctx.getDefaultSSLParameters();
+	        params.setProtocols(new String[] { "TLSv1.2", "TLSv1.3" });
+	        con.setSSLParameters(params);
+	    } catch (Exception ignore) {
+	        // keep TLSv1.2 SSLContext factory as the minimum guarantee
+	    }
+
+
 	    DataOutputStream wr = new DataOutputStream(con.getOutputStream());
 	    String urlTxt = "grant_type=" + grant_type +
 						"&client_id=" + client_id +
@@ -114,7 +113,7 @@
 						"&scope=" + scope +
 						"&auth_type=" + autype +
 						"&user_id=" + uname +
-						"&password=" + passSha512;
+						"&password=" + password;
 	    
 	    wr.writeBytes(urlTxt);
 	    wr.flush();

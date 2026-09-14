@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import hashlib
 import logging
+import ssl
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -33,12 +33,23 @@ class LoginResult:
     userid: str = ""
 
 
-def sha512_hex(value: str) -> str:
-    return hashlib.sha512(value.encode()).hexdigest()
+def _madang_ssl_context(*, verify_ssl: bool) -> ssl.SSLContext:
+    """Build an SSL context that requires TLS 1.2+ for APIM calls."""
+    if verify_ssl:
+        context = ssl.create_default_context()
+    else:
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        context.check_hostname = False
+        context.verify_mode = ssl.CERT_NONE
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
+    return context
 
 
 def _madang_http_client(*, verify_ssl: bool) -> httpx.AsyncClient:
-    return httpx.AsyncClient(timeout=30.0, verify=verify_ssl)
+    return httpx.AsyncClient(
+        timeout=30.0,
+        verify=_madang_ssl_context(verify_ssl=verify_ssl),
+    )
 
 
 async def verify_madang_via_direct_oauth(
@@ -47,14 +58,17 @@ async def verify_madang_via_direct_oauth(
     userid: str,
     password: str,
 ) -> bool:
-    """Port of server-samples/oauth/login.jsp — password grant to madang token API."""
+    """Port of server-samples/oauth/login.jsp — password grant to madang token API.
+
+    Auth-provider policy (http mode): send the password in plaintext (no SHA-512)
+    and require TLS 1.2+ for the APIM call.
+    """
     if not settings.oauth_url or not settings.oauth_client_id or not settings.oauth_client_secret:
         raise AuthProviderError(
             500,
             "madang OAuth 설정(OAUTH_URL, OAUTH_CLIENT_ID, OAUTH_CLIENT_SECRET)이 필요합니다.",
         )
 
-    hashed_password = sha512_hex(password)
     form_data = {
         "grant_type": settings.oauth_grant_type,
         "client_id": settings.oauth_client_id,
@@ -62,7 +76,7 @@ async def verify_madang_via_direct_oauth(
         "scope": settings.oauth_scope,
         "auth_type": settings.oauth_auth_type,
         "user_id": userid,
-        "password": hashed_password,
+        "password": password,
     }
 
     try:
