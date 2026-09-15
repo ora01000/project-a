@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import { DashboardPage } from "./components/DashboardPage";
 import { WorkflowPage } from "./components/workflow/WorkflowPage";
+import { InventoryPage } from "./components/inventory/InventoryPage";
 import { LoginPage } from "./components/LoginPage";
 import { MenuBar } from "./components/MenuBar";
 import { TeamsInboundDebugWatcher } from "./components/TeamsInboundDebugWatcher";
@@ -23,7 +24,7 @@ import {
   userFromAuthResponse,
 } from "./utils/authSession";
 
-type ShellView = "dashboard" | "workflow";
+type ShellView = "dashboard" | "workflow" | "inventory";
 
 const OVERLAY_VIEWS: ReadonlySet<AppView> = new Set([
   "user-list",
@@ -33,7 +34,7 @@ const OVERLAY_VIEWS: ReadonlySet<AppView> = new Set([
 ]);
 
 function isShellView(view: AppView): view is ShellView {
-  return view === "dashboard" || view === "workflow";
+  return view === "dashboard" || view === "workflow" || view === "inventory";
 }
 
 export default function App() {
@@ -296,6 +297,8 @@ export default function App() {
             user={user}
             onChatComplete={loadDashboardData}
           />
+        ) : shellView === "inventory" ? (
+          <InventoryPage user={user} />
         ) : (
           <DashboardPage
             agents={agents}

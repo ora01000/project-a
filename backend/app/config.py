@@ -1140,6 +1140,13 @@ def workflow_template_dir() -> Path:
     return path
 
 
+def inventory_csv_dir() -> Path:
+    """``{UPLOAD_HOME}/inventory/csv`` — uploaded inventory CSV store."""
+    path = resolve_upload_home() / "inventory" / "csv"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
 def docs_workflow_template_dir() -> Path:
     """Bundled seed templates under ``docs/workflow_template`` (read-only source)."""
     return PROJECT_ROOT / "docs" / "workflow_template"

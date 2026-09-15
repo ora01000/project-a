@@ -64,7 +64,7 @@ export function WorkflowFrontGuidePanel() {
             <JobContentView
               content={themedContent}
               jobType={JOB_TYPE_WORKFLOW}
-              className="rounded-md border border-slate-700/80 bg-slate-950/50 p-4 text-sm text-slate-200"
+              className="bg-transparent p-1 text-sm text-slate-200"
             />
           ) : (
             <p className="text-sm text-slate-500">

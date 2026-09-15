@@ -1,6 +1,7 @@
 export type AppView =
   | "dashboard"
   | "workflow"
+  | "inventory"
   | "user-list"
   | "agent-assignment"
   | "agent-connections"

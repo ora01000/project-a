@@ -28,8 +28,8 @@ import { ThemeSettingsModal } from "./ThemeSettingsModal";
 
 interface MenuBarProps {
   activeView: AppView;
-  /** Underlying dashboard/workflow while a modal overlay is open. */
-  shellView?: "dashboard" | "workflow";
+  /** Underlying dashboard/workflow/inventory while a modal overlay is open. */
+  shellView?: "dashboard" | "workflow" | "inventory";
   user: AuthUser;
   onNavigate: (view: AppView) => void;
   onLogout: () => void;
@@ -183,6 +183,14 @@ export function MenuBar({
             className={menuButtonClass(highlightedShell === "workflow")}
           >
             작업 워크플로우
+          </button>
+          <span className="text-slate-600">|</span>
+          <button
+            type="button"
+            onClick={() => onNavigate("inventory")}
+            className={menuButtonClass(highlightedShell === "inventory")}
+          >
+            인벤토리 관리
           </button>
           <span className="text-slate-600">|</span>
 

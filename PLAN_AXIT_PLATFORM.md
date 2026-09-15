@@ -1645,39 +1645,39 @@ JOB_DECISION_AGENT 정의 (완료)
       - VM명 | 호스트명 | 호스트명에 포함된 시스템코드(일반적으로 영소문자 4개) | IP주소
   2.2. 대상 인프라의 구성을 변경하거나 생성, 삭제(CUD) 작업의 경우 최소 다음 정보가 제공되어야 한다.
     2.2.1. Kubernetes
-      - Requirements
+          - Requirements
         - 대상 manifests : RoleBinding, Group/Users(OKD only), Namespace(Project), Deployments(Deployment, Statefulset, DaemonSet, DeploymentConfig(OKD Only)), ServiceAccount, ConfigMap/Secret, PersistentVolumeClaim, Service, Route/Ingress
-        - 대상 manifests 별 하위 Requirements
-          - Namespace
+            - 대상 manifests 별 하위 Requirements
+              - Namespace
             - 변경 대상 값 : ex) DisplayName, ResourceQuota 등
-          - ResourceQuota 정보
-            - CPU/MEM capacity
-            - Pod 개수 Limit(옵션)
-          - Group/Users(OKD only)
-            - 그룹에 할당할 그룹명/사용자
-          - RoleBinding
-            - role 할당(OKD 인 경우 ["admin", "cru-damin", "view", "edit"], 일반 K8S 인 경우 ["admin", "view", "edit"])
-          - Deployments
-            - 변경 대상 값 : ex) 이미지 경로, Resources, Replicas, updateStrategy, serviceAccount 등
-            - sidecar/initcontainer 추가의 경우 이미지 경로 및 컨테이너 이름
-          - ServiceAccount SCC | rolebinding
-            - scc 의 종류 및 할당할 serviceAccount 정보 또는 할당하고자 하는 rolebinding 정보
-          - ConfigMap/Secret
-            - 변경할 내용(manifest 의 이름과 config, env 값등)
-          - PersistentVolumeClaim
-            - 변경하고자 하는 pvc 이름, capacity
-          - Service
-            - type 변경 정보(ClusterIP, NodePort)
-          - Route/Ingress 인증서 갱신(OKD 인 경우 Route 만)
-            - 인증서 원본, 반영 시각
+                - ResourceQuota 정보
+                  - CPU/MEM capacity
+                  - Pod 개수 Limit(옵션)
+              - Group/Users(OKD only)
+                - 그룹에 할당할 그룹명/사용자
+              - RoleBinding
+                - role 할당(OKD 인 경우 ["admin", "cru-damin", "view", "edit"], 일반 K8S 인 경우 ["admin", "view", "edit"])
+              - Deployments
+                - 변경 대상 값 : ex) 이미지 경로, Resources, Replicas, updateStrategy, serviceAccount 등
+                - sidecar/initcontainer 추가의 경우 이미지 경로 및 컨테이너 이름
+              - ServiceAccount SCC | rolebinding
+                - scc 의 종류 및 할당할 serviceAccount 정보 또는 할당하고자 하는 rolebinding 정보
+              - ConfigMap/Secret
+                - 변경할 내용(manifest 의 이름과 config, env 값등)
+              - PersistentVolumeClaim
+                - 변경하고자 하는 pvc 이름, capacity
+              - Service
+                - type 변경 정보(ClusterIP, NodePort)
+              - Route/Ingress 인증서 갱신(OKD 인 경우 Route 만)
+                - 인증서 원본, 반영 시각
     2.2.2. KubeVirt
-      - Requirements
-        - 2.2.1. 포함
-        - 변경이 필요한 VM 정보와 변경할 자원의 종류와 capacity
+          - Requirements
+            - 2.2.1. 포함
+            - 변경이 필요한 VM 정보와 변경할 자원의 종류와 capacity
     2.2.3. vSphere
-      - Requitements
-        - 변경 대상 VM과 변경 대상 자원(CPU/MEM/DISK)
-        - Power On/Off/재시작(VM state/phase 변경) 할 VM 정보
+          - Requitements
+            - 변경 대상 VM과 변경 대상 자원(CPU/MEM/DISK)
+            - Power On/Off/재시작(VM state/phase 변경) 할 VM 정보
 3. decision_type = 10 의 기준
   - 위 1, 2 에 해당하지 않는 경우
 
@@ -1702,8 +1702,8 @@ received_mail 에 레코드가 적재되면, decision_type = 0 인 레코드에 
       회신 메일 제목 양식 : [자료보완] {기존 메일 제목}
       회신 메일의 본문 내용 : 에이전트에서 판단한 추가 요청 사항을 넣는다. 이 과정을 처리하기 위해 JOB_DECISION_AGENT의 응답에 보환이 필요한 부분이 있다면 시스템 프롬프트를 보완한다.
     - 메일 참조자로 users.role = 0 인 사용자를 추가한다.
+        
 
- 
 
 
 
@@ -2703,7 +2703,82 @@ left "작업 워크플로우 목록" 패널의 생성된 작업 워크플로우 
   - 패스워드 전송시 SHA512 처리하지 않고 평문 전송
   - APIM 호출시 반드시 TLS1.2 이상 통신
 
+# 인벤토리 관리 기능을 계획한다.
+- "인벤토리 관리" 메뉴를 추가한다. 
+  - 개요 : 인벤토리 관리 기능은 CSV -> DB 변환과 어떤 컬럼을 where 절로 어떤 컬럼을 추출할질를 지정하고 이를 함수(API)로 expose 하는 기능을 제공한다.
+  - 인벤토리 메타 정보 테이블을 추가한다.
+    - inventory
+      - idx int primary key
+      - table_name varchar(50)
+      - display_name varchar(100)
+      - description varchar(200)
+      - created_by int <- users.idx
+      - origin_csv varchar(100) <- 원본 CSV 파일명
+    - inventory_api
+      - idx int primary key
+      - api_name varchar(50)
+      - display_name varchar(100)
+      - description varchar(200)
+      - api_fullpath varchar(255)
+      - created_by int <- users.idx
+      - table_name varchar(50)
+      - where_exp varchar(500)
+      - select_exp varchar(500)
+      - param_columns varchar(500) <- ex. "col1,col2,col3"
+      
+- 화면 구성
+  - 전체 화면은 왼쪽 인벤토리 목록을 작업워크플로우와 동일한 구성으로 배치한다.
+    - 가장 위에는 "새로운 인벤토리" 버튼을 "새로운 작업 워크플로우" 버튼과 동일한 스타일로 배치 -> 클릭시 오른쪽 패널, 새로운 인벤토리 구성 화면 표시
+    - 인벤토리 목록 카드 표시 내용
+      - display_name
+      - 작성자 : created_by
+    - 기능
+      - 삭제 icon
+      - 선택시 오른쪽 화면에 인벤토리 구성 화면 출력
 
+  - 새로운 인벤토리 구성 패널
+    - 인벤토리 이름 : 텍스트 필드 
+    - 인벤토리 설명 : 텍스트 영역
+    - 인벤토리 테이블 명 : 기본 "inventory_" 가 표시되며, 사용자의 입력을 받게 한다. 인벤토리 테이블명은 실제 DB테이블을 생성하므로 저장하기 전에 postgres에 맞춰 이름을 검증한다. 테이블 명은 반드시 "inventory_" 로 시작해야 한다.
+    - CSV 파일 업로드 
+      - 업로드 경로 : {UPLOAD_HOME}/inventory/csv
+        - 업로드 실행시, csv 정합성을 체크한다. 첫행은 테이블 생성에 필요한 컬럼명이다.
+        - 컬럼 명으로 쓰일 내용은 정규화해서 변환한다.
+    - 미리보기(패널의 하단 완쪽에 배치, 가로의 100%, 세로는 끝까지)
+      - 업로드 된 CSV 를 스프레드 시트 형태로 출력한다. 편집은 불가하다.
+      - 미리보기 패널의 세로/가로 길이에 맞춰 lazy loading 한다(가능하면)
+    - 저장 버튼을 패널의 상단 오른쪽으로 이동한다.
+      - 저장 클릭시 확인을 한후 다음 절치로 진행한다.
+        - inventory_{inventory.table_name} 으로 테이블을 생성
+          - 스키마는 입력받은 csv 의 컬럼을 토대로 한다.
+          - 각 컬럼의 데이터타입을 응용에서 지정할 수 있는가? 로직으로 지정할 수 있다면 지정하고, 그렇지 않으면 모두 통일한다.
 
+  - 인벤토리 구성 화면 : 오른쪽 패널 전체
+    - 이름, 설명을 변경할 수 있으며 origin_csv 파일을 다시 업로드하여 전체를 교체할 수 있다.
+      - origin_csv 파일을 교체하는 경우 기존의 컬럼 개수/명과 다른경우 변경할 수 없다.
+      - 새로운 csv 을 업로드시, 컬럼개수, 정규화된 컬럼 명이 맞지 않을 경우 알럿을 발생하고 저장을 비활성화 한다.
+
+    - "API" 버튼을 "저장" 왼쪽에 배치한다.
+      - "API" 버튼 클릭시 패널의 오른쪽 50% 가 API목록 패널로 변경된다.
+      - inventory_api 테이블을 목록 카드로 출력한다.(모두 GET API 이다)
+        - api_name, display_name
+        - api_fullpath
+        - input_columns
+        - 삭제 버튼
+
+      - "API생성"
+        - 생성을 위한 입력 패널이 목록 카드를 아래로 밀고 생성된다.
+          - API 이름 : 영어로 입력받고 호출명에 해당한다.
+          - 디스플레이 명 
+          - 설명
+          - api_fullpath 는 입력받지 않는다. API 이름을 입력하면 자동 생성된다.
+          - table_name 은 입력받지 않는다. 현재 열린 인벤토리의 테이블 명이다.
+          - 조건절 : where 이후의 조건문을 그대로 입력받는다.
+          - 출력절 : select 이후의 출력 구절을 그대로 입력받는다.
+          - API 매개변수 : 컬럼중에 선택하게 한다. 선택한 컬럼을 "," 로 붙인다.
+      - API 목록에서 카드 선택시 구성 정보를 편집할 수 있다. 생성 패널과 유사한 형태로 편집 패널을 생성한다.
+      - API 목록 카드에는 테스트 버튼을 둔다. 테스트를 수행하면 팝업 창이 뜨고 입력값을 받는다. 정의된 입력값을 받고 출력을 보여준다 
+
+  
 
 
