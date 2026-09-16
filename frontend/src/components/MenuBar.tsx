@@ -16,6 +16,7 @@ import { AboutModal } from "./AboutModal";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { MockLlmSelectModal } from "./admin/MockLlmSelectModal";
 import { PostmanDebugModal } from "./admin/PostmanDebugModal";
+import { InventoryApiDebugModal } from "./admin/InventoryApiDebugModal";
 import { WhatapEventTestModal } from "./admin/WhatapEventTestModal";
 import { K8sInfraConfigModal } from "./admin/K8sInfraConfigModal";
 import { MailServerConfigModal } from "./admin/MailServerConfigModal";
@@ -63,6 +64,7 @@ export function MenuBar({
   const [showPostmanDebug, setShowPostmanDebug] = useState(false);
   const [showMockLlmSelect, setShowMockLlmSelect] = useState(false);
   const [showWhatapEventTest, setShowWhatapEventTest] = useState(false);
+  const [showInventoryApiDebug, setShowInventoryApiDebug] = useState(false);
   const [showK8sInfraConfig, setShowK8sInfraConfig] = useState(false);
   const [showMailServerConfig, setShowMailServerConfig] = useState(false);
   const [showMailTest, setShowMailTest] = useState(false);
@@ -302,13 +304,14 @@ export function MenuBar({
                 showAbout ||
                   showReleaseNotes ||
                   showTableDebug ||
-                        showPostmanDebug ||
-                        showMockLlmSelect ||
-                        showWhatapEventTest ||
-                        showK8sInfraConfig ||
-                        showMailServerConfig ||
-                        showMailTest ||
-                        showReceivedMailDebug ||
+                  showPostmanDebug ||
+                  showMockLlmSelect ||
+                  showWhatapEventTest ||
+                  showInventoryApiDebug ||
+                  showK8sInfraConfig ||
+                  showMailServerConfig ||
+                  showMailTest ||
+                  showReceivedMailDebug ||
                   showThemeSettings,
               )}
             >
@@ -327,6 +330,7 @@ export function MenuBar({
                         showPostmanDebug ||
                         showMockLlmSelect ||
                         showWhatapEventTest ||
+                        showInventoryApiDebug ||
                         showK8sInfraConfig ||
                         showMailServerConfig ||
                         showMailTest ||
@@ -374,6 +378,17 @@ export function MenuBar({
                           className="block w-full px-3 py-2 text-left text-sm text-slate-200 hover:bg-slate-800"
                         >
                           Whatap 이벤트 테스트
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowSettingsMenu(false);
+                            setShowAdminWorkMenu(false);
+                            setShowInventoryApiDebug(true);
+                          }}
+                          className="block w-full px-3 py-2 text-left text-sm text-slate-200 hover:bg-slate-800"
+                        >
+                          인벤토리 정보조회(디버깅)
                         </button>
                         <button
                           type="button"
@@ -549,6 +564,12 @@ export function MenuBar({
       ) : null}
       {showWhatapEventTest && isAdmin ? (
         <WhatapEventTestModal viewerRole={user.role} onClose={() => setShowWhatapEventTest(false)} />
+      ) : null}
+      {showInventoryApiDebug && isAdmin ? (
+        <InventoryApiDebugModal
+          viewerRole={user.role}
+          onClose={() => setShowInventoryApiDebug(false)}
+        />
       ) : null}
       {showK8sInfraConfig && isAdmin ? (
         <K8sInfraConfigModal viewerRole={user.role} onClose={() => setShowK8sInfraConfig(false)} />

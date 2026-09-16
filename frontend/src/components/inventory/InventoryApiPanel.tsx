@@ -6,7 +6,6 @@ import { WorkflowIcon } from "../workflow/WorkflowIcon";
 import { InventoryApiTestModal } from "./InventoryApiTestModal";
 
 interface InventoryApiPanelProps {
-  inventoryIdx: number;
   tableName: string;
   user: AuthUser;
   canEdit: boolean;
@@ -38,7 +37,6 @@ function parseParamList(raw: string): string[] {
 }
 
 export function InventoryApiPanel({
-  inventoryIdx,
   tableName,
   user,
   canEdit,
@@ -48,7 +46,7 @@ export function InventoryApiPanel({
   const [apis, setApis] = useState<InventoryApiItem[]>([]);
   const [columns, setColumns] = useState<string[]>([]);
   const [formMode, setFormMode] = useState<FormMode>("closed");
-  const [editingIdx, setEditingIdx] = useState<number | null>(null);
+  const [editingName, setEditingName] = useState<string | null>(null);
   const [apiName, setApiName] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [description, setDescription] = useState("");
@@ -65,24 +63,24 @@ export function InventoryApiPanel({
   const formOpen = formMode !== "closed";
   const formEditable = isCreate || (isEdit && canEdit);
   const apiFullpathPreview = apiName.trim()
-    ? `/api/inventory-data/${apiName.trim().toLowerCase()}`
-    : "/api/inventory-data/{api_name}";
+    ? `/inv/${tableName}/${apiName.trim().toLowerCase()}`
+    : `/inv/${tableName}/{api_name}`;
 
   const loadApis = useCallback(async () => {
-    const response = await fetch(`/api/inventories/${inventoryIdx}/apis`);
+    const response = await fetch(`/api/inventories/${encodeURIComponent(tableName)}/apis`);
     if (!response.ok) {
       throw new Error(await readErrorDetail(response, "API 목록을 불러오지 못했습니다."));
     }
     setApis((await response.json()) as InventoryApiItem[]);
-  }, [inventoryIdx]);
+  }, [tableName]);
 
   const loadColumns = useCallback(async () => {
-    const response = await fetch(`/api/inventories/${inventoryIdx}/columns`);
+    const response = await fetch(`/api/inventories/${encodeURIComponent(tableName)}/columns`);
     if (!response.ok) {
       throw new Error(await readErrorDetail(response, "컬럼 목록을 불러오지 못했습니다."));
     }
     setColumns((await response.json()) as string[]);
-  }, [inventoryIdx]);
+  }, [tableName]);
 
   useEffect(() => {
     let cancelled = false;
@@ -102,7 +100,7 @@ export function InventoryApiPanel({
     return () => {
       cancelled = true;
     };
-  }, [loadApis, loadColumns, inventoryIdx, tableName]);
+  }, [loadApis, loadColumns, tableName]);
 
   const resetForm = () => {
     setApiName("");
@@ -111,13 +109,13 @@ export function InventoryApiPanel({
     setWhereExp("");
     setSelectExp("*");
     setSelectedParams([]);
-    setEditingIdx(null);
+    setEditingName(null);
     setFormMode("closed");
   };
 
   const beginCreate = () => {
     setError(null);
-    setEditingIdx(null);
+    setEditingName(null);
     setApiName("");
     setDisplayName("");
     setDescription("");
@@ -129,7 +127,7 @@ export function InventoryApiPanel({
 
   const beginEdit = (item: InventoryApiItem) => {
     setError(null);
-    setEditingIdx(item.idx);
+    setEditingName(item.api_name);
     setApiName(item.api_name);
     setDisplayName(item.display_name);
     setDescription(item.description || "");
@@ -140,7 +138,7 @@ export function InventoryApiPanel({
   };
 
   const handleSelectCard = (item: InventoryApiItem) => {
-    if (formMode === "edit" && editingIdx === item.idx) {
+    if (formMode === "edit" && editingName === item.api_name) {
       resetForm();
       return;
     }
@@ -200,7 +198,7 @@ export function InventoryApiPanel({
     setError(null);
     try {
       if (isCreate) {
-        const response = await fetch(`/api/inventories/${inventoryIdx}/apis`, {
+        const response = await fetch(`/api/inventories/${encodeURIComponent(tableName)}/apis`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
@@ -213,14 +211,17 @@ export function InventoryApiPanel({
         return;
       }
 
-      if (editingIdx == null) {
+      if (!editingName) {
         return;
       }
-      const response = await fetch(`/api/inventories/${inventoryIdx}/apis/${editingIdx}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
+      const response = await fetch(
+        `/api/inventories/${encodeURIComponent(tableName)}/apis/${encodeURIComponent(editingName)}`,
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        },
+      );
       if (!response.ok) {
         throw new Error(await readErrorDetail(response, "API 수정에 실패했습니다."));
       }
@@ -240,13 +241,14 @@ export function InventoryApiPanel({
     }
     setError(null);
     try {
-      const response = await fetch(`/api/inventories/${inventoryIdx}/apis/${item.idx}`, {
-        method: "DELETE",
-      });
+      const response = await fetch(
+        `/api/inventories/${encodeURIComponent(tableName)}/apis/${encodeURIComponent(item.api_name)}`,
+        { method: "DELETE" },
+      );
       if (!response.ok) {
         throw new Error(await readErrorDetail(response, "API 삭제에 실패했습니다."));
       }
-      if (editingIdx === item.idx) {
+      if (editingName === item.api_name) {
         resetForm();
       }
       await loadApis();
@@ -256,7 +258,10 @@ export function InventoryApiPanel({
   };
 
   const canDeleteApi = (item: InventoryApiItem) =>
-    item.created_by === user.idx || user.role === 0 || user.role === 100;
+    item.created_by === user.idx ||
+    item.created_by === 0 ||
+    user.role === 0 ||
+    user.role === 100;
 
   return (
     <aside
@@ -373,7 +378,8 @@ export function InventoryApiPanel({
                 />
               </label>
               <p className="text-[11px] text-slate-500">
-                매개변수는 {"{column}"} 형식입니다. 예: asset_id like &apos;%{"{asset_id}"}%&apos;
+                조건절/출력절은 plain SQL입니다. 매개변수는 {"{column}"} 형식.
+                예: asset_id like &apos;%{"{asset_id}"}%&apos;
               </p>
               <fieldset className="flex flex-col gap-1">
                 <legend className="text-[11px] font-medium text-slate-300">API 매개변수</legend>
@@ -434,10 +440,10 @@ export function InventoryApiPanel({
         ) : (
           <div className="flex flex-col gap-3">
             {apis.map((item) => {
-              const isActive = formMode === "edit" && editingIdx === item.idx;
+              const isActive = formMode === "edit" && editingName === item.api_name;
               return (
                 <article
-                  key={item.idx}
+                  key={item.api_name}
                   className={`rounded-xl border bg-slate-900/90 px-3 py-2 shadow-lg ${
                     isActive ? "border-sky-500" : "border-slate-700"
                   }`}

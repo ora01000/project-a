@@ -46,19 +46,37 @@ function validateTableNameClient(raw: string): string | null {
   if (!TABLE_NAME_PATTERN.test(text)) {
     return "테이블 명은 소문자·숫자·밑줄만 사용할 수 있으며, 숫자로 시작할 수 없습니다.";
   }
+  if (`temp_${text}`.length > TABLE_NAME_MAX) {
+    return "임시 테이블명(temp_…)이 50자를 초과합니다. 더 짧게 입력하세요.";
+  }
   return null;
+}
+
+async function cleanupTempTable(tablename: string | null | undefined): Promise<void> {
+  const name = (tablename || "").trim();
+  if (!name) {
+    return;
+  }
+  try {
+    await fetch(`/api/inventories/temp/cleanup?tablename=${encodeURIComponent(name)}`, {
+      method: "POST",
+    });
+  } catch {
+    // best-effort
+  }
 }
 
 export function InventoryPage({ user }: InventoryPageProps) {
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [mode, setMode] = useState<EditorMode>("idle");
-  const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
+  const [selectedTable, setSelectedTable] = useState<string | null>(null);
   const [isListCollapsed, setIsListCollapsed] = useState(false);
   const [displayName, setDisplayName] = useState("");
   const [description, setDescription] = useState("");
   const [tableName, setTableName] = useState(TABLE_NAME_PREFIX);
   const [baselineCsv, setBaselineCsv] = useState<string | null>(null);
   const [originCsv, setOriginCsv] = useState<string | null>(null);
+  const [tempTableName, setTempTableName] = useState<string | null>(null);
   const [uploadPreview, setUploadPreview] = useState<InventoryCsvPreview | null>(null);
   const [csvMismatch, setCsvMismatch] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -67,13 +85,17 @@ export function InventoryPage({ user }: InventoryPageProps) {
   const [uploading, setUploading] = useState(false);
   const [showApiPanel, setShowApiPanel] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const tempTableRef = useRef<string | null>(null);
 
-  const selected = items.find((item) => item.idx === selectedIdx) ?? null;
+  const selected = items.find((item) => item.table_name === selectedTable) ?? null;
   const isCreate = mode === "create";
   const isView = mode === "view" && selected != null;
   const canEditSelected =
     selected != null &&
-    (selected.created_by === user.idx || user.role === 0 || user.role === 100);
+    (selected.created_by === user.idx ||
+      selected.created_by === 0 ||
+      user.role === 0 ||
+      user.role === 100);
   const fieldsEditable = isCreate || (isView && canEditSelected);
   const tableNameError = isCreate ? validateTableNameClient(tableName) : null;
   const saveDisabled =
@@ -83,7 +105,12 @@ export function InventoryPage({ user }: InventoryPageProps) {
     !fieldsEditable ||
     !originCsv ||
     !displayName.trim() ||
-    (isCreate && tableNameError != null);
+    (isCreate && (tableNameError != null || !tempTableName));
+
+  const previewTableName =
+    tempTableName ||
+    (isView && selected?.table_name ? selected.table_name : null) ||
+    (originCsv ? tableName.trim().toLowerCase() : null);
 
   const loadItems = async () => {
     const response = await fetch("/api/inventories");
@@ -106,15 +133,44 @@ export function InventoryPage({ user }: InventoryPageProps) {
     };
   }, []);
 
+  useEffect(() => {
+    tempTableRef.current = tempTableName;
+  }, [tempTableName]);
+
+  useEffect(() => {
+    const onLeave = () => {
+      const name = tempTableRef.current;
+      if (!name) {
+        return;
+      }
+      void fetch(`/api/inventories/temp/cleanup?tablename=${encodeURIComponent(name)}`, {
+        method: "POST",
+        keepalive: true,
+      });
+    };
+    window.addEventListener("beforeunload", onLeave);
+    return () => {
+      window.removeEventListener("beforeunload", onLeave);
+      void cleanupTempTable(tempTableRef.current);
+    };
+  }, []);
+
   const resetFileInput = () => {
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
     }
   };
 
+  const discardTemp = async () => {
+    const current = tempTableName;
+    setTempTableName(null);
+    await cleanupTempTable(current);
+  };
+
   const beginCreate = () => {
+    void discardTemp();
     setMode("create");
-    setSelectedIdx(null);
+    setSelectedTable(null);
     setDisplayName("");
     setDescription("");
     setTableName(TABLE_NAME_PREFIX);
@@ -129,10 +185,11 @@ export function InventoryPage({ user }: InventoryPageProps) {
   };
 
   const beginView = (item: InventoryItem) => {
+    void discardTemp();
     setMode("view");
-    setSelectedIdx(item.idx);
+    setSelectedTable(item.table_name);
     setDisplayName(item.display_name);
-    setDescription(item.description);
+    setDescription(item.description || "");
     setTableName(item.table_name || TABLE_NAME_PREFIX);
     setBaselineCsv(item.origin_csv || null);
     setOriginCsv(item.origin_csv || null);
@@ -148,25 +205,47 @@ export function InventoryPage({ user }: InventoryPageProps) {
     if (!file || !fieldsEditable) {
       return;
     }
+    const resolvedTable = (isCreate ? tableName : selected?.table_name || tableName)
+      .trim()
+      .toLowerCase();
+    if (isCreate) {
+      const tableError = validateTableNameClient(resolvedTable);
+      if (tableError) {
+        setError(tableError);
+        return;
+      }
+    } else if (!resolvedTable) {
+      setError("인벤토리 테이블 명이 없습니다.");
+      return;
+    }
+
     setUploading(true);
     setError(null);
     try {
+      await discardTemp();
       const form = new FormData();
       form.append("file", file);
       const params = new URLSearchParams();
-      if (isView && baselineCsv) {
-        params.set("compare_to", baselineCsv);
+      params.set("table_name", resolvedTable);
+      if (displayName.trim()) {
+        params.set("display_name", displayName.trim());
       }
-      const query = params.toString();
-      const response = await fetch(
-        `/api/inventories/csv/upload${query ? `?${query}` : ""}`,
-        { method: "POST", body: form },
-      );
+      if (description.trim()) {
+        params.set("description", description.trim());
+      }
+      if (isView && selected?.table_name) {
+        params.set("compare_to_table", selected.table_name);
+      }
+      const response = await fetch(`/api/inventories/csv/upload?${params.toString()}`, {
+        method: "POST",
+        body: form,
+      });
       if (!response.ok) {
         throw new Error(await readErrorDetail(response, "CSV 업로드에 실패했습니다."));
       }
       const preview = (await response.json()) as InventoryCsvPreview;
       setOriginCsv(preview.filename);
+      setTempTableName(preview.temp_table_name || null);
       setUploadPreview(preview);
 
       if (isView && preview.columns_compatible === false) {
@@ -181,14 +260,18 @@ export function InventoryPage({ user }: InventoryPageProps) {
       }
 
       setCsvMismatch(false);
-      setStatusMessage(`CSV 업로드 완료: ${preview.filename} (${preview.total_rows}행)`);
+      setStatusMessage(
+        `CSV 업로드·임시 테이블 전환 완료: ${preview.filename} → ${preview.temp_table_name || resolvedTable} (${preview.total_rows}행)`,
+      );
     } catch (err) {
       if (isCreate) {
         setOriginCsv(null);
         setUploadPreview(null);
+        setTempTableName(null);
       } else {
         setOriginCsv(baselineCsv);
         setUploadPreview(null);
+        setTempTableName(null);
       }
       setCsvMismatch(false);
       setError(err instanceof Error ? err.message : "CSV 업로드 실패");
@@ -217,10 +300,14 @@ export function InventoryPage({ user }: InventoryPageProps) {
         setError(tableError);
         return;
       }
+      if (!tempTableName) {
+        setError("임시 테이블이 없습니다. CSV를 다시 업로드하세요.");
+        return;
+      }
     }
 
     const confirmMessage = isCreate
-      ? `「${name}」 인벤토리를 저장하고 DB 테이블 「${tableName.trim().toLowerCase()}」을(를) 생성할까요?`
+      ? `「${name}」 인벤토리를 저장하고 테이블 「${tableName.trim().toLowerCase()}」을(를) 생성할까요?`
       : `「${name}」 인벤토리 구성을 저장할까요?`;
     if (!window.confirm(confirmMessage)) {
       return;
@@ -238,12 +325,14 @@ export function InventoryPage({ user }: InventoryPageProps) {
             description: description.trim(),
             origin_csv: originCsv,
             table_name: tableName.trim().toLowerCase(),
+            temp_table_name: tempTableName,
           }),
         });
         if (!response.ok) {
           throw new Error(await readErrorDetail(response, "인벤토리 저장에 실패했습니다."));
         }
         const created = (await response.json()) as InventoryItem;
+        setTempTableName(null);
         await loadItems();
         beginView(created);
         setStatusMessage("인벤토리가 저장되었습니다.");
@@ -253,21 +342,23 @@ export function InventoryPage({ user }: InventoryPageProps) {
       if (!selected) {
         return;
       }
-      const response = await fetch(`/api/inventories/${selected.idx}`, {
+      const response = await fetch(`/api/inventories/${encodeURIComponent(selected.table_name)}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           display_name: name,
           description: description.trim(),
           origin_csv: originCsv,
+          temp_table_name: tempTableName,
         }),
       });
       if (!response.ok) {
         throw new Error(await readErrorDetail(response, "인벤토리 수정에 실패했습니다."));
       }
       const updated = (await response.json()) as InventoryItem;
+      setTempTableName(null);
       await loadItems();
-      beginView(updated);
+      beginView({ ...selected, ...updated, table_name: selected.table_name });
       setStatusMessage("인벤토리가 저장되었습니다.");
     } catch (err) {
       setError(err instanceof Error ? err.message : "인벤토리 저장 실패");
@@ -285,13 +376,16 @@ export function InventoryPage({ user }: InventoryPageProps) {
     }
     setError(null);
     try {
-      const response = await fetch(`/api/inventories/${item.idx}`, { method: "DELETE" });
+      const response = await fetch(`/api/inventories/${encodeURIComponent(item.table_name)}`, {
+        method: "DELETE",
+      });
       if (!response.ok) {
         throw new Error(await readErrorDetail(response, "인벤토리 삭제에 실패했습니다."));
       }
-      if (selectedIdx === item.idx) {
+      if (selectedTable === item.table_name) {
+        await discardTemp();
         setMode("idle");
-        setSelectedIdx(null);
+        setSelectedTable(null);
         setBaselineCsv(null);
         setOriginCsv(null);
         setUploadPreview(null);
@@ -307,14 +401,16 @@ export function InventoryPage({ user }: InventoryPageProps) {
   };
 
   const canDelete = (item: InventoryItem) =>
-    item.created_by === user.idx || user.role === 0 || user.role === 100;
+    item.created_by === user.idx ||
+    item.created_by === 0 ||
+    user.role === 0 ||
+    user.role === 100;
 
   const showEditor = isCreate || isView;
 
   const handleTableNameChange = (value: string) => {
     const next = value.toLowerCase();
     if (!next.startsWith(TABLE_NAME_PREFIX) && TABLE_NAME_PREFIX.startsWith(next)) {
-      // Allow temporary shorter edits while typing prefix, snap back to prefix.
       setTableName(TABLE_NAME_PREFIX);
       return;
     }
@@ -340,11 +436,13 @@ export function InventoryPage({ user }: InventoryPageProps) {
               <p className="text-xs text-slate-500">등록된 인벤토리가 없습니다.</p>
             ) : null}
             {items.map((item) => {
-              const isActive = selectedIdx === item.idx && mode === "view";
-              const author = (item.created_by_username || "").trim() || `user#${item.created_by}`;
+              const isActive = selectedTable === item.table_name && mode === "view";
+              const author =
+                (item.created_by_username || "").trim() ||
+                (item.created_by ? `user#${item.created_by}` : "-");
               return (
                 <div
-                  key={item.idx}
+                  key={item.table_name || item.idx}
                   className={`flex min-h-[64px] w-full flex-col justify-center gap-1 overflow-hidden rounded-xl border bg-slate-900/90 px-3 py-2 text-left shadow-lg ${
                     isActive ? "border-sky-500" : "border-slate-700"
                   }`}
@@ -404,7 +502,7 @@ export function InventoryPage({ user }: InventoryPageProps) {
                   </h1>
                   <p className="mt-0.5 text-xs text-slate-500">
                     {isCreate
-                      ? "CSV를 업로드하고 DB 테이블을 생성합니다."
+                      ? "CSV를 업로드해 임시 테이블로 미리본 뒤 저장합니다."
                       : "이름·설명을 수정하거나 origin_csv를 동일 컬럼으로 교체할 수 있습니다."}
                   </p>
                 </div>
@@ -481,7 +579,8 @@ export function InventoryPage({ user }: InventoryPageProps) {
                         <span className="text-[11px] text-rose-300">{tableNameError}</span>
                       ) : (
                         <span className="text-[11px] text-slate-500">
-                          PostgreSQL 테이블명. 반드시 {TABLE_NAME_PREFIX}로 시작, 저장 시 실제 테이블이 생성됩니다.
+                          PostgreSQL 테이블명. 업로드 시 temp_ 접두 임시 테이블로 미리보고, 저장 시
+                          확정됩니다.
                         </span>
                       )}
                     </label>
@@ -515,6 +614,7 @@ export function InventoryPage({ user }: InventoryPageProps) {
                       {originCsv ? (
                         <span className="truncate text-xs text-slate-400" title={originCsv}>
                           {originCsv}
+                          {tempTableName ? ` · ${tempTableName}` : ""}
                         </span>
                       ) : null}
                     </div>
@@ -526,6 +626,7 @@ export function InventoryPage({ user }: InventoryPageProps) {
                   </div>
 
                   <InventoryCsvPreviewPanel
+                    tableName={previewTableName}
                     filename={originCsv}
                     initialPreview={uploadPreview}
                     className="mt-4 min-h-0 w-full flex-1"
@@ -533,7 +634,6 @@ export function InventoryPage({ user }: InventoryPageProps) {
                 </div>
                 {showApiPanel && isView && selected ? (
                   <InventoryApiPanel
-                    inventoryIdx={selected.idx}
                     tableName={selected.table_name}
                     user={user}
                     canEdit={canEditSelected}

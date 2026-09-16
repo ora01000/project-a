@@ -303,28 +303,6 @@ CREATE TABLE IF NOT EXISTS workflow_template (
 CREATE INDEX IF NOT EXISTS ix_workflow_template_name ON workflow_template (template_name);
 CREATE INDEX IF NOT EXISTS ix_workflow_template_filename ON workflow_template (template_filename);
 
-CREATE TABLE IF NOT EXISTS inventory (
-    idx SERIAL PRIMARY KEY,
-    table_name VARCHAR(50) NOT NULL DEFAULT '',
-    display_name VARCHAR(100) NOT NULL,
-    description VARCHAR(200) NOT NULL DEFAULT '',
-    created_by INTEGER NOT NULL DEFAULT 1,
-    origin_csv VARCHAR(100) NOT NULL DEFAULT ''
-);
-CREATE INDEX IF NOT EXISTS ix_inventory_display_name ON inventory (display_name);
-CREATE INDEX IF NOT EXISTS ix_inventory_created_by ON inventory (created_by);
-
-CREATE TABLE IF NOT EXISTS inventory_api (
-    idx SERIAL PRIMARY KEY,
-    api_name VARCHAR(50) NOT NULL UNIQUE,
-    display_name VARCHAR(100) NOT NULL,
-    description VARCHAR(200) NOT NULL DEFAULT '',
-    api_fullpath VARCHAR(255) NOT NULL UNIQUE,
-    created_by INTEGER NOT NULL DEFAULT 1,
-    table_name VARCHAR(50) NOT NULL,
-    where_exp VARCHAR(500) NOT NULL DEFAULT '',
-    select_exp VARCHAR(500) NOT NULL DEFAULT '',
-    param_columns VARCHAR(500) NOT NULL DEFAULT ''
-);
-CREATE INDEX IF NOT EXISTS ix_inventory_api_table_name ON inventory_api (table_name);
-CREATE INDEX IF NOT EXISTS ix_inventory_api_created_by ON inventory_api (created_by);
+-- inventory / inventory_api metadata is managed by the remote inventory-api service.
+DROP TABLE IF EXISTS inventory_api CASCADE;
+DROP TABLE IF EXISTS inventory CASCADE;

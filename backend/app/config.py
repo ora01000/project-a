@@ -273,6 +273,16 @@ class AppSettings(BaseSettings):
     )
 
     upload_home: str = Field(default="/app/upload", alias="UPLOAD_HOME")
+    inventory_api_base_url: str = Field(
+        # Local mock default. HTTP(prod) mode: set INVENTORY_API_BASE_URL to
+        # http://inventory-api.apps.pcicd-k8s.co.kr (or the cluster service URL).
+        default="http://inventory-api.ora01000.pe.kr:32716",
+        alias="INVENTORY_API_BASE_URL",
+    )
+    inventory_csv_upload_url: str = Field(
+        default="",
+        alias="INVENTORY_CSV_UPLOAD_URL",
+    )
 
     job_decision_loop_enabled: bool | None = Field(
         default=None,
@@ -1145,6 +1155,33 @@ def inventory_csv_dir() -> Path:
     path = resolve_upload_home() / "inventory" / "csv"
     path.mkdir(parents=True, exist_ok=True)
     return path
+
+
+def resolve_inventory_api_base_url() -> str:
+    """Base URL for the remote inventory-api service.
+
+    Defaults to the local mock. Override with ``INVENTORY_API_BASE_URL``
+    (HTTP mode default: ``http://inventory-api.apps.pcicd-k8s.co.kr``).
+    """
+    raw = (AppSettings().inventory_api_base_url or "").strip()
+    return (raw or "http://inventory-api.ora01000.pe.kr:32716").rstrip("/")
+
+
+def resolve_inventory_csv_upload_url() -> str:
+    """External URL for inventory CSV upload (POST multipart)."""
+    explicit = (AppSettings().inventory_csv_upload_url or "").strip()
+    if explicit:
+        return explicit
+    return f"{resolve_inventory_api_base_url()}/uploadCSV"
+
+
+def resolve_inventory_csv_transfer_url() -> str:
+    """External URL for CSV→table transfer (POST JSON ``{filename}``)."""
+    upload = resolve_inventory_csv_upload_url()
+    if upload.endswith("/uploadCSV"):
+        return f"{upload[: -len('/uploadCSV')]}/transferCSV2Table"
+    base = upload.rsplit("/", 1)[0] if "/" in upload else resolve_inventory_api_base_url()
+    return f"{base.rstrip('/')}/transferCSV2Table"
 
 
 def docs_workflow_template_dir() -> Path:

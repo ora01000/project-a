@@ -369,6 +369,20 @@ async def get_current_user(request: Request) -> MeResponse:
 async def logout(request: Request) -> LogoutResponse:
     token = extract_bearer_token(request) or getattr(request.state, "auth_token", None)
     if token:
+        try:
+            from backend.app.services.inventory_external import (
+                InventoryExternalApiError,
+                remove_external_temp_table,
+            )
+            from backend.app.services.inventory_temp_session import clear_inventory_temp_tables
+
+            for temp_name in await clear_inventory_temp_tables(token):
+                try:
+                    await remove_external_temp_table(temp_name)
+                except InventoryExternalApiError:
+                    pass
+        except Exception:
+            pass
         await revoke_session(token)
     return LogoutResponse()
 

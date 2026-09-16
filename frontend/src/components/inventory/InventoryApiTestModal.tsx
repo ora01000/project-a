@@ -7,6 +7,12 @@ interface InventoryApiTestModalProps {
   onClose: () => void;
 }
 
+interface TestResultPayload {
+  columns: string[];
+  rows: Record<string, unknown>[];
+  row_count: number;
+}
+
 async function readErrorDetail(response: Response, fallback: string): Promise<string> {
   try {
     const payload = await response.json();
@@ -26,12 +32,38 @@ function parseParamList(raw: string): string[] {
     .filter(Boolean);
 }
 
+function normalizeTestPayload(payload: unknown): TestResultPayload {
+  if (Array.isArray(payload)) {
+    return {
+      columns: [],
+      rows: payload as Record<string, unknown>[],
+      row_count: payload.length,
+    };
+  }
+  if (payload && typeof payload === "object") {
+    const record = payload as Record<string, unknown>;
+    if (Array.isArray(record.rows)) {
+      const columns = Array.isArray(record.columns)
+        ? (record.columns as string[])
+        : [];
+      const rows = record.rows as Record<string, unknown>[];
+      return {
+        columns,
+        rows,
+        row_count: Number(record.row_count ?? rows.length) || rows.length,
+      };
+    }
+    return { columns: [], rows: [record], row_count: 1 };
+  }
+  return { columns: [], rows: [], row_count: 0 };
+}
+
 export function InventoryApiTestModal({ api, onClose }: InventoryApiTestModalProps) {
   const paramNames = useMemo(() => parseParamList(api.param_columns), [api.param_columns]);
   const [values, setValues] = useState<Record<string, string>>({});
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<object[] | null>(null);
+  const [result, setResult] = useState<TestResultPayload | null>(null);
 
   useEffect(() => {
     const initial: Record<string, string> = {};
@@ -41,7 +73,7 @@ export function InventoryApiTestModal({ api, onClose }: InventoryApiTestModalPro
     setValues(initial);
     setError(null);
     setResult(null);
-  }, [api.idx, paramNames]);
+  }, [api.api_name, api.table_name, paramNames]);
 
   const handleRun = async () => {
     const missing = paramNames.filter((name) => !(values[name] || "").trim());
@@ -60,13 +92,13 @@ export function InventoryApiTestModal({ api, onClose }: InventoryApiTestModalPro
     setResult(null);
     try {
       const response = await fetch(
-        `/api/inventory-data/${encodeURIComponent(api.api_name)}?${params.toString()}`,
+        `/api/inventories/${encodeURIComponent(api.table_name)}/apis/${encodeURIComponent(api.api_name)}/test?${params.toString()}`,
       );
       if (!response.ok) {
         throw new Error(await readErrorDetail(response, "API 테스트에 실패했습니다."));
       }
-      const payload = (await response.json()) as object[];
-      setResult(Array.isArray(payload) ? payload : [payload]);
+      const payload = await response.json();
+      setResult(normalizeTestPayload(payload));
     } catch (err) {
       setError(err instanceof Error ? err.message : "API 테스트 실패");
     } finally {
@@ -74,13 +106,20 @@ export function InventoryApiTestModal({ api, onClose }: InventoryApiTestModalPro
     }
   };
 
+  const displayColumns =
+    result && result.columns.length > 0
+      ? result.columns
+      : result && result.rows[0]
+        ? Object.keys(result.rows[0])
+        : [];
+
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/70 px-4">
       <div
         role="dialog"
         aria-modal="true"
         aria-labelledby="inventory-api-test-title"
-        className="flex max-h-[85vh] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-slate-700 bg-slate-900 shadow-xl"
+        className="flex max-h-[85vh] w-full max-w-3xl flex-col overflow-hidden rounded-xl border border-slate-700 bg-slate-900 shadow-xl"
       >
         <header className="flex shrink-0 items-start justify-between gap-3 border-b border-slate-700 px-5 py-4">
           <div className="min-w-0">
@@ -148,16 +187,46 @@ export function InventoryApiTestModal({ api, onClose }: InventoryApiTestModalPro
                 <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-400">
                   출력
                 </h3>
-                <span className="text-[11px] text-slate-500">{result.length.toLocaleString()}건</span>
+                <span className="text-[11px] text-slate-500">
+                  {result.row_count.toLocaleString()}건
+                </span>
               </div>
-              {result.length === 0 ? (
+              {result.rows.length === 0 ? (
                 <p className="rounded-md border border-slate-700 bg-slate-950/60 px-3 py-3 text-sm text-slate-400">
                   결과가 없습니다.
                 </p>
               ) : (
-                <pre className="max-h-[40vh] overflow-auto rounded-md border border-slate-700 bg-slate-950/80 p-3 font-mono text-xs leading-relaxed text-slate-200">
-                  {JSON.stringify(result, null, 2)}
-                </pre>
+                <div className="max-h-[40vh] overflow-auto rounded-md border border-slate-700 bg-slate-950/80">
+                  <table className="min-w-full border-collapse text-left text-xs">
+                    <thead className="sticky top-0 bg-slate-900">
+                      <tr>
+                        {displayColumns.map((col) => (
+                          <th
+                            key={col}
+                            className="whitespace-nowrap border-b border-slate-700 px-3 py-2 font-semibold text-slate-200"
+                          >
+                            {col}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {result.rows.map((row, rowIndex) => (
+                        <tr key={rowIndex} className="odd:bg-slate-900/40">
+                          {displayColumns.map((col) => (
+                            <td
+                              key={`${rowIndex}-${col}`}
+                              className="max-w-[240px] truncate whitespace-nowrap border-b border-slate-800/80 px-3 py-1.5 text-slate-300"
+                              title={String(row[col] ?? "")}
+                            >
+                              {row[col] == null ? "" : String(row[col])}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               )}
             </section>
           ) : null}

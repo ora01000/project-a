@@ -24,13 +24,30 @@ export interface InventoryApiItem {
 
 export interface InventoryCsvPreview {
   filename: string;
+  table_name?: string;
+  temp_table_name?: string;
   columns: string[];
   labels: string[];
   rows: Record<string, string>[];
   offset: number;
   limit: number;
+  startrow?: number;
+  endrow?: number;
   total_rows: number;
   has_more: boolean;
   columns_compatible?: boolean | null;
   compatibility_error?: string | null;
+  transfer_ok?: boolean | null;
+  transfer_result?: Record<string, unknown> | null;
+}
+
+export interface InventoryTablePreview {
+  table_name: string;
+  columns: string[];
+  labels: string[];
+  rows: Record<string, string>[];
+  startrow: number;
+  endrow: number;
+  total_rows: number;
+  has_more: boolean;
 }
