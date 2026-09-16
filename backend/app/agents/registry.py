@@ -10,6 +10,7 @@ from backend.app.agents.mock_platform_agents import (
     load_mock_platform_agent_definitions,
 )
 from backend.app.agents.vcenter_agent import VCENTER_AGENT
+from backend.app.infra_search_agent.definition import INFRA_SEARCH_AGENT
 from backend.app.db.agentruntime import catalog_agent_id, list_agentruntime_records
 
 AGENT_DEFINITIONS: list[AgentDefinition] = [
@@ -37,6 +38,8 @@ def load_mock_runtime_definitions(database_path: str | Path) -> list[AgentDefini
     for definition in load_mock_platform_agent_definitions():
         if definition.agent_id not in static_ids:
             definitions.append(definition)
+    if INFRA_SEARCH_AGENT.agent_id not in static_ids:
+        definitions.append(INFRA_SEARCH_AGENT)
     return definitions
 
 
@@ -53,4 +56,7 @@ def load_server_agent_definitions(database_path: str | Path) -> list[AgentDefini
                 system_prompt="",
             ),
         )
+    catalog_ids = {definition.agent_id for definition in definitions}
+    if INFRA_SEARCH_AGENT.agent_id not in catalog_ids:
+        definitions.append(INFRA_SEARCH_AGENT)
     return definitions

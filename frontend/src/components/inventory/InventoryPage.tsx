@@ -497,7 +497,8 @@ export function InventoryPage({ user }: InventoryPageProps) {
             <div className="flex min-h-0 flex-1 flex-col p-4">
               <header className="mb-3 flex shrink-0 items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <h1 className="text-base font-semibold text-slate-100">
+                  <h1 className="inline-flex items-center gap-1.5 text-base font-semibold text-slate-100">
+                    <WorkflowIcon name="inventory" size="sm" />
                     {isCreate ? "새로운 인벤토리" : "인벤토리 구성"}
                   </h1>
                   <p className="mt-0.5 text-xs text-slate-500">
@@ -511,12 +512,13 @@ export function InventoryPage({ user }: InventoryPageProps) {
                     <button
                       type="button"
                       onClick={() => setShowApiPanel((current) => !current)}
-                      className={`rounded-md border px-4 py-2 text-sm font-medium ${
+                      className={`inline-flex items-center gap-1.5 rounded-md border px-4 py-2 text-sm font-medium ${
                         showApiPanel
                           ? "border-sky-500 bg-sky-900/60 text-sky-100"
                           : "border-slate-600 bg-slate-800/70 text-slate-100 hover:bg-slate-800"
                       }`}
                     >
+                      <WorkflowIcon name="api" size="sm" label="API" />
                       API
                     </button>
                   ) : null}
@@ -525,8 +527,9 @@ export function InventoryPage({ user }: InventoryPageProps) {
                       type="button"
                       disabled={saveDisabled}
                       onClick={() => void handleSave()}
-                      className="rounded-md border border-sky-700 bg-sky-950/50 px-4 py-2 text-sm font-medium text-sky-100 hover:bg-sky-900/60 disabled:cursor-not-allowed disabled:opacity-50"
+                      className="inline-flex items-center gap-1.5 rounded-md border border-sky-700 bg-sky-950/50 px-4 py-2 text-sm font-medium text-sky-100 hover:bg-sky-900/60 disabled:cursor-not-allowed disabled:opacity-50"
                     >
+                      <WorkflowIcon name="save" size="sm" label="저장" />
                       {saving ? "저장 중…" : "저장"}
                     </button>
                   ) : null}
@@ -601,8 +604,9 @@ export function InventoryPage({ user }: InventoryPageProps) {
                             type="button"
                             disabled={uploading}
                             onClick={() => fileInputRef.current?.click()}
-                            className="inline-flex items-center justify-center rounded-md border border-slate-600 bg-slate-800/70 px-3 py-2 text-sm text-slate-100 hover:bg-slate-800 disabled:opacity-50"
+                            className="inline-flex items-center justify-center gap-1.5 rounded-md border border-slate-600 bg-slate-800/70 px-3 py-2 text-sm text-slate-100 hover:bg-slate-800 disabled:opacity-50"
                           >
+                            <WorkflowIcon name="upload" size="sm" label={isCreate ? "CSV 업로드" : "CSV 교체"} />
                             {uploading
                               ? "업로드 중…"
                               : isCreate

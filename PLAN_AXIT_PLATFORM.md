@@ -2705,8 +2705,8 @@ left "작업 워크플로우 목록" 패널의 생성된 작업 워크플로우 
 
 # 인벤토리 관리 기능을 계획한다.
 - "인벤토리 관리" 메뉴를 추가한다. 
-  - 개요 : 인벤토리 관리 기능은 CSV -> DB 변환과 어떤 컬럼을 where 절로 어떤 컬럼을 추출할질를 지정하고 이를 함수(API)로 expose 하는 기능을 제공한다.
-  - 인벤토리 메타 정보 테이블을 추가한다.
+  - 개요 : 인벤토리 관리 기능은 CSV -> DB 변환과 어떤 컬럼을 where 절로 어떤 컬럼을 추출할질를 지정하고 이를 함수(API)로 expose 하는 기능을 제공한다
+  - 인벤토리 메타 정보 테이블을 추가한다. -> 삭제한다(drop)
     - inventory
       - idx int primary key
       - table_name varchar(50)
@@ -2725,15 +2725,23 @@ left "작업 워크플로우 목록" 패널의 생성된 작업 워크플로우 
       - where_exp varchar(500)
       - select_exp varchar(500)
       - param_columns varchar(500) <- ex. "col1,col2,col3"
+
+  - 전체 기능을 외부 API 서비스로 변경중이다. 따라서 위 두 테이블을 이제 로컬에서 관리하지 않고, 외부 API 서비스에서 관리한다. API로 호출할 것이다.
       
 - 화면 구성
+  - 목업용 API 주소 : http://inventory-api.ora01000.pe.kr:32716
+  - http 모드용 API 주소 : 환경변수로 삽입 가능, default http://inventory-api.apps.pcicd-k8s.co.kr
+
   - 전체 화면은 왼쪽 인벤토리 목록을 작업워크플로우와 동일한 구성으로 배치한다.
     - 가장 위에는 "새로운 인벤토리" 버튼을 "새로운 작업 워크플로우" 버튼과 동일한 스타일로 배치 -> 클릭시 오른쪽 패널, 새로운 인벤토리 구성 화면 표시
+    - 사용 API
+      - /getInventoryList (GET)
     - 인벤토리 목록 카드 표시 내용
       - display_name
       - 작성자 : created_by
     - 기능
       - 삭제 icon
+        - /removeInventory (POST)
       - 선택시 오른쪽 화면에 인벤토리 구성 화면 출력
 
   - 새로운 인벤토리 구성 패널
@@ -2741,30 +2749,62 @@ left "작업 워크플로우 목록" 패널의 생성된 작업 워크플로우 
     - 인벤토리 설명 : 텍스트 영역
     - 인벤토리 테이블 명 : 기본 "inventory_" 가 표시되며, 사용자의 입력을 받게 한다. 인벤토리 테이블명은 실제 DB테이블을 생성하므로 저장하기 전에 postgres에 맞춰 이름을 검증한다. 테이블 명은 반드시 "inventory_" 로 시작해야 한다.
     - CSV 파일 업로드 
-      - 업로드 경로 : {UPLOAD_HOME}/inventory/csv
-        - 업로드 실행시, csv 정합성을 체크한다. 첫행은 테이블 생성에 필요한 컬럼명이다.
+      - 업로드 방식을 변경한다.
+        - 업로드 시 목업은 다음 외부 API를 호출한다. 
+          - /uploadCSV (POST)
         - 컬럼 명으로 쓰일 내용은 정규화해서 변환한다.
+        - 파일 업로드가 성공하면 다음 API를 호출한다.(업로드 된 csv 를 테이블 전환) 이 테이블은 임시 테이블이다. 테이블 이름의 앞에 반드시 "temp_" 를 붙인다.
+          - /transferCSV2Table (POST)
+        
+
     - 미리보기(패널의 하단 완쪽에 배치, 가로의 100%, 세로는 끝까지)
+      - 업로드이후 변환된 임시 테이블을 출력한다.
+      - 업로드 된 테이블을 가져올때 활용할 API(로직 구현에 필요한 것만 사용) 
+        - /getRecordsWithRows (GET)
+        - /getInventorySchema (GET)
+        - /getCount           (GET)
+
       - 업로드 된 CSV 를 스프레드 시트 형태로 출력한다. 편집은 불가하다.
       - 미리보기 패널의 세로/가로 길이에 맞춰 lazy loading 한다(가능하면)
+
+
     - 저장 버튼을 패널의 상단 오른쪽으로 이동한다.
       - 저장 클릭시 확인을 한후 다음 절치로 진행한다.
-        - inventory_{inventory.table_name} 으로 테이블을 생성
-          - 스키마는 입력받은 csv 의 컬럼을 토대로 한다.
-          - 각 컬럼의 데이터타입을 응용에서 지정할 수 있는가? 로직으로 지정할 수 있다면 지정하고, 그렇지 않으면 모두 통일한다.
+      - api
+        1. transferCSV2Table -> 지정된 테이블 명으로 변환
+          - POST /transferCSV2Table 
+        2. addInventory -> 지정된 정보로 입력
+          - POST /addInventory
+        3. 임시 테이블 삭제
+          - POST /removeTempTable
+
+    - 정상적인 저장을 하지 않고 페이지를 벗어날 경우 이 생성된 temp_ 테이블을 삭제해야 한다.
+      - 세션에 생성된 temp 테이블을 기록했다가 타임아웃시, 또는 브라우저 종료에 의한 로그아웃시 임시 테이블 삭제
+        - POST /removeTempTable
+
+
 
   - 인벤토리 구성 화면 : 오른쪽 패널 전체
     - 이름, 설명을 변경할 수 있으며 origin_csv 파일을 다시 업로드하여 전체를 교체할 수 있다.
       - origin_csv 파일을 교체하는 경우 기존의 컬럼 개수/명과 다른경우 변경할 수 없다.
       - 새로운 csv 을 업로드시, 컬럼개수, 정규화된 컬럼 명이 맞지 않을 경우 알럿을 발생하고 저장을 비활성화 한다.
+      - API
+        1. 업로드
+          - POST /uploadCSV
+        2. 임시테이블 생성. 테이블 이름의 앞에 반드시 "temp_" 를 붙인다.
+          - POST /transferCSV2Table
+
 
     - "API" 버튼을 "저장" 왼쪽에 배치한다.
       - "API" 버튼 클릭시 패널의 오른쪽 50% 가 API목록 패널로 변경된다.
       - inventory_api 테이블을 목록 카드로 출력한다.(모두 GET API 이다)
+        - 사용 API
+          - GET /getInventoryAPIList
         - api_name, display_name
         - api_fullpath
         - input_columns
         - 삭제 버튼
+          - POST /removeInventoryAPI
 
       - "API생성"
         - 생성을 위한 입력 패널이 목록 카드를 아래로 밀고 생성된다.
@@ -2776,9 +2816,62 @@ left "작업 워크플로우 목록" 패널의 생성된 작업 워크플로우 
           - 조건절 : where 이후의 조건문을 그대로 입력받는다.
           - 출력절 : select 이후의 출력 구절을 그대로 입력받는다.
           - API 매개변수 : 컬럼중에 선택하게 한다. 선택한 컬럼을 "," 로 붙인다.
+        - 사용 API
+          - POST /addInventoryAPI
       - API 목록에서 카드 선택시 구성 정보를 편집할 수 있다. 생성 패널과 유사한 형태로 편집 패널을 생성한다.
+        - POST /updateInventoryAPI
       - API 목록 카드에는 테스트 버튼을 둔다. 테스트를 수행하면 팝업 창이 뜨고 입력값을 받는다. 정의된 입력값을 받고 출력을 보여준다 
+        - 인벤토리 API 서버로 호출한다. GET 만 있다.
+      - API 의 생성, 변경, 삭제 가 발생하고 저장되면 다음 API를 호출하여 reload 한다
+        - POST /reloadAPI?tablename= 
+        
+# http 모드에서 디버깅 경로
+- http 모드용 API 주소 : 환경변수로 삽입 가능, default http://inventory-api.apps.pcicd-k8s.co.kr 로 맞춘다
+
+
+# 스킬 작성
+@docs/skill/inventory_sql.md 파일에 다음 초안으로 에이전트가 사용할 스킬 파일을 작성한다. 특히 SQLite 쿼리를 생성하는 부분을 디테일하게 가이드한다.
+- SQLite SQL 생성
+  - 사용 가능한 도구
+    - getInventoryList : SQLite 에 등록된 인벤토리 테이블
+    - getInventorySchema : SQLite 에 등록된 인벤토리 테이블 스키마
+  - 등록된 mcp 도구를 사용해서 인벤토리 스키마를 읽어온다.
+  - 질의의 문맥에 맞춰 SQL 문을 생성한다.
+    - 스키마 정보를 통해 컬럼 명과 찾고자 하는 키값을 매칭하여 쿼리를 완성한다.
+    - 사용자 질의는 데이터의 일부만 포함될 수 있다. 따라서 like '%{키값}%' 행태로 조회하는 것이 정확도를 높인다.
+- SQL 수행 후 질의에 답변
+  - 사용 가능한 도구
+    - readDataUsingSQL : SQL(read only) 문장을 수행해서 결좌 조회
+
+
+# 목업용 인벤토리 검색 에이전트 생성
+목업 환경에서 테스트를 위한 인벤토리 검색 에이전트를 생성하고 프롬프트를 정의한다 (@docs/system-prompt)
+- 에이전트 명 : INFRA_SEARCH_AGENT
+- 도구 등록
+  - http://inventory-mcp.ora01000.pe.kr:32716/mcp 에 등록된 모두 도구
+- 스킬
+  - @docs/skill/inventory_sql.md
+
 
   
 
+# 관리자 작업 > 인벤토리 정보조회(디버깅) 메뉴 추가
+- 원격 서버에서 제공하는 인벤토리 API 테스트 팝업을 띄우고 아래 각 API에 요청으 보내고 테스트 할 수 있다
 
+  API (http://inventory-api.ora01000.pe.kr:32716)
+
+  POST /uploadCSV           # param 업로드 파일
+  POST /transferCSV2Table   # param filename, tablename
+  GET /getInventoryList 
+  GET /getInventorySchema   # param inventory(table)
+  GET /getRecordsWithRows (startrow/endrow는 1부터, 양끝 포함)    # param table, startrow, endrow
+  GET /getCount             # param table
+  POST /sql                 # sql
+  POST /removeInventory     # param table
+  POST /addInventory
+
+
+# 작업 워크플로우, 인벤토리 관리 화면 icon asset 보강
+- 두 메뉴의 레이블, 버튼 중 텍스트로만 표시된 화면 컴포넌트에 대해 icon asset 이 필요한 경우 생성, 또는 기존 asset 에서 선택하여 보강한다. 다크/밝은 테마 용을 모두 고려
+- 대시보드, 에이전트, 사용자 관리, 환경설정, 공지사항 메뉴 , 로그아웃 버튼 icon asset 보강
+- 대시보드 화면에서 버튼, 레이블 등 icon asset 보강

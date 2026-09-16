@@ -9,6 +9,7 @@ from backend.app.agents.mock_platform_agents import is_mock_platform_orchestrato
 from backend.app.agents.orchestrator_agent import ORCHESTRATOR_MARKER
 from backend.app.agents.remote_agent import REMOTE_AGENT_MARKER
 from backend.app.disabled_features import is_removed_agent_id
+from backend.app.infra_search_agent.definition import INFRA_SEARCH_SERVICE_MARKER
 
 
 class AgentInvocationError(Exception):
@@ -45,6 +46,11 @@ async def invoke_agent_by_id(
             message,
             agent_runtime=agent_runtime,
         )
+
+    if agent is INFRA_SEARCH_SERVICE_MARKER:
+        from backend.app.infra_search_agent.agent import infra_search_agent_service
+
+        return await infra_search_agent_service.invoke(message)
 
     try:
         definition = agent_manager.get_definition(agent_id)

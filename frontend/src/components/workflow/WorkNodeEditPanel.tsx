@@ -1143,7 +1143,7 @@ export function WorkNodeEditPanel({
           onClick={onSave}
           className="inline-flex w-fit items-center gap-1.5 rounded-md border border-sky-700 bg-sky-950/50 px-3 py-2 text-sm text-sky-100 hover:bg-sky-900/60"
         >
-          <WorkflowIcon name="edit" size="sm" label="저장" />
+          <WorkflowIcon name="save" size="sm" label="저장" />
           저장
         </button>
       </div>
@@ -1215,7 +1215,7 @@ export function WorkNodeEditPanel({
                   }}
                   className="inline-flex items-center gap-1 rounded-md border border-sky-700 bg-sky-950/50 px-2.5 py-1 text-[11px] font-medium text-sky-100 hover:bg-sky-900/60 disabled:opacity-50"
                 >
-                  <WorkflowIcon name="edit" size="xs" />
+                  <WorkflowIcon name="save" size="xs" />
                   저장
                 </button>
                 <button

@@ -342,16 +342,18 @@ export function WorkflowTemplateEditorPanel({
           <button
             type="button"
             onClick={onClose}
-            className="rounded-md border border-slate-600 bg-slate-900 px-3 py-1.5 text-xs text-slate-200 hover:bg-slate-800"
+            className="inline-flex items-center gap-1.5 rounded-md border border-slate-600 bg-slate-900 px-3 py-1.5 text-xs text-slate-200 hover:bg-slate-800"
           >
+            <WorkflowIcon name="close" size="xs" label="닫기" />
             닫기
           </button>
           <button
             type="button"
             disabled={!canSave}
             onClick={() => void handleSave()}
-            className="rounded-md border border-sky-700 bg-sky-950/50 px-3 py-1.5 text-xs font-medium text-sky-100 hover:bg-sky-900/60 disabled:cursor-not-allowed disabled:opacity-40"
+            className="inline-flex items-center gap-1.5 rounded-md border border-sky-700 bg-sky-950/50 px-3 py-1.5 text-xs font-medium text-sky-100 hover:bg-sky-900/60 disabled:cursor-not-allowed disabled:opacity-40"
           >
+            <WorkflowIcon name="save" size="xs" label="저장" />
             {isSaving ? "저장 중…" : "저장"}
           </button>
         </div>

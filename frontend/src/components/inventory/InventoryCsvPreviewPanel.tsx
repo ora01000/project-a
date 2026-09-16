@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { InventoryCsvPreview, InventoryTablePreview } from "../../types/inventory";
+import { WorkflowIcon } from "../workflow/WorkflowIcon";
 
 interface InventoryCsvPreviewPanelProps {
   /** Remote inventory table name (after upload/transfer). */
@@ -208,7 +209,10 @@ export function InventoryCsvPreviewPanel({
     >
       <div className="flex shrink-0 items-center justify-between gap-2 border-b border-slate-800 px-3 py-2">
         <div className="min-w-0">
-          <p className="truncate text-xs font-medium text-slate-300">테이블 미리보기</p>
+          <p className="inline-flex items-center gap-1.5 truncate text-xs font-medium text-slate-300">
+            <WorkflowIcon name="list" size="xs" />
+            테이블 미리보기
+          </p>
           <p className="truncate text-[11px] text-slate-500" title={tableName}>
             {tableName}
             {filename ? ` · ${filename}` : ""}

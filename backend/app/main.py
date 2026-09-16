@@ -10,6 +10,10 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from backend.app.agents.base import AgentDefinition, _aggregate_mcp_status, build_agent
 from backend.app.agents.mock_platform_agents import is_mock_platform_orchestrator_agent
+from backend.app.infra_search_agent.definition import (
+    INFRA_SEARCH_SERVICE_MARKER,
+    is_infra_search_agent_id,
+)
 from backend.app.agents.orchestrator_agent import ORCHESTRATOR_MARKER
 from backend.app.agents.remote_agent import REMOTE_AGENT_MARKER
 from backend.app.mcp.client import MCPClientManager
@@ -42,6 +46,8 @@ from backend.app.api.mailserver import router as mailserver_router
 from backend.app.api.received_mail import router as received_mail_router
 from backend.app.infra_gap_analysis.api import router as infra_gap_analysis_router
 from backend.app.infra_gap_analysis.agent import infra_gap_analysis_service
+from backend.app.infra_search_agent.api import router as infra_search_agent_router
+from backend.app.infra_search_agent.agent import infra_search_agent_service
 from backend.app.job_decision_agent.api import router as job_decision_agent_router
 from backend.app.job_decision_agent.agent import job_decision_agent_service
 from backend.app.config import (
@@ -67,6 +73,7 @@ from backend.app.services.agent_runtime_client import (
 from backend.app.db import init_database
 from backend.app.db.agentruntime import (
     ensure_mock_ansible_lint_agentruntime,
+    ensure_mock_infra_search_agentruntime,
     ensure_mock_workflow_agent_agentruntime,
 )
 from backend.app.disabled_features import filter_agent_definitions
@@ -131,6 +138,9 @@ class AgentManager:
                 if is_mock_platform_orchestrator_agent(definition.agent_id):
                     self.agents[definition.agent_id] = ORCHESTRATOR_MARKER
                     continue
+                if is_infra_search_agent_id(definition.agent_id):
+                    self.agents[definition.agent_id] = INFRA_SEARCH_SERVICE_MARKER
+                    continue
                 self.agents[definition.agent_id] = await build_agent(definition, self.mcp_manager)
             except Exception as exc:
                 logger.exception("Failed to build agent %s: %s", definition.agent_id, exc)
@@ -151,6 +161,7 @@ class AgentManager:
         if not self.uses_remote_runtime():
             ensure_mock_ansible_lint_agentruntime(database_path)
             ensure_mock_workflow_agent_agentruntime(database_path)
+            ensure_mock_infra_search_agentruntime(database_path)
 
         self.agent_definitions = self._load_runtime_definitions(database_path)
         self.agent_definitions_by_id = {
@@ -191,6 +202,19 @@ class AgentManager:
                 continue
             if is_mock_platform_orchestrator_agent(agent_id):
                 statuses[agent_id] = "ready"
+                continue
+            if self.agents.get(agent_id) is INFRA_SEARCH_SERVICE_MARKER or (
+                self.uses_remote_runtime() and is_infra_search_agent_id(agent_id)
+            ):
+                mcp_status = infra_search_agent_service.mcp_status
+                if mcp_status == "connected":
+                    statuses[agent_id] = "connected"
+                elif mcp_status in {"partial", "degraded"}:
+                    statuses[agent_id] = "partial"
+                elif infra_search_agent_service.is_ready:
+                    statuses[agent_id] = "partial"
+                else:
+                    statuses[agent_id] = "unavailable"
                 continue
             if self.uses_remote_runtime():
                 statuses[agent_id] = self.get_axit_agent_connection_status(agent_id)
@@ -453,6 +477,14 @@ async def lifespan(app: FastAPI):
         app.state.infra_gap_analysis = infra_gap_analysis_service
 
     try:
+        await infra_search_agent_service.initialize(runtime_mode)
+        app.state.infra_search_agent = infra_search_agent_service
+    except Exception:
+        logger.exception("INFRA_SEARCH_AGENT initialization failed (agent remains available for lazy init)")
+        app.state.infra_search_agent = infra_search_agent_service
+    await agent_manager.refresh_health()
+
+    try:
         await job_decision_agent_service.initialize(runtime_mode)
         app.state.job_decision_agent = job_decision_agent_service
     except Exception:
@@ -605,6 +637,7 @@ def create_app() -> FastAPI:
     app.include_router(mailserver_router, prefix="/api")
     app.include_router(received_mail_router, prefix="/api")
     app.include_router(infra_gap_analysis_router, prefix="/api")
+    app.include_router(infra_search_agent_router, prefix="/api")
     app.include_router(job_decision_agent_router, prefix="/api")
     app.include_router(workflow_router, prefix="/api")
     app.include_router(inventory_router, prefix="/api")

@@ -26,3 +26,7 @@ servers:
     transport: streamable_http
     url: "http://ansible-lint.ora01000.pe.kr:32716/mcp"
     enabled: true
+  inventory:
+    transport: streamable_http
+    url: "http://inventory-mcp.ora01000.pe.kr:32716/mcp"
+    enabled: true

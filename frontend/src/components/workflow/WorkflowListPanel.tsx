@@ -134,7 +134,10 @@ export function WorkflowListPanel({
         <div className="relative z-10 flex min-h-0 flex-1 flex-col">
           <header className="flex shrink-0 items-start justify-between gap-2 border-b border-slate-700/80 px-4 py-3">
             <div className="min-w-0">
-              <h2 className="text-sm font-semibold text-slate-200">작업 워크플로우 목록</h2>
+              <h2 className="inline-flex items-center gap-1.5 text-sm font-semibold text-slate-200">
+                <WorkflowIcon name="nodes" size="sm" />
+                작업 워크플로우 목록
+              </h2>
               <p className="mt-0.5 text-xs text-slate-500">등록된 작업 워크플로우를 선택합니다.</p>
             </div>
             <button
@@ -154,7 +157,7 @@ export function WorkflowListPanel({
               onClick={onCreate}
               className="inline-flex w-full items-center justify-center gap-1.5 rounded-md border border-sky-700 bg-sky-950/50 px-3 py-2 text-sm font-medium text-sky-100 hover:bg-sky-900/60"
             >
-              <WorkflowIcon name="edit" size="sm" label="새로운 작업 워크플로우" />
+              <WorkflowIcon name="work-node" size="sm" label="새로운 작업 워크플로우" />
               새로운 작업 워크플로우
             </button>
           </div>

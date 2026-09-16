@@ -3,7 +3,37 @@
 프로젝트 최초 개발일(2026-07-08) 이후 변경 이력을 **최근순**으로 요약합니다.  
 출처: git 커밋, `ADDITIONAL_PLAN.md`, 워킹 트리 반영분(2026-07-15~18).
 
-**현재 버전:** 1.8 / 릴리즈 `260819`
+**현재 버전:** 1.9 / 릴리즈 `260916`
+
+---
+
+## 2026-09-16 — 작업 워크플로우·인벤토리·INFRA_SEARCH (`260916` / `pg260916`)
+
+### 작업 워크플로우
+- **작업 워크플로우** 메뉴: 목록·디자이너·체크인/아웃(소유자·배포·복제), Redis Working Set 드래프트
+- AI 설계 에이전트 **`WORKFLOW_AGENT`** (mock `agentruntime` 등록), 다이어그램·스크립트·CRUD 판단
+- 워크노드 스케줄링·실행 중지·HITL 승인(첨부 업로드), 실행 이력·결과 정규화(`merge_work_result`)
+- 워크플로우 템플릿 작성·수정 UI, 밝은 테마 아이콘, kubectl/ansible-lint 검증 경로 보강
+
+### 인벤토리 관리
+- **인벤토리 관리** 메뉴: 메타·API를 로컬 DB가 아닌 **원격 inventory-api**로 이전
+  - mock 기본: `http://inventory-api.ora01000.pe.kr:32716`
+  - http 기본: `http://inventory-api.apps.pcicd-k8s.co.kr` (`INVENTORY_API_BASE_URL`로 덮어쓰기)
+- CSV 업로드 → `temp_` 테이블 전환·미리보기 → 저장 시 최종 테이블 + API 등록, 세션 종료 시 temp 정리
+- 인벤토리 API 패널(등록·수정·삭제·reload·테스트), 관리자 **인벤토리 API 디버그** 팝업
+
+### INFRA_SEARCH_AGENT
+- 목업용 인벤토리 검색 에이전트: inventory MCP + skill `docs/skill/inventory_sql.md`
+- `agentruntime` 등록·사용자 할당·**통합 채팅** 연동 (`infra_search_agent_service`로 invoke)
+- 독립 API: `GET/POST /api/infra-search-agent/{status,invoke}`
+
+### 인증·메일
+- http 마당 인증: 패스워드 평문 전송, APIM TLS1.2+ 강제
+- 수신 메일 **POP3** 지원 추가 (기존 IMAP)
+
+### 릴리즈
+- About: 버전 **1.9**, 릴리즈 **260916**
+- Docker 이미지 태그: `pg260916` (`linux/amd64`)
 
 ---
 

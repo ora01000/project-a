@@ -176,7 +176,8 @@ export function WorkflowDesignPanel({
         <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
           <header className="flex shrink-0 items-start justify-between gap-3 border-b border-slate-700/80 px-4 py-3">
             <div className="min-w-0">
-              <h2 className="truncate text-sm font-semibold text-slate-200">
+              <h2 className="inline-flex items-center gap-1.5 truncate text-sm font-semibold text-slate-200">
+                <WorkflowIcon name={mode === "create" ? "work-node" : "edit"} size="sm" />
                 {mode === "create" ? "새로운 작업 워크플로우" : selected?.workflow_name ?? "작업 워크플로우 편집"}
               </h2>
               {mode === "edit" ? (
@@ -228,7 +229,7 @@ export function WorkflowDesignPanel({
                   }}
                   className="inline-flex items-center gap-1.5 rounded-md border border-sky-700 bg-sky-950/50 px-3 py-1.5 text-sm font-medium text-sky-100 hover:bg-sky-900/60 disabled:opacity-50"
                 >
-                  <WorkflowIcon name="edit" size="sm" label="저장" />
+                  <WorkflowIcon name="save" size="sm" label="저장" />
                   {saveState.isSaving ? "저장 중…" : "저장"}
                 </button>
               ) : null}

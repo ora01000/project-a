@@ -525,3 +525,32 @@ def ensure_mock_workflow_agent_agentruntime(database_path: str | Path) -> Stored
         talkable=default_talkable_for_local_agent_id(WORKFLOW_AGENT_LOCAL_AGENT_ID),
         is_orchestrator=default_is_orchestrator_for_local_agent_id(WORKFLOW_AGENT_LOCAL_AGENT_ID),
     )
+
+
+def ensure_mock_infra_search_agentruntime(database_path: str | Path) -> StoredAgentRuntime | None:
+    """Insert mock-only INFRA_SEARCH_AGENT agentruntime row if missing (standalone invoke service)."""
+    from backend.app.infra_search_agent.settings import AGENT_ID, AGENT_NAME
+
+    existing = get_agentruntime_by_local_agent_id(
+        database_path,
+        AGENT_ID,
+        runtime_mode="mock",
+    )
+    if existing is not None:
+        return existing
+
+    description = (
+        "Inventory search via inventory MCP "
+        "(getInventoryList, getInventorySchema, readDataUsingSQL)."
+    )
+    return create_agentruntime_record(
+        database_path,
+        runtime_type=AGENTRUNTIME_TYPE_MOCKUP,
+        agent_name=AGENT_NAME,
+        agent_id=build_axit_agent_id(AGENT_ID),
+        local_agent_id=AGENT_ID,
+        description=description,
+        service_id=DEFAULT_SERVICE_ID,
+        talkable=default_talkable_for_local_agent_id(AGENT_ID),
+        is_orchestrator=default_is_orchestrator_for_local_agent_id(AGENT_ID),
+    )

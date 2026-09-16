@@ -274,9 +274,8 @@ class AppSettings(BaseSettings):
 
     upload_home: str = Field(default="/app/upload", alias="UPLOAD_HOME")
     inventory_api_base_url: str = Field(
-        # Local mock default. HTTP(prod) mode: set INVENTORY_API_BASE_URL to
-        # http://inventory-api.apps.pcicd-k8s.co.kr (or the cluster service URL).
-        default="http://inventory-api.ora01000.pe.kr:32716",
+        # Empty → resolve_inventory_api_base_url() picks mock/http default by AGENT_RUNTIME_MODE.
+        default="",
         alias="INVENTORY_API_BASE_URL",
     )
     inventory_csv_upload_url: str = Field(
@@ -1157,14 +1156,25 @@ def inventory_csv_dir() -> Path:
     return path
 
 
+INVENTORY_API_MOCK_BASE_URL = "http://inventory-api.ora01000.pe.kr:32716"
+INVENTORY_API_HTTP_BASE_URL = "http://inventory-api.apps.pcicd-k8s.co.kr"
+
+
 def resolve_inventory_api_base_url() -> str:
     """Base URL for the remote inventory-api service.
 
-    Defaults to the local mock. Override with ``INVENTORY_API_BASE_URL``
-    (HTTP mode default: ``http://inventory-api.apps.pcicd-k8s.co.kr``).
+    Explicit ``INVENTORY_API_BASE_URL`` wins. Otherwise:
+    - mock mode → ``http://inventory-api.ora01000.pe.kr:32716``
+    - http mode → ``http://inventory-api.apps.pcicd-k8s.co.kr``
     """
     raw = (AppSettings().inventory_api_base_url or "").strip()
-    return (raw or "http://inventory-api.ora01000.pe.kr:32716").rstrip("/")
+    if raw:
+        return raw.rstrip("/")
+    yaml_settings = _load_yaml(CONFIG_DIR / "settings.yaml")
+    mode = resolve_agent_runtime_mode(server_yaml=yaml_settings.get("server", {})).strip().lower()
+    if mode == "http":
+        return INVENTORY_API_HTTP_BASE_URL
+    return INVENTORY_API_MOCK_BASE_URL
 
 
 def resolve_inventory_csv_upload_url() -> str:

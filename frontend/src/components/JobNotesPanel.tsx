@@ -13,6 +13,7 @@ import { WhatapEventReportTab } from "./jobs/WhatapEventReportTab";
 import { useJobReviewNewBadges } from "./jobs/useJobReviewNewBadges";
 import { useMyNotes } from "./jobs/useMyNotes";
 import { canRunGapAnalysis, hasAdminAccess, shouldMaskIps } from "../types/user";
+import { WorkflowIcon, type WorkflowIconName } from "./workflow/WorkflowIcon";
 
 type JobNotesTab =
   | "review"
@@ -24,15 +25,15 @@ type JobNotesTab =
   | "infra-shape"
   | "fossflow";
 
-const TABS: { id: JobNotesTab; label: string; adminOnly?: boolean }[] = [
-  { id: "infra-shape", label: "인프라 형상" },
-  { id: "review", label: "작업 검토" },
-  { id: "my-review", label: "나의 검토작업" },
-  { id: "my-results", label: "나의 작업결과" },
-  { id: "whatap-report", label: "Whatap 이벤트 리포트" },
-  { id: "rejected-jobs", label: "반려된 작업" },
-  { id: "my-notes", label: "나의 노트" },
-  { id: "fossflow", label: "FossFLOW", adminOnly: true },
+const TABS: { id: JobNotesTab; label: string; icon: WorkflowIconName; adminOnly?: boolean }[] = [
+  { id: "infra-shape", label: "인프라 형상", icon: "nodes" },
+  { id: "review", label: "작업 검토", icon: "approve" },
+  { id: "my-review", label: "나의 검토작업", icon: "owner" },
+  { id: "my-results", label: "나의 작업결과", icon: "result" },
+  { id: "whatap-report", label: "Whatap 이벤트 리포트", icon: "log" },
+  { id: "rejected-jobs", label: "반려된 작업", icon: "end-fail" },
+  { id: "my-notes", label: "나의 노트", icon: "notes" },
+  { id: "fossflow", label: "FossFLOW", icon: "template", adminOnly: true },
 ];
 
 interface JobNotesPanelProps {
@@ -116,7 +117,10 @@ export function JobNotesPanel({
         <header className="shrink-0 border-b border-slate-700/80 px-4 py-3">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
-              <h2 className="text-sm font-semibold text-slate-200">작업 노트</h2>
+              <h2 className="inline-flex items-center gap-1.5 text-sm font-semibold text-slate-200">
+                <WorkflowIcon name="notes" size="sm" />
+                작업 노트
+              </h2>
               <p className="mt-0.5 text-xs text-slate-500">
                 접수된 작업요청서를 확인하고 처리 상태를 관리합니다.
               </p>
@@ -135,12 +139,13 @@ export function JobNotesPanel({
               key={tab.id}
               type="button"
               onClick={() => setActiveTab(tab.id)}
-              className={`shrink-0 rounded-t-md px-3 py-2 text-xs font-medium ${
+              className={`inline-flex shrink-0 items-center gap-1.5 rounded-t-md px-3 py-2 text-xs font-medium ${
                 activeTab === tab.id
                   ? "border border-b-0 border-slate-600 bg-slate-800 text-sky-200"
                   : "text-slate-400 hover:bg-slate-800/60 hover:text-slate-200"
               }`}
             >
+              <WorkflowIcon name={tab.icon} size="xs" />
               {tab.label}
               {showNewBadge ? " 🆕" : ""}
             </button>

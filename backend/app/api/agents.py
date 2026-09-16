@@ -54,6 +54,13 @@ def _mcp_status_for_definition(
     *,
     mcp_connection_status: dict[str, str],
 ) -> dict[str, str]:
+    from backend.app.infra_search_agent.definition import is_infra_search_agent_id
+
+    if is_infra_search_agent_id(definition.agent_id):
+        from backend.app.infra_search_agent.agent import infra_search_agent_service
+        from backend.app.infra_search_agent.settings import STATIC_CONFIG
+
+        return {STATIC_CONFIG.mcp_server_key: infra_search_agent_service.mcp_status}
     return {key: mcp_connection_status.get(key, "unknown") for key in definition.mcp_server_keys}
 
 

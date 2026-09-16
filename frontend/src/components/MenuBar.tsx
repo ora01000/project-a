@@ -26,6 +26,7 @@ import { ProfileEditModal } from "./ProfileEditModal";
 import { ReleaseNotesModal } from "./ReleaseNotesModal";
 import { TableDebugModal } from "./TableDebugModal";
 import { ThemeSettingsModal } from "./ThemeSettingsModal";
+import { WorkflowIcon } from "./workflow/WorkflowIcon";
 
 interface MenuBarProps {
   activeView: AppView;
@@ -38,10 +39,16 @@ interface MenuBarProps {
 }
 
 function menuButtonClass(isActive: boolean): string {
-  return `rounded-md px-3 py-1.5 transition ${
+  return `inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 transition ${
     isActive
       ? "bg-slate-800 text-slate-100"
       : "text-slate-200 hover:bg-slate-800 hover:text-slate-100"
+  }`;
+}
+
+function menuItemClass(isActive = false): string {
+  return `inline-flex w-full items-center gap-1.5 px-3 py-2 text-left text-sm ${
+    isActive ? "bg-slate-800 text-sky-200" : "text-slate-200 hover:bg-slate-800"
   }`;
 }
 
@@ -176,6 +183,7 @@ export function MenuBar({
             onClick={() => onNavigate("dashboard")}
             className={menuButtonClass(highlightedShell === "dashboard")}
           >
+            <WorkflowIcon name="dashboard" size="sm" label="대시보드" />
             대시보드
           </button>
           <span className="text-slate-600">|</span>
@@ -184,6 +192,7 @@ export function MenuBar({
             onClick={() => onNavigate("workflow")}
             className={menuButtonClass(highlightedShell === "workflow")}
           >
+            <WorkflowIcon name="nodes" size="sm" label="작업 워크플로우" />
             작업 워크플로우
           </button>
           <span className="text-slate-600">|</span>
@@ -192,6 +201,7 @@ export function MenuBar({
             onClick={() => onNavigate("inventory")}
             className={menuButtonClass(highlightedShell === "inventory")}
           >
+            <WorkflowIcon name="inventory" size="sm" label="인벤토리 관리" />
             인벤토리 관리
           </button>
           <span className="text-slate-600">|</span>
@@ -203,6 +213,7 @@ export function MenuBar({
                 onClick={() => setShowAgentMenu((current) => !current)}
                 className={menuButtonClass(isAgentMenuActive)}
               >
+                <WorkflowIcon name="agents" size="sm" label="에이전트" />
                 에이전트 ▾
               </button>
               {showAgentMenu ? (
@@ -213,12 +224,9 @@ export function MenuBar({
                       onNavigate("agent-connections");
                       setShowAgentMenu(false);
                     }}
-                    className={`block w-full px-3 py-2 text-left text-sm ${
-                      activeView === "agent-connections"
-                        ? "bg-slate-800 text-sky-200"
-                        : "text-slate-200 hover:bg-slate-800"
-                    }`}
+                    className={menuItemClass(activeView === "agent-connections")}
                   >
+                    <WorkflowIcon name="connect" size="sm" label="에이전트 연결" />
                     에이전트 연결
                   </button>
                   <button
@@ -227,12 +235,9 @@ export function MenuBar({
                       onNavigate("agent-assignment");
                       setShowAgentMenu(false);
                     }}
-                    className={`block w-full px-3 py-2 text-left text-sm ${
-                      activeView === "agent-assignment"
-                        ? "bg-slate-800 text-sky-200"
-                        : "text-slate-200 hover:bg-slate-800"
-                    }`}
+                    className={menuItemClass(activeView === "agent-assignment")}
                   >
+                    <WorkflowIcon name="distribute" size="sm" label="에이전트 할당" />
                     에이전트 할당
                   </button>
                 </div>
@@ -248,6 +253,7 @@ export function MenuBar({
               onClick={() => setShowUserMenu((current) => !current)}
               className={menuButtonClass(isUserManagementActive)}
             >
+              <WorkflowIcon name="owner" size="sm" label="사용자 관리" />
               사용자 관리 ▾
             </button>
             {showUserMenu ? (
@@ -258,12 +264,9 @@ export function MenuBar({
                     onNavigate("user-list");
                     setShowUserMenu(false);
                   }}
-                  className={`block w-full px-3 py-2 text-left text-sm ${
-                    activeView === "user-list"
-                      ? "bg-slate-800 text-sky-200"
-                      : "text-slate-200 hover:bg-slate-800"
-                  }`}
+                  className={menuItemClass(activeView === "user-list")}
                 >
+                  <WorkflowIcon name="list" size="sm" label="사용자 조회" />
                   사용자 조회
                 </button>
                 {isAdmin ? (
@@ -273,12 +276,9 @@ export function MenuBar({
                       setShowEventReportSub(true);
                       setShowUserMenu(false);
                     }}
-                    className={`block w-full px-3 py-2 text-left text-sm ${
-                      showEventReportSub
-                        ? "bg-slate-800 text-sky-200"
-                        : "text-slate-200 hover:bg-slate-800"
-                    }`}
+                    className={menuItemClass(showEventReportSub)}
                   >
+                    <WorkflowIcon name="mail" size="sm" label="이벤트 리포트 구독" />
                     이벤트 리포트 구독
                   </button>
                 ) : null}
@@ -315,6 +315,7 @@ export function MenuBar({
                   showThemeSettings,
               )}
             >
+              <WorkflowIcon name="settings" size="sm" label="환경설정" />
               환경설정 ▾
             </button>
             {showSettingsMenu ? (
@@ -339,11 +340,14 @@ export function MenuBar({
                           : "text-slate-200 hover:bg-slate-800"
                       }`}
                     >
-                      <span>관리자 작업</span>
+                      <span className="inline-flex items-center gap-1.5">
+                        <WorkflowIcon name="settings" size="sm" label="관리자 작업" />
+                        관리자 작업
+                      </span>
                       <span className="text-slate-500">▸</span>
                     </button>
                     {showAdminWorkMenu ? (
-                      <div className="absolute left-full top-0 z-30 ml-1 min-w-[180px] rounded-md border border-slate-700 bg-slate-900 py-1 shadow-lg">
+                      <div className="absolute left-full top-0 z-30 ml-1 min-w-[200px] rounded-md border border-slate-700 bg-slate-900 py-1 shadow-lg">
                         <button
                           type="button"
                           onClick={() => {
@@ -351,8 +355,9 @@ export function MenuBar({
                             setShowAdminWorkMenu(false);
                             setShowPostmanDebug(true);
                           }}
-                          className="block w-full px-3 py-2 text-left text-sm text-slate-200 hover:bg-slate-800"
+                          className={menuItemClass()}
                         >
+                          <WorkflowIcon name="api" size="sm" label="postman" />
                           postman
                         </button>
                         {isMockRuntime ? (
@@ -363,8 +368,9 @@ export function MenuBar({
                               setShowAdminWorkMenu(false);
                               setShowMockLlmSelect(true);
                             }}
-                            className="block w-full px-3 py-2 text-left text-sm text-slate-200 hover:bg-slate-800"
+                            className={menuItemClass()}
                           >
+                            <WorkflowIcon name="ai" size="sm" label="LLM 변경" />
                             (목업)LLM 변경
                           </button>
                         ) : null}
@@ -375,8 +381,9 @@ export function MenuBar({
                             setShowAdminWorkMenu(false);
                             setShowWhatapEventTest(true);
                           }}
-                          className="block w-full px-3 py-2 text-left text-sm text-slate-200 hover:bg-slate-800"
+                          className={menuItemClass()}
                         >
+                          <WorkflowIcon name="log" size="sm" label="Whatap 이벤트 테스트" />
                           Whatap 이벤트 테스트
                         </button>
                         <button
@@ -386,8 +393,9 @@ export function MenuBar({
                             setShowAdminWorkMenu(false);
                             setShowInventoryApiDebug(true);
                           }}
-                          className="block w-full px-3 py-2 text-left text-sm text-slate-200 hover:bg-slate-800"
+                          className={menuItemClass()}
                         >
+                          <WorkflowIcon name="api" size="sm" label="인벤토리 정보조회" />
                           인벤토리 정보조회(디버깅)
                         </button>
                         <button
@@ -397,8 +405,9 @@ export function MenuBar({
                             setShowAdminWorkMenu(false);
                             setShowK8sInfraConfig(true);
                           }}
-                          className="block w-full px-3 py-2 text-left text-sm text-slate-200 hover:bg-slate-800"
+                          className={menuItemClass()}
                         >
+                          <WorkflowIcon name="nodes" size="sm" label="인프라 구성" />
                           인프라 구성
                         </button>
                         <button
@@ -408,8 +417,9 @@ export function MenuBar({
                             setShowAdminWorkMenu(false);
                             setShowMailServerConfig(true);
                           }}
-                          className="block w-full px-3 py-2 text-left text-sm text-slate-200 hover:bg-slate-800"
+                          className={menuItemClass()}
                         >
+                          <WorkflowIcon name="mail" size="sm" label="메일 서버 설정" />
                           메일 서버 설정
                         </button>
                         <button
@@ -419,8 +429,9 @@ export function MenuBar({
                             setShowAdminWorkMenu(false);
                             setShowMailTest(true);
                           }}
-                          className="block w-full px-3 py-2 text-left text-sm text-slate-200 hover:bg-slate-800"
+                          className={menuItemClass()}
                         >
+                          <WorkflowIcon name="send" size="sm" label="테스트 메일 발송" />
                           테스트 메일 발송(디버깅)
                         </button>
                         <button
@@ -430,8 +441,9 @@ export function MenuBar({
                             setShowAdminWorkMenu(false);
                             setShowReceivedMailDebug(true);
                           }}
-                          className="block w-full px-3 py-2 text-left text-sm text-slate-200 hover:bg-slate-800"
+                          className={menuItemClass()}
                         >
+                          <WorkflowIcon name="mail" size="sm" label="수신메일 목록" />
                           수신메일 목록(디버깅)
                         </button>
                         <button
@@ -441,8 +453,9 @@ export function MenuBar({
                             setShowAdminWorkMenu(false);
                             setShowTableDebug(true);
                           }}
-                          className="block w-full px-3 py-2 text-left text-sm text-slate-200 hover:bg-slate-800"
+                          className={menuItemClass()}
                         >
+                          <WorkflowIcon name="list" size="sm" label="테이블 조회" />
                           테이블 조회(디버깅)
                         </button>
                       </div>
@@ -456,8 +469,9 @@ export function MenuBar({
                     setShowAdminWorkMenu(false);
                     setShowThemeSettings(true);
                   }}
-                  className="block w-full px-3 py-2 text-left text-sm text-slate-200 hover:bg-slate-800"
+                  className={menuItemClass()}
                 >
+                  <WorkflowIcon name="theme" size="sm" label="화면 테마" />
                   화면 테마
                 </button>
                 <button
@@ -467,8 +481,9 @@ export function MenuBar({
                     setShowAdminWorkMenu(false);
                     setShowReleaseNotes(true);
                   }}
-                  className="block w-full px-3 py-2 text-left text-sm text-slate-200 hover:bg-slate-800"
+                  className={menuItemClass()}
                 >
+                  <WorkflowIcon name="history" size="sm" label="변경이력" />
                   변경이력
                 </button>
                 <button
@@ -478,8 +493,9 @@ export function MenuBar({
                     setShowAdminWorkMenu(false);
                     setShowAbout(true);
                   }}
-                  className="block w-full px-3 py-2 text-left text-sm text-slate-200 hover:bg-slate-800"
+                  className={menuItemClass()}
                 >
+                  <WorkflowIcon name="about" size="sm" label="About" />
                   About
                 </button>
               </div>
@@ -493,6 +509,7 @@ export function MenuBar({
             onClick={() => onNavigate("notice-board")}
             className={menuButtonClass(activeView === "notice-board")}
           >
+            <WorkflowIcon name="notice" size="sm" label="공지사항" />
             공지사항
           </button>
         </div>
@@ -509,28 +526,31 @@ export function MenuBar({
                   ? "세션 만료 전 연장 (클릭)"
                   : "세션 만료까지 남은 시간 (5분 이하일 때 연장 가능)"
               }
-              className={`rounded-md border px-2.5 py-1 font-mono text-xs transition ${
+              className={`inline-flex items-center gap-1 rounded-md border px-2.5 py-1 font-mono text-xs transition ${
                 canExtendSession
                   ? "border-amber-600/80 bg-amber-950/40 text-amber-100 hover:bg-amber-900/50 disabled:opacity-50"
                   : "cursor-default border-slate-700 text-slate-500 disabled:opacity-100"
               }`}
             >
+              <WorkflowIcon name="session" size="xs" label="세션" />
               {formatAuthSessionRemaining(sessionRemainingMs)}
             </button>
           </div>
           <button
             type="button"
             onClick={() => setShowProfileEdit(true)}
-            className="rounded-md border border-slate-700 px-3 py-1.5 text-slate-200 transition hover:bg-slate-800"
+            className="inline-flex items-center gap-1.5 rounded-md border border-slate-700 px-3 py-1.5 text-slate-200 transition hover:bg-slate-800"
             title="개인정보 수정"
           >
+            <WorkflowIcon name="owner" size="sm" label="프로필" />
             {userLabel}
           </button>
           <button
             type="button"
             onClick={() => setShowLogoutConfirm(true)}
-            className="rounded-md border border-slate-700 px-3 py-1.5 text-slate-200 transition hover:bg-slate-800"
+            className="inline-flex items-center gap-1.5 rounded-md border border-slate-700 px-3 py-1.5 text-slate-200 transition hover:bg-slate-800"
           >
+            <WorkflowIcon name="logout" size="sm" label="로그아웃" />
             로그아웃
           </button>
         </div>

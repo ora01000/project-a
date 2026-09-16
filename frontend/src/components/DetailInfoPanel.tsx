@@ -6,6 +6,7 @@ import { hasAdminAccess } from "../types/user";
 import { AgentLogsPanel } from "./AgentLogsPanel";
 import { JobMgmtTab } from "./jobs/JobMgmtTab";
 import { JobWorkflowPanel } from "./JobWorkflowPanel";
+import { WorkflowIcon, type WorkflowIconName } from "./workflow/WorkflowIcon";
 
 interface DetailInfoPanelProps {
   currentUser: AuthUser;
@@ -17,11 +18,11 @@ interface DetailInfoPanelProps {
 
 type DetailTab = "logs" | "whatap" | "workflow" | "job-mgmt";
 
-const ALL_TABS: { id: DetailTab; label: string; adminOnly?: boolean }[] = [
-  { id: "workflow", label: "작업 진행" },
-  { id: "whatap", label: "Whatap 이벤트 감지" },
-  { id: "logs", label: "대화로그" },
-  { id: "job-mgmt", label: "작업 관리" },
+const ALL_TABS: { id: DetailTab; label: string; icon: WorkflowIconName; adminOnly?: boolean }[] = [
+  { id: "workflow", label: "작업 진행", icon: "run" },
+  { id: "whatap", label: "Whatap 이벤트 감지", icon: "log" },
+  { id: "logs", label: "대화로그", icon: "chat" },
+  { id: "job-mgmt", label: "작업 관리", icon: "list" },
 ];
 
 const GENERAL_LOG_EXCLUDE_AGENT_IDS = [WHATAP_EVENT_LOG_SOURCE, "WORKFLOW_AGENT"];
@@ -148,7 +149,8 @@ export function DetailInfoPanel({
           isCollapsed ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0"
         }`}
       >
-        <span className="select-none text-xs font-semibold tracking-wide text-slate-200">
+        <span className="inline-flex select-none items-center gap-1.5 text-xs font-semibold tracking-wide text-slate-200">
+          <WorkflowIcon name="list" size="xs" />
           상세 정보
         </span>
       </button>
@@ -177,12 +179,13 @@ export function DetailInfoPanel({
                 key={tab.id}
                 type="button"
                 onClick={() => setActiveTab(tab.id)}
-                className={`shrink-0 rounded-t-md px-3 py-2 text-xs font-medium ${
+                className={`inline-flex shrink-0 items-center gap-1.5 rounded-t-md px-3 py-2 text-xs font-medium ${
                   activeTab === tab.id
                     ? "border border-b-0 border-slate-600 bg-slate-800 text-sky-200"
                     : "text-slate-400 hover:bg-slate-800/60 hover:text-slate-200"
                 }`}
               >
+                <WorkflowIcon name={tab.icon} size="xs" />
                 {tab.label}
               </button>
             ))}

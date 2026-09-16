@@ -319,7 +319,13 @@ class ExternalAxitRuntimeClient:
     async def invoke(self, request: AgentInvokeRequest) -> AgentInvokeResult:
         from backend.app.agents.base import ToolUsage
         from backend.app.db.agentruntime import resolve_agentruntime_for_invoke
+        from backend.app.infra_search_agent.definition import is_infra_search_agent_id
         from backend.app.services.axit_platform_client import AxitPlatformInvokeRequest
+
+        if is_infra_search_agent_id(request.agent_id):
+            from backend.app.infra_search_agent.agent import infra_search_agent_service
+
+            return await infra_search_agent_service.invoke(request.message)
 
         runtime_record = resolve_agentruntime_for_invoke(
             self._database_path,

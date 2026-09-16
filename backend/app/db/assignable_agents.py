@@ -11,10 +11,14 @@ from backend.app.services.agent_runtime_client import normalize_runtime_mode
 
 
 def known_assignable_agent_ids(database_path: str | Path, *, runtime_mode: str) -> set[str]:
-    if normalize_runtime_mode(runtime_mode) == "mock":
-        assignable_ids = set(AGENT_DEFINITIONS_BY_ID.keys()) | set(MOCK_PLATFORM_AGENT_IDS)
-        return assignable_ids
-    return {
+    catalog_ids = {
         catalog_agent_id(record)
         for record in list_agentruntime_records(database_path, runtime_mode=runtime_mode)
     }
+    if normalize_runtime_mode(runtime_mode) == "mock":
+        return (
+            set(AGENT_DEFINITIONS_BY_ID.keys())
+            | set(MOCK_PLATFORM_AGENT_IDS)
+            | catalog_ids
+        )
+    return catalog_ids

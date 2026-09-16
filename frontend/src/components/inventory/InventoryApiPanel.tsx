@@ -269,7 +269,10 @@ export function InventoryApiPanel({
     >
       <header className="flex shrink-0 items-center justify-between gap-2 border-b border-slate-700/80 px-4 py-3">
         <div className="min-w-0">
-          <h2 className="text-sm font-semibold text-slate-200">API 목록</h2>
+          <h2 className="inline-flex items-center gap-1.5 text-sm font-semibold text-slate-200">
+            <WorkflowIcon name="api" size="sm" />
+            API 목록
+          </h2>
           <p className="mt-0.5 truncate text-[11px] text-slate-500">{tableName}</p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
@@ -283,20 +286,22 @@ export function InventoryApiPanel({
                   beginCreate();
                 }
               }}
-              className={`rounded-md border px-3 py-1.5 text-xs font-medium ${
+              className={`inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-medium ${
                 formMode === "create"
                   ? "border-sky-500 bg-sky-900/60 text-sky-100"
                   : "border-sky-700 bg-sky-950/50 text-sky-100 hover:bg-sky-900/60"
               }`}
             >
+              <WorkflowIcon name="edit" size="xs" label="API생성" />
               API생성
             </button>
           ) : null}
           <button
             type="button"
             onClick={onClose}
-            className="rounded-md border border-slate-600 bg-slate-800/70 px-3 py-1.5 text-xs font-medium text-slate-200 hover:bg-slate-800"
+            className="inline-flex items-center gap-1.5 rounded-md border border-slate-600 bg-slate-800/70 px-3 py-1.5 text-xs font-medium text-slate-200 hover:bg-slate-800"
           >
+            <WorkflowIcon name="close" size="xs" label="닫기" />
             닫기
           </button>
         </div>
@@ -414,8 +419,9 @@ export function InventoryApiPanel({
                 <button
                   type="button"
                   onClick={resetForm}
-                  className="rounded-md border border-slate-600 px-3 py-1.5 text-xs text-slate-200 hover:bg-slate-800"
+                  className="inline-flex items-center gap-1 rounded-md border border-slate-600 px-3 py-1.5 text-xs text-slate-200 hover:bg-slate-800"
                 >
+                  <WorkflowIcon name="close" size="xs" label="취소" />
                   취소
                 </button>
                 {formEditable ? (
@@ -423,8 +429,9 @@ export function InventoryApiPanel({
                     type="button"
                     disabled={saving}
                     onClick={() => void handleSave()}
-                    className="rounded-md border border-sky-700 bg-sky-950/50 px-3 py-1.5 text-xs font-medium text-sky-100 hover:bg-sky-900/60 disabled:opacity-50"
+                    className="inline-flex items-center gap-1 rounded-md border border-sky-700 bg-sky-950/50 px-3 py-1.5 text-xs font-medium text-sky-100 hover:bg-sky-900/60 disabled:opacity-50"
                   >
+                    <WorkflowIcon name="save" size="xs" label={isCreate ? "생성" : "저장"} />
                     {saving ? "저장 중…" : isCreate ? "생성" : "저장"}
                   </button>
                 ) : null}

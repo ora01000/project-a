@@ -1,5 +1,7 @@
 import { useState, type ReactNode } from "react";
 
+import { WorkflowIcon } from "./workflow/WorkflowIcon";
+
 interface AgentNodeListPanelProps {
   children: ReactNode;
   className?: string;
@@ -77,7 +79,10 @@ export function AgentNodeListPanel({
         <div className="relative z-10 flex min-h-0 flex-1 flex-col">
           <header className="flex shrink-0 items-start justify-between gap-2 border-b border-slate-700/80 px-4 py-3">
             <div className="min-w-0">
-              <h2 className="text-sm font-semibold text-slate-200">에이전트 노드 목록</h2>
+              <h2 className="inline-flex items-center gap-1.5 text-sm font-semibold text-slate-200">
+                <WorkflowIcon name="agents" size="sm" />
+                에이전트 노드 목록
+              </h2>
               <p className="mt-0.5 text-xs text-slate-500">
                 시스템 에이전트와 할당된 일반 에이전트 노드를 확인합니다.
               </p>

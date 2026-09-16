@@ -28,7 +28,7 @@ const ENDPOINTS: Array<{ id: EndpointId; method: string; path: string; label: st
   { id: "removeInventory", method: "POST", path: "/removeInventory", label: "인벤토리 삭제" },
 ];
 
-const DEFAULT_BASE_URL = "http://inventory-api.ora01000.pe.kr:32716";
+const FALLBACK_BASE_URL = "http://inventory-api.ora01000.pe.kr:32716";
 
 async function parseError(response: Response, fallback: string): Promise<string> {
   const payload = (await response.json().catch(() => null)) as { detail?: string } | null;
@@ -44,7 +44,7 @@ function formatResult(payload: unknown): string {
 }
 
 export function InventoryApiDebugModal({ viewerRole, onClose }: InventoryApiDebugModalProps) {
-  const [baseUrl, setBaseUrl] = useState(DEFAULT_BASE_URL);
+  const [baseUrl, setBaseUrl] = useState(FALLBACK_BASE_URL);
   const [endpointId, setEndpointId] = useState<EndpointId>("getInventoryList");
   const [filename, setFilename] = useState("");
   const [tablename, setTablename] = useState("");
@@ -230,7 +230,7 @@ export function InventoryApiDebugModal({ viewerRole, onClose }: InventoryApiDebu
           value={baseUrl}
           onChange={(event) => setBaseUrl(event.target.value)}
           className="mt-1 w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 font-mono text-sm text-slate-100 focus:border-sky-600 focus:outline-none"
-          placeholder={DEFAULT_BASE_URL}
+          placeholder={FALLBACK_BASE_URL}
         />
 
         <div className="mt-4 flex flex-wrap gap-2">

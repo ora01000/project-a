@@ -12,6 +12,7 @@ import { JobIntakePanel } from "./JobIntakePanel";
 import { OpenAiBillingConfirmDialog } from "./OpenAiBillingConfirmDialog";
 import { ToolUsageList } from "./ToolUsageList";
 import { fetchLlmBillingStatus } from "../utils/llmBilling";
+import { WorkflowIcon, type WorkflowIconName } from "./workflow/WorkflowIcon";
 
 interface IntegratedChatPanelProps {
   agents: AgentInfo[];
@@ -88,9 +89,9 @@ const VISIBLE_CHAT_RESPONSE_LIMIT = 10;
 
 type TerminalContentTab = "chat" | "job-intake";
 
-const CONTENT_TABS: { id: TerminalContentTab; label: string }[] = [
-  { id: "chat", label: "대화창" },
-  { id: "job-intake", label: "작업접수" },
+const CONTENT_TABS: { id: TerminalContentTab; label: string; icon: WorkflowIconName }[] = [
+  { id: "chat", label: "대화창", icon: "chat" },
+  { id: "job-intake", label: "작업접수", icon: "upload" },
 ];
 
 function keepRecentResponses(entries: IntegratedChatResponse[]): IntegratedChatResponse[] {
@@ -697,7 +698,10 @@ export function IntegratedChatPanel({
       >
       <header className="flex h-[100px] shrink-0 items-center justify-between border-b border-slate-700 px-4">
         <div className="min-w-0">
-          <h2 className="text-lg font-semibold text-slate-100">대화형 터미널</h2>
+          <h2 className="inline-flex items-center gap-1.5 text-lg font-semibold text-slate-100">
+            <WorkflowIcon name="chat" size="md" />
+            대화형 터미널
+          </h2>
           <p className="mt-1 text-sm text-slate-400">에이전트를 선택해 메시지를 전송하세요.</p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
@@ -716,8 +720,9 @@ export function IntegratedChatPanel({
             type="button"
             onClick={onToggleFullscreen}
             title={isFullscreen ? "원복" : "전체화면"}
-            className="rounded-md border border-slate-600 px-3 py-1.5 text-sm text-slate-200 hover:bg-slate-800"
+            className="inline-flex items-center gap-1.5 rounded-md border border-slate-600 px-3 py-1.5 text-sm text-slate-200 hover:bg-slate-800"
           >
+            <WorkflowIcon name="fullscreen" size="sm" label={isFullscreen ? "원복" : "전체화면"} />
             {isFullscreen ? "원복" : "전체화면"}
           </button>
         </div>
@@ -730,12 +735,13 @@ export function IntegratedChatPanel({
               key={tab.id}
               type="button"
               onClick={() => setContentTab(tab.id)}
-              className={`shrink-0 rounded-t-md px-3 py-2 text-xs font-medium ${
+              className={`inline-flex shrink-0 items-center gap-1.5 rounded-t-md px-3 py-2 text-xs font-medium ${
                 contentTab === tab.id
                   ? "border border-b-0 border-slate-600 bg-slate-800 text-sky-200"
                   : "text-slate-400 hover:bg-slate-800/60 hover:text-slate-200"
               }`}
             >
+              <WorkflowIcon name={tab.icon} size="xs" />
               {tab.label}
             </button>
           ))}
@@ -751,8 +757,9 @@ export function IntegratedChatPanel({
                   onClick={handleResetSession}
                   disabled={isLoading}
                   title="에이전트 호출 세션 UUID를 새로 생성합니다"
-                  className="shrink-0 rounded-md border border-slate-600 px-2 py-1 text-xs text-slate-200 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="inline-flex shrink-0 items-center gap-1 rounded-md border border-slate-600 px-2 py-1 text-xs text-slate-200 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
                 >
+                  <WorkflowIcon name="refresh" size="xs" label="세션 초기화" />
                   세션 초기화
                 </button>
               </div>
@@ -946,8 +953,9 @@ export function IntegratedChatPanel({
               <button
                 type="submit"
                 disabled={isDisabled || !input.trim()}
-                className="self-stretch rounded-md bg-sky-600 px-3 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-slate-700"
+                className="inline-flex items-center gap-1.5 self-stretch rounded-md bg-sky-600 px-3 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-slate-700"
               >
+                <WorkflowIcon name="send" size="sm" label="전송" />
                 전송
               </button>
             )}

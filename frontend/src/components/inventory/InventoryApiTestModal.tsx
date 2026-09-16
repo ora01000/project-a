@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import type { InventoryApiItem } from "../../types/inventory";
+import { WorkflowIcon } from "../workflow/WorkflowIcon";
 
 interface InventoryApiTestModalProps {
   api: InventoryApiItem;
@@ -136,8 +137,9 @@ export function InventoryApiTestModal({ api, onClose }: InventoryApiTestModalPro
           <button
             type="button"
             onClick={onClose}
-            className="shrink-0 rounded-md border border-slate-600 px-3 py-1.5 text-sm text-slate-200 hover:bg-slate-800"
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-slate-600 px-3 py-1.5 text-sm text-slate-200 hover:bg-slate-800"
           >
+            <WorkflowIcon name="close" size="sm" label="닫기" />
             닫기
           </button>
         </header>
@@ -168,8 +170,9 @@ export function InventoryApiTestModal({ api, onClose }: InventoryApiTestModalPro
                 type="button"
                 disabled={running || paramNames.length === 0}
                 onClick={() => void handleRun()}
-                className="rounded-md border border-sky-700 bg-sky-950/50 px-4 py-2 text-sm font-medium text-sky-100 hover:bg-sky-900/60 disabled:cursor-not-allowed disabled:opacity-50"
+                className="inline-flex items-center gap-1.5 rounded-md border border-sky-700 bg-sky-950/50 px-4 py-2 text-sm font-medium text-sky-100 hover:bg-sky-900/60 disabled:cursor-not-allowed disabled:opacity-50"
               >
+                <WorkflowIcon name="run" size="sm" label="실행" />
                 {running ? "실행 중…" : "실행"}
               </button>
             </div>
