@@ -10,12 +10,18 @@ import math
 import re
 import shutil
 import subprocess
+from functools import lru_cache
+from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
 FENCE_PATTERN = re.compile(r"```([^\n`]*)\r?\n(.*?)```", re.DOTALL)
 _PLAIN_DIAGRAM_PLACEHOLDER = "[FossFLOW 다이어그램]"
+_ICON_DATA_URI_RE = re.compile(
+    r'(?:href|xlink:href)="(data:image/(?:svg\+xml|png);base64,[A-Za-z0-9+/=]+)"'
+)
+_ICONS_PATH = Path(__file__).with_name("fossflow_icons.json")
 
 UNPROJECTED_TILE_SIZE = 100
 PROJECTED_TILE = (UNPROJECTED_TILE_SIZE * 1.415, UNPROJECTED_TILE_SIZE * 0.819)
@@ -31,6 +37,29 @@ LABEL_MAX_WIDTH = 250
 GRID_PADDING_TILES = 3
 PADDING = 48
 FONT_FAMILY = "Roboto, Arial, sans-serif"
+
+
+@lru_cache(maxsize=1)
+def _load_icon_catalog() -> tuple[dict[str, str], dict[str, str]]:
+    try:
+        payload = json.loads(_ICONS_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        logger.exception("Failed to load FossFLOW icon catalog from %s", _ICONS_PATH)
+        return {}, {}
+    by_id = payload.get("byId") if isinstance(payload, dict) else None
+    by_name = payload.get("byName") if isinstance(payload, dict) else None
+    return (
+        by_id if isinstance(by_id, dict) else {},
+        by_name if isinstance(by_name, dict) else {},
+    )
+
+
+def lookup_fossflow_icon_url(icon_ref: str) -> str:
+    ref = (icon_ref or "").strip()
+    if not ref:
+        return ""
+    by_id, by_name = _load_icon_catalog()
+    return by_id.get(ref) or by_name.get(ref) or ""
 
 
 def is_fossflow_compact(value: Any) -> bool:
@@ -200,10 +229,14 @@ def compact_to_scene(model: dict[str, Any]) -> dict[str, Any]:
     for index, item in enumerate(items):
         if not isinstance(item, list):
             continue
+        icon_ref = str(item[1] if len(item) > 1 and item[1] else "block")
+        icon_url = lookup_fossflow_icon_url(icon_ref) or lookup_fossflow_icon_url("block")
         nodes.append(
             {
                 "index": index,
                 "name": str(item[0] if item else ""),
+                "icon": icon_ref,
+                "icon_url": icon_url,
                 "description": str(item[2] if len(item) > 2 else ""),
                 "tile": tile_by_index.get(index, {"x": 0.0, "y": 0.0}),
             }
@@ -359,10 +392,20 @@ def render_fossflow_svg(model: dict[str, Any]) -> str:
         bottom = layout["bottom"]
         x = bottom[0] + ox
         y = bottom[1] + oy
-        image = (
-            f'<polygon points="{x},{layout["icon_y"] + oy} {x + ICON_WIDTH / 2},{y - ICON_HEIGHT / 2} '
-            f'{x},{y} {x - ICON_WIDTH / 2},{y - ICON_HEIGHT / 2}" fill="#93c5fd" stroke="#64748b" />'
-        )
+        icon_url = layout["node"].get("icon_url") or ""
+        if icon_url:
+            escaped_url = _escape(icon_url)
+            image = (
+                f'<image href="{escaped_url}" xlink:href="{escaped_url}" '
+                f'x="{layout["icon_x"] + ox}" y="{layout["icon_y"] + oy}" '
+                f'width="{ICON_WIDTH}" height="{ICON_HEIGHT}" '
+                'preserveAspectRatio="xMidYMid meet" />'
+            )
+        else:
+            image = (
+                f'<polygon points="{x},{layout["icon_y"] + oy} {x + ICON_WIDTH / 2},{y - ICON_HEIGHT / 2} '
+                f'{x},{y} {x - ICON_WIDTH / 2},{y - ICON_HEIGHT / 2}" fill="#93c5fd" stroke="#64748b" />'
+            )
         name_lines = layout["name_lines"]
         desc_lines = layout["desc_lines"]
         if not name_lines and not desc_lines:
@@ -397,7 +440,8 @@ def render_fossflow_svg(model: dict[str, Any]) -> str:
         nodes_svg.append(f"<g>{stem}{card}{''.join(texts)}{image}</g>")
 
     return (
-        f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">'
+        f'<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" '
+        f'width="{width}" height="{height}" viewBox="0 0 {width} {height}">'
         f'<rect width="100%" height="100%" fill="{DIAGRAM_BG}"/>'
         f'<g pointer-events="none">{"".join(diamonds)}</g>'
         f'{"".join(connectors_svg)}'
@@ -406,13 +450,22 @@ def render_fossflow_svg(model: dict[str, Any]) -> str:
     )
 
 
-def _svg_to_png(svg_bytes: bytes) -> bytes | None:
-    rsvg = shutil.which("rsvg-convert")
+def _rsvg_bin() -> str | None:
+    return shutil.which("rsvg-convert")
+
+
+def _svg_to_png(svg_bytes: bytes, *, width: int | None = None, height: int | None = None) -> bytes | None:
+    rsvg = _rsvg_bin()
     if rsvg is None:
         return None
+    cmd = [rsvg, "-f", "png"]
+    if width is not None:
+        cmd.extend(["-w", str(width)])
+    if height is not None:
+        cmd.extend(["-h", str(height)])
     try:
         completed = subprocess.run(
-            [rsvg, "-f", "png"],
+            cmd,
             input=svg_bytes,
             check=True,
             capture_output=True,
@@ -425,17 +478,61 @@ def _svg_to_png(svg_bytes: bytes) -> bytes | None:
     return completed.stdout or None
 
 
+def _decode_data_uri(data_uri: str) -> tuple[str, bytes] | None:
+    if not data_uri.startswith("data:") or ";base64," not in data_uri:
+        return None
+    header, _, encoded = data_uri.partition(";base64,")
+    mime = header[5:] if header.startswith("data:") else header
+    try:
+        return mime, base64.standard_b64decode(encoded)
+    except Exception:
+        return None
+
+
+def _embed_icons_as_png_data_uris(svg_text: str) -> str:
+    """Rasterize embedded SVG icons to PNG data URIs so rsvg-convert can paint them."""
+    if _rsvg_bin() is None:
+        return svg_text
+    cache: dict[str, str] = {}
+    replacements: dict[str, str] = {}
+    for match in _ICON_DATA_URI_RE.finditer(svg_text):
+        uri = match.group(1)
+        if uri in replacements or not uri.startswith("data:image/svg+xml;base64,"):
+            continue
+        if uri not in cache:
+            decoded = _decode_data_uri(uri)
+            if not decoded:
+                continue
+            _mime, svg_bytes = decoded
+            # Match diagram icon footprint closely for sharp rasterization.
+            png_bytes = _svg_to_png(
+                svg_bytes,
+                width=max(1, int(round(ICON_WIDTH * 2))),
+                height=max(1, int(round(ICON_HEIGHT * 2))),
+            )
+            if not png_bytes:
+                continue
+            cache[uri] = "data:image/png;base64," + base64.standard_b64encode(png_bytes).decode("ascii")
+        replacements[uri] = cache[uri]
+    if not replacements:
+        return svg_text
+    updated = svg_text
+    for old, new in replacements.items():
+        updated = updated.replace(old, new)
+    return updated
+
+
 def render_fossflow_diagram_image(model: dict[str, Any]) -> tuple[bytes, str] | None:
     try:
         svg_text = render_fossflow_svg(model)
     except Exception:
         logger.exception("FossFLOW SVG render failed")
         return None
-    svg_bytes = svg_text.encode("utf-8")
-    png_bytes = _svg_to_png(svg_bytes)
+    svg_for_png = _embed_icons_as_png_data_uris(svg_text)
+    png_bytes = _svg_to_png(svg_for_png.encode("utf-8"))
     if png_bytes:
         return png_bytes, "png"
-    return svg_bytes, "svg+xml"
+    return svg_text.encode("utf-8"), "svg+xml"
 
 
 def _image_html(data: bytes, mime_subtype: str) -> str:

@@ -24,7 +24,10 @@ from backend.app.db.received_mail import (
 )
 from backend.app.job_decision_agent.settings import STATIC_CONFIG, build_system_prompt
 from backend.app.services.agent_runtime_client import normalize_runtime_mode
-from backend.app.services.received_mail_attachments import resolve_attachment_file
+from backend.app.services.received_mail_attachments import (
+    is_ignored_attachment_filename,
+    resolve_attachment_file,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -157,10 +160,16 @@ def build_mail_decision_message(
         parts.append("(none)")
 
     if record.unreadable_attachment_names:
-        parts.append("=== unreadable attachments (office/binary; treat as insufficient for type 10) ===")
-        for name in record.unreadable_attachment_names:
-            parts.append(f"- {name}")
-        parts.append("")
+        relevant = [
+            name
+            for name in record.unreadable_attachment_names
+            if name and not is_ignored_attachment_filename(name)
+        ]
+        if relevant:
+            parts.append("=== unreadable attachments (non-text; prefer type 5 over 10) ===")
+            for name in relevant:
+                parts.append(f"- {name}")
+            parts.append("")
 
     return "\n".join(parts), record.uuid
 

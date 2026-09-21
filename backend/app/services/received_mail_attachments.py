@@ -7,7 +7,7 @@ from pathlib import Path
 
 from backend.app.config import load_received_mail_settings
 
-# Text-readable attachments only. Office/binary types are rejected as unreadable.
+# Text-readable attachments only. Office/images are ignored (not stored, not decided on).
 ALLOWED_ATTACHMENT_EXTENSIONS = frozenset(
     {
         ".crt",
@@ -49,6 +49,23 @@ OFFICE_ATTACHMENT_EXTENSIONS = frozenset(
     }
 )
 
+IMAGE_ATTACHMENT_EXTENSIONS = frozenset(
+    {
+        ".png",
+        ".jpg",
+        ".jpeg",
+        ".gif",
+        ".bmp",
+        ".webp",
+        ".tif",
+        ".tiff",
+        ".svg",
+        ".ico",
+        ".heic",
+        ".heif",
+    }
+)
+
 _UNSAFE_NAME = re.compile(r"[^\w.\-()+@]+", re.UNICODE)
 
 
@@ -65,7 +82,19 @@ def is_office_attachment_filename(filename: str) -> bool:
     return suffix in OFFICE_ATTACHMENT_EXTENSIONS
 
 
+def is_image_attachment_filename(filename: str) -> bool:
+    suffix = Path(filename or "").suffix.lower()
+    return suffix in IMAGE_ATTACHMENT_EXTENSIONS
+
+
+def is_ignored_attachment_filename(filename: str) -> bool:
+    """Office docs and images: do not store and do not feed into job_decision."""
+    return is_office_attachment_filename(filename) or is_image_attachment_filename(filename)
+
+
 def is_unreadable_attachment_filename(filename: str) -> bool:
+    if is_ignored_attachment_filename(filename):
+        return False
     return not is_allowed_attachment_filename(filename)
 
 

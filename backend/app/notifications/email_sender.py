@@ -104,16 +104,19 @@ def convert_markdown_to_html(markdown_text: str) -> str:
         "<head>\n"
         '<meta charset="utf-8">\n'
         "<style>\n"
+        "html, body { margin: 0; padding: 0; border: 0; outline: none; box-shadow: none; "
+        "background: transparent; }\n"
         "body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; "
-        "line-height: 1.6; color: #1e293b; padding: 16px; }\n"
-        "pre { background: #f1f5f9; padding: 12px; border-radius: 6px; overflow-x: auto; }\n"
-        "code { background: #f1f5f9; padding: 2px 4px; border-radius: 3px; font-size: 0.9em; }\n"
-        "table { border-collapse: collapse; margin: 12px 0; }\n"
+        "line-height: 1.6; color: #1e293b; }\n"
+        "pre { background: #f1f5f9; padding: 12px; border: 0; border-radius: 0; overflow-x: auto; }\n"
+        "code { background: #f1f5f9; padding: 2px 4px; border: 0; border-radius: 0; font-size: 0.9em; }\n"
+        "table { border-collapse: collapse; margin: 12px 0; border: 0; }\n"
         "th, td { border: 1px solid #cbd5e1; padding: 8px 12px; text-align: left; }\n"
         "th { background: #f8fafc; }\n"
         "h1, h2, h3 { color: #0f172a; }\n"
-        "blockquote { border-left: 4px solid #94a3b8; margin: 0; padding-left: 12px; color: #475569; }\n"
-        "img { max-width: 100%; height: auto; }\n"
+        "blockquote { margin: 0; padding: 0; border: 0; border-left: 0; color: #475569; }\n"
+        "hr { border: 0; border-top: 1px solid #e2e8f0; margin: 16px 0; }\n"
+        "img { max-width: 100%; height: auto; border: 0; outline: none; }\n"
         "</style>\n"
         "</head>\n"
         f"<body>\n{rendered}\n</body>\n"
@@ -145,9 +148,11 @@ def _send_email_sync(
     if bcc_list:
         message["Bcc"] = ", ".join(bcc_list)
     message["Subject"] = subject
-    message.set_content(body)
     if html_body:
-        message.add_alternative(html_body, subtype="html")
+        # HTML only: some gateways keep the first/plain part and drop the HTML alternative.
+        message.set_content(html_body, subtype="html", charset="utf-8")
+    else:
+        message.set_content(body)
 
     delivery_targets = list(dict.fromkeys([*to_addresses, *cc_list, *bcc_list]))
 

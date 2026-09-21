@@ -23,6 +23,7 @@ import {
   startAuthSession,
   userFromAuthResponse,
 } from "./utils/authSession";
+import { clearClientSessionMemory } from "./utils/sessionMemory";
 
 type ShellView = "dashboard" | "workflow" | "inventory";
 
@@ -82,8 +83,8 @@ export default function App() {
     setUser(updatedUser);
   }, []);
 
-  const handleLogout = useCallback(() => {
-    void logoutSession();
+  const resetToLoggedOut = useCallback(() => {
+    clearClientSessionMemory();
     setUser(null);
     setShellView("dashboard");
     setActiveView("dashboard");
@@ -92,18 +93,18 @@ export default function App() {
     setIntegratedChatFullscreen(false);
   }, []);
 
+  const handleLogout = useCallback(() => {
+    void logoutSession();
+    resetToLoggedOut();
+  }, [resetToLoggedOut]);
+
   useEffect(() => {
     setUnauthorizedHandler(() => {
       clearAuthUser();
-      setUser(null);
-      setShellView("dashboard");
-      setActiveView("dashboard");
-      setAgents([]);
-      setError(null);
-      setIntegratedChatFullscreen(false);
+      resetToLoggedOut();
     });
     return () => setUnauthorizedHandler(null);
-  }, []);
+  }, [resetToLoggedOut]);
 
   useEffect(() => {
     const token = getAccessToken();

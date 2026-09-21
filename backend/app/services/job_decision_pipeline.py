@@ -23,12 +23,22 @@ from backend.app.db.roles import ROLE_ADMIN
 from backend.app.db.users import list_users
 from backend.app.job_decision_agent.agent import ParsedDecision, job_decision_agent_service
 from backend.app.notifications.email_sender import send_job_supplement_request_email
+from backend.app.services.received_mail_attachments import is_ignored_attachment_filename
 
 logger = logging.getLogger(__name__)
 
 UNKNOWN_DEPART = "확인 불가"
 MAIL_TEAM_ID = "mail"
 MAIL_CHANNEL_ID = "received_mail"
+
+
+def relevant_unreadable_attachment_names(record: ReceivedMailRecord) -> list[str]:
+    """Names that still affect decision (excludes Office/images, which are ignored)."""
+    return [
+        name
+        for name in (record.unreadable_attachment_names or [])
+        if name and not is_ignored_attachment_filename(name)
+    ]
 
 
 def extract_sender_email(from_address: str) -> str:
@@ -62,8 +72,9 @@ def build_job_content(record: ReceivedMailRecord, parsed: ParsedDecision) -> str
     ]
     if parsed.missing:
         lines.append("missing: " + ", ".join(parsed.missing))
-    if record.unreadable_attachment_names:
-        lines.append("unreadable_attachments: " + ", ".join(record.unreadable_attachment_names))
+    unreadable = relevant_unreadable_attachment_names(record)
+    if unreadable:
+        lines.append("unreadable_attachments: " + ", ".join(unreadable))
     return "\n".join(lines)
 
 
@@ -115,10 +126,9 @@ def resolve_supplement_reply_body(parsed: ParsedDecision, record: ReceivedMailRe
         return parsed.operator_ko
     lines = ["작업 처리를 위해 아래 정보가 추가로 필요합니다."]
     missing = list(parsed.missing)
-    if record.unreadable_attachment_names:
-        missing.extend(
+    for name in relevant_unreadable_attachment_names(record):
+        missing.append(
             f"텍스트로 읽을 수 없는 첨부({name}) — 텍스트 파일로 다시 보내 주세요"
-            for name in record.unreadable_attachment_names
         )
     if missing:
         lines.append("")
@@ -134,20 +144,21 @@ def apply_unreadable_attachment_rule(
     record: ReceivedMailRecord,
     parsed: ParsedDecision,
 ) -> tuple[int, ParsedDecision]:
-    if not record.unreadable_attachment_names:
+    unreadable = relevant_unreadable_attachment_names(record)
+    if not unreadable:
         return decision_type, parsed
     if decision_type == DECISION_TYPE_NON_JOB:
         return decision_type, parsed
     missing = list(parsed.missing)
-    for name in record.unreadable_attachment_names:
+    for name in unreadable:
         note = f"unreadable attachment: {name}"
         if note not in missing:
             missing.append(note)
     reply = parsed.reply_ko
     if not reply:
-        names = ", ".join(record.unreadable_attachment_names)
+        names = ", ".join(unreadable)
         reply = (
-            "첨부 파일이 Office 문서이거나 텍스트로 읽을 수 없습니다. "
+            "첨부 파일을 텍스트로 읽을 수 없습니다. "
             f"다음 파일을 텍스트 형식(.txt, .csv 등)으로 다시 보내 주세요: {names}"
         )
     updated = ParsedDecision(
@@ -155,7 +166,7 @@ def apply_unreadable_attachment_rule(
         infra=parsed.infra,
         job_kind=parsed.job_kind,
         missing=missing,
-        summary=parsed.summary or "Unreadable or Office attachments present",
+        summary=parsed.summary or "Unreadable attachments present",
         reply_ko=reply,
         operator_ko=parsed.operator_ko,
     )

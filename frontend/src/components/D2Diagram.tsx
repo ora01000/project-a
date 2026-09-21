@@ -6,6 +6,11 @@ import { normalizeD2Definition } from "../utils/d2Normalize";
 const D2_RENDER_CONFIG_VERSION = "v3-normalize-styles";
 const renderedSvgCache = new Map<string, string>();
 
+/** Drop module-level SVG cache (e.g. on logout) so large strings become GC-eligible. */
+export function clearD2SvgCache(): void {
+  renderedSvgCache.clear();
+}
+
 const ZOOM_MIN = 0.5;
 const ZOOM_MAX = 2;
 const ZOOM_STEP = 0.1;

@@ -6,6 +6,11 @@ let mermaidInitialized = false;
 const MERMAID_RENDER_CONFIG_VERSION = "wrap-v1";
 const renderedSvgCache = new Map<string, string>();
 
+/** Drop module-level SVG cache (e.g. on logout) so large strings become GC-eligible. */
+export function clearMermaidSvgCache(): void {
+  renderedSvgCache.clear();
+}
+
 const ZOOM_MIN = 0.5;
 const ZOOM_MAX = 2;
 const ZOOM_STEP = 0.1;

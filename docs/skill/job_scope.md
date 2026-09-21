@@ -16,6 +16,9 @@
   3. Ansible playbook or AWX
   4. vSphere VM, NSX
   5. Infra type not named explicitly, but the mail is a request/inquiry about infra service location, architecture, or Ansible playbook creation
+- Do **not** use type 11 for **simple inventory lookup** (IP / hostname / owner / operator, no CUD) — that is `decision_type = 10` (§3), for jobs + `INFRA_SEARCH_AGENT` handling
+
+
 
 ### 2. Criteria for decision_type = 5
 
@@ -27,19 +30,30 @@ For requests for configuration info, architecture analysis, or current-state inv
 
 ##### 2.1.1. Kubernetes
 
-- cluster name | namespace (project) name | deploy name | project display name
+- No additional minimums If you got a request for capabilities of tools
+- cluster name is required if not
+
+
 
 ##### 2.1.2. KubeVirt
 
-- cluster name | namespace (project) name | deploy name | project display name | VM name
+- No additional minimums If you got a request for capabilities of tools
+- cluster name is required if not
+
+
 
 ##### 2.1.3. Ansible / AWX
 
 - No additional minimums for Ansible/AWX
 
+
+
 ##### 2.1.4. vSphere VM, NSX
 
-- VM name | hostname | system code embedded in hostname (typically 4 lowercase letters) | IP address
+- No additional minimums If you got a request for capabilities of tools
+- Datacenter is required if not
+
+
 
 #### 2.2. CUD (change / create / delete)
 
@@ -76,16 +90,28 @@ RoleBinding, Group/Users (OKD only), Namespace (Project), Deployments (Deploymen
 - **Route/Ingress certificate renew** (OKD: Route only)
   - Certificate material and apply time
 
+
+
 ##### 2.2.2. KubeVirt
 
 - Includes 2.2.1
 - Target VM identity plus resource kinds and capacities to change
+
+
 
 ##### 2.2.3. vSphere
 
 - Target VM and resources to change (CPU/MEM/DISK)
 - VM identity for Power On/Off/restart (VM state/phase change)
 
+
+
 ### 3. Criteria for decision_type = 10
 
 - Does not match 1 or 2 above (in scope **and** minimum information is present)
+- **Simple inventory lookup** (inventory / `INFRA_SEARCH_AGENT` style) — classify as `decision_type = 10`:
+  - Questions answerable by querying inventory tables (e.g. IP, hostname, owner, operator / 담당자·운영자)
+  - Queries that do **not** include CUD (create / update / delete / change) work
+  - Prefer `10` for these (not `11` or `5`); they enter the jobs pipeline for inventory-search handling
+  - Differs from §2.1 Read: §2.1 is non-destructive infra **config/architecture** analysis with per-type minimum IDs; §3 inventory lookup is table-backed Q&A without CUD
+

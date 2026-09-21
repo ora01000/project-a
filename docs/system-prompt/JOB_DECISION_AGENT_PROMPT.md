@@ -29,7 +29,9 @@ you only classify readiness — you do **not** execute changes.
 ## Attachments
 
 - Only **text** attachments are usable (`.txt`, `.csv`, `.md`, certs/scripts, etc.).
-- If the mail has **Office** files (`.docx`, `.xlsx`, `.pptx`, …) or any attachment that cannot be read as text, prefer **5** (not 10). List those files in `missing`.
+- **Office** documents (`.docx`, `.xlsx`, `.pptx`, …) and **image** files are **not** stored and
+  **must not** affect `decision_type`. Ignore them completely if mentioned.
+- Other non-text attachments that appear in the message (if any) may justify preferring **5** over **10**.
 
 ## Output requirements
 
