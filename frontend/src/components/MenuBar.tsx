@@ -11,7 +11,7 @@ import {
   getAuthSessionRemainingMs,
   SESSION_EXTEND_THRESHOLD_MS,
 } from "../utils/authSession";
-import { formatCurrentTime } from "../utils/datetime";
+import { formatHeaderClock } from "../utils/datetime";
 import { AboutModal } from "./AboutModal";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { MockLlmSelectModal } from "./admin/MockLlmSelectModal";
@@ -26,6 +26,7 @@ import { ProfileEditModal } from "./ProfileEditModal";
 import { ReleaseNotesModal } from "./ReleaseNotesModal";
 import { TableDebugModal } from "./TableDebugModal";
 import { ThemeSettingsModal } from "./ThemeSettingsModal";
+import { MonitorAreaOverlay, type MonitorAreaPreset } from "./admin/MonitorAreaOverlay";
 import { WorkflowIcon } from "./workflow/WorkflowIcon";
 
 interface MenuBarProps {
@@ -60,7 +61,7 @@ export function MenuBar({
   onLogout,
   onUserUpdated,
 }: MenuBarProps) {
-  const [currentTime, setCurrentTime] = useState(formatCurrentTime(new Date()));
+  const [currentTime, setCurrentTime] = useState(() => formatHeaderClock(new Date()));
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [sessionRemainingMs, setSessionRemainingMs] = useState(() => getAuthSessionRemainingMs());
   const [isExtendingSession, setIsExtendingSession] = useState(false);
@@ -84,16 +85,21 @@ export function MenuBar({
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showSettingsMenu, setShowSettingsMenu] = useState(false);
   const [showAdminWorkMenu, setShowAdminWorkMenu] = useState(false);
+  const [showAccountMenu, setShowAccountMenu] = useState(false);
+  const [showMonitorAreaMenu, setShowMonitorAreaMenu] = useState(false);
+  const [monitorAreaPreset, setMonitorAreaPreset] = useState<MonitorAreaPreset | null>(null);
   const agentMenuRef = useRef<HTMLDivElement>(null);
   const userMenuRef = useRef<HTMLDivElement>(null);
   const settingsMenuRef = useRef<HTMLDivElement>(null);
+  const adminWorkMenuRef = useRef<HTMLDivElement>(null);
+  const accountMenuRef = useRef<HTMLDivElement>(null);
   const userLabel = formatUserLabel(user);
   const isAdmin = hasAdminAccess(user.role);
   const isMockRuntime = runtimeMode === "mock" || runtimeMode === "local";
 
   useEffect(() => {
     const timer = window.setInterval(() => {
-      setCurrentTime(formatCurrentTime(new Date()));
+      setCurrentTime(formatHeaderClock(new Date()));
       setSessionRemainingMs(getAuthSessionRemainingMs());
     }, 1000);
     return () => window.clearInterval(timer);
@@ -155,7 +161,13 @@ export function MenuBar({
       }
       if (!settingsMenuRef.current?.contains(event.target as Node)) {
         setShowSettingsMenu(false);
+      }
+      if (!adminWorkMenuRef.current?.contains(event.target as Node)) {
         setShowAdminWorkMenu(false);
+        setShowMonitorAreaMenu(false);
+      }
+      if (!accountMenuRef.current?.contains(event.target as Node)) {
+        setShowAccountMenu(false);
       }
     };
     window.addEventListener("mousedown", handleClickOutside);
@@ -292,193 +304,36 @@ export function MenuBar({
             <button
               type="button"
               onClick={() => {
-                setShowSettingsMenu((current) => {
-                  const next = !current;
-                  if (!next) {
-                    setShowAdminWorkMenu(false);
-                  }
-                  return next;
-                });
+                setShowSettingsMenu((current) => !current);
+                setShowAdminWorkMenu(false);
+                setShowAgentMenu(false);
+                setShowUserMenu(false);
+                setShowAccountMenu(false);
               }}
               className={menuButtonClass(
-                showAbout ||
-                  showReleaseNotes ||
-                  showTableDebug ||
-                  showPostmanDebug ||
-                  showMockLlmSelect ||
-                  showWhatapEventTest ||
-                  showInventoryApiDebug ||
-                  showK8sInfraConfig ||
-                  showMailServerConfig ||
-                  showMailTest ||
-                  showReceivedMailDebug ||
-                  showThemeSettings,
+                activeView === "notice-board" || showAbout || showReleaseNotes,
               )}
             >
-              <WorkflowIcon name="settings" size="sm" label="환경설정" />
-              환경설정 ▾
+              <WorkflowIcon name="about" size="sm" label="정보" />
+              정보 ▾
             </button>
             {showSettingsMenu ? (
-              <div className="absolute left-0 top-full z-20 mt-1 min-w-[180px] rounded-md border border-slate-700 bg-slate-900 py-1 shadow-lg">
-                {isAdmin ? (
-                  <div className="relative">
-                    <button
-                      type="button"
-                      onClick={() => setShowAdminWorkMenu((current) => !current)}
-                      className={`flex w-full items-center justify-between px-3 py-2 text-left text-sm ${
-                        showAdminWorkMenu ||
-                        showTableDebug ||
-                        showPostmanDebug ||
-                        showMockLlmSelect ||
-                        showWhatapEventTest ||
-                        showInventoryApiDebug ||
-                        showK8sInfraConfig ||
-                        showMailServerConfig ||
-                        showMailTest ||
-                        showReceivedMailDebug
-                          ? "bg-slate-800 text-sky-200"
-                          : "text-slate-200 hover:bg-slate-800"
-                      }`}
-                    >
-                      <span className="inline-flex items-center gap-1.5">
-                        <WorkflowIcon name="settings" size="sm" label="관리자 작업" />
-                        관리자 작업
-                      </span>
-                      <span className="text-slate-500">▸</span>
-                    </button>
-                    {showAdminWorkMenu ? (
-                      <div className="absolute left-full top-0 z-30 ml-1 min-w-[200px] rounded-md border border-slate-700 bg-slate-900 py-1 shadow-lg">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setShowSettingsMenu(false);
-                            setShowAdminWorkMenu(false);
-                            setShowPostmanDebug(true);
-                          }}
-                          className={menuItemClass()}
-                        >
-                          <WorkflowIcon name="api" size="sm" label="postman" />
-                          postman
-                        </button>
-                        {isMockRuntime ? (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setShowSettingsMenu(false);
-                              setShowAdminWorkMenu(false);
-                              setShowMockLlmSelect(true);
-                            }}
-                            className={menuItemClass()}
-                          >
-                            <WorkflowIcon name="ai" size="sm" label="LLM 변경" />
-                            (목업)LLM 변경
-                          </button>
-                        ) : null}
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setShowSettingsMenu(false);
-                            setShowAdminWorkMenu(false);
-                            setShowWhatapEventTest(true);
-                          }}
-                          className={menuItemClass()}
-                        >
-                          <WorkflowIcon name="log" size="sm" label="Whatap 이벤트 테스트" />
-                          Whatap 이벤트 테스트
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setShowSettingsMenu(false);
-                            setShowAdminWorkMenu(false);
-                            setShowInventoryApiDebug(true);
-                          }}
-                          className={menuItemClass()}
-                        >
-                          <WorkflowIcon name="api" size="sm" label="인벤토리 정보조회" />
-                          인벤토리 정보조회(디버깅)
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setShowSettingsMenu(false);
-                            setShowAdminWorkMenu(false);
-                            setShowK8sInfraConfig(true);
-                          }}
-                          className={menuItemClass()}
-                        >
-                          <WorkflowIcon name="nodes" size="sm" label="인프라 구성" />
-                          인프라 구성
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setShowSettingsMenu(false);
-                            setShowAdminWorkMenu(false);
-                            setShowMailServerConfig(true);
-                          }}
-                          className={menuItemClass()}
-                        >
-                          <WorkflowIcon name="mail" size="sm" label="메일 서버 설정" />
-                          메일 서버 설정
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setShowSettingsMenu(false);
-                            setShowAdminWorkMenu(false);
-                            setShowMailTest(true);
-                          }}
-                          className={menuItemClass()}
-                        >
-                          <WorkflowIcon name="send" size="sm" label="테스트 메일 발송" />
-                          테스트 메일 발송(디버깅)
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setShowSettingsMenu(false);
-                            setShowAdminWorkMenu(false);
-                            setShowReceivedMailDebug(true);
-                          }}
-                          className={menuItemClass()}
-                        >
-                          <WorkflowIcon name="mail" size="sm" label="수신메일 목록" />
-                          수신메일 목록(디버깅)
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setShowSettingsMenu(false);
-                            setShowAdminWorkMenu(false);
-                            setShowTableDebug(true);
-                          }}
-                          className={menuItemClass()}
-                        >
-                          <WorkflowIcon name="list" size="sm" label="테이블 조회" />
-                          테이블 조회(디버깅)
-                        </button>
-                      </div>
-                    ) : null}
-                  </div>
-                ) : null}
+              <div className="absolute left-0 top-full z-20 mt-1 min-w-[160px] rounded-md border border-slate-700 bg-slate-900 py-1 shadow-lg">
                 <button
                   type="button"
                   onClick={() => {
                     setShowSettingsMenu(false);
-                    setShowAdminWorkMenu(false);
-                    setShowThemeSettings(true);
+                    onNavigate("notice-board");
                   }}
-                  className={menuItemClass()}
+                  className={menuItemClass(activeView === "notice-board")}
                 >
-                  <WorkflowIcon name="theme" size="sm" label="화면 테마" />
-                  화면 테마
+                  <WorkflowIcon name="notice" size="sm" label="공지사항" />
+                  공지사항
                 </button>
                 <button
                   type="button"
                   onClick={() => {
                     setShowSettingsMenu(false);
-                    setShowAdminWorkMenu(false);
                     setShowReleaseNotes(true);
                   }}
                   className={menuItemClass()}
@@ -490,7 +345,6 @@ export function MenuBar({
                   type="button"
                   onClick={() => {
                     setShowSettingsMenu(false);
-                    setShowAdminWorkMenu(false);
                     setShowAbout(true);
                   }}
                   className={menuItemClass()}
@@ -502,21 +356,197 @@ export function MenuBar({
             ) : null}
           </div>
 
-          <span className="text-slate-600">|</span>
-
-          <button
-            type="button"
-            onClick={() => onNavigate("notice-board")}
-            className={menuButtonClass(activeView === "notice-board")}
-          >
-            <WorkflowIcon name="notice" size="sm" label="공지사항" />
-            공지사항
-          </button>
+          {isAdmin ? (
+            <>
+              <span className="text-slate-600">|</span>
+              <div ref={adminWorkMenuRef} className="relative">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowAdminWorkMenu((current) => {
+                      const next = !current;
+                      if (!next) {
+                        setShowMonitorAreaMenu(false);
+                      }
+                      return next;
+                    });
+                    setShowSettingsMenu(false);
+                    setShowAgentMenu(false);
+                    setShowUserMenu(false);
+                    setShowAccountMenu(false);
+                  }}
+                  className={menuButtonClass(
+                    showTableDebug ||
+                      showPostmanDebug ||
+                      showMockLlmSelect ||
+                      showWhatapEventTest ||
+                      showInventoryApiDebug ||
+                      showK8sInfraConfig ||
+                      showMailServerConfig ||
+                      showMailTest ||
+                      showReceivedMailDebug,
+                  )}
+                >
+                  <WorkflowIcon name="settings" size="sm" label="관리자 작업" />
+                  관리자 작업 ▾
+                </button>
+                {showAdminWorkMenu ? (
+                  <div className="absolute left-0 top-full z-20 mt-1 min-w-[220px] rounded-md border border-slate-700 bg-slate-900 py-1 shadow-lg">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowAdminWorkMenu(false);
+                        setShowPostmanDebug(true);
+                      }}
+                      className={menuItemClass()}
+                    >
+                      <WorkflowIcon name="api" size="sm" label="postman" />
+                      postman
+                    </button>
+                    {isMockRuntime ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowAdminWorkMenu(false);
+                          setShowMockLlmSelect(true);
+                        }}
+                        className={menuItemClass()}
+                      >
+                        <WorkflowIcon name="ai" size="sm" label="LLM 변경" />
+                        (목업)LLM 변경
+                      </button>
+                    ) : null}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowAdminWorkMenu(false);
+                        setShowWhatapEventTest(true);
+                      }}
+                      className={menuItemClass()}
+                    >
+                      <WorkflowIcon name="log" size="sm" label="Whatap 이벤트 테스트" />
+                      Whatap 이벤트 테스트
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowAdminWorkMenu(false);
+                        setShowInventoryApiDebug(true);
+                      }}
+                      className={menuItemClass()}
+                    >
+                      <WorkflowIcon name="api" size="sm" label="인벤토리 정보조회" />
+                      인벤토리 정보조회(디버깅)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowAdminWorkMenu(false);
+                        setShowK8sInfraConfig(true);
+                      }}
+                      className={menuItemClass()}
+                    >
+                      <WorkflowIcon name="nodes" size="sm" label="인프라 구성" />
+                      인프라 구성
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowAdminWorkMenu(false);
+                        setShowMailServerConfig(true);
+                      }}
+                      className={menuItemClass()}
+                    >
+                      <WorkflowIcon name="mail" size="sm" label="메일 서버 설정" />
+                      메일 서버 설정
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowAdminWorkMenu(false);
+                        setShowMailTest(true);
+                      }}
+                      className={menuItemClass()}
+                    >
+                      <WorkflowIcon name="send" size="sm" label="테스트 메일 발송" />
+                      테스트 메일 발송(디버깅)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowAdminWorkMenu(false);
+                        setShowReceivedMailDebug(true);
+                      }}
+                      className={menuItemClass()}
+                    >
+                      <WorkflowIcon name="mail" size="sm" label="수신메일 목록" />
+                      수신메일 목록(디버깅)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowAdminWorkMenu(false);
+                        setShowMonitorAreaMenu(false);
+                        setShowTableDebug(true);
+                      }}
+                      className={menuItemClass()}
+                    >
+                      <WorkflowIcon name="list" size="sm" label="테이블 조회" />
+                      테이블 조회(디버깅)
+                    </button>
+                    <div className="relative">
+                      <button
+                        type="button"
+                        onClick={() => setShowMonitorAreaMenu((current) => !current)}
+                        className={`flex w-full items-center justify-between px-3 py-2 text-left text-sm ${
+                          showMonitorAreaMenu
+                            ? "bg-slate-800 text-sky-200"
+                            : "text-slate-200 hover:bg-slate-800"
+                        }`}
+                      >
+                        <span className="inline-flex items-center gap-1.5">
+                          <WorkflowIcon name="fullscreen" size="sm" label="모니터 영역" />
+                          모니터 영역
+                        </span>
+                        <span className="text-slate-500">▸</span>
+                      </button>
+                      {showMonitorAreaMenu ? (
+                        <div className="absolute left-full top-0 z-30 ml-1 min-w-[120px] rounded-md border border-slate-700 bg-slate-900 py-1 shadow-lg">
+                          {(["FHD", "QHD", "4K"] as MonitorAreaPreset[]).map((preset) => (
+                            <button
+                              key={preset}
+                              type="button"
+                              onClick={() => {
+                                setShowAdminWorkMenu(false);
+                                setShowMonitorAreaMenu(false);
+                                setMonitorAreaPreset(preset);
+                              }}
+                              className={menuItemClass()}
+                            >
+                              {preset}
+                            </button>
+                          ))}
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            </>
+          ) : null}
         </div>
 
-        <div className="flex flex-wrap items-center gap-3 text-sm text-slate-300">
+        <div className="flex flex-wrap items-center gap-2.5 text-sm text-slate-300">
           <div className="flex items-center gap-2">
-            <time className="font-mono text-slate-400">{currentTime}</time>
+            <time
+              className="flex flex-col items-end leading-tight text-slate-400"
+              title={`${currentTime.dateLine} ${currentTime.timeLine}`}
+            >
+              <span className="text-[10px] tracking-tight">{currentTime.dateLine}</span>
+              <span className="font-mono text-xs tabular-nums text-slate-300">
+                {currentTime.timeLine}
+              </span>
+            </time>
             <button
               type="button"
               disabled={!canExtendSession || isExtendingSession}
@@ -536,23 +566,75 @@ export function MenuBar({
               {formatAuthSessionRemaining(sessionRemainingMs)}
             </button>
           </div>
-          <button
-            type="button"
-            onClick={() => setShowProfileEdit(true)}
-            className="inline-flex items-center gap-1.5 rounded-md border border-slate-700 px-3 py-1.5 text-slate-200 transition hover:bg-slate-800"
-            title="개인정보 수정"
-          >
-            <WorkflowIcon name="owner" size="sm" label="프로필" />
-            {userLabel}
-          </button>
-          <button
-            type="button"
-            onClick={() => setShowLogoutConfirm(true)}
-            className="inline-flex items-center gap-1.5 rounded-md border border-slate-700 px-3 py-1.5 text-slate-200 transition hover:bg-slate-800"
-          >
-            <WorkflowIcon name="logout" size="sm" label="로그아웃" />
-            로그아웃
-          </button>
+
+          <div ref={accountMenuRef} className="relative">
+            <button
+              type="button"
+              onClick={() => {
+                setShowAccountMenu((current) => !current);
+                setShowAgentMenu(false);
+                setShowUserMenu(false);
+                setShowSettingsMenu(false);
+                setShowAdminWorkMenu(false);
+              }}
+              className={`inline-flex h-8 w-8 items-center justify-center rounded-md border transition ${
+                showAccountMenu
+                  ? "border-sky-600 bg-slate-800 text-sky-100"
+                  : "border-slate-700 text-slate-200 hover:bg-slate-800"
+              }`}
+              title={userLabel}
+              aria-label="사용자 메뉴"
+              aria-expanded={showAccountMenu}
+              aria-haspopup="menu"
+            >
+              <WorkflowIcon name="owner" size="sm" label="사용자" />
+            </button>
+            {showAccountMenu ? (
+              <div
+                role="menu"
+                className="absolute right-0 top-full z-30 mt-1 min-w-[220px] rounded-md border border-slate-700 bg-slate-900 py-1 shadow-lg"
+              >
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setShowAccountMenu(false);
+                    setShowProfileEdit(true);
+                  }}
+                  className={menuItemClass()}
+                  title="개인정보 수정"
+                >
+                  <WorkflowIcon name="owner" size="sm" label="프로필" />
+                  <span className="min-w-0 truncate">{userLabel}</span>
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setShowAccountMenu(false);
+                    setShowThemeSettings(true);
+                  }}
+                  className={menuItemClass()}
+                >
+                  <WorkflowIcon name="theme" size="sm" label="화면 테마" />
+                  화면 테마
+                </button>
+                <div className="my-1 border-t border-slate-700" role="separator" />
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setShowAccountMenu(false);
+                    setShowLogoutConfirm(true);
+                  }}
+                  className={menuItemClass()}
+                >
+                  <WorkflowIcon name="logout" size="sm" label="로그아웃" />
+                  로그아웃
+                </button>
+              </div>
+            ) : null}
+          </div>
         </div>
       </nav>
 
@@ -571,6 +653,12 @@ export function MenuBar({
       ) : null}
 
       {showThemeSettings ? <ThemeSettingsModal onClose={() => setShowThemeSettings(false)} /> : null}
+      {monitorAreaPreset && isAdmin ? (
+        <MonitorAreaOverlay
+          preset={monitorAreaPreset}
+          onDone={() => setMonitorAreaPreset(null)}
+        />
+      ) : null}
       {showAbout ? <AboutModal onClose={() => setShowAbout(false)} /> : null}
       {showReleaseNotes ? <ReleaseNotesModal onClose={() => setShowReleaseNotes(false)} /> : null}
       {showPostmanDebug && isAdmin ? (

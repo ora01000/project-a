@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 from pathlib import Path
@@ -28,6 +29,7 @@ from backend.app.services.inventory_external import (
     add_external_inventory,
     add_external_inventory_api,
     execute_external_inventory_api,
+    get_external_inventory_count,
     get_external_inventory_schema,
     list_external_inventories,
     list_external_inventory_apis,
@@ -58,6 +60,33 @@ class InventoryResponse(BaseModel):
     created_by: int = 0
     created_by_username: str = ""
     origin_csv: str = ""
+    created_at: str = ""
+
+
+class InventoryStatsRow(BaseModel):
+    table_name: str
+    display_name: str = ""
+    description: str = ""
+    origin_csv: str = ""
+    created_at: str = ""
+    created_by: int = 0
+    created_by_username: str = ""
+    row_count: int = 0
+    column_count: int = 0
+    error: str | None = None
+
+
+class InventoryApiStatsRow(BaseModel):
+    """Flattened inventory-api registry row for the idle dashboard."""
+
+    api_name: str
+    table_name: str = ""
+    display_name: str = ""
+    api_fullpath: str = ""
+    created_by: int = 0
+    created_by_username: str = ""
+    description: str = ""
+    error: str | None = None
 
 
 class InventoryCreateRequest(BaseModel):
@@ -125,7 +154,7 @@ class InventoryApiCreateRequest(BaseModel):
     description: str = Field(default="", max_length=200)
     where_exp: str = Field(min_length=1, max_length=500)
     select_exp: str = Field(min_length=1, max_length=500)
-    param_columns: str = Field(min_length=1, max_length=500)
+    param_columns: str = Field(default="", max_length=500)
 
 
 class InventoryApiUpdateRequest(BaseModel):
@@ -134,7 +163,40 @@ class InventoryApiUpdateRequest(BaseModel):
     description: str = Field(default="", max_length=200)
     where_exp: str = Field(min_length=1, max_length=500)
     select_exp: str = Field(min_length=1, max_length=500)
-    param_columns: str = Field(min_length=1, max_length=500)
+    param_columns: str = Field(default="", max_length=500)
+
+
+def _created_at_from_row(row: dict[str, Any]) -> str:
+    for key in (
+        "created_at",
+        "created_date",
+        "registered_date",
+        "registered_at",
+        "create_date",
+        "created",
+    ):
+        value = row.get(key)
+        if value is None:
+            continue
+        text = str(value).strip()
+        if text:
+            return text
+    return ""
+
+
+def _column_names_from_schema(schema: dict[str, Any]) -> list[str]:
+    columns: list[str] = []
+    raw = schema.get("columns")
+    if not isinstance(raw, list):
+        return columns
+    for item in raw:
+        if isinstance(item, dict):
+            name = str(item.get("name") or item.get("column") or "").strip()
+        else:
+            name = str(item or "").strip()
+        if name and name not in columns:
+            columns.append(name)
+    return columns
 
 
 def _username_for(database_path: str, created_by: int | None) -> str:
@@ -156,6 +218,7 @@ def _to_inventory_response(row: dict[str, Any], *, database_path: str) -> Invent
         created_by=created_by,
         created_by_username=_username_for(database_path, created_by),
         origin_csv=str(row.get("origin_csv") or ""),
+        created_at=_created_at_from_row(row),
     )
 
 
@@ -220,6 +283,125 @@ async def api_list_inventories(request: Request) -> list[InventoryResponse]:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     database_path = request.app.state.database_path
     return [_to_inventory_response(row, database_path=database_path) for row in rows]
+
+
+@router.get("/inventories/stats", response_model=list[InventoryStatsRow])
+async def api_inventory_stats(request: Request) -> list[InventoryStatsRow]:
+    """Overview stats for the idle inventory dashboard (list + count + schema)."""
+    get_request_auth_user(request)
+    try:
+        rows = await list_external_inventories()
+    except InventoryExternalApiError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    database_path = request.app.state.database_path
+    base_items = [_to_inventory_response(row, database_path=database_path) for row in rows]
+
+    async def _one(item: InventoryResponse) -> InventoryStatsRow:
+        table = (item.table_name or "").strip()
+        if not table:
+            return InventoryStatsRow(
+                table_name="",
+                display_name=item.display_name,
+                description=item.description,
+                origin_csv=item.origin_csv,
+                created_at=item.created_at,
+                created_by=item.created_by,
+                created_by_username=item.created_by_username,
+                error="table_name 없음",
+            )
+        try:
+            count_task = get_external_inventory_count(table)
+            schema_task = get_external_inventory_schema(table)
+            row_count, schema = await asyncio.gather(count_task, schema_task)
+            columns = _column_names_from_schema(schema)
+            return InventoryStatsRow(
+                table_name=table,
+                display_name=item.display_name or table,
+                description=item.description,
+                origin_csv=item.origin_csv,
+                created_at=item.created_at,
+                created_by=item.created_by,
+                created_by_username=item.created_by_username,
+                row_count=int(row_count),
+                column_count=len(columns),
+            )
+        except InventoryExternalApiError as exc:
+            logger.warning("inventory stats failed table=%s err=%s", table, exc)
+            return InventoryStatsRow(
+                table_name=table,
+                display_name=item.display_name or table,
+                description=item.description,
+                origin_csv=item.origin_csv,
+                created_at=item.created_at,
+                created_by=item.created_by,
+                created_by_username=item.created_by_username,
+                error=str(exc),
+            )
+
+    return list(await asyncio.gather(*[_one(item) for item in base_items]))
+
+
+@router.get("/inventories/api-stats", response_model=list[InventoryApiStatsRow])
+async def api_inventory_api_stats(request: Request) -> list[InventoryApiStatsRow]:
+    """Flattened API registry across all inventory tables for the idle dashboard."""
+    get_request_auth_user(request)
+    try:
+        inventory_rows = await list_external_inventories()
+    except InventoryExternalApiError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    database_path = request.app.state.database_path
+    tables: list[str] = []
+    seen: set[str] = set()
+    for row in inventory_rows:
+        table = str(row.get("table_name") or "").strip()
+        if table and table not in seen:
+            seen.add(table)
+            tables.append(table)
+
+    async def _apis_for_table(table: str) -> list[InventoryApiStatsRow]:
+        try:
+            rows = await list_external_inventory_apis(table)
+        except InventoryExternalApiError as exc:
+            logger.warning("inventory api-stats failed table=%s err=%s", table, exc)
+            return [
+                InventoryApiStatsRow(
+                    api_name="",
+                    table_name=table,
+                    error=str(exc),
+                )
+            ]
+        result: list[InventoryApiStatsRow] = []
+        for index, row in enumerate(rows):
+            mapped = _to_api_response(
+                row,
+                table_name=table,
+                database_path=database_path,
+                index=index + 1,
+            )
+            result.append(
+                InventoryApiStatsRow(
+                    api_name=mapped.api_name,
+                    table_name=mapped.table_name or table,
+                    display_name=mapped.display_name,
+                    api_fullpath=mapped.api_fullpath,
+                    created_by=mapped.created_by,
+                    created_by_username=mapped.created_by_username,
+                    description=mapped.description,
+                )
+            )
+        return result
+
+    if not tables:
+        return []
+
+    nested = await asyncio.gather(*[_apis_for_table(table) for table in tables])
+    flattened: list[InventoryApiStatsRow] = []
+    for group in nested:
+        flattened.extend(group)
+    flattened.sort(key=lambda item: (item.table_name, item.api_name))
+    return flattened
 
 
 @router.post("/inventories/csv/upload", response_model=InventoryCsvPreviewResponse)

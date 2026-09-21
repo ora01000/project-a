@@ -127,9 +127,57 @@ function clusterButtonClass(isSelected: boolean): string {
   return "border-slate-700 bg-slate-900/80 text-slate-300 hover:border-slate-600 hover:bg-slate-800/60";
 }
 
-function clusterListLabel(cluster: { cluster_name: string; display_name?: string }): string {
+const INFRA_TYPE_ORDER = ["vSphere", "k8s", "kubevirt"] as const;
+
+function normalizeInfraType(raw: string | undefined): string {
+  const value = (raw ?? "").trim();
+  if (!value) {
+    return "k8s";
+  }
+  if (value.toLowerCase() === "kubernetes") {
+    return "k8s";
+  }
+  return value;
+}
+
+function clusterListPrimaryLabel(cluster: {
+  cluster_name: string;
+  display_name?: string;
+}): string {
   const display = (cluster.display_name ?? "").trim();
-  return display ? `${cluster.cluster_name} ${display}` : cluster.cluster_name;
+  return display || cluster.cluster_name;
+}
+
+function groupClustersByInfraType(
+  clusters: ShapeCluster[],
+): Array<{ infraType: string; items: ShapeCluster[] }> {
+  const buckets = new Map<string, ShapeCluster[]>();
+  for (const cluster of clusters) {
+    const infraType = normalizeInfraType(cluster.infra_type);
+    const list = buckets.get(infraType);
+    if (list) {
+      list.push(cluster);
+    } else {
+      buckets.set(infraType, [cluster]);
+    }
+  }
+
+  const grouped: Array<{ infraType: string; items: ShapeCluster[] }> = [];
+  for (const infraType of INFRA_TYPE_ORDER) {
+    const items = buckets.get(infraType);
+    if (!items?.length) {
+      continue;
+    }
+    grouped.push({ infraType, items });
+    buckets.delete(infraType);
+  }
+  for (const infraType of [...buckets.keys()].sort((a, b) => a.localeCompare(b))) {
+    const items = buckets.get(infraType);
+    if (items?.length) {
+      grouped.push({ infraType, items });
+    }
+  }
+  return grouped;
 }
 
 function ShapeTrendChart({
@@ -307,6 +355,16 @@ export function InfraShapeTab({
   const [gapAnalysisMessage, setGapAnalysisMessage] = useState<string | null>(null);
   const [capacity, setCapacity] = useState<ClusterShapeCapacity | null>(null);
   const [isLoadingCapacity, setIsLoadingCapacity] = useState(false);
+  const [collapsedInfraTypes, setCollapsedInfraTypes] = useState<Record<string, boolean>>({});
+
+  const groupedClusters = useMemo(() => groupClustersByInfraType(clusters), [clusters]);
+
+  const toggleInfraTypeGroup = (infraType: string) => {
+    setCollapsedInfraTypes((current) => ({
+      ...current,
+      [infraType]: !current[infraType],
+    }));
+  };
 
   const loadClusters = useCallback(async () => {
     setIsLoadingList(true);
@@ -489,30 +547,58 @@ export function InfraShapeTab({
           {!isLoadingList && clusters.length === 0 ? (
             <p className="text-xs text-slate-500">등록된 클러스터가 없습니다.</p>
           ) : null}
-          {clusters.map((cluster) => {
-            const isSelected = cluster.cluster_name === selectedName;
-            const infraType = cluster.infra_type || "k8s";
+          {groupedClusters.map(({ infraType, items }) => {
+            const isCollapsed = Boolean(collapsedInfraTypes[infraType]);
             return (
-              <button
-                key={cluster.idx}
-                type="button"
-                onClick={() => setSelectedName(cluster.cluster_name)}
-                className={`block w-full rounded-md border px-2.5 py-1.5 text-left text-[11px] font-medium transition-colors ${clusterButtonClass(isSelected)}`}
-                title={
-                  cluster.last_update
-                    ? `${infraType} · last_update: ${cluster.last_update}`
-                    : `${clusterListLabel(cluster)} (${infraType})`
-                }
-              >
-                <span className="block truncate">{clusterListLabel(cluster)}</span>
-                <span
-                  className={`mt-0.5 block truncate text-[10px] font-normal ${
-                    isSelected ? "text-sky-300/80" : "text-slate-500"
-                  }`}
+              <div key={infraType} className="space-y-1">
+                <button
+                  type="button"
+                  onClick={() => toggleInfraTypeGroup(infraType)}
+                  className="flex w-full items-center gap-1 rounded px-1 py-0.5 text-left text-[11px] font-semibold text-slate-400 hover:bg-slate-800/60 hover:text-slate-200"
+                  aria-expanded={!isCollapsed}
                 >
-                  {infraType}
-                </span>
-              </button>
+                  <span className="inline-block w-3 shrink-0 text-slate-500" aria-hidden>
+                    {isCollapsed ? "▸" : "▾"}
+                  </span>
+                  <span className="min-w-0 truncate">{infraType}</span>
+                  <span className="ml-auto shrink-0 tabular-nums text-[10px] font-normal text-slate-500">
+                    {items.length}
+                  </span>
+                </button>
+                {isCollapsed ? null : (
+                  <div className="space-y-1.5 border-l border-slate-700/70 pl-2 ml-1.5">
+                    {items.map((cluster) => {
+                      const isSelected = cluster.cluster_name === selectedName;
+                      const primary = clusterListPrimaryLabel(cluster);
+                      const hasDisplayName = Boolean((cluster.display_name ?? "").trim());
+                      return (
+                        <button
+                          key={cluster.idx}
+                          type="button"
+                          onClick={() => setSelectedName(cluster.cluster_name)}
+                          className={`block w-full rounded-md border px-2.5 py-1.5 text-left text-[11px] font-medium transition-colors ${clusterButtonClass(isSelected)}`}
+                          title={
+                            cluster.last_update
+                              ? `${primary} · ${cluster.cluster_name} · last_update: ${cluster.last_update}`
+                              : `${primary} (${cluster.cluster_name})`
+                          }
+                        >
+                          <span className="block truncate">{primary}</span>
+                          {hasDisplayName ? (
+                            <span
+                              className={`mt-0.5 block truncate font-mono text-[10px] font-normal ${
+                                isSelected ? "text-sky-300/80" : "text-slate-500"
+                              }`}
+                            >
+                              {cluster.cluster_name}
+                            </span>
+                          ) : null}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
             );
           })}
         </div>

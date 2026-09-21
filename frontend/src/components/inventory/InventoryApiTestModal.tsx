@@ -168,7 +168,7 @@ export function InventoryApiTestModal({ api, onClose }: InventoryApiTestModalPro
             <div className="flex justify-end">
               <button
                 type="button"
-                disabled={running || paramNames.length === 0}
+                disabled={running}
                 onClick={() => void handleRun()}
                 className="inline-flex items-center gap-1.5 rounded-md border border-sky-700 bg-sky-950/50 px-4 py-2 text-sm font-medium text-sky-100 hover:bg-sky-900/60 disabled:cursor-not-allowed disabled:opacity-50"
               >

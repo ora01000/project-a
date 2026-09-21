@@ -1,0 +1,12 @@
+---
+description: PLAN_AXIT_PLATFORM.md is the Cursor-edited canonical plan
+globs: PLAN_AXIT_PLATFORM.md
+alwaysApply: true
+---
+
+# PLAN_AXIT_PLATFORM.md 기준본
+
+- `PLAN_AXIT_PLATFORM.md`는 Cursor에서 편집하는 본(canonical)이다.
+- 구현·반영 시 디스크에 저장된 이 파일을 우선한다. 채팅 첨부/요약과 충돌하면 Cursor에 저장된 PLAN 내용을 따른다.
+- PLAN 문구를 에이전트가 임의로 재작성하지 않는다. 사용자가 지시하거나 구현에 맞춰 동기화가 필요할 때만 해당 구간을 갱신한다.
+- PLAN 구간을 `@`로 지정해 구현을 요청하면, 필요 시 그 편집본이 파일에 반영되어 있는지 확인한 뒤 작업한다.

@@ -2730,7 +2730,7 @@ left "작업 워크플로우 목록" 패널의 생성된 작업 워크플로우 
       
 - 화면 구성
   - 목업용 API 주소 : http://inventory-api.ora01000.pe.kr:32716
-  - http 모드용 API 주소 : 환경변수로 삽입 가능, default http://inventory-api.apps.pcicd-k8s.co.kr
+  - http 모드용 API 주소 : 환경변수로 삽입 가능, default http://inventory-api.mcps.svc.cluster.local:9000
 
   - 전체 화면은 왼쪽 인벤토리 목록을 작업워크플로우와 동일한 구성으로 배치한다.
     - 가장 위에는 "새로운 인벤토리" 버튼을 "새로운 작업 워크플로우" 버튼과 동일한 스타일로 배치 -> 클릭시 오른쪽 패널, 새로운 인벤토리 구성 화면 표시
@@ -2824,9 +2824,13 @@ left "작업 워크플로우 목록" 패널의 생성된 작업 워크플로우 
         - 인벤토리 API 서버로 호출한다. GET 만 있다.
       - API 의 생성, 변경, 삭제 가 발생하고 저장되면 다음 API를 호출하여 reload 한다
         - POST /reloadAPI?tablename= 
+      - "API복제"
+        - API 편집 패널의 상단 오른쪽에 "복제" 버튼을 둔다
+        - 복제는 동일한 정보로 다른 인벤토리(테이블)에 API를 동일하게 생성한다.
+        - 복제 클릭시 대상 인벤토리를 선택하게 하고, 최종 확인 후 복제한다.
         
 # http 모드에서 디버깅 경로
-- http 모드용 API 주소 : 환경변수로 삽입 가능, default http://inventory-api.apps.pcicd-k8s.co.kr 로 맞춘다
+- http 모드용 API 주소 : 환경변수로 삽입 가능, default http://inventory-api.mcps.svc.cluster.local:9000 로 맞춘다
 
 
 # 스킬 작성
@@ -2858,7 +2862,8 @@ left "작업 워크플로우 목록" 패널의 생성된 작업 워크플로우 
 # 관리자 작업 > 인벤토리 정보조회(디버깅) 메뉴 추가
 - 원격 서버에서 제공하는 인벤토리 API 테스트 팝업을 띄우고 아래 각 API에 요청으 보내고 테스트 할 수 있다
 
-  API (http://inventory-api.ora01000.pe.kr:32716)
+  목업 : API (http://inventory-api.ora01000.pe.kr:32716)
+  http 모드 : API (http://inventory-api.mcps.svc.cluster.local:9000)
 
   POST /uploadCSV           # param 업로드 파일
   POST /transferCSV2Table   # param filename, tablename
@@ -2868,10 +2873,60 @@ left "작업 워크플로우 목록" 패널의 생성된 작업 워크플로우 
   GET /getCount             # param table
   POST /sql                 # sql
   POST /removeInventory     # param table
-  POST /addInventory
+  GET /getInventoryAPIList  # param tablename
 
 
 # 작업 워크플로우, 인벤토리 관리 화면 icon asset 보강
 - 두 메뉴의 레이블, 버튼 중 텍스트로만 표시된 화면 컴포넌트에 대해 icon asset 이 필요한 경우 생성, 또는 기존 asset 에서 선택하여 보강한다. 다크/밝은 테마 용을 모두 고려
 - 대시보드, 에이전트, 사용자 관리, 환경설정, 공지사항 메뉴 , 로그아웃 버튼 icon asset 보강
 - 대시보드 화면에서 버튼, 레이블 등 icon asset 보강
+
+# 인벤토리 관리 메뉴 선택 대표 화면
+- 메뉴 클릭시 오른쪽 패널은 빈화면(테스트 문구만 출력됨)이 나오는데 이를 등록된 인벤토리의 통계 정보로 대시보드화 하여 표시한다.
+  - 인벤토리 통계
+    이름 | 원본CSV | 등록일자 | 등록자 | 레코드 개수 | 컬럼 개수 | 설명 |
+    ---------------------------------------------------------
+    <API를 사용하여 데이터 조회>
+  
+  - 사용자 정의 API 목록
+    이름 | 인벤토리 테이블 | 호출명 | 표시명 | API전채 경로 | 등록자 | 설명 | 
+    -----------------------------------------------------------
+    {api_name} | {table_name} | {api_name} | {display_name} | {api_fullpath} | {created_by} | {description}
+  
+    <API를 사용하여 데이터 조회>
+    
+  ** 구현시 API 가 필요한 경우 알려주면 API 구현 파트에 전달하겠음
+    - created_at 컬럼 보강함. API 호출시 컬럼 전달됨
+    
+
+
+# UI 개편
+- 오른쪽 상단 컴포넌트를 개선한다.
+  - 조직/이름직급 | 로그아웃 버튼 통합
+    - 하나의 사용자 아이콘으로 변경하고 아이콘 클릭시 메뉴 구조로 변경한다. 메뉴 구조에는 다음이 표시된다.
+      - 조직/이름지급(햔재 표시 내용 그대로) -> 클릭시 현재 팝업 그대로 연결
+      - 화면 테마 -> 환경설정>화면테마 메뉴를 여기로 옮긴다.
+      - 분할 선
+      - 로그 아웃
+  - datetime 표시자 : 폰트를 줄여서 아래와 같이 두 줄이 한 row 에 들어가게 배치한다.
+    MM월 DD일 (요일)
+    HH:MM
+
+- 메뉴 구조 변경
+  - 공지사항 을 환경설정 의 하위 메뉴로 이동한다.
+    - 순서 : 공지사항 -> 변경이력 -> About
+    - 환경설정 메뉴 이름을 "정보" 로 변경한다
+  - 관리자 작업 메뉴를 상위 메뉴로 빼고 제일 마지막에 배치한다. 관리자 작업은 기존과 마찬가지로 users.role = 0 | 100 만 노출된다 
+- 작업 노트 > 인프라 형상 탭 > 인프라 목록 카드
+  - 카드는 display_name 이 먼저 나온다
+  - infra_type 별로 카드를 그룹핑 한다. 그룹핑 순서는 vSphere, k8s, kubevirt 이다.
+    - 각 infra_type 별로 카드가 있고 트리 형태로 접고 펼수 있다.
+    
+
+- 관리자 메뉴 > 모니터 영역 표시 메뉴 추가
+  - 모니터 영역 > FHD
+  - 모니터 영역 > QHD
+  - 모니터 영역 > 4K
+
+  - 각 모니터 영역 클릭시 해당 해상도에 맞춰 화면에 표시되는 영역의 가장자리를 네모 박스로 표시한다. 이 메뉴는 선택하면 한번만 표시되고 사라진다.
+    - 영역 표시의 시작을 브라우저의 0,0 부터 시작한다. alignment 로는 left, top 이다

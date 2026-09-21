@@ -18,7 +18,7 @@
 ### 인벤토리 관리
 - **인벤토리 관리** 메뉴: 메타·API를 로컬 DB가 아닌 **원격 inventory-api**로 이전
   - mock 기본: `http://inventory-api.ora01000.pe.kr:32716`
-  - http 기본: `http://inventory-api.apps.pcicd-k8s.co.kr` (`INVENTORY_API_BASE_URL`로 덮어쓰기)
+  - http 기본: `http://inventory-api.mcps.svc.cluster.local:9000` (`INVENTORY_API_BASE_URL`로 덮어쓰기)
 - CSV 업로드 → `temp_` 테이블 전환·미리보기 → 저장 시 최종 테이블 + API 등록, 세션 종료 시 temp 정리
 - 인벤토리 API 패널(등록·수정·삭제·reload·테스트), 관리자 **인벤토리 API 디버그** 팝업
 

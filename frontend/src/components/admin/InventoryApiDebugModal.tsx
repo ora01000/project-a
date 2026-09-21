@@ -15,7 +15,8 @@ type EndpointId =
   | "getRecordsWithRows"
   | "getCount"
   | "sql"
-  | "removeInventory";
+  | "removeInventory"
+  | "getInventoryAPIList";
 
 const ENDPOINTS: Array<{ id: EndpointId; method: string; path: string; label: string }> = [
   { id: "uploadCSV", method: "POST", path: "/uploadCSV", label: "CSV 업로드" },
@@ -26,9 +27,12 @@ const ENDPOINTS: Array<{ id: EndpointId; method: string; path: string; label: st
   { id: "getCount", method: "GET", path: "/getCount", label: "건수 조회" },
   { id: "sql", method: "POST", path: "/sql", label: "SQL 실행" },
   { id: "removeInventory", method: "POST", path: "/removeInventory", label: "인벤토리 삭제" },
+  { id: "getInventoryAPIList", method: "GET", path: "/getInventoryAPIList", label: "API 목록" },
 ];
 
-const FALLBACK_BASE_URL = "http://inventory-api.ora01000.pe.kr:32716";
+const MOCK_BASE_URL = "http://inventory-api.ora01000.pe.kr:32716";
+const HTTP_BASE_URL = "http://inventory-api.mcps.svc.cluster.local:9000";
+const FALLBACK_BASE_URL = MOCK_BASE_URL;
 
 async function parseError(response: Response, fallback: string): Promise<string> {
   const payload = (await response.json().catch(() => null)) as { detail?: string } | null;
@@ -169,6 +173,15 @@ export function InventoryApiDebugModal({ viewerRole, onClose }: InventoryApiDebu
         response = await fetch(`/api/debug/inventory-api/removeInventory?${params.toString()}`, {
           method: "POST",
         });
+      } else if (endpointId === "getInventoryAPIList") {
+        if (!tablename.trim()) {
+          throw new Error("tablename을 입력하세요.");
+        }
+        const params = new URLSearchParams({
+          tablename: tablename.trim(),
+          base_url: trimmedBase,
+        });
+        response = await fetch(`/api/debug/inventory-api/getInventoryAPIList?${params.toString()}`);
       } else {
         if (!sql.trim()) {
           throw new Error("sql을 입력하세요.");
@@ -224,12 +237,28 @@ export function InventoryApiDebugModal({ viewerRole, onClose }: InventoryApiDebu
         <label className="mt-4 block text-sm font-medium text-slate-200" htmlFor="inventory-api-base-url">
           Base URL
         </label>
+        <div className="mt-1 flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => setBaseUrl(MOCK_BASE_URL)}
+            className="rounded-md border border-slate-700 px-2.5 py-1 text-xs text-slate-300 hover:bg-slate-800"
+          >
+            목업
+          </button>
+          <button
+            type="button"
+            onClick={() => setBaseUrl(HTTP_BASE_URL)}
+            className="rounded-md border border-slate-700 px-2.5 py-1 text-xs text-slate-300 hover:bg-slate-800"
+          >
+            http 모드
+          </button>
+        </div>
         <input
           id="inventory-api-base-url"
           type="text"
           value={baseUrl}
           onChange={(event) => setBaseUrl(event.target.value)}
-          className="mt-1 w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 font-mono text-sm text-slate-100 focus:border-sky-600 focus:outline-none"
+          className="mt-2 w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 font-mono text-sm text-slate-100 focus:border-sky-600 focus:outline-none"
           placeholder={FALLBACK_BASE_URL}
         />
 
@@ -268,18 +297,22 @@ export function InventoryApiDebugModal({ viewerRole, onClose }: InventoryApiDebu
             />
           ) : null}
 
-          {endpointId === "transferCSV2Table" ? (
-            <div className="grid gap-3 md:grid-cols-2">
-              <label className="block text-sm text-slate-300">
-                filename
-                <input
-                  type="text"
-                  value={filename}
-                  onChange={(event) => setFilename(event.target.value)}
-                  className="mt-1 w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 font-mono text-sm text-slate-100 focus:border-sky-600 focus:outline-none"
-                  placeholder="servers_abc123.csv"
-                />
-              </label>
+          {endpointId === "transferCSV2Table" || endpointId === "getInventoryAPIList" ? (
+            <div
+              className={`grid gap-3 ${endpointId === "transferCSV2Table" ? "md:grid-cols-2" : ""}`}
+            >
+              {endpointId === "transferCSV2Table" ? (
+                <label className="block text-sm text-slate-300">
+                  filename
+                  <input
+                    type="text"
+                    value={filename}
+                    onChange={(event) => setFilename(event.target.value)}
+                    className="mt-1 w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 font-mono text-sm text-slate-100 focus:border-sky-600 focus:outline-none"
+                    placeholder="servers_abc123.csv"
+                  />
+                </label>
+              ) : null}
               <label className="block text-sm text-slate-300">
                 tablename
                 <input

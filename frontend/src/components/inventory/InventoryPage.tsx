@@ -5,6 +5,7 @@ import type { InventoryCsvPreview, InventoryItem } from "../../types/inventory";
 import { InventoryApiPanel } from "./InventoryApiPanel";
 import { InventoryCsvPreviewPanel } from "./InventoryCsvPreviewPanel";
 import { InventoryListPanel } from "./InventoryListPanel";
+import { InventoryStatsPanel } from "./InventoryStatsPanel";
 import { WorkflowIcon } from "../workflow/WorkflowIcon";
 
 interface InventoryPageProps {
@@ -84,6 +85,7 @@ export function InventoryPage({ user }: InventoryPageProps) {
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [showApiPanel, setShowApiPanel] = useState(false);
+  const [statsRefreshKey, setStatsRefreshKey] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const tempTableRef = useRef<string | null>(null);
 
@@ -119,6 +121,11 @@ export function InventoryPage({ user }: InventoryPageProps) {
     }
     const payload = (await response.json()) as InventoryItem[];
     setItems(payload);
+  };
+
+  const refreshListAndStats = async () => {
+    await loadItems();
+    setStatsRefreshKey((current) => current + 1);
   };
 
   useEffect(() => {
@@ -333,7 +340,7 @@ export function InventoryPage({ user }: InventoryPageProps) {
         }
         const created = (await response.json()) as InventoryItem;
         setTempTableName(null);
-        await loadItems();
+        await refreshListAndStats();
         beginView(created);
         setStatusMessage("인벤토리가 저장되었습니다.");
         return;
@@ -357,7 +364,7 @@ export function InventoryPage({ user }: InventoryPageProps) {
       }
       const updated = (await response.json()) as InventoryItem;
       setTempTableName(null);
-      await loadItems();
+      await refreshListAndStats();
       beginView({ ...selected, ...updated, table_name: selected.table_name });
       setStatusMessage("인벤토리가 저장되었습니다.");
     } catch (err) {
@@ -393,7 +400,7 @@ export function InventoryPage({ user }: InventoryPageProps) {
         setTableName(TABLE_NAME_PREFIX);
         setShowApiPanel(false);
       }
-      await loadItems();
+      await refreshListAndStats();
       setStatusMessage("인벤토리가 삭제되었습니다.");
     } catch (err) {
       setError(err instanceof Error ? err.message : "인벤토리 삭제 실패");
@@ -490,9 +497,39 @@ export function InventoryPage({ user }: InventoryPageProps) {
 
         <section className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-xl border border-slate-700 bg-slate-900/40">
           {!showEditor ? (
-            <div className="m-auto px-6 text-center text-sm text-slate-500">
-              왼쪽에서 인벤토리를 선택하거나 「새로운 인벤토리」를 시작하세요.
-            </div>
+            <InventoryStatsPanel
+              refreshKey={statsRefreshKey}
+              onSelectRow={(row) => {
+                const existing = items.find((entry) => entry.table_name === row.table_name);
+                beginView(
+                  existing ?? {
+                    idx: 0,
+                    table_name: row.table_name,
+                    display_name: row.display_name || row.table_name,
+                    description: row.description || "",
+                    created_by: row.created_by,
+                    created_by_username: row.created_by_username,
+                    origin_csv: row.origin_csv,
+                    created_at: row.created_at,
+                  },
+                );
+              }}
+              onSelectApiRow={(row) => {
+                const existing = items.find((entry) => entry.table_name === row.table_name);
+                beginView(
+                  existing ?? {
+                    idx: 0,
+                    table_name: row.table_name,
+                    display_name: row.table_name,
+                    description: "",
+                    created_by: row.created_by,
+                    created_by_username: row.created_by_username,
+                    origin_csv: "",
+                  },
+                );
+                setShowApiPanel(true);
+              }}
+            />
           ) : (
             <div className="flex min-h-0 flex-1 flex-col p-4">
               <header className="mb-3 flex shrink-0 items-start justify-between gap-3">

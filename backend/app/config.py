@@ -1157,7 +1157,7 @@ def inventory_csv_dir() -> Path:
 
 
 INVENTORY_API_MOCK_BASE_URL = "http://inventory-api.ora01000.pe.kr:32716"
-INVENTORY_API_HTTP_BASE_URL = "http://inventory-api.apps.pcicd-k8s.co.kr"
+INVENTORY_API_HTTP_BASE_URL = "http://inventory-api.mcps.svc.cluster.local:9000"
 
 
 def resolve_inventory_api_base_url() -> str:
@@ -1165,7 +1165,7 @@ def resolve_inventory_api_base_url() -> str:
 
     Explicit ``INVENTORY_API_BASE_URL`` wins. Otherwise:
     - mock mode → ``http://inventory-api.ora01000.pe.kr:32716``
-    - http mode → ``http://inventory-api.apps.pcicd-k8s.co.kr``
+    - http mode → ``http://inventory-api.mcps.svc.cluster.local:9000``
     """
     raw = (AppSettings().inventory_api_base_url or "").strip()
     if raw:

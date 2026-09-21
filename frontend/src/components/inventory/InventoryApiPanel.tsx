@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import type { AuthUser } from "../../types/auth";
-import type { InventoryApiItem } from "../../types/inventory";
+import type { InventoryApiItem, InventoryItem } from "../../types/inventory";
 import { WorkflowIcon } from "../workflow/WorkflowIcon";
 import { InventoryApiTestModal } from "./InventoryApiTestModal";
 
@@ -57,6 +57,12 @@ export function InventoryApiPanel({
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(false);
   const [testingApi, setTestingApi] = useState<InventoryApiItem | null>(null);
+  const [cloneOpen, setCloneOpen] = useState(false);
+  const [cloneTargets, setCloneTargets] = useState<InventoryItem[]>([]);
+  const [cloneTarget, setCloneTarget] = useState("");
+  const [cloneLoading, setCloneLoading] = useState(false);
+  const [cloning, setCloning] = useState(false);
+  const [cloneNotice, setCloneNotice] = useState<string | null>(null);
 
   const isCreate = formMode === "create";
   const isEdit = formMode === "edit";
@@ -111,6 +117,9 @@ export function InventoryApiPanel({
     setSelectedParams([]);
     setEditingName(null);
     setFormMode("closed");
+    setCloneOpen(false);
+    setCloneTarget("");
+    setCloneNotice(null);
   };
 
   const beginCreate = () => {
@@ -135,6 +144,87 @@ export function InventoryApiPanel({
     setSelectExp(item.select_exp || "*");
     setSelectedParams(parseParamList(item.param_columns));
     setFormMode("edit");
+    setCloneOpen(false);
+    setCloneTarget("");
+    setCloneNotice(null);
+  };
+
+  const openClonePanel = async () => {
+    setError(null);
+    setCloneNotice(null);
+    setCloneOpen(true);
+    setCloneLoading(true);
+    try {
+      const response = await fetch("/api/inventories");
+      if (!response.ok) {
+        throw new Error(await readErrorDetail(response, "인벤토리 목록을 불러오지 못했습니다."));
+      }
+      const items = (await response.json()) as InventoryItem[];
+      const targets = items.filter((item) => item.table_name && item.table_name !== tableName);
+      setCloneTargets(targets);
+      setCloneTarget(targets[0]?.table_name || "");
+      if (targets.length === 0) {
+        setCloneNotice("복제할 다른 인벤토리가 없습니다.");
+      }
+    } catch (err) {
+      setCloneOpen(false);
+      setError(err instanceof Error ? err.message : "인벤토리 목록 로드 실패");
+    } finally {
+      setCloneLoading(false);
+    }
+  };
+
+  const handleClone = async () => {
+    const validationError = validateForm();
+    if (validationError) {
+      setError(validationError);
+      return;
+    }
+    const target = cloneTarget.trim();
+    if (!target) {
+      setError("복제 대상 인벤토리를 선택하세요.");
+      return;
+    }
+    if (target === tableName) {
+      setError("현재 인벤토리와 다른 대상을 선택하세요.");
+      return;
+    }
+    const targetLabel =
+      cloneTargets.find((item) => item.table_name === target)?.display_name || target;
+    const confirmed = window.confirm(
+      `「${displayName.trim() || apiName}」 API를 「${targetLabel}」(${target})에 복제할까요?`,
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    const payload = {
+      api_name: apiName.trim().toLowerCase(),
+      display_name: displayName.trim(),
+      description: description.trim(),
+      where_exp: whereExp.trim(),
+      select_exp: selectExp.trim(),
+      param_columns: selectedParams.join(","),
+    };
+
+    setCloning(true);
+    setError(null);
+    setCloneNotice(null);
+    try {
+      const response = await fetch(`/api/inventories/${encodeURIComponent(target)}/apis`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!response.ok) {
+        throw new Error(await readErrorDetail(response, "API 복제에 실패했습니다."));
+      }
+      setCloneNotice(`「${targetLabel}」에 복제되었습니다.`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "API 복제 실패");
+    } finally {
+      setCloning(false);
+    }
   };
 
   const handleSelectCard = (item: InventoryApiItem) => {
@@ -167,9 +257,6 @@ export function InventoryApiPanel({
     }
     if (!selectExp.trim()) {
       return "출력절(select)을 입력하세요.";
-    }
-    if (selectedParams.length === 0) {
-      return "API 매개변수 컬럼을 1개 이상 선택하세요.";
     }
     return null;
   };
@@ -314,9 +401,76 @@ export function InventoryApiPanel({
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4">
         {formOpen ? (
           <section className="mb-4 rounded-lg border border-sky-800/60 bg-slate-900/70 p-3">
-            <h3 className="mb-3 text-xs font-semibold text-sky-200">
-              {isCreate ? "새 API" : "API 편집"}
-            </h3>
+            <div className="mb-3 flex items-center justify-between gap-2">
+              <h3 className="text-xs font-semibold text-sky-200">
+                {isCreate ? "새 API" : "API 편집"}
+              </h3>
+              {isEdit ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (cloneOpen) {
+                      setCloneOpen(false);
+                      setCloneNotice(null);
+                      return;
+                    }
+                    void openClonePanel();
+                  }}
+                  className={`inline-flex items-center gap-1 rounded-md border px-2.5 py-1 text-[11px] font-medium ${
+                    cloneOpen
+                      ? "border-sky-500 bg-sky-900/60 text-sky-100"
+                      : "border-slate-600 bg-slate-800/70 text-slate-200 hover:bg-slate-800"
+                  }`}
+                >
+                  <WorkflowIcon name="clone" size="xs" label="복제" />
+                  복제
+                </button>
+              ) : null}
+            </div>
+            {isEdit && cloneOpen ? (
+              <div className="mb-3 rounded-md border border-slate-700 bg-slate-950/50 p-2.5">
+                <p className="mb-2 text-[11px] text-slate-400">
+                  동일한 API 정의로 다른 인벤토리에 생성합니다.
+                </p>
+                {cloneLoading ? (
+                  <p className="text-[11px] text-slate-500">대상 목록 로딩 중…</p>
+                ) : (
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+                    <label className="flex min-w-0 flex-1 flex-col gap-1">
+                      <span className="text-[11px] font-medium text-slate-300">대상 인벤토리</span>
+                      <select
+                        value={cloneTarget}
+                        onChange={(event) => setCloneTarget(event.target.value)}
+                        disabled={cloneTargets.length === 0 || cloning}
+                        className="w-full rounded-md border border-slate-700 bg-slate-950/80 px-2 py-1.5 text-xs text-slate-100 outline-none focus:border-sky-600 disabled:opacity-70"
+                      >
+                        {cloneTargets.length === 0 ? (
+                          <option value="">복제 가능한 인벤토리 없음</option>
+                        ) : (
+                          cloneTargets.map((item) => (
+                            <option key={item.table_name} value={item.table_name}>
+                              {item.display_name || item.table_name} ({item.table_name})
+                            </option>
+                          ))
+                        )}
+                      </select>
+                    </label>
+                    <button
+                      type="button"
+                      disabled={cloning || !cloneTarget}
+                      onClick={() => void handleClone()}
+                      className="inline-flex shrink-0 items-center gap-1 rounded-md border border-sky-700 bg-sky-950/50 px-3 py-1.5 text-xs font-medium text-sky-100 hover:bg-sky-900/60 disabled:opacity-50"
+                    >
+                      <WorkflowIcon name="clone" size="xs" label="복제 실행" />
+                      {cloning ? "복제 중…" : "복제 실행"}
+                    </button>
+                  </div>
+                )}
+                {cloneNotice ? (
+                  <p className="mt-2 text-[11px] text-emerald-300">{cloneNotice}</p>
+                ) : null}
+              </div>
+            ) : null}
             <div className="flex flex-col gap-3">
               <label className="flex flex-col gap-1">
                 <span className="text-[11px] font-medium text-slate-300">API 이름</span>

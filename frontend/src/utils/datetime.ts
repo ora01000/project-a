@@ -68,6 +68,19 @@ export function formatCurrentTime(date: Date): string {
   return `${year}년 ${month}월 ${day}일(${weekday}) ${hour}:${minute}:${second}`;
 }
 
+/** Compact two-line clock for the top-right header. */
+export function formatHeaderClock(date: Date): { dateLine: string; timeLine: string } {
+  const weekday = new Intl.DateTimeFormat("ko-KR", {
+    timeZone: DISPLAY_TIMEZONE,
+    weekday: "short",
+  }).format(date);
+  const { month, day, hour, minute } = getDateTimeParts(date);
+  return {
+    dateLine: `${month}월 ${day}일 (${weekday})`,
+    timeLine: `${hour}:${minute}`,
+  };
+}
+
 export function formatLocaleDateTime(
   date: Date,
   options?: Intl.DateTimeFormatOptions,

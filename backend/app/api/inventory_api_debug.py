@@ -189,6 +189,24 @@ async def api_inventory_api_debug_remove(
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
+@router.get("/debug/inventory-api/getInventoryAPIList")
+async def api_inventory_api_debug_api_list(
+    request: Request,
+    tablename: str = Query(min_length=1),
+    base_url: str | None = Query(default=None),
+) -> dict[str, Any]:
+    _require_admin(request)
+    try:
+        return await call_inventory_api(
+            method="GET",
+            path="/getInventoryAPIList",
+            base_url=base_url,
+            params={"tablename": tablename},
+        )
+    except InventoryExternalApiError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
 @router.post("/debug/inventory-api/sql")
 async def api_inventory_api_debug_sql(
     body: InventoryApiSqlRequest,
