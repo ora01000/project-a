@@ -100,6 +100,9 @@ class JobIntakePayload:
     channel_id: str
     message_id: str
     job_type: int = JOB_TYPE_AX_INFRA
+    status_code: int = JOB_STATUS_RECEIVED
+    approver: str | None = None
+    approver_registered_date: str | None = None
 
 
 def _row_to_job(row) -> JobRecord:
@@ -329,6 +332,17 @@ def create_job_from_intake(
 ) -> JobRecord:
     normalized_request_date = normalize_job_datetime(payload.request_date)
     received_at = now_job_datetime()
+    status_code = int(payload.status_code)
+    approver = (payload.approver or "").strip() or None
+    if approver is not None:
+        approver = approver[:20]
+    approver_registered_date = payload.approver_registered_date
+    if approver is not None and not (approver_registered_date or "").strip():
+        approver_registered_date = received_at
+    elif approver is None:
+        approver_registered_date = None
+    else:
+        approver_registered_date = str(approver_registered_date).strip() or received_at
 
     with get_connection(database_path) as connection:
         sequence = next_sr_sequence(connection, normalized_request_date)
@@ -357,10 +371,10 @@ def create_job_from_intake(
             """,
             (
                 srnum,
-                JOB_STATUS_RECEIVED,
+                status_code,
                 int(payload.job_type),
-                None,
-                None,
+                approver_registered_date,
+                approver,
                 payload.job_title.strip(),
                 payload.requester_name.strip(),
                 payload.requester_email.strip(),
@@ -607,6 +621,8 @@ def assign_job_approver(
     userid = approver_userid.strip()
     if not userid:
         raise ValueError("approver is required")
+    if is_hidden_system_user(userid):
+        raise ValueError(f"unknown approver userid: {userid}")
 
     approver = get_user_by_userid(database_path, userid)
     if approver is None or is_hidden_system_user(approver.userid, approver.role):

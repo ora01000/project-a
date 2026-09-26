@@ -26,6 +26,7 @@ from backend.app.notifications.email_sender import (
     send_ax_infra_job_completion_email,
     send_whatap_event_subscriber_report,
 )
+from backend.app.db.received_mail import get_received_mail_by_uuid
 from backend.app.services.agent_runtime_client import AgentInvokeRequest, AgentRuntimeClient, normalize_runtime_mode
 from backend.app.services.job_processor import (
     build_job_agent_message,
@@ -35,10 +36,30 @@ from backend.app.services.job_processor import (
 
 logger = logging.getLogger(__name__)
 
+MAIL_CHANNEL_ID = "received_mail"
+
 
 async def _notify_ax_infra_job_completion(database_path: Path, job: JobRecord, report_body: str) -> None:
     if int(job.job_type) != JOB_TYPE_AX_INFRA:
         return
+    reply_kwargs: dict = {}
+    if (job.channel_id or "").strip() == MAIL_CHANNEL_ID:
+        mail_uuid = (job.message_id or "").strip()
+        record = get_received_mail_by_uuid(database_path, mail_uuid) if mail_uuid else None
+        if record is not None:
+            reply_kwargs = {
+                "reply_to_message_id": record.message_id,
+                "reply_original_subject": record.subject,
+                "reply_original_from": record.from_address,
+                "reply_original_received_at": record.received_at,
+                "reply_original_body": record.body_text,
+            }
+        else:
+            logger.warning(
+                "AX infra completion reply context missing for idx=%s message_id=%s",
+                job.idx,
+                mail_uuid,
+            )
     try:
         await send_ax_infra_job_completion_email(
             database_path=database_path,
@@ -46,6 +67,7 @@ async def _notify_ax_infra_job_completion(database_path: Path, job: JobRecord, r
             requester_email=job.requester_email,
             approver_userid=job.approver,
             report_body=report_body,
+            **reply_kwargs,
         )
     except Exception:
         logger.exception(

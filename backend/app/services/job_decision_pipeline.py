@@ -8,7 +8,14 @@ from pathlib import Path
 from typing import Any
 
 from backend.app.db.job_datetime import now_job_datetime
-from backend.app.db.jobs import JOB_TYPE_AX_INFRA, JobIntakePayload, JobRecord, create_job_from_intake
+from backend.app.db.jobs import (
+    JOB_STATUS_DIRECT_APPROVED,
+    JOB_STATUS_RECEIVED,
+    JOB_TYPE_AX_INFRA,
+    JobIntakePayload,
+    JobRecord,
+    create_job_from_intake,
+)
 from backend.app.db.received_mail import (
     DECISION_TYPE_INSUFFICIENT,
     DECISION_TYPE_JOB,
@@ -19,7 +26,7 @@ from backend.app.db.received_mail import (
     list_pending_received_mail,
     update_decision_type,
 )
-from backend.app.db.roles import ROLE_ADMIN
+from backend.app.db.roles import AUTO_APPROVE_USERID, ROLE_ADMIN
 from backend.app.db.users import list_users
 from backend.app.job_decision_agent.agent import ParsedDecision, job_decision_agent_service
 from backend.app.notifications.email_sender import send_job_supplement_request_email
@@ -30,6 +37,10 @@ logger = logging.getLogger(__name__)
 UNKNOWN_DEPART = "확인 불가"
 MAIL_TEAM_ID = "mail"
 MAIL_CHANNEL_ID = "received_mail"
+
+
+def is_read_job_kind(kind: str) -> bool:
+    return (kind or "").strip().lower() == "read"
 
 
 def relevant_unreadable_attachment_names(record: ReceivedMailRecord) -> list[str]:
@@ -86,6 +97,8 @@ def create_job_from_received_mail(
     sender = extract_sender_email(record.from_address)
     if not sender:
         raise ValueError("sender email is required to create a job")
+    auto_approve = is_read_job_kind(parsed.job_kind)
+    approved_at = now_job_datetime() if auto_approve else None
     payload = JobIntakePayload(
         job_title=build_job_title(record.subject),
         requester_name=sender[:100],
@@ -98,8 +111,19 @@ def create_job_from_received_mail(
         channel_id=MAIL_CHANNEL_ID,
         message_id=record.uuid[:50],
         job_type=JOB_TYPE_AX_INFRA,
+        status_code=JOB_STATUS_DIRECT_APPROVED if auto_approve else JOB_STATUS_RECEIVED,
+        approver=AUTO_APPROVE_USERID if auto_approve else None,
+        approver_registered_date=approved_at,
     )
-    return create_job_from_intake(database_path, payload)
+    job = create_job_from_intake(database_path, payload)
+    if auto_approve:
+        logger.info(
+            "mail job auto-approved (read) idx=%s srnum=%s approver=%s",
+            job.idx,
+            job.srnum,
+            AUTO_APPROVE_USERID,
+        )
+    return job
 
 
 def list_supplement_cc_emails(database_path: Path | str) -> list[str]:
@@ -235,6 +259,10 @@ async def process_received_mail_decision(
                     original_subject=record.subject,
                     body=body,
                     cc_addresses=cc_addresses,
+                    in_reply_to_message_id=record.message_id,
+                    original_from_address=record.from_address,
+                    original_received_at=record.received_at,
+                    original_body_text=record.body_text,
                 )
             else:
                 logger.warning(

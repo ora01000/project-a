@@ -5,6 +5,7 @@ ROLE_PENDING = 5
 ROLE_SUPERADMIN = 100
 
 ROOT_USERID = "root"
+AUTO_APPROVE_USERID = "auto_approve"
 
 ASSIGNABLE_ROLES = frozenset({ROLE_ADMIN, ROLE_USER, ROLE_INFRAADMIN, ROLE_PENDING})
 
@@ -31,9 +32,15 @@ def should_mask_ips(role: int) -> bool:
     return role == ROLE_USER
 
 
+def is_auto_approve_userid(userid: str) -> bool:
+    return userid.strip().lower() == AUTO_APPROVE_USERID
+
+
 def is_hidden_system_user(userid: str, role: int | None = None) -> bool:
     normalized = userid.strip()
     if normalized == ROOT_USERID:
+        return True
+    if is_auto_approve_userid(normalized):
         return True
     if role is not None and role == ROLE_SUPERADMIN:
         return True

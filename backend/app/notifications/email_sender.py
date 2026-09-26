@@ -124,6 +124,63 @@ def convert_markdown_to_html(markdown_text: str) -> str:
     )
 
 
+def normalize_rfc_message_id(message_id: str) -> str:
+    mid = (message_id or "").strip()
+    if not mid:
+        return ""
+    if not mid.startswith("<"):
+        mid = f"<{mid}"
+    if not mid.endswith(">"):
+        mid = f"{mid}>"
+    return mid
+
+
+def format_reply_subject(original_subject: str) -> str:
+    """Prefix with RE: for reply threading (strip an existing Re:/RE: once)."""
+    subject = (original_subject or "").strip() or "(제목 없음)"
+    while True:
+        lowered = subject.lower()
+        if lowered.startswith("re:"):
+            subject = subject[3:].lstrip()
+            continue
+        break
+    if not subject:
+        subject = "(제목 없음)"
+    return f"RE: {subject}"
+
+
+def format_original_mail_quote(
+    *,
+    from_address: str,
+    subject: str,
+    received_at: str,
+    body_text: str,
+) -> str:
+    """Markdown block quoting the inbound mail below the reply body."""
+    header_lines = [
+        f"- From: {(from_address or '').strip() or '(unknown)'}",
+        f"- Subject: {(subject or '').strip() or '(제목 없음)'}",
+    ]
+    when = (received_at or "").strip()
+    if when:
+        header_lines.append(f"- Date: {when}")
+    body = (body_text or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+    if body:
+        quoted = "\n".join(f"> {line}" if line else ">" for line in body.splitlines())
+        return "\n".join([*header_lines, "", quoted])
+    return "\n".join(header_lines)
+
+
+def append_original_mail_to_markdown(reply_markdown: str, original_quote: str) -> str:
+    reply = (reply_markdown or "").rstrip()
+    quote = (original_quote or "").strip()
+    if not quote:
+        return reply
+    if not reply:
+        return f"## 원본 메일\n\n{quote}"
+    return f"{reply}\n\n---\n\n## 원본 메일\n\n{quote}"
+
+
 def _send_email_sync(
     settings: EmailNotificationSettings,
     *,
@@ -133,6 +190,8 @@ def _send_email_sync(
     html_body: str | None = None,
     cc_addresses: list[str] | None = None,
     bcc_addresses: list[str] | None = None,
+    in_reply_to: str | None = None,
+    references: str | None = None,
 ) -> None:
     if not to_addresses:
         raise ValueError("수신자 이메일이 없습니다.")
@@ -148,6 +207,11 @@ def _send_email_sync(
     if bcc_list:
         message["Bcc"] = ", ".join(bcc_list)
     message["Subject"] = subject
+    reply_to = normalize_rfc_message_id(in_reply_to or "")
+    if reply_to:
+        message["In-Reply-To"] = reply_to
+        refs = (references or "").strip() or reply_to
+        message["References"] = refs
     if html_body:
         # HTML only: some gateways keep the first/plain part and drop the HTML alternative.
         message.set_content(html_body, subtype="html", charset="utf-8")
@@ -255,6 +319,10 @@ async def send_job_supplement_request_email(
     original_subject: str,
     body: str,
     cc_addresses: list[str] | None = None,
+    in_reply_to_message_id: str | None = None,
+    original_from_address: str | None = None,
+    original_received_at: str | None = None,
+    original_body_text: str | None = None,
 ) -> bool:
     """Reply asking the sender for missing job materials (decision_type=5)."""
     config = load_email_settings_from_db(database_path)
@@ -271,11 +339,18 @@ async def send_job_supplement_request_email(
         logger.warning("Supplement email skipped: invalid to_address=%s", to_address)
         return False
 
-    original = (original_subject or "").strip() or "(제목 없음)"
-    subject = f"[자료보완] {original}"
+    subject = format_reply_subject(original_subject)
     markdown_body = (body or "").strip() or "작업 처리를 위해 추가 자료가 필요합니다."
+    quote = format_original_mail_quote(
+        from_address=original_from_address or "",
+        subject=original_subject or "",
+        received_at=original_received_at or "",
+        body_text=original_body_text or "",
+    )
+    markdown_body = append_original_mail_to_markdown(markdown_body, quote)
     cc_list = [address.strip() for address in (cc_addresses or []) if address.strip()]
     cc_list = [address for address in cc_list if address.lower() != recipient.lower()]
+    reply_mid = normalize_rfc_message_id(in_reply_to_message_id or "")
 
     try:
         await send_markdown_email(
@@ -284,6 +359,8 @@ async def send_job_supplement_request_email(
             cc_addresses=cc_list,
             subject=subject,
             markdown_body=markdown_body,
+            in_reply_to=reply_mid or None,
+            references=reply_mid or None,
         )
         logger.info("Supplement email sent to=%s cc=%s subject=%s", recipient, cc_list, subject)
         return True
@@ -300,6 +377,8 @@ async def send_markdown_email(
     markdown_body: str,
     cc_addresses: list[str] | None = None,
     bcc_addresses: list[str] | None = None,
+    in_reply_to: str | None = None,
+    references: str | None = None,
 ) -> None:
     plain_markdown, html_markdown = prepare_markdown_for_email(markdown_body.strip())
     html_body = convert_markdown_to_html(html_markdown)
@@ -313,6 +392,8 @@ async def send_markdown_email(
         subject=subject,
         body=plain_body,
         html_body=html_body,
+        in_reply_to=in_reply_to,
+        references=references,
     )
 
 
@@ -352,6 +433,8 @@ async def send_job_report_emails(
     cc_addresses: list[str] | None = None,
     bcc_addresses: list[str] | None = None,
     settings: EmailNotificationSettings | None = None,
+    in_reply_to: str | None = None,
+    references: str | None = None,
 ) -> tuple[int, list[str]]:
     """Send one markdown report email with To/Cc/Bcc. Returns (recipient_count, failed_recipients)."""
     config = settings or load_email_settings_from_db(database_path)
@@ -377,6 +460,8 @@ async def send_job_report_emails(
             bcc_addresses=unique_bcc,
             subject=subject,
             markdown_body=markdown_body,
+            in_reply_to=in_reply_to,
+            references=references,
         )
         logger.info(
             "Job report email sent to=%s cc=%s bcc=%s subject=%s",
@@ -596,6 +681,11 @@ async def _send_ax_infra_requester_notice(
     report_body: str,
     log_label: str,
     settings: EmailNotificationSettings | None = None,
+    reply_to_message_id: str | None = None,
+    reply_original_subject: str | None = None,
+    reply_original_from: str | None = None,
+    reply_original_received_at: str | None = None,
+    reply_original_body: str | None = None,
 ) -> tuple[int, list[str]]:
     to_address, cc_addresses = _resolve_ax_infra_mail_targets(
         database_path, requester_email, approver_userid
@@ -605,11 +695,27 @@ async def _send_ax_infra_requester_notice(
         return 0, []
 
     title = (job_title or "").strip() or "작업 요청서"
-    subject = f"{subject_prefix} {title}"
-    markdown_body = compose_report_markdown(
-        forward_message=forward_message,
-        report_body=report_body,
-    )
+    reply_mid = normalize_rfc_message_id(reply_to_message_id or "")
+    if reply_mid or (reply_original_subject or "").strip() or (reply_original_body or "").strip():
+        # Mail-sourced jobs: send as a reply to the inbound message.
+        subject = format_reply_subject(reply_original_subject or title)
+        markdown_body = compose_report_markdown(
+            forward_message=forward_message,
+            report_body=report_body,
+        )
+        quote = format_original_mail_quote(
+            from_address=reply_original_from or "",
+            subject=reply_original_subject or title,
+            received_at=reply_original_received_at or "",
+            body_text=reply_original_body or "",
+        )
+        markdown_body = append_original_mail_to_markdown(markdown_body, quote)
+    else:
+        subject = f"{subject_prefix} {title}"
+        markdown_body = compose_report_markdown(
+            forward_message=forward_message,
+            report_body=report_body,
+        )
 
     try:
         sent_count, failed = await send_job_report_emails(
@@ -619,6 +725,8 @@ async def _send_ax_infra_requester_notice(
             subject=subject,
             markdown_body=markdown_body,
             settings=settings,
+            in_reply_to=reply_mid or None,
+            references=reply_mid or None,
         )
         if failed:
             logger.warning(
@@ -650,6 +758,11 @@ async def send_ax_infra_job_completion_email(
     approver_userid: str | None,
     report_body: str,
     settings: EmailNotificationSettings | None = None,
+    reply_to_message_id: str | None = None,
+    reply_original_subject: str | None = None,
+    reply_original_from: str | None = None,
+    reply_original_received_at: str | None = None,
+    reply_original_body: str | None = None,
 ) -> tuple[int, list[str]]:
     """Email job_type=1 completion result to requester, Cc approver."""
     return await _send_ax_infra_requester_notice(
@@ -662,6 +775,11 @@ async def send_ax_infra_job_completion_email(
         report_body=report_body,
         log_label="AX infra completion email",
         settings=settings,
+        reply_to_message_id=reply_to_message_id,
+        reply_original_subject=reply_original_subject,
+        reply_original_from=reply_original_from,
+        reply_original_received_at=reply_original_received_at,
+        reply_original_body=reply_original_body,
     )
 
 
