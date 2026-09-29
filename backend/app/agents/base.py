@@ -63,9 +63,12 @@ def _aggregate_mcp_status(mcp_manager: MCPClientManager, server_keys: list[str])
     return enabled_statuses[0]
 
 
-def extract_tools_used(messages: list[Any], mcp_manager: MCPClientManager | None = None) -> list[ToolUsage]:
-    from backend.app.agents.inventory_tool import QUERY_INVENTORY_TOOL_NAME
-
+def extract_tools_used(
+    messages: list[Any],
+    mcp_manager: MCPClientManager | None = None,
+    *,
+    mcp_server_keys: list[str] | None = None,
+) -> list[ToolUsage]:
     seen: set[str] = set()
     tools_used: list[ToolUsage] = []
 
@@ -85,11 +88,11 @@ def extract_tools_used(messages: list[Any], mcp_manager: MCPClientManager | None
                 if sanitized_args != raw_args:
                     logger.warning("Sanitized tool call args for %s: %s -> %s", name, raw_args, sanitized_args)
 
-            if name == QUERY_INVENTORY_TOOL_NAME:
-                tools_used.append(ToolUsage(name=name, mcp_server="inventory"))
-                continue
-
-            mcp_server = mcp_manager.get_tool_server(name) if mcp_manager else None
+            mcp_server = (
+                mcp_manager.get_tool_server(name, server_keys=mcp_server_keys)
+                if mcp_manager
+                else None
+            )
             tools_used.append(ToolUsage(name=name, mcp_server=mcp_server))
 
     return tools_used
@@ -165,16 +168,8 @@ async def build_agent(
     definition: AgentDefinition,
     mcp_manager: MCPClientManager,
 ) -> Any:
-    from backend.app.agents.inventory_tool import (
-        INVENTORY_AGENT_ID,
-        INVENTORY_TOOL_PROMPT_HINT,
-        QUERY_INVENTORY_TOOL_NAME,
-        create_inventory_tool,
-    )
     from backend.app.logging.prompt_debug import wrap_llm_for_prompt_debug
 
-    # wrap_llm_for_prompt_debug hooks _agenerate so capture survives LangGraph bind_tools
-    # (model.with_config(callbacks=...) is stripped by bind_tools).
     llm = wrap_llm_for_prompt_debug(
         get_llm(),
         agent_id=definition.agent_id,
@@ -185,22 +180,8 @@ async def build_agent(
         for tool in await mcp_manager.get_tools_for_servers(definition.mcp_server_keys)
     ]
 
-    if definition.agent_id != INVENTORY_AGENT_ID:
-        tools.append(
-            create_inventory_tool(
-                caller_agent_id=definition.agent_id,
-                caller_agent_name=definition.name,
-            )
-        )
-
     prompt = definition.system_prompt
-    if definition.agent_id != INVENTORY_AGENT_ID:
-        prompt = f"{prompt}\n\n{INVENTORY_TOOL_PROMPT_HINT}"
-
-    mcp_tools = [
-        tool for tool in tools if getattr(tool, "name", None) != QUERY_INVENTORY_TOOL_NAME
-    ]
-    if not mcp_tools and definition.mcp_server_keys:
+    if not tools and definition.mcp_server_keys:
         server_keys = ", ".join(definition.mcp_server_keys)
         prompt = (
             f"{prompt}\n\n"
@@ -223,10 +204,6 @@ async def build_planned_step_agent(
     tool_name: str | None,
 ) -> Any:
     """Build a one-shot agent that may only use the single tool chosen in the job plan."""
-    from backend.app.agents.inventory_tool import (
-        QUERY_INVENTORY_TOOL_NAME,
-        create_inventory_tool,
-    )
     from backend.app.logging.prompt_debug import wrap_llm_for_prompt_debug
 
     llm = wrap_llm_for_prompt_debug(
@@ -238,20 +215,12 @@ async def build_planned_step_agent(
     selected_tools: list[Any] = []
     planned_name = (tool_name or "").strip()
     if planned_name and planned_name != "agent_invoke":
-        if planned_name == QUERY_INVENTORY_TOOL_NAME:
-            selected_tools = [
-                create_inventory_tool(
-                    caller_agent_id=definition.agent_id,
-                    caller_agent_name=definition.name,
-                )
-            ]
-        else:
-            available = [
-                wrap_tool_with_argument_sanitizer(tool)
-                for tool in await mcp_manager.get_tools_for_servers(definition.mcp_server_keys)
-            ]
-            selected_tools = [tool for tool in available if getattr(tool, "name", None) == planned_name]
-            if not selected_tools:
+        available = [
+            wrap_tool_with_argument_sanitizer(tool)
+            for tool in await mcp_manager.get_tools_for_servers(definition.mcp_server_keys)
+        ]
+        selected_tools = [tool for tool in available if getattr(tool, "name", None) == planned_name]
+        if not selected_tools:
                 raise ValueError(
                     f"Planned tool '{planned_name}' is not available for agent '{definition.agent_id}'"
                 )
@@ -282,6 +251,7 @@ async def invoke_agent(
     *,
     agent_id: str | None = None,
     agent_name: str | None = None,
+    mcp_server_keys: list[str] | None = None,
 ) -> AgentInvokeResult:
     # agent_id/agent_name kept for call-site compatibility; capture is via wrap_llm_for_prompt_debug
     del agent_id, agent_name
@@ -290,7 +260,11 @@ async def invoke_agent(
     if not messages:
         return AgentInvokeResult(content="No response generated.", tools_used=[])
 
-    tools_used = extract_tools_used(messages, mcp_manager)
+    tools_used = extract_tools_used(
+        messages,
+        mcp_manager,
+        mcp_server_keys=mcp_server_keys,
+    )
     content = _extract_message_content(messages[-1])
     input_tokens, output_tokens = extract_token_usage_from_messages(messages)
     return AgentInvokeResult(

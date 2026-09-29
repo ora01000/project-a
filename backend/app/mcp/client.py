@@ -79,5 +79,16 @@ class MCPClientManager:
                 tools.append(tool)
         return tools
 
-    def get_tool_server(self, tool_name: str) -> str | None:
+    def get_tool_server(
+        self,
+        tool_name: str,
+        *,
+        server_keys: list[str] | None = None,
+    ) -> str | None:
+        if server_keys is not None:
+            for server_key in server_keys:
+                for tool in self._tools_by_server.get(server_key, []):
+                    if tool.name == tool_name:
+                        return server_key
+            return None
         return self._tool_server_map.get(tool_name)

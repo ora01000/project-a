@@ -1,235 +1,146 @@
+from __future__ import annotations
+
 from dataclasses import dataclass
 from pathlib import Path
 
 from backend.app.db.database import get_connection
-from backend.app.db.job_datetime import build_sr_num, normalize_job_datetime, now_job_datetime
+from backend.app.db.roles import is_admin_role
+from backend.app.db.job_datetime import (
+    build_sr_num,
+    normalize_job_datetime,
+    next_sr_sequence,
+    now_job_datetime,
+)
+from backend.app.db.users import User
 
-JOB_STATE_RECEIVED = 0
-JOB_STATE_PLAN_COMPLETED = 1
-JOB_STATE_UNDER_REVIEW = 2
-JOB_STATE_PENDING = 3
-JOB_STATE_REJECTED = 4
-JOB_STATE_APPROVED = 5
-JOB_STATE_COMPLETED = 6
-JOB_STATE_FAILED = 7
+JOB_STATUS_RECEIVED = 0
+JOB_STATUS_APPROVER_ASSIGNED = 1
+JOB_STATUS_DIRECT_APPROVED = 2
+JOB_STATUS_COMPLETED_SUCCESS = 10
+JOB_STATUS_COMPLETED_FAILURE = 11
+JOB_STATUS_REJECTED = 12
+JOB_STATUS_CANCELLED = 13
 
-JOB_STATE_LABELS: dict[int, str] = {
-    JOB_STATE_RECEIVED: "접수",
-    JOB_STATE_PLAN_COMPLETED: "계획수립완료",
-    JOB_STATE_UNDER_REVIEW: "검토중",
-    JOB_STATE_PENDING: "보류",
-    JOB_STATE_REJECTED: "반려",
-    JOB_STATE_APPROVED: "승인",
-    JOB_STATE_COMPLETED: "완료",
-    JOB_STATE_FAILED: "실패",
-}
+JOB_TYPE_AX_INFRA = 1
+JOB_TYPE_WHATAP = 2
+JOB_TYPE_WORKFLOW = 3
+JOB_TYPE_SIGNUP = 10
+
+SIGNUP_ACCESS_REQUEST_JOB_TITLE = "[신규사용자] 접속 권한 신청서"
+
+WHATAP_REQUESTER_NAME = "Whatap"
+WHATAP_REQUESTER_EMAIL = "whatap@admin.io"
+WHATAP_REQUESTER_DEPART = "Whatap"
+WHATAP_MADANG_ID = "whatap"
+WHATAP_JOB_TITLE_PREFIX = "[Whatap 이벤트]"
+WHATAP_JOB_TITLE_SUFFIX = "에서 발생한 이벤트 분석(자동)"
 
 JOB_SELECT_COLUMNS = """
     idx,
-    sr_num,
-    request_date,
-    job_title,
-    request_depart,
-    requester,
-    requester_email,
-    completion_request_date,
-    job_description,
+    srnum,
+    status_code,
+    job_type,
+    approver_registered_date,
     approver,
-    state,
-    notify_channel,
-    job_plan,
-    original_job_plan,
-    execution_result,
-    actual_completion_time,
-    approval_date,
-    pending_date,
-    reject_date
+    job_title,
+    requester_name,
+    requester_email,
+    requester_depart,
+    job_content,
+    request_date,
+    madang_id,
+    team_id,
+    channel_id,
+    message_id,
+    received_at,
+    reject_reason,
+    drop_reason,
+    ai_audit_comment,
+    ai_audit_date,
+    ai_audit_cnt
 """
 
 
-def job_state_label(state: int) -> str:
-    return JOB_STATE_LABELS.get(state, f"unknown({state})")
+@dataclass(frozen=True)
+class JobRecord:
+    idx: int
+    srnum: str
+    status_code: int
+    job_type: int
+    approver_registered_date: str | None
+    approver: str | None
+    job_title: str
+    requester_name: str
+    requester_email: str
+    requester_depart: str
+    job_content: str
+    request_date: str
+    madang_id: str
+    team_id: str
+    channel_id: str
+    message_id: str
+    received_at: str
+    reject_reason: str = ""
+    drop_reason: str = ""
+    ai_audit_comment: str = ""
+    ai_audit_date: str | None = None
+    ai_audit_cnt: int = 0
 
 
 @dataclass(frozen=True)
-class Job:
-    idx: int
-    request_date: str
+class JobIntakePayload:
     job_title: str
-    request_depart: str
-    requester: str
+    requester_name: str
     requester_email: str
-    completion_request_date: str
-    job_description: str
-    approver: str
-    state: int
-    notify_channel: str
-    job_plan: str | None
-    original_job_plan: str | None
-    execution_result: str | None
-    actual_completion_time: str | None
-    sr_num: str | None = None
-    approval_date: str | None = None
-    pending_date: str | None = None
-    reject_date: str | None = None
+    requester_depart: str
+    job_content: str
+    request_date: str
+    madang_id: str
+    team_id: str
+    channel_id: str
+    message_id: str
+    job_type: int = JOB_TYPE_AX_INFRA
+    status_code: int = JOB_STATUS_RECEIVED
+    approver: str | None = None
+    approver_registered_date: str | None = None
 
 
-def _optional_job_datetime(row, key: str) -> str | None:
-    if key not in row.keys() or row[key] is None:
-        return None
-    value = str(row[key])
-    try:
-        return normalize_job_datetime(value)
-    except ValueError:
-        return value
-
-
-def _row_to_job(row) -> Job:
-    keys = row.keys()
-    request_date = str(row["request_date"])
-    completion_request_date = str(row["completion_request_date"])
-    try:
-        request_date = normalize_job_datetime(request_date)
-    except ValueError:
-        pass
-    try:
-        completion_request_date = normalize_job_datetime(completion_request_date)
-    except ValueError:
-        pass
-
-    actual_completion_time = _optional_job_datetime(row, "actual_completion_time")
-
-    sr_num = None
-    if "sr_num" in keys and row["sr_num"] is not None:
-        value = str(row["sr_num"]).strip()
-        sr_num = value or None
-
-    return Job(
+def _row_to_job(row) -> JobRecord:
+    approver_registered_date = row["approver_registered_date"]
+    approver = row["approver"]
+    return JobRecord(
         idx=int(row["idx"]),
-        request_date=request_date,
+        srnum=str(row["srnum"]),
+        status_code=int(row["status_code"]),
+        job_type=int(row["job_type"] if row["job_type"] is not None else JOB_TYPE_AX_INFRA),
+        approver_registered_date=(
+            str(approver_registered_date) if approver_registered_date is not None else None
+        ),
+        approver=str(approver).strip() if approver is not None and str(approver).strip() else None,
         job_title=str(row["job_title"]),
-        request_depart=str(row["request_depart"]),
-        requester=str(row["requester"]),
+        requester_name=str(row["requester_name"]),
         requester_email=str(row["requester_email"]),
-        completion_request_date=completion_request_date,
-        job_description=str(row["job_description"]),
-        approver=str(row["approver"]),
-        state=int(row["state"]),
-        notify_channel=str(row["notify_channel"]) if "notify_channel" in keys else "integrated_chat",
-        job_plan=str(row["job_plan"]) if row["job_plan"] is not None else None,
-        original_job_plan=(
-            str(row["original_job_plan"])
-            if "original_job_plan" in keys and row["original_job_plan"] is not None
+        requester_depart=str(row["requester_depart"]),
+        job_content=str(row["job_content"] or ""),
+        request_date=str(row["request_date"]),
+        madang_id=str(row["madang_id"]),
+        team_id=str(row["team_id"]),
+        channel_id=str(row["channel_id"]),
+        message_id=str(row["message_id"]),
+        received_at=str(row["received_at"]),
+        reject_reason=str(row["reject_reason"] or ""),
+        drop_reason=str(row["drop_reason"] or ""),
+        ai_audit_comment=str(row["ai_audit_comment"] or ""),
+        ai_audit_date=(
+            str(row["ai_audit_date"]).strip()
+            if row["ai_audit_date"] is not None and str(row["ai_audit_date"]).strip()
             else None
         ),
-        execution_result=str(row["execution_result"]) if row["execution_result"] is not None else None,
-        actual_completion_time=actual_completion_time,
-        sr_num=sr_num,
-        approval_date=_optional_job_datetime(row, "approval_date"),
-        pending_date=_optional_job_datetime(row, "pending_date"),
-        reject_date=_optional_job_datetime(row, "reject_date"),
+        ai_audit_cnt=int(row["ai_audit_cnt"] if row["ai_audit_cnt"] is not None else 0),
     )
 
 
-def list_jobs(database_path: str | Path) -> list[Job]:
-    with get_connection(database_path) as connection:
-        rows = connection.execute(
-            f"""
-            SELECT {JOB_SELECT_COLUMNS}
-            FROM jobs
-            ORDER BY idx
-            """
-        ).fetchall()
-    return [_row_to_job(row) for row in rows]
-
-
-def list_jobs_by_state(database_path: str | Path, state: int) -> list[Job]:
-    with get_connection(database_path) as connection:
-        rows = connection.execute(
-            f"""
-            SELECT {JOB_SELECT_COLUMNS}
-            FROM jobs
-            WHERE state = ?
-            ORDER BY idx
-            """,
-            (state,),
-        ).fetchall()
-    return [_row_to_job(row) for row in rows]
-
-
-def list_jobs_by_states(database_path: str | Path, states: list[int]) -> list[Job]:
-    if not states:
-        return []
-
-    placeholders = ", ".join("?" for _ in states)
-    with get_connection(database_path) as connection:
-        rows = connection.execute(
-            f"""
-            SELECT {JOB_SELECT_COLUMNS}
-            FROM jobs
-            WHERE state IN ({placeholders})
-            ORDER BY idx
-            """,
-            states,
-        ).fetchall()
-    return [_row_to_job(row) for row in rows]
-
-
-def list_jobs_by_approver(
-    database_path: str | Path,
-    *,
-    userid: str,
-    username: str,
-) -> list[Job]:
-    """Jobs where approver matches userid (username kept for legacy rows)."""
-    candidates = [value.strip() for value in (userid, username) if value and value.strip()]
-    if not candidates:
-        return []
-
-    unique_candidates = list(dict.fromkeys(candidates))
-    placeholders = ", ".join("?" for _ in unique_candidates)
-    with get_connection(database_path) as connection:
-        rows = connection.execute(
-            f"""
-            SELECT {JOB_SELECT_COLUMNS}
-            FROM jobs
-            WHERE approver IN ({placeholders})
-            ORDER BY idx DESC
-            """,
-            unique_candidates,
-        ).fetchall()
-    return [_row_to_job(row) for row in rows]
-
-
-def list_jobs_for_participant(
-    database_path: str | Path,
-    *,
-    userid: str,
-    username: str = "",
-) -> list[Job]:
-    """Jobs where the user is requester or approver (userid; username for legacy rows)."""
-    candidates = [value.strip() for value in (userid, username) if value and value.strip()]
-    if not candidates:
-        return []
-
-    unique_candidates = list(dict.fromkeys(candidates))
-    placeholders = ", ".join("?" for _ in unique_candidates)
-    params = [*unique_candidates, *unique_candidates]
-    with get_connection(database_path) as connection:
-        rows = connection.execute(
-            f"""
-            SELECT {JOB_SELECT_COLUMNS}
-            FROM jobs
-            WHERE requester IN ({placeholders})
-               OR approver IN ({placeholders})
-            ORDER BY idx DESC
-            """,
-            params,
-        ).fetchall()
-    return [_row_to_job(row) for row in rows]
-
-
-def get_job_by_idx(database_path: str | Path, idx: int) -> Job | None:
+def get_job_by_idx(database_path: str | Path, idx: int) -> JobRecord | None:
     with get_connection(database_path) as connection:
         row = connection.execute(
             f"""
@@ -244,240 +155,816 @@ def get_job_by_idx(database_path: str | Path, idx: int) -> Job | None:
     return _row_to_job(row)
 
 
-def create_job(
+def can_view_job(*, job: JobRecord, viewer_userid: str, viewer_role: int) -> bool:
+    """Admin sees all jobs; general users see requester/approver jobs and Whatap events."""
+    if is_admin_role(viewer_role):
+        return True
+    if int(job.job_type) == JOB_TYPE_SIGNUP:
+        return False
+    if int(job.job_type) == JOB_TYPE_WHATAP:
+        return True
+    viewer = viewer_userid.strip()
+    if not viewer:
+        return False
+    if (job.madang_id or "").strip() == viewer:
+        return True
+    return (job.approver or "").strip() == viewer
+
+
+def list_jobs(
     database_path: str | Path,
     *,
-    request_date: str,
-    job_title: str,
-    request_depart: str,
-    requester: str,
-    requester_email: str,
-    completion_request_date: str,
-    job_description: str,
-    approver: str,
-    state: int = JOB_STATE_RECEIVED,
-    notify_channel: str = "integrated_chat",
-    actual_completion_time: str | None = None,
-) -> Job:
-    normalized_request_date = normalize_job_datetime(request_date)
-    normalized_completion_request_date = normalize_job_datetime(completion_request_date)
-    normalized_actual = (
-        normalize_job_datetime(actual_completion_time) if actual_completion_time else None
-    )
-    with get_connection(database_path) as connection:
-        cursor = connection.execute(
-            """
-            INSERT INTO jobs (
-                request_date,
-                job_title,
-                request_depart,
-                requester,
-                requester_email,
-                completion_request_date,
-                job_description,
-                approver,
-                state,
-                notify_channel,
-                actual_completion_time
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                normalized_request_date,
-                job_title.strip(),
-                request_depart.strip(),
-                requester.strip(),
-                requester_email.strip(),
-                normalized_completion_request_date,
-                job_description,
-                approver.strip(),
-                state,
-                notify_channel,
-                normalized_actual,
-            ),
-        )
-        idx = int(cursor.lastrowid)
-        sr_num = build_sr_num(normalized_request_date, idx)
-        connection.execute(
-            """
-            UPDATE jobs
-            SET sr_num = ?
-            WHERE idx = ?
-            """,
-            (sr_num, idx),
-        )
-        connection.commit()
+    status_code: int | None = None,
+    min_status_code: int | None = None,
+    approver: str | None = None,
+    job_type: int | None = None,
+    exclude_status_code: int | None = None,
+    exclude_job_type: int | None = None,
+    viewer_userid: str | None = None,
+    viewer_role: int | None = None,
+) -> list[JobRecord]:
+    clauses: list[str] = []
+    params: list[object] = []
+    if status_code is not None:
+        clauses.append("status_code = ?")
+        params.append(status_code)
+    if min_status_code is not None:
+        clauses.append("status_code >= ?")
+        params.append(min_status_code)
+    if exclude_status_code is not None:
+        clauses.append("status_code != ?")
+        params.append(exclude_status_code)
+    if job_type is not None:
+        clauses.append("job_type = ?")
+        params.append(job_type)
+    if exclude_job_type is not None:
+        clauses.append("job_type != ?")
+        params.append(exclude_job_type)
+    if approver is not None and approver.strip():
+        clauses.append("approver = ?")
+        params.append(approver.strip())
 
-    job = get_job_by_idx(database_path, idx)
-    if job is None:
-        raise RuntimeError("Failed to load created job")
-    return job
+    if viewer_role is not None and not is_admin_role(viewer_role):
+        viewer = (viewer_userid or "").strip()
+        if not viewer:
+            return []
+        # requester (madang_id), approver, or Whatap event jobs
+        clauses.append("(madang_id = ? OR approver = ? OR job_type = ?)")
+        params.extend([viewer, viewer, JOB_TYPE_WHATAP])
 
-
-def update_job_state(database_path: str | Path, idx: int, state: int) -> Job | None:
-    set_parts = ["state = ?"]
-    params: list[object] = [state]
-
-    if state == JOB_STATE_APPROVED:
-        set_parts.append("approval_date = ?")
-        params.append(now_job_datetime())
-    elif state == JOB_STATE_PENDING:
-        set_parts.append("pending_date = ?")
-        params.append(now_job_datetime())
-    elif state == JOB_STATE_REJECTED:
-        set_parts.append("reject_date = ?")
-        params.append(now_job_datetime())
-
-    params.append(idx)
-    with get_connection(database_path) as connection:
-        connection.execute(
-            f"""
-            UPDATE jobs
-            SET {", ".join(set_parts)}
-            WHERE idx = ?
-            """,
-            tuple(params),
-        )
-        connection.commit()
-
-    return get_job_by_idx(database_path, idx)
-
-
-def get_job_notification_times(
-    database_path: str | Path,
-    job_idxs: list[int],
-) -> dict[int, dict[str, str | None]]:
-    if not job_idxs:
-        return {}
-
-    unique_idxs = sorted({int(value) for value in job_idxs})
-    placeholders = ", ".join("?" for _ in unique_idxs)
+    where_sql = f"WHERE {' AND '.join(clauses)}" if clauses else ""
     with get_connection(database_path) as connection:
         rows = connection.execute(
             f"""
-            SELECT idx, request_date, actual_completion_time
+            SELECT {JOB_SELECT_COLUMNS}
             FROM jobs
-            WHERE idx IN ({placeholders})
+            {where_sql}
+            ORDER BY idx DESC
             """,
-            tuple(unique_idxs),
+            params,
         ).fetchall()
+    return [_row_to_job(row) for row in rows]
 
-    result: dict[int, dict[str, str | None]] = {}
+
+def find_pending_workflow_approval_job(
+    database_path: str | Path,
+    workflow_uuid: str,
+) -> JobRecord | None:
+    """Latest open HITL approval job for a workflow (status 0 or 1)."""
+    prefix = f"workflow:{workflow_uuid.strip().lower()}:"
+    if len(prefix) <= len("workflow:"):
+        return None
+    with get_connection(database_path) as connection:
+        row = connection.execute(
+            f"""
+            SELECT {JOB_SELECT_COLUMNS}
+            FROM jobs
+            WHERE job_type = ?
+              AND status_code IN (?, ?)
+              AND message_id LIKE ?
+            ORDER BY idx DESC
+            LIMIT 1
+            """,
+            (
+                JOB_TYPE_WORKFLOW,
+                JOB_STATUS_RECEIVED,
+                JOB_STATUS_APPROVER_ASSIGNED,
+                f"{prefix}%",
+            ),
+        ).fetchone()
+    return _row_to_job(row) if row is not None else None
+
+
+def map_pending_workflow_approval_jobs(
+    database_path: str | Path,
+) -> dict[str, JobRecord]:
+    """workflow_uuid(lower) → latest pending HITL approval job."""
+    with get_connection(database_path) as connection:
+        rows = connection.execute(
+            f"""
+            SELECT {JOB_SELECT_COLUMNS}
+            FROM jobs
+            WHERE job_type = ?
+              AND status_code IN (?, ?)
+              AND message_id LIKE 'workflow:%'
+            ORDER BY idx DESC
+            """,
+            (
+                JOB_TYPE_WORKFLOW,
+                JOB_STATUS_RECEIVED,
+                JOB_STATUS_APPROVER_ASSIGNED,
+            ),
+        ).fetchall()
+    result: dict[str, JobRecord] = {}
     for row in rows:
-        job_idx = int(row["idx"])
-        request_date = str(row["request_date"])
-        try:
-            request_date = normalize_job_datetime(request_date)
-        except ValueError:
-            pass
-        result[job_idx] = {
-            "request_date": request_date,
-            "actual_completion_time": _optional_job_datetime(row, "actual_completion_time"),
-        }
+        job = _row_to_job(row)
+        message_id = (job.message_id or "").strip()
+        if not message_id.startswith("workflow:"):
+            continue
+        parts = message_id.split(":")
+        if len(parts) < 3:
+            continue
+        workflow_uuid = parts[1].strip().lower()
+        if not workflow_uuid or workflow_uuid in result:
+            continue
+        result[workflow_uuid] = job
     return result
 
 
-def update_job_plan(database_path: str | Path, idx: int, job_plan: str, state: int) -> Job | None:
+def list_jobs_for_workflow(
+    database_path: str | Path,
+    *,
+    viewer_userid: str,
+    viewer_role: int,
+    exclude_job_type: int | None = None,
+) -> list[JobRecord]:
+    clauses: list[str] = []
+    params: list[object] = []
+
+    normalized_viewer = viewer_userid.strip()
+    if not is_admin_role(viewer_role):
+        if not normalized_viewer:
+            return []
+        clauses.append("(madang_id = ? OR approver = ?)")
+        params.extend([normalized_viewer, normalized_viewer])
+
+    if exclude_job_type is not None:
+        clauses.append("job_type != ?")
+        params.append(exclude_job_type)
+
+    where_sql = f"WHERE {' AND '.join(clauses)}" if clauses else ""
     with get_connection(database_path) as connection:
-        connection.execute(
-            """
-            UPDATE jobs
-            SET job_plan = ?,
-                original_job_plan = COALESCE(original_job_plan, ?),
-                state = ?
-            WHERE idx = ?
+        rows = connection.execute(
+            f"""
+            SELECT {JOB_SELECT_COLUMNS}
+            FROM jobs
+            {where_sql}
+            ORDER BY idx DESC
             """,
-            (job_plan, job_plan, state, idx),
+            params,
+        ).fetchall()
+    return [_row_to_job(row) for row in rows]
+
+
+def create_job_from_intake(
+    database_path: str | Path,
+    payload: JobIntakePayload,
+) -> JobRecord:
+    normalized_request_date = normalize_job_datetime(payload.request_date)
+    received_at = now_job_datetime()
+    status_code = int(payload.status_code)
+    approver = (payload.approver or "").strip() or None
+    if approver is not None:
+        approver = approver[:20]
+    approver_registered_date = payload.approver_registered_date
+    if approver is not None and not (approver_registered_date or "").strip():
+        approver_registered_date = received_at
+    elif approver is None:
+        approver_registered_date = None
+    else:
+        approver_registered_date = str(approver_registered_date).strip() or received_at
+
+    with get_connection(database_path) as connection:
+        sequence = next_sr_sequence(connection, normalized_request_date)
+        srnum = build_sr_num(normalized_request_date, sequence)
+        cursor = connection.execute(
+            """
+            INSERT INTO jobs (
+                srnum,
+                status_code,
+                job_type,
+                approver_registered_date,
+                approver,
+                job_title,
+                requester_name,
+                requester_email,
+                requester_depart,
+                job_content,
+                request_date,
+                madang_id,
+                team_id,
+                channel_id,
+                message_id,
+                received_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                srnum,
+                status_code,
+                int(payload.job_type),
+                approver_registered_date,
+                approver,
+                payload.job_title.strip(),
+                payload.requester_name.strip(),
+                payload.requester_email.strip(),
+                payload.requester_depart.strip(),
+                payload.job_content,
+                normalized_request_date,
+                payload.madang_id.strip(),
+                payload.team_id.strip(),
+                payload.channel_id.strip(),
+                payload.message_id.strip(),
+                received_at,
+            ),
         )
+        idx = int(cursor.lastrowid)
         connection.commit()
 
-    return get_job_by_idx(database_path, idx)
+    created = get_job_by_idx(database_path, idx)
+    if created is None:
+        raise RuntimeError("Failed to load created job record")
+    return created
 
 
-def save_job_plan_edit(database_path: str | Path, idx: int, job_plan: str) -> Job | None:
+def build_whatap_event_job_title(project_name: str | None) -> str:
+    project = (project_name or "").strip() or "unknown"
+    title = f"{WHATAP_JOB_TITLE_PREFIX}{project}{WHATAP_JOB_TITLE_SUFFIX}"
+    if len(title) <= 300:
+        return title
+    max_project_len = 300 - len(WHATAP_JOB_TITLE_PREFIX) - len(WHATAP_JOB_TITLE_SUFFIX)
+    if max_project_len < 1:
+        return title[:300]
+    truncated_project = project[:max_project_len]
+    return f"{WHATAP_JOB_TITLE_PREFIX}{truncated_project}{WHATAP_JOB_TITLE_SUFFIX}"
+
+
+def create_whatap_event_job(
+    database_path: str | Path,
+    *,
+    job_title: str,
+    job_content: str,
+    request_date: str,
+) -> JobRecord:
+    """Create an auto-approved Whatap event job (job_type=2, status_code=2)."""
+    normalized_request_date = normalize_job_datetime(request_date)
+    received_at = now_job_datetime()
+    approver_registered_at = received_at
+
     with get_connection(database_path) as connection:
-        connection.execute(
+        sequence = next_sr_sequence(connection, normalized_request_date)
+        srnum = build_sr_num(normalized_request_date, sequence)
+        cursor = connection.execute(
             """
-            UPDATE jobs
-            SET job_plan = ?,
-                original_job_plan = COALESCE(original_job_plan, job_plan)
-            WHERE idx = ?
+            INSERT INTO jobs (
+                srnum,
+                status_code,
+                job_type,
+                approver_registered_date,
+                approver,
+                job_title,
+                requester_name,
+                requester_email,
+                requester_depart,
+                job_content,
+                request_date,
+                madang_id,
+                team_id,
+                channel_id,
+                message_id,
+                received_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (job_plan, idx),
+            (
+                srnum,
+                JOB_STATUS_DIRECT_APPROVED,
+                JOB_TYPE_WHATAP,
+                approver_registered_at,
+                None,
+                job_title.strip(),
+                WHATAP_REQUESTER_NAME,
+                WHATAP_REQUESTER_EMAIL,
+                WHATAP_REQUESTER_DEPART,
+                job_content,
+                normalized_request_date,
+                WHATAP_MADANG_ID,
+                "",
+                "",
+                "",
+                received_at,
+            ),
         )
+        idx = int(cursor.lastrowid)
         connection.commit()
 
-    return get_job_by_idx(database_path, idx)
+    created = get_job_by_idx(database_path, idx)
+    if created is None:
+        raise RuntimeError("Failed to load created Whatap job record")
+    return created
 
 
-def restore_job_plan(database_path: str | Path, idx: int) -> Job | None:
-    with get_connection(database_path) as connection:
-        row = connection.execute(
-            "SELECT original_job_plan FROM jobs WHERE idx = ?",
-            (idx,),
-        ).fetchone()
-        if row is None:
-            return None
-        original = row["original_job_plan"]
-        if original is None:
-            return get_job_by_idx(database_path, idx)
-        connection.execute(
-            """
-            UPDATE jobs
-            SET job_plan = ?
-            WHERE idx = ?
-            """,
-            (str(original), idx),
-        )
-        connection.commit()
-
-    return get_job_by_idx(database_path, idx)
+def create_user_access_request_job(database_path: str | Path, user: User) -> JobRecord:
+    """Create a signup access-request job for a pending user."""
+    requester_name = f"{user.username.strip()} {user.depart.strip()}".strip()
+    submitted_at = now_job_datetime()
+    payload = JobIntakePayload(
+        job_title=SIGNUP_ACCESS_REQUEST_JOB_TITLE,
+        requester_name=requester_name,
+        requester_email=user.email.strip(),
+        requester_depart=user.depart.strip(),
+        job_content=user.request_reason.strip(),
+        request_date=submitted_at,
+        madang_id=user.userid.strip(),
+        team_id="",
+        channel_id="",
+        message_id="",
+        job_type=JOB_TYPE_SIGNUP,
+    )
+    return create_job_from_intake(database_path, payload)
 
 
-def update_job_execution_result(
+def approval_target_status_code(job: JobRecord) -> int:
+    """Signup / workflow approval jobs complete without helpdesk delegation."""
+    if job.job_type in {JOB_TYPE_SIGNUP, JOB_TYPE_WORKFLOW}:
+        return JOB_STATUS_COMPLETED_SUCCESS
+    return JOB_STATUS_DIRECT_APPROVED
+
+
+def _resolve_user_display_name(
+    database_path: str | Path,
+    userid: str,
+    *,
+    fallback: str = "",
+) -> str:
+    from backend.app.db.users import get_user_by_userid
+
+    normalized_userid = userid.strip()
+    if normalized_userid:
+        user = get_user_by_userid(database_path, normalized_userid)
+        if user is not None and user.username.strip():
+            return user.username.strip()
+    normalized_fallback = fallback.strip()
+    if normalized_fallback:
+        return normalized_fallback
+    return normalized_userid
+
+
+def _record_signup_job_approval_result(database_path: str | Path, job: JobRecord) -> None:
+    from backend.app.db.jobs_result import upsert_job_result
+
+    approver_userid = (job.approver or "").strip()
+    if not approver_userid:
+        raise ValueError("signup job approval result requires approver")
+
+    approver_name = _resolve_user_display_name(database_path, approver_userid, fallback=approver_userid)
+    requester_userid = (job.madang_id or "").strip()
+    requester_name = _resolve_user_display_name(
+        database_path,
+        requester_userid,
+        fallback=job.requester_name,
+    )
+    result_text = f"{approver_name} 이 {requester_name} 의 접속 권한을 승인완료 하였습니다"
+    upsert_job_result(
+        database_path,
+        srnum=job.srnum,
+        result=result_text,
+        complete_date=now_job_datetime(),
+    )
+
+
+def _record_workflow_job_approval_result(database_path: str | Path, job: JobRecord) -> None:
+    """Persist HITL approval outcome so My Job Results can load jobs_result."""
+    from backend.app.db.jobs_result import upsert_job_result
+
+    if int(job.job_type) != JOB_TYPE_WORKFLOW:
+        return
+    approver_userid = (job.approver or "").strip()
+    approver_name = _resolve_user_display_name(
+        database_path,
+        approver_userid,
+        fallback=approver_userid or "-",
+    )
+    requester_name = _resolve_user_display_name(
+        database_path,
+        (job.madang_id or "").strip(),
+        fallback=job.requester_name,
+    )
+    body = (job.job_content or "").strip()
+    result_text = (
+        f"## 작업 워크플로우 승인 완료\n\n"
+        f"- 승인자: **{approver_name}**\n"
+        f"- 요청자: **{requester_name}**\n"
+        f"- 작업: {job.job_title}\n\n"
+    )
+    if body:
+        result_text = f"{result_text}---\n\n{body}\n"
+    upsert_job_result(
+        database_path,
+        srnum=job.srnum,
+        result=result_text.strip(),
+        complete_date=now_job_datetime(),
+    )
+
+
+def _finalize_signup_job_approval(database_path: str | Path, job: JobRecord):
+    if job.job_type != JOB_TYPE_SIGNUP:
+        return None
+    from backend.app.services.user_signup import approve_pending_user_for_signup_job
+
+    approved_user = approve_pending_user_for_signup_job(database_path, job)
+    _record_signup_job_approval_result(database_path, job)
+    return approved_user
+
+
+def _finalize_workflow_job_approval(database_path: str | Path, job: JobRecord) -> None:
+    if int(job.job_type) != JOB_TYPE_WORKFLOW:
+        return
+    _record_workflow_job_approval_result(database_path, job)
+
+
+def ensure_workflow_job_result(database_path: str | Path, job: JobRecord) -> JobResultRecord | None:
+    """Return jobs_result for a workflow job, backfilling approval text when missing."""
+    from backend.app.db.jobs_result import JobResultRecord, get_job_result_by_srnum
+
+    if int(job.job_type) != JOB_TYPE_WORKFLOW:
+        return get_job_result_by_srnum(database_path, job.srnum)
+    existing = get_job_result_by_srnum(database_path, job.srnum)
+    if existing is not None:
+        return existing
+    if int(job.status_code) < JOB_STATUS_COMPLETED_SUCCESS:
+        return None
+    _record_workflow_job_approval_result(database_path, job)
+    return get_job_result_by_srnum(database_path, job.srnum)
+
+
+def assign_job_approver(
     database_path: str | Path,
     idx: int,
-    execution_result: str,
-    state: int,
     *,
-    actual_completion_time: str | None = None,
-) -> Job | None:
-    """Persist execution payload/state. Sets actual_completion_time when provided or on COMPLETED."""
-    completion_time = actual_completion_time
-    if completion_time is None and state == JOB_STATE_COMPLETED:
-        completion_time = now_job_datetime()
-    elif completion_time is not None:
-        completion_time = normalize_job_datetime(completion_time)
+    approver_userid: str,
+    status_code: int = JOB_STATUS_APPROVER_ASSIGNED,
+) -> JobRecord:
+    from backend.app.db.roles import is_hidden_system_user
+    from backend.app.db.users import get_user_by_userid
+
+    userid = approver_userid.strip()
+    if not userid:
+        raise ValueError("approver is required")
+    if is_hidden_system_user(userid):
+        raise ValueError(f"unknown approver userid: {userid}")
+
+    approver = get_user_by_userid(database_path, userid)
+    if approver is None or is_hidden_system_user(approver.userid, approver.role):
+        raise ValueError(f"unknown approver userid: {userid}")
+
+    existing = get_job_by_idx(database_path, idx)
+    if existing is None:
+        raise ValueError("job not found")
+    if existing.approver:
+        raise ValueError("approver is already assigned")
+
+    registered_at = now_job_datetime()
+    with get_connection(database_path) as connection:
+        cursor = connection.execute(
+            """
+            UPDATE jobs
+            SET approver = ?,
+                approver_registered_date = ?,
+                status_code = ?
+            WHERE idx = ? AND (approver IS NULL OR TRIM(approver) = '')
+            """,
+            (userid, registered_at, status_code, idx),
+        )
+        connection.commit()
+        if cursor.rowcount == 0:
+            raise ValueError("approver is already assigned")
+
+    updated = get_job_by_idx(database_path, idx)
+    if updated is None:
+        raise RuntimeError("Failed to load updated job record")
+    return updated
+
+
+def direct_approve_job(
+    database_path: str | Path,
+    idx: int,
+    *,
+    approver_userid: str,
+) -> JobRecord:
+    existing = get_job_by_idx(database_path, idx)
+    if existing is None:
+        raise ValueError("job not found")
+    updated = assign_job_approver(
+        database_path,
+        idx,
+        approver_userid=approver_userid,
+        status_code=approval_target_status_code(existing),
+    )
+    _finalize_signup_job_approval(database_path, updated)
+    _finalize_workflow_job_approval(database_path, updated)
+    return updated
+
+
+def _require_assigned_reviewer(job: JobRecord, actor_userid: str) -> None:
+    actor = actor_userid.strip()
+    if not actor:
+        raise ValueError("actor_userid is required")
+    if job.status_code != JOB_STATUS_APPROVER_ASSIGNED:
+        raise ValueError("job is not awaiting review")
+    if (job.approver or "").strip() != actor:
+        raise ValueError("only assigned approver can perform this action")
+
+
+def approve_assigned_job(
+    database_path: str | Path,
+    idx: int,
+    *,
+    actor_userid: str,
+) -> JobRecord:
+    existing = get_job_by_idx(database_path, idx)
+    if existing is None:
+        raise ValueError("job not found")
+    _require_assigned_reviewer(existing, actor_userid)
+    target_status = approval_target_status_code(existing)
 
     with get_connection(database_path) as connection:
-        if completion_time is not None:
-            connection.execute(
+        cursor = connection.execute(
+            """
+            UPDATE jobs
+            SET status_code = ?
+            WHERE idx = ? AND status_code = ? AND approver = ?
+            """,
+            (target_status, idx, JOB_STATUS_APPROVER_ASSIGNED, actor_userid.strip()),
+        )
+        connection.commit()
+        if cursor.rowcount == 0:
+            raise ValueError("job review state has changed")
+
+    updated = get_job_by_idx(database_path, idx)
+    if updated is None:
+        raise RuntimeError("Failed to load updated job record")
+    _finalize_signup_job_approval(database_path, updated)
+    _finalize_workflow_job_approval(database_path, updated)
+    return updated
+
+
+def reject_assigned_job(
+    database_path: str | Path,
+    idx: int,
+    *,
+    actor_userid: str,
+    drop_reason: str = "",
+) -> JobRecord:
+    existing = get_job_by_idx(database_path, idx)
+    if existing is None:
+        raise ValueError("job not found")
+    _require_assigned_reviewer(existing, actor_userid)
+
+    normalized_reason = drop_reason.strip()[:200]
+    if not normalized_reason:
+        raise ValueError("drop_reason is required")
+
+    with get_connection(database_path) as connection:
+        cursor = connection.execute(
+            """
+            UPDATE jobs
+            SET status_code = ?,
+                reject_reason = ?
+            WHERE idx = ? AND status_code = ? AND approver = ?
+            """,
+            (
+                JOB_STATUS_REJECTED,
+                normalized_reason,
+                idx,
+                JOB_STATUS_APPROVER_ASSIGNED,
+                actor_userid.strip(),
+            ),
+        )
+        connection.commit()
+        if cursor.rowcount == 0:
+            raise ValueError("job review state has changed")
+
+    updated = get_job_by_idx(database_path, idx)
+    if updated is None:
+        raise RuntimeError("Failed to load updated job record")
+    return updated
+
+
+def reject_received_job(
+    database_path: str | Path,
+    idx: int,
+    *,
+    actor_userid: str,
+    drop_reason: str = "",
+) -> JobRecord:
+    existing = get_job_by_idx(database_path, idx)
+    if existing is None:
+        raise ValueError("job not found")
+
+    actor = actor_userid.strip()
+    if not actor:
+        raise ValueError("actor_userid is required")
+    if existing.status_code != JOB_STATUS_RECEIVED:
+        raise ValueError("only received jobs can be rejected from intake review")
+    if existing.approver and existing.approver.strip():
+        raise ValueError("approver is already assigned")
+
+    normalized_reason = drop_reason.strip()[:200]
+    if not normalized_reason:
+        raise ValueError("drop_reason is required")
+
+    with get_connection(database_path) as connection:
+        cursor = connection.execute(
+            """
+            UPDATE jobs
+            SET status_code = ?,
+                reject_reason = ?
+            WHERE idx = ? AND status_code = ?
+              AND (approver IS NULL OR TRIM(approver) = '')
+            """,
+            (
+                JOB_STATUS_REJECTED,
+                normalized_reason,
+                idx,
+                JOB_STATUS_RECEIVED,
+            ),
+        )
+        connection.commit()
+        if cursor.rowcount == 0:
+            raise ValueError("job reject state has changed")
+
+    updated = get_job_by_idx(database_path, idx)
+    if updated is None:
+        raise RuntimeError("Failed to load updated job record")
+    return updated
+
+
+def update_job_status(
+    database_path: str | Path,
+    idx: int,
+    status_code: int,
+    *,
+    expected_status: int | None = None,
+) -> JobRecord:
+    with get_connection(database_path) as connection:
+        if expected_status is None:
+            cursor = connection.execute(
                 """
                 UPDATE jobs
-                SET execution_result = ?,
-                    state = ?,
-                    actual_completion_time = ?
+                SET status_code = ?
                 WHERE idx = ?
                 """,
-                (execution_result, state, completion_time, idx),
+                (status_code, idx),
             )
         else:
-            connection.execute(
+            cursor = connection.execute(
                 """
                 UPDATE jobs
-                SET execution_result = ?,
-                    state = ?
-                WHERE idx = ?
+                SET status_code = ?
+                WHERE idx = ? AND status_code = ?
                 """,
-                (execution_result, state, idx),
+                (status_code, idx, expected_status),
             )
         connection.commit()
+        if cursor.rowcount == 0:
+            raise ValueError("job status update failed")
 
-    return get_job_by_idx(database_path, idx)
+    updated = get_job_by_idx(database_path, idx)
+    if updated is None:
+        raise RuntimeError("Failed to load updated job record")
+    return updated
 
 
-def delete_job_by_idx(database_path: str | Path, idx: int) -> bool:
+def rework_job(
+    database_path: str | Path,
+    idx: int,
+    *,
+    actor_userid: str,
+) -> JobRecord:
+    existing = get_job_by_idx(database_path, idx)
+    if existing is None:
+        raise ValueError("job not found")
+
+    actor = actor_userid.strip()
+    if not actor:
+        raise ValueError("actor_userid is required")
+    if (existing.approver or "").strip() != actor:
+        raise ValueError("only assigned approver can rework this job")
+    if existing.status_code < JOB_STATUS_COMPLETED_SUCCESS:
+        raise ValueError("job is not in a completed state")
+    if existing.status_code == JOB_STATUS_CANCELLED:
+        raise ValueError("cancelled jobs cannot be reworked")
+
     with get_connection(database_path) as connection:
-        cursor = connection.execute("DELETE FROM jobs WHERE idx = ?", (idx,))
+        cursor = connection.execute(
+            """
+            UPDATE jobs
+            SET status_code = ?
+            WHERE idx = ? AND approver = ? AND status_code >= ? AND status_code != ?
+            """,
+            (JOB_STATUS_DIRECT_APPROVED, idx, actor, JOB_STATUS_COMPLETED_SUCCESS, JOB_STATUS_CANCELLED),
+        )
         connection.commit()
-        return int(cursor.rowcount) > 0
+        if cursor.rowcount == 0:
+            raise ValueError("job rework state has changed")
+
+    updated = get_job_by_idx(database_path, idx)
+    if updated is None:
+        raise RuntimeError("Failed to load updated job record")
+    return updated
+
+
+def cancel_failed_job(
+    database_path: str | Path,
+    idx: int,
+    *,
+    actor_userid: str,
+    drop_reason: str = "",
+) -> JobRecord:
+    existing = get_job_by_idx(database_path, idx)
+    if existing is None:
+        raise ValueError("job not found")
+
+    actor = actor_userid.strip()
+    if not actor:
+        raise ValueError("actor_userid is required")
+    if (existing.approver or "").strip() != actor:
+        raise ValueError("only assigned approver can cancel this job")
+    if existing.status_code != JOB_STATUS_COMPLETED_FAILURE:
+        raise ValueError("only failed jobs can be cancelled")
+
+    normalized_reason = drop_reason.strip()[:200]
+    if not normalized_reason:
+        raise ValueError("drop_reason is required")
+
+    with get_connection(database_path) as connection:
+        cursor = connection.execute(
+            """
+            UPDATE jobs
+            SET status_code = ?,
+                drop_reason = ?
+            WHERE idx = ? AND status_code = ? AND approver = ?
+            """,
+            (
+                JOB_STATUS_CANCELLED,
+                normalized_reason,
+                idx,
+                JOB_STATUS_COMPLETED_FAILURE,
+                actor,
+            ),
+        )
+        connection.commit()
+        if cursor.rowcount == 0:
+            raise ValueError("job cancel state has changed")
+
+    updated = get_job_by_idx(database_path, idx)
+    if updated is None:
+        raise RuntimeError("Failed to load updated job record")
+    return updated
+
+
+def normalize_ai_audit_comment(value: str) -> str:
+    return value.strip()
+
+
+def update_job_ai_audit_comment(
+    database_path: str | Path,
+    idx: int,
+    ai_audit_comment: str,
+) -> JobRecord:
+    normalized = normalize_ai_audit_comment(ai_audit_comment)
+    if not normalized:
+        raise ValueError("ai_audit_comment is required")
+
+    audited_at = now_job_datetime()
+
+    with get_connection(database_path) as connection:
+        cursor = connection.execute(
+            """
+            UPDATE jobs
+            SET ai_audit_comment = ?,
+                ai_audit_cnt = ai_audit_cnt + 1,
+                ai_audit_date = ?
+            WHERE idx = ?
+            """,
+            (normalized, audited_at, idx),
+        )
+        connection.commit()
+        if cursor.rowcount == 0:
+            raise ValueError("job not found")
+
+    updated = get_job_by_idx(database_path, idx)
+    if updated is None:
+        raise RuntimeError("Failed to load updated job record")
+    return updated

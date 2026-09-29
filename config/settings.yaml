@@ -15,19 +15,12 @@ server:
   backend_api_port: 8080
   database_path: "data/app.db"
   health_check_interval_seconds: 30
+  # http 모드 AXIT invoke 대기 시간(초). nginx proxy_read_timeout 과 맞추는 것을 권장
+  agent_runtime_http_timeout_seconds: 3600
 
-# 작업 알림 채널 (환경변수로 오버라이드 가능)
+# 작업 알림 채널 (Teams는 환경변수로 오버라이드 가능)
+# 메일 SMTP는 DB 테이블 mailserver_config (관리자 UI)에서 관리한다.
 notifications:
-  email:
-    enabled: false
-    smtp_host: ""
-    smtp_port: 587
-    smtp_username: ""
-    smtp_password: ""
-    from_address: ""
-    use_tls: true
-    use_ssl: false
-    timeout_seconds: 30
   teams:
     enabled: false
     mode: "webhook"   # webhook | graph
@@ -39,12 +32,6 @@ notifications:
     channel_id: ""
     timeout_seconds: 30
 
-# 시스템 인벤토리 (ChromaDB) - 환경변수로 오버라이드 가능
-inventory:
-  chroma_data_path: "data/chroma"
-  csv_path: "data/inventory/inventory.csv"
-  upload_path: "data/inventory/uploads"
-
 # Whatap 이벤트 수신 webhook
 whatap:
   webhook_secret: ""
@@ -52,7 +39,15 @@ whatap:
 # 통합 채팅 사용자 대화 로그
 user_comm_log:
   log_dir: "data/user_comm_logs"
-  retention_days: 30
+  keep_count: 3
+  archive_keep_count: 3
+  # file | stdout (multi-pod: stdout → 클러스터 로깅)
+  backend: file
+
+# 에이전트 파일 로그 (logs/agents) 일 단위 로테이션 보관
+agent_log:
+  keep_count: 3
+  archive_keep_count: 3
 
 # 작업요청자 데몬 (수동 "테스트 작업 발송"으로 대체됨, 기본 중지)
 job_requester:
@@ -60,23 +55,66 @@ job_requester:
   interval_minutes: 60
   initial_delay_seconds: 60
 
-# Kubernetes/OpenShift 클러스터 수집 (openshift DynamicClient, 동기)
-# - 기동 시/스케줄 자동 수집은 중지 (수동 수집 UI 사용)
-# - schedule_enabled 를 true 로 켜면 매일 00:10 부터 등록 순서대로 5분 간격 재개
-k8s_collector:
+# 승인 완료(status_code=2) 작업을 helpdesk 에이전트에 위임
+job_processor:
   enabled: true
-  collect_on_startup: false
-  schedule_enabled: false
-  schedule_hour: 0
-  schedule_minute: 10
-  stagger_minutes: 5
-  # Deployed path; if missing, collector uses local kubeconfig (KUBECONFIG/~/.kube/config)
-  kubeconfig: /etc/k8s-kubeconfig/k8s-kubeconfig
+  poll_interval_seconds: 60
+  initial_delay_seconds: 0
+  # http 모드: agentruntime.local_agent_id (기본 helpdesk, 대안 sys-helpdesk)
+  helpdesk_local_agent_id: helpdesk
+  # http 모드: AXIT agent_id 직접 지정 (선택)
+  helpdesk_axit_agent_id: ""
+
+# 작업 검토 탭 AI 검토 (job auditor orchestrator)
+job_auditor:
+  # http 모드: agentruntime.local_agent_id (AXIT runtime 등록값 JOB_AUDITOR_AGENT)
+  local_agent_id: JOB_AUDITOR_AGENT
+  # http 모드: AXIT agent_id 직접 지정 (선택)
+  axit_agent_id: ""
+
+# 나의 노트: Redis 편집 버퍼 → 주기적 영구 저장
+mynotes:
+  enabled: true
+  flush_interval_seconds: 300
+  initial_delay_seconds: 0
+  # file | database (multi-pod: database + PostgreSQL 권장)
+  content_backend: file
+
+# K8S 인프라 scrape (관리자 UI 수동 수집 + cron 스케줄)
+# http 모드: /etc/k8s/kubeconfig 마운트 필요
+# mock/local: 파일 없으면 KUBECONFIG/~/.kube/config 사용
+# 클러스터별 on/off 는 infra_cluster.cron / cron_expr (infra_type=k8s)
+k8s_collector:
+  kubeconfig: /etc/k8s/kubeconfig
   fallback_to_current_context: true
+  schedule_enabled: true
+  schedule_poll_interval_seconds: 30
+  schedule_initial_delay_seconds: 5
   # contexts:
   #   dtest-k8s: orbstack
 
-# 인증 프로바이더 (환경변수 AUTH_PROVIDER_TYPE / OAUTH_PROXY 로 오버라이드)
+# 인증 프로바이더 (환경변수 AUTH_PROVIDER_TYPE / OAUTH_* 로 오버라이드)
 auth:
   provider_type: "db"   # db | madang
   oauth_proxy: ""
+  # madang 직접 연동 (login.jsp Python 포팅) — 아래 3개가 모두 설정되면 OAUTH_PROXY 대신 사용
+  oauth_url: ""
+  oauth_client_id: ""
+  oauth_client_secret: ""
+  oauth_grant_type: "password"
+  oauth_scope: "EA"
+  oauth_auth_type: "IM"
+  oauth_verify_ssl: false
+
+# Redis (세션·캐시, 배포 시 별도 프로세스 — 패키징하지 않음)
+redis:
+  url: "redis://localhost:6379/0"
+
+# 서버 역할 (로컬 기본 all / OKD: api|worker)
+# server:
+#   backend_role: all
+
+# Bearer 세션 (B-2): 슬라이딩 TTL + 절대 상한
+auth_session:
+  ttl_seconds: 7200
+  absolute_max_seconds: 28800

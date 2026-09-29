@@ -1,0 +1,29 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  annotations:
+    openshift.io/node-selector: node-role.kubernetes.io/worker=
+    openshift.io/sa.scc.mcs: s0:c29,c4
+    openshift.io/sa.scc.supplemental-groups: 1000820000/10000
+    openshift.io/sa.scc.uid-range: 1000820000/10000
+  creationTimestamp: "2025-04-17T05:40:03Z"
+  labels:
+    egressIPSelector: d-biz-i-nuac-svc
+    istio-injection: enabled
+    kiali.io/member-of: servicemesh-dprsv
+    kubernetes.io/metadata.name: d-biz-i-nuac-svc
+    maistra.io/member-of: servicemesh-dprsv
+    name: d-biz-i-nuac-svc
+    pod-security.kubernetes.io/audit: baseline
+    pod-security.kubernetes.io/audit-version: v1.24
+    pod-security.kubernetes.io/warn: baseline
+    pod-security.kubernetes.io/warn-version: v1.24
+  name: d-biz-i-nuac-svc
+  resourceVersion: "329441964"
+  uid: cf824b31-27fa-4a67-be99-de944aaf029d
+spec:
+  finalizers:
+  - kubernetes
+status:
+  phase: Active
+

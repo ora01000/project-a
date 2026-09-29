@@ -1,0 +1,475 @@
+import { useEffect, useState } from "react";
+
+import { hasAdminAccess } from "../../types/user";
+
+interface MailServerConfigModalProps {
+  viewerRole: number;
+  onClose: () => void;
+}
+
+type ReceiveProtocol = "imap" | "pop3";
+
+interface MailserverConfig {
+  enabled: boolean;
+  smtp_host: string;
+  smtp_port: number;
+  smtp_username: string;
+  from_address: string;
+  smtp_auth: boolean;
+  use_tls: boolean;
+  use_ssl: boolean;
+  timeout_seconds: number;
+  receive_enabled: boolean;
+  receive_protocol: ReceiveProtocol;
+  imap_host: string;
+  imap_port: number;
+  imap_use_ssl: boolean;
+  pop3_host: string;
+  pop3_port: number;
+  pop3_use_ssl: boolean;
+  pop3_leave_on_server: boolean;
+  updated_at: string;
+  has_password: boolean;
+  suggested_profile: string;
+}
+
+async function parseError(response: Response, fallback: string): Promise<string> {
+  const payload = (await response.json().catch(() => null)) as { detail?: string } | null;
+  return typeof payload?.detail === "string" ? payload.detail : fallback;
+}
+
+export function MailServerConfigModal({ viewerRole, onClose }: MailServerConfigModalProps) {
+  const [enabled, setEnabled] = useState(false);
+  const [smtpHost, setSmtpHost] = useState("");
+  const [smtpPort, setSmtpPort] = useState(587);
+  const [smtpUsername, setSmtpUsername] = useState("");
+  const [smtpPassword, setSmtpPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [hasPassword, setHasPassword] = useState(false);
+  const [fromAddress, setFromAddress] = useState("");
+  const [smtpAuth, setSmtpAuth] = useState(true);
+  const [useTls, setUseTls] = useState(true);
+  const [useSsl, setUseSsl] = useState(false);
+  const [timeoutSeconds, setTimeoutSeconds] = useState(30);
+  const [receiveEnabled, setReceiveEnabled] = useState(false);
+  const [receiveProtocol, setReceiveProtocol] = useState<ReceiveProtocol>("imap");
+  const [imapHost, setImapHost] = useState("");
+  const [imapPort, setImapPort] = useState(993);
+  const [imapUseSsl, setImapUseSsl] = useState(true);
+  const [pop3Host, setPop3Host] = useState("");
+  const [pop3Port, setPop3Port] = useState(995);
+  const [pop3UseSsl, setPop3UseSsl] = useState(true);
+  const [pop3LeaveOnServer, setPop3LeaveOnServer] = useState(true);
+  const [updatedAt, setUpdatedAt] = useState("");
+  const [suggestedProfile, setSuggestedProfile] = useState("gmail");
+  const [error, setError] = useState<string | null>(null);
+  const [info, setInfo] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+
+  useEffect(() => {
+    if (!hasAdminAccess(viewerRole)) {
+      setError("관리자만 열람할 수 있습니다.");
+      setIsLoading(false);
+      return;
+    }
+    void (async () => {
+      setIsLoading(true);
+      setError(null);
+      try {
+        const response = await fetch("/api/admin/mailserver-config");
+        if (!response.ok) {
+          throw new Error(await parseError(response, "메일 서버 설정을 불러오지 못했습니다."));
+        }
+        const data = (await response.json()) as MailserverConfig;
+        setEnabled(data.enabled);
+        setSmtpHost(data.smtp_host);
+        setSmtpPort(data.smtp_port);
+        setSmtpUsername(data.smtp_username);
+        setFromAddress(data.from_address);
+        setSmtpAuth(data.smtp_auth);
+        setUseTls(data.use_tls);
+        setUseSsl(data.use_ssl);
+        setTimeoutSeconds(data.timeout_seconds);
+        setReceiveEnabled(Boolean(data.receive_enabled));
+        setReceiveProtocol(data.receive_protocol === "pop3" ? "pop3" : "imap");
+        setImapHost(data.imap_host || (data.suggested_profile === "gmail" ? "imap.gmail.com" : ""));
+        setImapPort(data.imap_port || 993);
+        setImapUseSsl(data.imap_use_ssl !== false);
+        setPop3Host(data.pop3_host || "");
+        setPop3Port(data.pop3_port || 995);
+        setPop3UseSsl(data.pop3_use_ssl !== false);
+        setPop3LeaveOnServer(data.pop3_leave_on_server !== false);
+        setUpdatedAt(data.updated_at);
+        setHasPassword(data.has_password);
+        setSuggestedProfile(data.suggested_profile);
+        setSmtpPassword("");
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "메일 서버 설정을 불러오지 못했습니다.");
+      } finally {
+        setIsLoading(false);
+      }
+    })();
+  }, [viewerRole]);
+
+  const handleReceiveToggle = (checked: boolean) => {
+    setReceiveEnabled(checked);
+    if (!checked) {
+      return;
+    }
+    if (receiveProtocol === "imap" && !imapHost.trim() && suggestedProfile === "gmail") {
+      setImapHost("imap.gmail.com");
+      setImapPort(993);
+      setImapUseSsl(true);
+    }
+  };
+
+  const handleProtocolChange = (protocol: ReceiveProtocol) => {
+    setReceiveProtocol(protocol);
+    if (protocol === "imap" && !imapHost.trim() && suggestedProfile === "gmail") {
+      setImapHost("imap.gmail.com");
+      setImapPort(993);
+      setImapUseSsl(true);
+    }
+  };
+
+  const handleSave = async () => {
+    if (!hasAdminAccess(viewerRole)) {
+      setError("관리자만 저장할 수 있습니다.");
+      return;
+    }
+    setIsSaving(true);
+    setError(null);
+    setInfo(null);
+    try {
+      const response = await fetch("/api/admin/mailserver-config", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          enabled,
+          smtp_host: smtpHost,
+          smtp_port: smtpPort,
+          smtp_username: smtpUsername,
+          smtp_password: smtpPassword || null,
+          from_address: fromAddress,
+          smtp_auth: smtpAuth,
+          use_tls: useTls,
+          use_ssl: useSsl,
+          timeout_seconds: timeoutSeconds,
+          receive_enabled: receiveEnabled,
+          receive_protocol: receiveProtocol,
+          imap_host: imapHost,
+          imap_port: imapPort,
+          imap_use_ssl: imapUseSsl,
+          pop3_host: pop3Host,
+          pop3_port: pop3Port,
+          pop3_use_ssl: pop3UseSsl,
+          pop3_leave_on_server: pop3LeaveOnServer,
+        }),
+      });
+      if (!response.ok) {
+        throw new Error(await parseError(response, "메일 서버 설정 저장에 실패했습니다."));
+      }
+      const data = (await response.json()) as MailserverConfig;
+      setUpdatedAt(data.updated_at);
+      setHasPassword(data.has_password);
+      setReceiveEnabled(Boolean(data.receive_enabled));
+      setReceiveProtocol(data.receive_protocol === "pop3" ? "pop3" : "imap");
+      setImapHost(data.imap_host);
+      setImapPort(data.imap_port);
+      setImapUseSsl(data.imap_use_ssl);
+      setPop3Host(data.pop3_host);
+      setPop3Port(data.pop3_port);
+      setPop3UseSsl(data.pop3_use_ssl);
+      setPop3LeaveOnServer(data.pop3_leave_on_server);
+      setSmtpPassword("");
+      setInfo("저장되었습니다.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "메일 서버 설정 저장에 실패했습니다.");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const profileHint =
+    suggestedProfile === "gmail"
+      ? "목업/로컬: Gmail SMTP(smtp.gmail.com:587) / IMAP(imap.gmail.com:993) 사용을 권장합니다. 앱 비밀번호가 필요할 수 있습니다."
+      : "배포(http): 내부 SMTP·IMAP/POP3 호스트를 입력하세요.";
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 px-4">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="mailserver-config-dialog-title"
+        className="flex max-h-[90vh] w-full max-w-xl flex-col rounded-xl border border-slate-700 bg-slate-900 p-5 shadow-xl"
+      >
+        <div className="mb-3 flex items-start justify-between gap-3">
+          <div>
+            <h2 id="mailserver-config-dialog-title" className="text-sm font-semibold text-slate-100">
+              메일 서버 설정
+            </h2>
+            <p className="mt-1 text-[11px] text-slate-400">{profileHint}</p>
+            {updatedAt ? (
+              <p className="mt-0.5 text-[10px] text-slate-500">마지막 저장: {updatedAt}</p>
+            ) : null}
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-md px-2 py-1 text-xs text-slate-300 hover:bg-slate-800"
+          >
+            닫기
+          </button>
+        </div>
+
+        {isLoading ? (
+          <p className="text-xs text-slate-500">불러오는 중...</p>
+        ) : (
+          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto text-xs">
+            <label className="flex items-center gap-2 text-slate-200">
+              <input
+                type="checkbox"
+                checked={enabled}
+                onChange={(event) => setEnabled(event.target.checked)}
+              />
+              메일 발송 활성화
+            </label>
+
+            <label className="block space-y-1">
+              <span className="text-slate-400">SMTP 호스트</span>
+              <input
+                type="text"
+                value={smtpHost}
+                onChange={(event) => setSmtpHost(event.target.value)}
+                className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1.5 font-mono text-slate-100"
+                placeholder="smtp.gmail.com"
+              />
+            </label>
+
+            <label className="block space-y-1">
+              <span className="text-slate-400">포트</span>
+              <input
+                type="number"
+                value={smtpPort}
+                onChange={(event) => setSmtpPort(Number(event.target.value) || 587)}
+                className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1.5 font-mono text-slate-100"
+              />
+            </label>
+
+            <label className="block space-y-1">
+              <span className="text-slate-400">사용자명</span>
+              <input
+                type="text"
+                value={smtpUsername}
+                onChange={(event) => setSmtpUsername(event.target.value)}
+                className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1.5 font-mono text-slate-100"
+                autoComplete="off"
+              />
+            </label>
+
+            <label className="block space-y-1">
+              <span className="text-slate-400">
+                비밀번호{hasPassword ? " (저장됨 — 비우면 유지)" : ""}
+              </span>
+              <div className="flex gap-2">
+                <input
+                  type={showPassword ? "text" : "password"}
+                  value={smtpPassword}
+                  onChange={(event) => setSmtpPassword(event.target.value)}
+                  className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1.5 font-mono text-slate-100"
+                  placeholder={hasPassword ? "변경 시에만 입력" : ""}
+                  autoComplete="new-password"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((current) => !current)}
+                  className="shrink-0 rounded-md border border-slate-700 px-2 text-slate-300 hover:bg-slate-800"
+                >
+                  {showPassword ? "숨김" : "표시"}
+                </button>
+              </div>
+            </label>
+
+            <label className="block space-y-1">
+              <span className="text-slate-400">발신 주소 (From)</span>
+              <input
+                type="email"
+                value={fromAddress}
+                onChange={(event) => setFromAddress(event.target.value)}
+                className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1.5 font-mono text-slate-100"
+              />
+            </label>
+
+            <div className="flex flex-wrap gap-4">
+              <label className="flex items-center gap-2 text-slate-200">
+                <input
+                  type="checkbox"
+                  checked={smtpAuth}
+                  onChange={(event) => setSmtpAuth(event.target.checked)}
+                />
+                SMTP Auth
+              </label>
+              <label className="flex items-center gap-2 text-slate-200">
+                <input
+                  type="checkbox"
+                  checked={useTls}
+                  onChange={(event) => setUseTls(event.target.checked)}
+                />
+                STARTTLS
+              </label>
+              <label className="flex items-center gap-2 text-slate-200">
+                <input
+                  type="checkbox"
+                  checked={useSsl}
+                  onChange={(event) => setUseSsl(event.target.checked)}
+                />
+                SSL (SMTP_SSL)
+              </label>
+            </div>
+
+            <label className="block space-y-1">
+              <span className="text-slate-400">타임아웃(초)</span>
+              <input
+                type="number"
+                value={timeoutSeconds}
+                onChange={(event) => setTimeoutSeconds(Number(event.target.value) || 30)}
+                className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1.5 font-mono text-slate-100"
+              />
+            </label>
+
+            <div className="rounded-md border border-slate-700 bg-slate-950/50 p-3 space-y-3">
+              <label className="flex items-center gap-2 text-slate-200">
+                <input
+                  type="checkbox"
+                  checked={receiveEnabled}
+                  onChange={(event) => handleReceiveToggle(event.target.checked)}
+                />
+                메일 수신 활성화
+              </label>
+              <p className="text-[10px] text-slate-500">
+                활성화 시 동일 계정(사용자명/비밀번호)으로 IMAP 또는 POP3 수신을 사용합니다.
+                worker(또는 BACKEND_ROLE=all)가 약 30초마다 새 메일을 수집해 DB·첨부 경로에
+                저장합니다.
+              </p>
+              {receiveEnabled ? (
+                <>
+                  <label className="block space-y-1">
+                    <span className="text-slate-400">수신 프로토콜</span>
+                    <select
+                      value={receiveProtocol}
+                      onChange={(event) => handleProtocolChange(event.target.value as ReceiveProtocol)}
+                      className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1.5 text-slate-100"
+                    >
+                      <option value="imap">IMAP</option>
+                      <option value="pop3">POP3</option>
+                    </select>
+                  </label>
+
+                  {receiveProtocol === "imap" ? (
+                    <>
+                      <label className="block space-y-1">
+                        <span className="text-slate-400">IMAP 호스트</span>
+                        <input
+                          type="text"
+                          value={imapHost}
+                          onChange={(event) => setImapHost(event.target.value)}
+                          className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1.5 font-mono text-slate-100"
+                          placeholder="imap.gmail.com"
+                        />
+                      </label>
+                      <label className="block space-y-1">
+                        <span className="text-slate-400">IMAP 포트</span>
+                        <input
+                          type="number"
+                          value={imapPort}
+                          onChange={(event) => setImapPort(Number(event.target.value) || 993)}
+                          className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1.5 font-mono text-slate-100"
+                        />
+                      </label>
+                      <label className="flex items-center gap-2 text-slate-200">
+                        <input
+                          type="checkbox"
+                          checked={imapUseSsl}
+                          onChange={(event) => setImapUseSsl(event.target.checked)}
+                        />
+                        IMAP SSL
+                      </label>
+                    </>
+                  ) : (
+                    <>
+                      <label className="block space-y-1">
+                        <span className="text-slate-400">POP3 호스트</span>
+                        <input
+                          type="text"
+                          value={pop3Host}
+                          onChange={(event) => setPop3Host(event.target.value)}
+                          className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1.5 font-mono text-slate-100"
+                          placeholder="pop.example.com"
+                        />
+                      </label>
+                      <label className="block space-y-1">
+                        <span className="text-slate-400">POP3 포트</span>
+                        <input
+                          type="number"
+                          value={pop3Port}
+                          onChange={(event) => setPop3Port(Number(event.target.value) || 995)}
+                          className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1.5 font-mono text-slate-100"
+                        />
+                      </label>
+                      <label className="flex items-center gap-2 text-slate-200">
+                        <input
+                          type="checkbox"
+                          checked={pop3UseSsl}
+                          onChange={(event) => setPop3UseSsl(event.target.checked)}
+                        />
+                        POP3 SSL
+                      </label>
+                      <label className="flex items-center gap-2 text-slate-200">
+                        <input
+                          type="checkbox"
+                          checked={pop3LeaveOnServer}
+                          onChange={(event) => setPop3LeaveOnServer(event.target.checked)}
+                        />
+                        서버에 메일 유지 (끄면 수집 후 DELE)
+                      </label>
+                    </>
+                  )}
+                </>
+              ) : null}
+            </div>
+          </div>
+        )}
+
+        {error ? (
+          <p className="mt-3 rounded-md border border-rose-800 bg-rose-950/40 px-2 py-1.5 text-[11px] text-rose-200">
+            {error}
+          </p>
+        ) : null}
+        {info ? (
+          <p className="mt-3 rounded-md border border-emerald-800 bg-emerald-950/40 px-2 py-1.5 text-[11px] text-emerald-200">
+            {info}
+          </p>
+        ) : null}
+
+        <div className="mt-4 flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-md border border-slate-700 px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-800"
+          >
+            취소
+          </button>
+          <button
+            type="button"
+            disabled={isLoading || isSaving}
+            onClick={() => void handleSave()}
+            className="rounded-md bg-sky-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-sky-600 disabled:opacity-50"
+          >
+            {isSaving ? "저장 중..." : "저장"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}

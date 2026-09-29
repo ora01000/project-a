@@ -12,3 +12,7 @@ frontend/dist/
 
 data/
 !data/.gitkeep
+upload/*
+!upload/.gitkeep
+
+logs/frontend-access.log

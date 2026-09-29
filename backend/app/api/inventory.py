@@ -1,561 +1,872 @@
-import logging
-from pathlib import Path
+"""Inventory management APIs — proxy to remote inventory-api service."""
 
-from fastapi import APIRouter, Body, File, Form, HTTPException, Request, UploadFile
+from __future__ import annotations
+
+import asyncio
+import logging
+import uuid
+from pathlib import Path
+from typing import Any
+
+from fastapi import APIRouter, File, HTTPException, Query, Request, UploadFile
 from pydantic import BaseModel, Field
 
-from backend.app.db.inventory_records import (
-    CHUNK_TYPE_CUSTOM,
-    CHUNK_TYPE_ROW,
-    DB_TYPE_TABLE,
-    DB_TYPE_VECTOR,
-    DEFAULT_CHUNK_OVERLAP,
-    DEFAULT_N_RESULTS,
-    MODIFIED_EMBEDDED,
-    MODIFIED_NEEDS_EMBED,
-    StoredInventory,
-    create_inventory_record,
-    delete_inventory_records,
-    extract_file_ext,
-    get_stored_inventory_by_idx,
-    list_stored_inventory,
-    update_inventory_modified,
-    update_inventory_record,
+from backend.app.db.inventory import (
+    assert_csv_columns_compatible,
+    preview_inventory_csv,
+    rewrite_csv_with_normalized_headers,
+    save_inventory_csv,
+    temp_table_name_for,
+    validate_inventory_table_name,
+    validate_preview_table_name,
 )
-from backend.app.db.inventory_table_import import (
-    drop_inventory_data_table,
-    import_csv_to_sqlite_table,
-    table_name_from_filename,
+from backend.app.db.roles import is_admin_role
+from backend.app.db.users import get_user_by_idx
+from backend.app.middleware.session_auth import get_request_auth_user
+from backend.app.services.inventory_external import (
+    InventoryExternalApiError,
+    InventoryExternalUploadError,
+    add_external_inventory,
+    add_external_inventory_api,
+    execute_external_inventory_api,
+    get_external_inventory_count,
+    get_external_inventory_schema,
+    list_external_inventories,
+    list_external_inventory_apis,
+    preview_external_inventory_table,
+    reload_external_inventory_api,
+    remove_external_inventory,
+    remove_external_inventory_api,
+    remove_external_temp_table,
+    transfer_csv_to_external_table,
+    update_external_inventory_api,
+    upload_csv_to_external_inventory_api,
+)
+from backend.app.services.inventory_temp_session import (
+    clear_inventory_temp_tables,
+    register_inventory_temp_table,
+    unregister_inventory_temp_table,
 )
 
 router = APIRouter(tags=["inventory"])
 logger = logging.getLogger(__name__)
 
-MAX_INVENTORY_UPLOAD_BYTES = 100 * 1024 * 1024
+
+class InventoryResponse(BaseModel):
+    idx: int = 0
+    table_name: str = ""
+    display_name: str = ""
+    description: str = ""
+    created_by: int = 0
+    created_by_username: str = ""
+    origin_csv: str = ""
+    created_at: str = ""
 
 
-class InventoryRecordResponse(BaseModel):
-    idx: int
-    inventory_name: str
-    inventory_file: str
-    file_ext: str
-    chunk_type: int
-    chunk_size: int
-    chunk_overlap: int
-    n_results: int
-    db_type: str
-    modified: int
-
-    @classmethod
-    def from_stored_inventory(cls, record: StoredInventory) -> "InventoryRecordResponse":
-        return cls(
-            idx=record.idx,
-            inventory_name=record.inventory_name,
-            inventory_file=record.inventory_file,
-            file_ext=record.file_ext,
-            chunk_type=record.chunk_type,
-            chunk_size=record.chunk_size,
-            chunk_overlap=record.chunk_overlap,
-            n_results=record.n_results,
-            db_type=record.effective_db_type,
-            modified=record.modified,
-        )
+class InventoryStatsRow(BaseModel):
+    table_name: str
+    display_name: str = ""
+    description: str = ""
+    origin_csv: str = ""
+    created_at: str = ""
+    created_by: int = 0
+    created_by_username: str = ""
+    row_count: int = 0
+    column_count: int = 0
+    error: str | None = None
 
 
-class UpdateInventoryRecordRequest(BaseModel):
-    inventory_name: str = Field(min_length=1, max_length=100)
-    chunk_type: int
-    chunk_size: int = 0
-    chunk_overlap: int = DEFAULT_CHUNK_OVERLAP
-    n_results: int = DEFAULT_N_RESULTS
-    db_type: str = DB_TYPE_VECTOR
+class InventoryApiStatsRow(BaseModel):
+    """Flattened inventory-api registry row for the idle dashboard."""
+
+    api_name: str
+    table_name: str = ""
+    display_name: str = ""
+    api_fullpath: str = ""
+    created_by: int = 0
+    created_by_username: str = ""
+    description: str = ""
+    error: str | None = None
 
 
-def _normalize_db_type(db_type: str | None) -> str:
-    value = (db_type or DB_TYPE_VECTOR).strip().lower()
-    if value not in {DB_TYPE_TABLE, DB_TYPE_VECTOR}:
-        raise HTTPException(status_code=400, detail="db_type must be 'table' or 'vector'")
-    return value
+class InventoryCreateRequest(BaseModel):
+    display_name: str = Field(min_length=1, max_length=100)
+    description: str = Field(default="", max_length=200)
+    origin_csv: str = Field(min_length=1, max_length=100)
+    table_name: str = Field(min_length=1, max_length=50)
+    temp_table_name: str | None = Field(default=None, max_length=50)
 
 
-class DeleteInventoryRecordsRequest(BaseModel):
-    idx_list: list[int] = Field(min_length=1)
+class InventoryUpdateRequest(BaseModel):
+    display_name: str = Field(min_length=1, max_length=100)
+    description: str = Field(default="", max_length=200)
+    origin_csv: str | None = Field(default=None, max_length=100)
+    temp_table_name: str | None = Field(default=None, max_length=50)
 
 
-class InventoryEmbedResponse(BaseModel):
-    status: str
-    embedded_rows: int
-    document_count: int
-    modified: int
+class InventoryCsvPreviewResponse(BaseModel):
+    filename: str = ""
+    table_name: str = ""
+    temp_table_name: str = ""
+    columns: list[str]
+    labels: list[str] = Field(default_factory=list)
+    rows: list[dict[str, str]]
+    offset: int = 0
+    limit: int = 50
+    startrow: int = 1
+    endrow: int = 50
+    total_rows: int = 0
+    has_more: bool = False
+    columns_compatible: bool | None = None
+    compatibility_error: str | None = None
+    transfer_ok: bool | None = None
+    transfer_result: dict[str, object] | None = None
 
 
-def _get_inventory_service(request: Request):
-    service = getattr(request.app.state, "inventory_service", None)
-    if service is None:
-        raise HTTPException(status_code=503, detail="Inventory service is not initialized")
-    return service
+class InventoryTablePreviewResponse(BaseModel):
+    table_name: str
+    columns: list[str]
+    labels: list[str] = Field(default_factory=list)
+    rows: list[dict[str, str]]
+    startrow: int = 1
+    endrow: int = 50
+    total_rows: int = 0
+    has_more: bool = False
 
 
-def _validate_upload_size(content: bytes) -> None:
-    if len(content) > MAX_INVENTORY_UPLOAD_BYTES:
-        raise HTTPException(
-            status_code=400,
-            detail="업로드 가능한 최대 파일 크기(100MB)를 초과했습니다.",
-        )
+class InventoryApiResponse(BaseModel):
+    idx: int = 0
+    api_name: str
+    display_name: str = ""
+    description: str = ""
+    api_fullpath: str = ""
+    created_by: int = 0
+    created_by_username: str = ""
+    table_name: str = ""
+    where_exp: str = ""
+    select_exp: str = ""
+    param_columns: str = ""
 
 
-def _validate_chunk_settings(
-    *,
-    chunk_type: int,
-    chunk_size: int,
-    chunk_overlap: int,
-    n_results: int,
-) -> None:
-    if chunk_type not in {CHUNK_TYPE_ROW, CHUNK_TYPE_CUSTOM}:
-        raise HTTPException(status_code=400, detail="chunk_type must be 1 (row) or 2 (custom size)")
-    if chunk_overlap < 0:
-        raise HTTPException(status_code=400, detail="chunk_overlap must be greater than or equal to 0")
-    if n_results <= 0:
-        raise HTTPException(status_code=400, detail="n_results must be greater than 0")
-    if chunk_type == CHUNK_TYPE_CUSTOM:
-        if chunk_size <= 0:
-            raise HTTPException(status_code=400, detail="chunk_size must be greater than 0 for custom chunking")
-        if chunk_overlap >= chunk_size:
-            raise HTTPException(status_code=400, detail="chunk_overlap must be less than chunk_size")
+class InventoryApiCreateRequest(BaseModel):
+    api_name: str = Field(min_length=1, max_length=50)
+    display_name: str = Field(min_length=1, max_length=100)
+    description: str = Field(default="", max_length=200)
+    where_exp: str = Field(min_length=1, max_length=500)
+    select_exp: str = Field(min_length=1, max_length=500)
+    param_columns: str = Field(default="", max_length=500)
 
 
-def _needs_reembed(
-    existing: StoredInventory,
-    *,
-    inventory_file: str | None,
-    chunk_type: int,
-    chunk_size: int,
-    chunk_overlap: int,
-) -> bool:
-    if inventory_file is not None and inventory_file != existing.inventory_file:
-        return True
-    if chunk_type != existing.chunk_type:
-        return True
-    if chunk_type == CHUNK_TYPE_CUSTOM and (
-        chunk_size != existing.chunk_size or chunk_overlap != existing.chunk_overlap
+class InventoryApiUpdateRequest(BaseModel):
+    api_name: str = Field(min_length=1, max_length=50)
+    display_name: str = Field(min_length=1, max_length=100)
+    description: str = Field(default="", max_length=200)
+    where_exp: str = Field(min_length=1, max_length=500)
+    select_exp: str = Field(min_length=1, max_length=500)
+    param_columns: str = Field(default="", max_length=500)
+
+
+def _created_at_from_row(row: dict[str, Any]) -> str:
+    for key in (
+        "created_at",
+        "created_date",
+        "registered_date",
+        "registered_at",
+        "create_date",
+        "created",
     ):
-        return True
-    return False
+        value = row.get(key)
+        if value is None:
+            continue
+        text = str(value).strip()
+        if text:
+            return text
+    return ""
 
 
-@router.get("/inventory/records", response_model=list[InventoryRecordResponse])
-async def get_inventory_records(request: Request) -> list[InventoryRecordResponse]:
+def _column_names_from_schema(schema: dict[str, Any]) -> list[str]:
+    columns: list[str] = []
+    raw = schema.get("columns")
+    if not isinstance(raw, list):
+        return columns
+    for item in raw:
+        if isinstance(item, dict):
+            name = str(item.get("name") or item.get("column") or "").strip()
+        else:
+            name = str(item or "").strip()
+        if name and name not in columns:
+            columns.append(name)
+    return columns
+
+
+def _username_for(database_path: str, created_by: int | None) -> str:
+    if not created_by:
+        return ""
+    user = get_user_by_idx(database_path, int(created_by))
+    if user is None:
+        return ""
+    return (user.username or user.userid or "").strip()
+
+
+def _to_inventory_response(row: dict[str, Any], *, database_path: str) -> InventoryResponse:
+    created_by = int(row.get("created_by") or 0)
+    return InventoryResponse(
+        idx=int(row.get("idx") or 0),
+        table_name=str(row.get("table_name") or ""),
+        display_name=str(row.get("display_name") or row.get("table_name") or ""),
+        description=str(row.get("description") or ""),
+        created_by=created_by,
+        created_by_username=_username_for(database_path, created_by),
+        origin_csv=str(row.get("origin_csv") or ""),
+        created_at=_created_at_from_row(row),
+    )
+
+
+def _api_fullpath(table_name: str, api_name: str, raw: object = None) -> str:
+    text = str(raw or "").strip()
+    if text:
+        return text
+    return f"/inv/{table_name}/{api_name}"
+
+
+def _to_api_response(
+    row: dict[str, Any],
+    *,
+    table_name: str,
+    database_path: str,
+    index: int = 0,
+) -> InventoryApiResponse:
+    api_name = str(row.get("api_name") or "")
+    created_by = int(row.get("created_by") or 0)
+    resolved_table = str(row.get("table_name") or table_name)
+    return InventoryApiResponse(
+        idx=int(row.get("idx") or index),
+        api_name=api_name,
+        display_name=str(row.get("display_name") or api_name),
+        description=str(row.get("description") or ""),
+        api_fullpath=_api_fullpath(resolved_table, api_name, row.get("api_fullpath")),
+        created_by=created_by,
+        created_by_username=_username_for(database_path, created_by),
+        table_name=resolved_table,
+        where_exp=str(row.get("where_exp") or ""),
+        select_exp=str(row.get("select_exp") or ""),
+        param_columns=str(row.get("param_columns") or row.get("input_columns") or ""),
+    )
+
+
+def _can_edit_created_by(created_by: int, auth_user) -> bool:
+    return int(created_by) == int(auth_user.idx) or is_admin_role(int(auth_user.role))
+
+
+def _session_token(request: Request) -> str | None:
+    return getattr(request.state, "auth_token", None)
+
+
+async def _cleanup_temp(token: str | None, temp_table: str | None) -> None:
+    name = (temp_table or "").strip()
+    if not name:
+        return
+    try:
+        await remove_external_temp_table(name)
+    except InventoryExternalApiError as exc:
+        logger.warning("removeTempTable failed table=%s err=%s", name, exc)
+    if token:
+        await unregister_inventory_temp_table(token, name)
+
+
+@router.get("/inventories", response_model=list[InventoryResponse])
+async def api_list_inventories(request: Request) -> list[InventoryResponse]:
+    get_request_auth_user(request)
+    try:
+        rows = await list_external_inventories()
+    except InventoryExternalApiError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    database_path = request.app.state.database_path
+    return [_to_inventory_response(row, database_path=database_path) for row in rows]
+
+
+@router.get("/inventories/stats", response_model=list[InventoryStatsRow])
+async def api_inventory_stats(request: Request) -> list[InventoryStatsRow]:
+    """Overview stats for the idle inventory dashboard (list + count + schema)."""
+    get_request_auth_user(request)
+    try:
+        rows = await list_external_inventories()
+    except InventoryExternalApiError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    database_path = request.app.state.database_path
+    base_items = [_to_inventory_response(row, database_path=database_path) for row in rows]
+
+    async def _one(item: InventoryResponse) -> InventoryStatsRow:
+        table = (item.table_name or "").strip()
+        if not table:
+            return InventoryStatsRow(
+                table_name="",
+                display_name=item.display_name,
+                description=item.description,
+                origin_csv=item.origin_csv,
+                created_at=item.created_at,
+                created_by=item.created_by,
+                created_by_username=item.created_by_username,
+                error="table_name 없음",
+            )
+        try:
+            count_task = get_external_inventory_count(table)
+            schema_task = get_external_inventory_schema(table)
+            row_count, schema = await asyncio.gather(count_task, schema_task)
+            columns = _column_names_from_schema(schema)
+            return InventoryStatsRow(
+                table_name=table,
+                display_name=item.display_name or table,
+                description=item.description,
+                origin_csv=item.origin_csv,
+                created_at=item.created_at,
+                created_by=item.created_by,
+                created_by_username=item.created_by_username,
+                row_count=int(row_count),
+                column_count=len(columns),
+            )
+        except InventoryExternalApiError as exc:
+            logger.warning("inventory stats failed table=%s err=%s", table, exc)
+            return InventoryStatsRow(
+                table_name=table,
+                display_name=item.display_name or table,
+                description=item.description,
+                origin_csv=item.origin_csv,
+                created_at=item.created_at,
+                created_by=item.created_by,
+                created_by_username=item.created_by_username,
+                error=str(exc),
+            )
+
+    return list(await asyncio.gather(*[_one(item) for item in base_items]))
+
+
+@router.get("/inventories/api-stats", response_model=list[InventoryApiStatsRow])
+async def api_inventory_api_stats(request: Request) -> list[InventoryApiStatsRow]:
+    """Flattened API registry across all inventory tables for the idle dashboard."""
+    get_request_auth_user(request)
+    try:
+        inventory_rows = await list_external_inventories()
+    except InventoryExternalApiError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    database_path = request.app.state.database_path
+    tables: list[str] = []
+    seen: set[str] = set()
+    for row in inventory_rows:
+        table = str(row.get("table_name") or "").strip()
+        if table and table not in seen:
+            seen.add(table)
+            tables.append(table)
+
+    async def _apis_for_table(table: str) -> list[InventoryApiStatsRow]:
+        try:
+            rows = await list_external_inventory_apis(table)
+        except InventoryExternalApiError as exc:
+            logger.warning("inventory api-stats failed table=%s err=%s", table, exc)
+            return [
+                InventoryApiStatsRow(
+                    api_name="",
+                    table_name=table,
+                    error=str(exc),
+                )
+            ]
+        result: list[InventoryApiStatsRow] = []
+        for index, row in enumerate(rows):
+            mapped = _to_api_response(
+                row,
+                table_name=table,
+                database_path=database_path,
+                index=index + 1,
+            )
+            result.append(
+                InventoryApiStatsRow(
+                    api_name=mapped.api_name,
+                    table_name=mapped.table_name or table,
+                    display_name=mapped.display_name,
+                    api_fullpath=mapped.api_fullpath,
+                    created_by=mapped.created_by,
+                    created_by_username=mapped.created_by_username,
+                    description=mapped.description,
+                )
+            )
+        return result
+
+    if not tables:
+        return []
+
+    nested = await asyncio.gather(*[_apis_for_table(table) for table in tables])
+    flattened: list[InventoryApiStatsRow] = []
+    for group in nested:
+        flattened.extend(group)
+    flattened.sort(key=lambda item: (item.table_name, item.api_name))
+    return flattened
+
+
+@router.post("/inventories/csv/upload", response_model=InventoryCsvPreviewResponse)
+async def api_upload_inventory_csv(
+    request: Request,
+    file: UploadFile = File(...),
+    compare_to_table: str | None = Query(default=None),
+    table_name: str | None = Query(default=None),
+    display_name: str | None = Query(default=None),
+    description: str | None = Query(default=None),
+) -> InventoryCsvPreviewResponse:
+    auth_user = get_request_auth_user(request)
+    token = _session_token(request)
+    raw_name = (file.filename or "upload.csv").strip()
+    if not raw_name.lower().endswith(".csv"):
+        raise HTTPException(status_code=400, detail="CSV 파일만 업로드할 수 있습니다.")
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="빈 파일입니다.")
+
+    try:
+        table = validate_inventory_table_name(table_name or "")
+        temp_table = temp_table_name_for(table)
+        normalized_content, columns, _labels = rewrite_csv_with_normalized_headers(content)
+        stem = Path(raw_name).stem
+        unique_name = f"{stem}_{uuid.uuid4().hex[:10]}.csv"
+        remote = await upload_csv_to_external_inventory_api(
+            normalized_content,
+            filename=unique_name,
+        )
+        remote_filename = str(remote.get("filename") or unique_name)
+        transfer_result = await transfer_csv_to_external_table(
+            filename=remote_filename,
+            tablename=temp_table,
+            display_name=(display_name or "").strip() or None,
+            description=(description or "").strip() or None,
+            created_by=int(auth_user.idx),
+        )
+        if token:
+            await register_inventory_temp_table(token, temp_table)
+        stored = save_inventory_csv(
+            normalized_content,
+            original_filename=raw_name,
+            stored_filename=remote_filename,
+        )
+        local_preview = preview_inventory_csv(stored, offset=0, limit=50)
+        try:
+            remote_preview = await preview_external_inventory_table(
+                temp_table, startrow=1, endrow=50
+            )
+        except InventoryExternalApiError as exc:
+            logger.warning(
+                "remote inventory preview failed after temp transfer table=%s err=%s",
+                temp_table,
+                exc,
+            )
+            remote_preview = None
+    except InventoryExternalUploadError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except InventoryExternalApiError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    columns_compatible: bool | None = None
+    compatibility_error: str | None = None
+    baseline_table = (compare_to_table or "").strip()
+    if baseline_table:
+        try:
+            schema = await get_external_inventory_schema(baseline_table)
+            expected = []
+            raw_cols = schema.get("columns")
+            if isinstance(raw_cols, list):
+                for item in raw_cols:
+                    if isinstance(item, dict):
+                        name = str(item.get("name") or "").strip()
+                    else:
+                        name = str(item or "").strip()
+                    if name:
+                        expected.append(name)
+            assert_csv_columns_compatible(expected, columns)
+            columns_compatible = True
+        except (InventoryExternalApiError, ValueError) as exc:
+            columns_compatible = False
+            compatibility_error = str(exc)
+
+    if remote_preview is not None:
+        return InventoryCsvPreviewResponse(
+            filename=remote_filename,
+            table_name=table,
+            temp_table_name=temp_table,
+            columns=list(remote_preview["columns"]),  # type: ignore[arg-type]
+            labels=list(remote_preview.get("labels") or remote_preview["columns"]),  # type: ignore[arg-type]
+            rows=list(remote_preview["rows"]),  # type: ignore[arg-type]
+            offset=0,
+            limit=50,
+            startrow=int(remote_preview.get("startrow") or 1),
+            endrow=int(remote_preview.get("endrow") or 50),
+            total_rows=int(remote_preview.get("total_rows") or 0),
+            has_more=bool(remote_preview.get("has_more")),
+            columns_compatible=columns_compatible,
+            compatibility_error=compatibility_error,
+            transfer_ok=True,
+            transfer_result=transfer_result,
+        )
+
+    return InventoryCsvPreviewResponse(
+        **local_preview,
+        table_name=table,
+        temp_table_name=temp_table,
+        startrow=1,
+        endrow=min(50, int(local_preview.get("total_rows") or 0) or 50),
+        columns_compatible=columns_compatible,
+        compatibility_error=compatibility_error,
+        transfer_ok=True,
+        transfer_result=transfer_result,
+    )
+
+
+@router.get(
+    "/inventories/tables/{table_name}/preview",
+    response_model=InventoryTablePreviewResponse,
+)
+async def api_preview_inventory_table(
+    table_name: str,
+    request: Request,
+    startrow: int = Query(default=1, ge=1),
+    endrow: int = Query(default=50, ge=1),
+) -> InventoryTablePreviewResponse:
+    get_request_auth_user(request)
+    if endrow < startrow:
+        raise HTTPException(status_code=400, detail="endrow는 startrow 이상이어야 합니다.")
+    if endrow - startrow + 1 > 500:
+        raise HTTPException(status_code=400, detail="한 번에 최대 500행까지 조회할 수 있습니다.")
+    try:
+        table = validate_preview_table_name(table_name)
+        preview = await preview_external_inventory_table(
+            table, startrow=startrow, endrow=endrow
+        )
+    except InventoryExternalApiError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return InventoryTablePreviewResponse(
+        table_name=str(preview["table_name"]),
+        columns=list(preview["columns"]),  # type: ignore[arg-type]
+        labels=list(preview.get("labels") or preview["columns"]),  # type: ignore[arg-type]
+        rows=list(preview["rows"]),  # type: ignore[arg-type]
+        startrow=int(preview.get("startrow") or startrow),
+        endrow=int(preview.get("endrow") or endrow),
+        total_rows=int(preview.get("total_rows") or 0),
+        has_more=bool(preview.get("has_more")),
+    )
+
+
+@router.post("/inventories/temp/cleanup")
+async def api_cleanup_inventory_temps(
+    request: Request,
+    tablename: str | None = Query(default=None),
+) -> dict[str, object]:
+    """Remove session-tracked temp tables (page leave / explicit cleanup)."""
+    get_request_auth_user(request)
+    token = _session_token(request)
+    removed: list[str] = []
+    explicit = (tablename or "").strip()
+    if explicit:
+        await _cleanup_temp(token, explicit)
+        removed.append(explicit)
+        return {"ok": True, "removed": removed}
+
+    if not token:
+        return {"ok": True, "removed": removed}
+    for name in await clear_inventory_temp_tables(token):
+        try:
+            await remove_external_temp_table(name)
+            removed.append(name)
+        except InventoryExternalApiError as exc:
+            logger.warning("removeTempTable failed table=%s err=%s", name, exc)
+    return {"ok": True, "removed": removed}
+
+
+@router.post("/inventories", response_model=InventoryResponse, status_code=201)
+async def api_create_inventory(
+    body: InventoryCreateRequest,
+    request: Request,
+) -> InventoryResponse:
+    auth_user = get_request_auth_user(request)
+    token = _session_token(request)
+    try:
+        table = validate_inventory_table_name(body.table_name)
+        temp_table = (body.temp_table_name or "").strip() or temp_table_name_for(table)
+        await transfer_csv_to_external_table(
+            filename=body.origin_csv,
+            tablename=table,
+            display_name=body.display_name.strip(),
+            description=body.description.strip(),
+            created_by=int(auth_user.idx),
+        )
+        created = await add_external_inventory(
+            table_name=table,
+            origin_csv=body.origin_csv,
+            display_name=body.display_name.strip(),
+            description=body.description.strip(),
+            created_by=int(auth_user.idx),
+        )
+        await _cleanup_temp(token, temp_table)
+    except InventoryExternalUploadError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except InventoryExternalApiError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    if isinstance(created, dict) and created.get("table_name"):
+        return _to_inventory_response(created, database_path=request.app.state.database_path)
+    return InventoryResponse(
+        table_name=table,
+        display_name=body.display_name.strip(),
+        description=body.description.strip(),
+        created_by=int(auth_user.idx),
+        created_by_username=_username_for(request.app.state.database_path, int(auth_user.idx)),
+        origin_csv=body.origin_csv,
+    )
+
+
+@router.put("/inventories/{table_name}", response_model=InventoryResponse)
+async def api_update_inventory(
+    table_name: str,
+    body: InventoryUpdateRequest,
+    request: Request,
+) -> InventoryResponse:
+    auth_user = get_request_auth_user(request)
+    token = _session_token(request)
+    try:
+        table = validate_inventory_table_name(table_name)
+        origin = (body.origin_csv or "").strip()
+        temp_table = (body.temp_table_name or "").strip()
+        if temp_table and origin:
+            await transfer_csv_to_external_table(
+                filename=origin,
+                tablename=table,
+                display_name=body.display_name.strip(),
+                description=body.description.strip(),
+                created_by=int(auth_user.idx),
+            )
+            await _cleanup_temp(token, temp_table)
+        # Remote API has no updateInventory; re-register metadata when origin is known.
+        if origin:
+            await add_external_inventory(
+                table_name=table,
+                origin_csv=origin,
+                display_name=body.display_name.strip(),
+                description=body.description.strip(),
+                created_by=int(auth_user.idx),
+            )
+    except InventoryExternalUploadError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except InventoryExternalApiError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return InventoryResponse(
+        table_name=table,
+        display_name=body.display_name.strip(),
+        description=body.description.strip(),
+        created_by=int(auth_user.idx),
+        created_by_username=_username_for(request.app.state.database_path, int(auth_user.idx)),
+        origin_csv=origin,
+    )
+
+
+@router.delete("/inventories/{table_name}")
+async def api_delete_inventory(table_name: str, request: Request) -> dict[str, object]:
+    auth_user = get_request_auth_user(request)
+    try:
+        table = validate_inventory_table_name(table_name)
+        rows = await list_external_inventories()
+        target = next((row for row in rows if str(row.get("table_name") or "") == table), None)
+        if target is None:
+            raise HTTPException(status_code=404, detail="인벤토리를 찾을 수 없습니다.")
+        created_by = int(target.get("created_by") or 0)
+        if created_by and not _can_edit_created_by(created_by, auth_user):
+            raise HTTPException(status_code=403, detail="이 인벤토리를 삭제할 권한이 없습니다.")
+        await remove_external_inventory(table)
+    except HTTPException:
+        raise
+    except InventoryExternalApiError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"ok": True, "table_name": table}
+
+
+@router.get("/inventories/{table_name}/columns", response_model=list[str])
+async def api_list_inventory_columns(table_name: str, request: Request) -> list[str]:
+    get_request_auth_user(request)
+    try:
+        table = validate_inventory_table_name(table_name)
+        schema = await get_external_inventory_schema(table)
+    except InventoryExternalApiError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    columns: list[str] = []
+    raw = schema.get("columns")
+    if isinstance(raw, list):
+        for item in raw:
+            if isinstance(item, dict):
+                name = str(item.get("name") or "").strip()
+            else:
+                name = str(item or "").strip()
+            if name and name not in columns:
+                columns.append(name)
+    return columns
+
+
+@router.get("/inventories/{table_name}/apis", response_model=list[InventoryApiResponse])
+async def api_list_inventory_apis(table_name: str, request: Request) -> list[InventoryApiResponse]:
+    get_request_auth_user(request)
+    try:
+        table = validate_inventory_table_name(table_name)
+        rows = await list_external_inventory_apis(table)
+    except InventoryExternalApiError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     database_path = request.app.state.database_path
     return [
-        InventoryRecordResponse.from_stored_inventory(record)
-        for record in list_stored_inventory(database_path)
+        _to_api_response(row, table_name=table, database_path=database_path, index=index + 1)
+        for index, row in enumerate(rows)
     ]
 
 
-@router.post("/inventory/records", response_model=InventoryRecordResponse, status_code=201)
-async def create_inventory_record_with_upload(
+@router.post(
+    "/inventories/{table_name}/apis",
+    response_model=InventoryApiResponse,
+    status_code=201,
+)
+async def api_create_inventory_api(
+    table_name: str,
+    body: InventoryApiCreateRequest,
     request: Request,
-    inventory_name: str = Form(...),
-    db_type: str = Form(DB_TYPE_VECTOR),
-    chunk_type: int = Form(CHUNK_TYPE_ROW),
-    chunk_size: int = Form(0),
-    chunk_overlap: int = Form(DEFAULT_CHUNK_OVERLAP),
-    n_results: int = Form(DEFAULT_N_RESULTS),
-    file: UploadFile = File(...),
-) -> InventoryRecordResponse:
-    database_path = request.app.state.database_path
-    service = _get_inventory_service(request)
-    normalized_db_type = _normalize_db_type(db_type)
-
-    if not file.filename:
-        raise HTTPException(status_code=400, detail="업로드할 파일을 선택해 주세요.")
-
-    content = await file.read()
-    if not content:
-        raise HTTPException(status_code=400, detail="업로드할 파일이 비어 있습니다.")
-    _validate_upload_size(content)
-
+) -> InventoryApiResponse:
+    auth_user = get_request_auth_user(request)
     try:
-        saved_filename = service.save_uploaded_file(filename=file.filename, content=content)
-
-        if normalized_db_type == DB_TYPE_TABLE:
-            if extract_file_ext(saved_filename) != "csv":
-                service.delete_uploaded_file(saved_filename)
-                raise HTTPException(status_code=400, detail="table 방식은 CSV 파일만 업로드할 수 있습니다.")
-
-            table_name, inserted_rows = import_csv_to_sqlite_table(
-                database_path,
-                filename=saved_filename,
-                content=content,
-            )
-            logger.info(
-                "Inventory table import complete file=%s table=%s rows=%s",
-                saved_filename,
-                table_name,
-                inserted_rows,
-            )
-            record = create_inventory_record(
-                database_path,
-                inventory_name=inventory_name,
-                inventory_file=saved_filename,
-                file_ext=extract_file_ext(saved_filename),
-                chunk_type=CHUNK_TYPE_ROW,
-                chunk_size=0,
-                chunk_overlap=DEFAULT_CHUNK_OVERLAP,
-                n_results=DEFAULT_N_RESULTS,
-                db_type=DB_TYPE_TABLE,
-                modified=MODIFIED_EMBEDDED,
-            )
-            return InventoryRecordResponse.from_stored_inventory(record)
-
-        _validate_chunk_settings(
-            chunk_type=chunk_type,
-            chunk_size=chunk_size,
-            chunk_overlap=chunk_overlap,
-            n_results=n_results,
-        )
-        next_chunk_size = chunk_size if chunk_type == CHUNK_TYPE_CUSTOM else 0
-        next_chunk_overlap = chunk_overlap if chunk_type == CHUNK_TYPE_CUSTOM else DEFAULT_CHUNK_OVERLAP
-        record = create_inventory_record(
-            database_path,
-            inventory_name=inventory_name,
-            inventory_file=saved_filename,
-            file_ext=extract_file_ext(saved_filename),
-            chunk_type=chunk_type,
-            chunk_size=next_chunk_size,
-            chunk_overlap=next_chunk_overlap,
-            n_results=n_results,
-            db_type=DB_TYPE_VECTOR,
-            modified=MODIFIED_NEEDS_EMBED,
-        )
+        table = validate_inventory_table_name(table_name)
+        payload = {
+            "api_name": body.api_name.strip().lower(),
+            "display_name": body.display_name.strip(),
+            "description": body.description.strip(),
+            "created_by": int(auth_user.idx),
+            "table_name": table,
+            "where_exp": body.where_exp.strip(),
+            "select_exp": body.select_exp.strip(),
+            "param_columns": body.param_columns.strip(),
+        }
+        created = await add_external_inventory_api(payload)
+        await reload_external_inventory_api(table)
+    except InventoryExternalApiError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    merged = {**payload, **(created if isinstance(created, dict) else {})}
+    return _to_api_response(
+        merged,
+        table_name=table,
+        database_path=request.app.state.database_path,
+    )
 
-    return InventoryRecordResponse.from_stored_inventory(record)
 
-
-@router.put("/inventory/records/{idx}", response_model=InventoryRecordResponse)
-async def update_inventory_metadata(
-    idx: int,
-    payload: UpdateInventoryRecordRequest,
+@router.put(
+    "/inventories/{table_name}/apis/{api_name}",
+    response_model=InventoryApiResponse,
+)
+async def api_update_inventory_api(
+    table_name: str,
+    api_name: str,
+    body: InventoryApiUpdateRequest,
     request: Request,
-) -> InventoryRecordResponse:
-    database_path = request.app.state.database_path
-    existing = get_stored_inventory_by_idx(database_path, idx)
-    if existing is None:
-        raise HTTPException(status_code=404, detail="인벤토리 레코드를 찾을 수 없습니다.")
-
-    normalized_db_type = _normalize_db_type(payload.db_type or existing.effective_db_type)
-    if existing.effective_db_type == DB_TYPE_TABLE or normalized_db_type == DB_TYPE_TABLE:
-        updated = update_inventory_record(
-            database_path,
-            idx,
-            inventory_name=payload.inventory_name,
-            db_type=DB_TYPE_TABLE,
-            modified=existing.modified,
-        )
-        if updated is None:
-            raise HTTPException(status_code=404, detail="인벤토리 레코드를 찾을 수 없습니다.")
-        return InventoryRecordResponse.from_stored_inventory(updated)
-
-    _validate_chunk_settings(
-        chunk_type=payload.chunk_type,
-        chunk_size=payload.chunk_size,
-        chunk_overlap=payload.chunk_overlap,
-        n_results=payload.n_results,
-    )
-
-    next_chunk_size = payload.chunk_size if payload.chunk_type == CHUNK_TYPE_CUSTOM else 0
-    next_chunk_overlap = (
-        payload.chunk_overlap if payload.chunk_type == CHUNK_TYPE_CUSTOM else DEFAULT_CHUNK_OVERLAP
-    )
-    next_modified = existing.modified
-    if _needs_reembed(
-        existing,
-        inventory_file=None,
-        chunk_type=payload.chunk_type,
-        chunk_size=next_chunk_size,
-        chunk_overlap=next_chunk_overlap,
-    ):
-        next_modified = MODIFIED_NEEDS_EMBED
-
-    updated = update_inventory_record(
-        database_path,
-        idx,
-        inventory_name=payload.inventory_name,
-        chunk_type=payload.chunk_type,
-        chunk_size=next_chunk_size,
-        chunk_overlap=next_chunk_overlap,
-        n_results=payload.n_results,
-        db_type=DB_TYPE_VECTOR,
-        modified=next_modified,
-    )
-    if updated is None:
-        raise HTTPException(status_code=404, detail="인벤토리 레코드를 찾을 수 없습니다.")
-
-    return InventoryRecordResponse.from_stored_inventory(updated)
-
-
-@router.post("/inventory/records/{idx}/upload", response_model=InventoryRecordResponse)
-async def upload_inventory_file(
-    idx: int,
-    request: Request,
-    inventory_name: str = Form(...),
-    db_type: str = Form(DB_TYPE_VECTOR),
-    chunk_type: int = Form(CHUNK_TYPE_ROW),
-    chunk_size: int = Form(0),
-    chunk_overlap: int = Form(DEFAULT_CHUNK_OVERLAP),
-    n_results: int = Form(DEFAULT_N_RESULTS),
-    file: UploadFile | None = File(None),
-) -> InventoryRecordResponse:
-    database_path = request.app.state.database_path
-    service = _get_inventory_service(request)
-    existing = get_stored_inventory_by_idx(database_path, idx)
-    if existing is None:
-        raise HTTPException(status_code=404, detail="인벤토리 레코드를 찾을 수 없습니다.")
-
-    normalized_db_type = _normalize_db_type(db_type or existing.effective_db_type)
-    next_inventory_file = existing.inventory_file
-    next_file_ext = existing.file_ext
-    next_modified = existing.modified
-
-    if normalized_db_type == DB_TYPE_TABLE:
-        if file is not None and file.filename:
-            content = await file.read()
-            if not content:
-                raise HTTPException(status_code=400, detail="업로드할 파일이 비어 있습니다.")
-            _validate_upload_size(content)
-            if extract_file_ext(file.filename) != "csv":
-                raise HTTPException(status_code=400, detail="table 방식은 CSV 파일만 업로드할 수 있습니다.")
-
-            old_table = table_name_from_filename(existing.inventory_file)
-            if existing.inventory_file and existing.inventory_file != Path(file.filename).name:
-                service.delete_uploaded_file(existing.inventory_file)
-                drop_inventory_data_table(database_path, old_table)
-
-            try:
-                next_inventory_file = service.save_uploaded_file(filename=file.filename, content=content)
-                next_file_ext = extract_file_ext(next_inventory_file)
-                import_csv_to_sqlite_table(
-                    database_path,
-                    filename=next_inventory_file,
-                    content=content,
-                )
-                next_modified = MODIFIED_EMBEDDED
-            except ValueError as exc:
-                raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-        updated = update_inventory_record(
-            database_path,
-            idx,
-            inventory_name=inventory_name,
-            inventory_file=next_inventory_file,
-            file_ext=next_file_ext,
-            chunk_type=CHUNK_TYPE_ROW,
-            chunk_size=0,
-            chunk_overlap=DEFAULT_CHUNK_OVERLAP,
-            n_results=DEFAULT_N_RESULTS,
-            db_type=DB_TYPE_TABLE,
-            modified=next_modified,
-        )
-        if updated is None:
-            raise HTTPException(status_code=404, detail="인벤토리 레코드를 찾을 수 없습니다.")
-        return InventoryRecordResponse.from_stored_inventory(updated)
-
-    _validate_chunk_settings(
-        chunk_type=chunk_type,
-        chunk_size=chunk_size,
-        chunk_overlap=chunk_overlap,
-        n_results=n_results,
-    )
-    next_chunk_size = chunk_size if chunk_type == CHUNK_TYPE_CUSTOM else 0
-    next_chunk_overlap = chunk_overlap if chunk_type == CHUNK_TYPE_CUSTOM else DEFAULT_CHUNK_OVERLAP
-
-    if file is not None and file.filename:
-        content = await file.read()
-        if not content:
-            raise HTTPException(status_code=400, detail="업로드할 파일이 비어 있습니다.")
-        _validate_upload_size(content)
-
-        if existing.inventory_file and existing.inventory_file != Path(file.filename).name:
-            service.delete_uploaded_file(existing.inventory_file)
-
-        try:
-            next_inventory_file = service.save_uploaded_file(filename=file.filename, content=content)
-            next_file_ext = extract_file_ext(next_inventory_file)
-            next_modified = MODIFIED_NEEDS_EMBED
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-    elif _needs_reembed(
-        existing,
-        inventory_file=None,
-        chunk_type=chunk_type,
-        chunk_size=next_chunk_size,
-        chunk_overlap=next_chunk_overlap,
-    ):
-        next_modified = MODIFIED_NEEDS_EMBED
-
-    updated = update_inventory_record(
-        database_path,
-        idx,
-        inventory_name=inventory_name,
-        inventory_file=next_inventory_file,
-        file_ext=next_file_ext,
-        chunk_type=chunk_type,
-        chunk_size=next_chunk_size,
-        chunk_overlap=next_chunk_overlap,
-        n_results=n_results,
-        db_type=DB_TYPE_VECTOR,
-        modified=next_modified,
-    )
-    if updated is None:
-        raise HTTPException(status_code=404, detail="인벤토리 레코드를 찾을 수 없습니다.")
-
-    return InventoryRecordResponse.from_stored_inventory(updated)
-
-
-@router.post("/inventory/records/{idx}/embed", response_model=InventoryEmbedResponse)
-async def embed_inventory_record(idx: int, request: Request) -> InventoryEmbedResponse:
-    database_path = request.app.state.database_path
-    service = _get_inventory_service(request)
-    record = get_stored_inventory_by_idx(database_path, idx)
-    if record is None:
-        logger.warning("Inventory embed rejected: record not found idx=%s", idx)
-        raise HTTPException(status_code=404, detail="인벤토리 레코드를 찾을 수 없습니다.")
-
-    status_info = service.get_status_info()
-    logger.info(
-        "Inventory embed request idx=%s name=%s file=%s ext=%s chunk_type=%s chunk_size=%s "
-        "chunk_overlap=%s modified=%s service_status=%s upload_path=%s chroma_path=%s document_count=%s",
-        record.idx,
-        record.inventory_name,
-        record.inventory_file,
-        record.file_ext,
-        record.chunk_type,
-        record.chunk_size,
-        record.chunk_overlap,
-        record.modified,
-        status_info.get("status"),
-        status_info.get("upload_path"),
-        status_info.get("chroma_data_path"),
-        status_info.get("document_count"),
-    )
-
-    if record.effective_db_type == DB_TYPE_TABLE:
-        raise HTTPException(status_code=400, detail="table 방식 인벤토리는 Embedding을 지원하지 않습니다.")
-
-    if record.modified != MODIFIED_NEEDS_EMBED:
-        logger.warning(
-            "Inventory embed rejected idx=%s modified=%s expected=%s",
-            record.idx,
-            record.modified,
-            MODIFIED_NEEDS_EMBED,
-        )
-        raise HTTPException(status_code=400, detail="임베딩이 필요한 상태가 아닙니다.")
-
+) -> InventoryApiResponse:
+    get_request_auth_user(request)
     try:
-        embedded_rows = service.embed_inventory_record(
-            inventory_idx=record.idx,
-            filename=record.inventory_file,
-            chunk_type=record.chunk_type,
-            chunk_size=record.chunk_size,
-            chunk_overlap=record.chunk_overlap,
-        )
-    except FileNotFoundError as exc:
-        logger.error(
-            "Inventory embed file missing idx=%s file=%s upload_path=%s detail=%s",
-            record.idx,
-            record.inventory_file,
-            status_info.get("upload_path"),
-            exc,
-        )
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        table = validate_inventory_table_name(table_name)
+        payload = {
+            "api_name": body.api_name.strip().lower() or api_name.strip().lower(),
+            "display_name": body.display_name.strip(),
+            "description": body.description.strip(),
+            "where_exp": body.where_exp.strip(),
+            "select_exp": body.select_exp.strip(),
+            "param_columns": body.param_columns.strip(),
+        }
+        updated = await update_external_inventory_api(payload)
+        await reload_external_inventory_api(table)
+    except InventoryExternalApiError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
     except ValueError as exc:
-        logger.error(
-            "Inventory embed validation failed idx=%s file=%s chunk_type=%s chunk_size=%s detail=%s",
-            record.idx,
-            record.inventory_file,
-            record.chunk_type,
-            record.chunk_size,
-            exc,
-        )
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except RuntimeError as exc:
-        logger.exception(
-            "Inventory embed service unavailable idx=%s file=%s service_status=%s service_error=%s",
-            record.idx,
-            record.inventory_file,
-            status_info.get("status"),
-            status_info.get("error"),
-        )
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
-    except Exception as exc:
-        logger.exception(
-            "Inventory embed failed idx=%s file=%s chunk_type=%s chunk_size=%s "
-            "upload_path=%s chroma_path=%s service_status=%s",
-            record.idx,
-            record.inventory_file,
-            record.chunk_type,
-            record.chunk_size,
-            status_info.get("upload_path"),
-            status_info.get("chroma_data_path"),
-            status_info.get("status"),
-        )
-        raise HTTPException(status_code=500, detail=f"Embedding 실패: {exc}") from exc
-
-    updated = update_inventory_modified(database_path, idx, MODIFIED_EMBEDDED)
-    if updated is None:
-        logger.error("Inventory embed DB update failed idx=%s embedded_rows=%s", idx, embedded_rows)
-        raise HTTPException(status_code=404, detail="인벤토리 레코드를 찾을 수 없습니다.")
-
-    logger.info(
-        "Inventory embed completed idx=%s file=%s embedded_rows=%s document_count=%s",
-        record.idx,
-        record.inventory_file,
-        embedded_rows,
-        service.document_count,
-    )
-
-    return InventoryEmbedResponse(
-        status="ok",
-        embedded_rows=embedded_rows,
-        document_count=service.document_count,
-        modified=updated.modified,
-    )
-
-
-@router.delete("/inventory/records")
-async def remove_inventory_records(
-    request: Request,
-    payload: DeleteInventoryRecordsRequest = Body(...),
-) -> dict[str, int]:
-    database_path = request.app.state.database_path
-    service = _get_inventory_service(request)
-    deleted_records = delete_inventory_records(database_path, payload.idx_list)
-
-    for record in deleted_records:
-        if record.effective_db_type == DB_TYPE_TABLE:
-            drop_inventory_data_table(database_path, table_name_from_filename(record.inventory_file))
-        else:
-            service.delete_inventory_embeddings(record.idx)
-        service.delete_uploaded_file(record.inventory_file)
-
-    service.refresh_document_count()
-    return {"deleted": len(deleted_records)}
-
-
-@router.get("/inventory/status")
-async def inventory_status(request: Request) -> dict:
-    service = _get_inventory_service(request)
-    return service.get_status_info()
-
-
-@router.post("/inventory/reload")
-async def reload_inventory(request: Request) -> dict:
-    service = _get_inventory_service(request)
-    loaded = service.reload_csv()
-    return {
-        "status": "ok",
-        "loaded_rows": loaded,
-        "document_count": service.document_count,
+    merged = {
+        "table_name": table,
+        **payload,
+        **(updated if isinstance(updated, dict) else {}),
     }
+    return _to_api_response(
+        merged,
+        table_name=table,
+        database_path=request.app.state.database_path,
+    )
+
+
+@router.delete("/inventories/{table_name}/apis/{api_name}")
+async def api_delete_inventory_api(
+    table_name: str,
+    api_name: str,
+    request: Request,
+) -> dict[str, object]:
+    get_request_auth_user(request)
+    try:
+        table = validate_inventory_table_name(table_name)
+        name = (api_name or "").strip()
+        if not name:
+            raise ValueError("api_name이 필요합니다.")
+        await remove_external_inventory_api(tablename=table, api_name=name)
+        await reload_external_inventory_api(table)
+    except InventoryExternalApiError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"ok": True, "table_name": table, "api_name": name}
+
+
+@router.get("/inventories/{table_name}/apis/{api_name}/test")
+async def api_test_inventory_api(
+    table_name: str,
+    api_name: str,
+    request: Request,
+) -> dict[str, Any]:
+    get_request_auth_user(request)
+    try:
+        table = validate_inventory_table_name(table_name)
+        name = (api_name or "").strip()
+        if not name:
+            raise ValueError("api_name이 필요합니다.")
+        params = {key: str(value) for key, value in request.query_params.items()}
+        body = await execute_external_inventory_api(
+            table_name=table,
+            api_name=name,
+            params=params,
+        )
+    except InventoryExternalApiError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    if isinstance(body, list):
+        return {"columns": [], "rows": body, "row_count": len(body)}
+    if isinstance(body, dict):
+        rows = body.get("rows")
+        if isinstance(rows, list):
+            columns = body.get("columns")
+            return {
+                "columns": columns if isinstance(columns, list) else [],
+                "rows": rows,
+                "row_count": int(body.get("row_count") or len(rows)),
+                "truncated": bool(body.get("truncated")),
+            }
+        return {"columns": [], "rows": [body], "row_count": 1}
+    return {"columns": [], "rows": [{"value": body}], "row_count": 1}

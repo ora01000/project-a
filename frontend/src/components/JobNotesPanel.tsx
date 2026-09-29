@@ -1,0 +1,162 @@
+import { useCallback, useEffect, useState } from "react";
+
+import type { AuthUser } from "../types/auth";
+import { FossFlowTab } from "./jobs/FossFlowTab";
+import { InfraShapeTab } from "./jobs/InfraShapeTab";
+import { JobReviewTab } from "./jobs/JobReviewTab";
+import { MyJobResultsTab } from "./jobs/MyJobResultsTab";
+import { MyJobReviewTab } from "./jobs/MyJobReviewTab";
+import { MyNotesHeaderButtons } from "./jobs/MyNotesHeaderButtons";
+import { MyNotesTab } from "./jobs/MyNotesTab";
+import { RejectedJobsTab } from "./jobs/RejectedJobsTab";
+import { WhatapEventReportTab } from "./jobs/WhatapEventReportTab";
+import { useJobReviewNewBadges } from "./jobs/useJobReviewNewBadges";
+import { useMyNotes } from "./jobs/useMyNotes";
+import { canRunGapAnalysis, hasAdminAccess, shouldMaskIps } from "../types/user";
+import { WorkflowIcon, type WorkflowIconName } from "./workflow/WorkflowIcon";
+
+type JobNotesTab =
+  | "review"
+  | "my-review"
+  | "my-results"
+  | "whatap-report"
+  | "rejected-jobs"
+  | "my-notes"
+  | "infra-shape"
+  | "fossflow";
+
+const TABS: { id: JobNotesTab; label: string; icon: WorkflowIconName; adminOnly?: boolean }[] = [
+  { id: "infra-shape", label: "인프라 형상", icon: "nodes" },
+  { id: "review", label: "작업 검토", icon: "approve" },
+  { id: "my-review", label: "나의 검토작업", icon: "owner" },
+  { id: "my-results", label: "나의 작업결과", icon: "result" },
+  { id: "whatap-report", label: "Whatap 이벤트 리포트", icon: "log" },
+  { id: "rejected-jobs", label: "반려된 작업", icon: "end-fail" },
+  { id: "my-notes", label: "나의 노트", icon: "notes" },
+  { id: "fossflow", label: "FossFLOW", icon: "template", adminOnly: true },
+];
+
+interface JobNotesPanelProps {
+  className?: string;
+  currentUser: AuthUser;
+  onCopyToNoteReady?: (handler: (content: string, noteName?: string) => Promise<void>) => void;
+}
+
+function renderActiveTab(
+  tab: JobNotesTab,
+  currentUser: AuthUser,
+  myNotes: ReturnType<typeof useMyNotes>,
+  onCopyToNote: (content: string, noteName?: string) => Promise<void>,
+) {
+  switch (tab) {
+    case "review":
+      return <JobReviewTab active currentUser={currentUser} onCopyToNote={onCopyToNote} />;
+    case "my-review":
+      return <MyJobReviewTab active currentUser={currentUser} onCopyToNote={onCopyToNote} />;
+    case "my-results":
+      return <MyJobResultsTab active currentUser={currentUser} onCopyToNote={onCopyToNote} />;
+    case "whatap-report":
+      return <WhatapEventReportTab active onCopyToNote={onCopyToNote} />;
+    case "rejected-jobs":
+      return <RejectedJobsTab active />;
+    case "my-notes":
+      return <MyNotesTab myNotes={myNotes} currentUser={currentUser} />;
+    case "infra-shape":
+      return (
+        <InfraShapeTab
+          active
+          maskIps={shouldMaskIps(currentUser.role)}
+          canRunGapAnalysis={canRunGapAnalysis(currentUser.role)}
+          onCopyToNote={onCopyToNote}
+        />
+      );
+    case "fossflow":
+      return <FossFlowTab />;
+  }
+}
+
+export function JobNotesPanel({
+  className = "",
+  currentUser,
+  onCopyToNoteReady,
+}: JobNotesPanelProps) {
+  const [activeTab, setActiveTab] = useState<JobNotesTab>("infra-shape");
+  const isAdmin = hasAdminAccess(currentUser.role);
+  const visibleTabs = TABS.filter((tab) => !tab.adminOnly || isAdmin);
+  const myNotes = useMyNotes(currentUser, activeTab === "my-notes");
+  const { hasNewReview, hasNewMyReview } = useJobReviewNewBadges(currentUser, activeTab);
+
+  useEffect(() => {
+    if (activeTab === "fossflow" && !isAdmin) {
+      setActiveTab("infra-shape");
+    }
+  }, [activeTab, isAdmin]);
+
+  const handleCopyToNote = useCallback(
+    async (content: string, noteName?: string) => {
+      const noteIdx = await myNotes.createNoteFromContent(content, noteName);
+      if (noteIdx !== null) {
+        setActiveTab("my-notes");
+      }
+    },
+    [myNotes.createNoteFromContent],
+  );
+
+  useEffect(() => {
+    onCopyToNoteReady?.(handleCopyToNote);
+  }, [handleCopyToNote, onCopyToNoteReady]);
+
+  return (
+    <section className={`relative flex min-h-0 min-w-0 flex-col ${className}`.trim()}>
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 rounded-xl border border-slate-700 bg-slate-900/50 shadow-inner"
+      />
+
+      <div className="relative z-10 flex min-h-0 flex-1 flex-col">
+        <header className="shrink-0 border-b border-slate-700/80 px-4 py-3">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <h2 className="inline-flex items-center gap-1.5 text-sm font-semibold text-slate-200">
+                <WorkflowIcon name="notes" size="sm" />
+                작업 노트
+              </h2>
+              <p className="mt-0.5 text-xs text-slate-500">
+                접수된 작업요청서를 확인하고 처리 상태를 관리합니다.
+              </p>
+            </div>
+            {activeTab === "my-notes" ? <MyNotesHeaderButtons myNotes={myNotes} /> : null}
+          </div>
+        </header>
+
+        <div className="flex shrink-0 gap-1 overflow-x-auto border-b border-slate-700/80 px-3 pt-2">
+          {visibleTabs.map((tab) => {
+            const showNewBadge =
+              (tab.id === "review" && hasNewReview) ||
+              (tab.id === "my-review" && hasNewMyReview);
+            return (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => setActiveTab(tab.id)}
+              className={`inline-flex shrink-0 items-center gap-1.5 rounded-t-md px-3 py-2 text-xs font-medium ${
+                activeTab === tab.id
+                  ? "border border-b-0 border-slate-600 bg-slate-800 text-sky-200"
+                  : "text-slate-400 hover:bg-slate-800/60 hover:text-slate-200"
+              }`}
+            >
+              <WorkflowIcon name={tab.icon} size="xs" />
+              {tab.label}
+              {showNewBadge ? " 🆕" : ""}
+            </button>
+            );
+          })}
+        </div>
+
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+          {renderActiveTab(activeTab, currentUser, myNotes, handleCopyToNote)}
+        </div>
+      </div>
+    </section>
+  );
+}

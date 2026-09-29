@@ -1,75 +1,78 @@
-export const CHUNK_TYPE_ROW = 1;
-export const CHUNK_TYPE_CUSTOM = 2;
-
-export const MAX_INVENTORY_UPLOAD_BYTES = 100 * 1024 * 1024;
-export const MAX_INVENTORY_UPLOAD_LABEL = "100MB";
-export const DEFAULT_CHUNK_OVERLAP = 50;
-export const DEFAULT_N_RESULTS = 100;
-
-export const DB_TYPE_TABLE = "table";
-export const DB_TYPE_VECTOR = "vector";
-
-export const MODIFIED_EMBEDDED = 0;
-export const MODIFIED_NEEDS_EMBED = 1;
-
-export interface InventoryRecord {
+export interface InventoryItem {
   idx: number;
-  inventory_name: string;
-  inventory_file: string;
-  file_ext: string;
-  chunk_type: number;
-  chunk_size: number;
-  chunk_overlap: number;
-  n_results: number;
-  db_type: string;
-  modified: number;
+  table_name: string;
+  display_name: string;
+  description: string;
+  created_by: number;
+  created_by_username: string;
+  origin_csv: string;
+  created_at?: string;
 }
 
-export interface InventoryFormValues {
-  inventory_name: string;
-  inventory_file: string;
-  db_type: string;
-  chunk_type: number;
-  chunk_size: number;
-  chunk_overlap: number;
-  n_results: number;
+export interface InventoryStatsRow {
+  table_name: string;
+  display_name: string;
+  description: string;
+  origin_csv: string;
+  created_at: string;
+  created_by: number;
+  created_by_username: string;
+  row_count: number;
+  column_count: number;
+  error?: string | null;
 }
 
-export interface InventoryStatus {
-  agent_id: string;
-  status: string;
-  error: string | null;
-  document_count: number;
-  chroma_data_path: string;
-  csv_path: string;
-  upload_path: string;
+export interface InventoryApiStatsRow {
+  api_name: string;
+  table_name: string;
+  display_name: string;
+  api_fullpath: string;
+  created_by: number;
+  created_by_username: string;
+  description: string;
+  error?: string | null;
 }
 
-export interface InventoryEmbedResult {
-  status: string;
-  embedded_rows: number;
-  document_count: number;
-  modified: number;
+export interface InventoryApiItem {
+  idx: number;
+  api_name: string;
+  display_name: string;
+  description: string;
+  api_fullpath: string;
+  created_by: number;
+  created_by_username: string;
+  table_name: string;
+  where_exp: string;
+  select_exp: string;
+  param_columns: string;
 }
 
-export const EMPTY_INVENTORY_FORM: InventoryFormValues = {
-  inventory_name: "",
-  inventory_file: "",
-  db_type: DB_TYPE_VECTOR,
-  chunk_type: CHUNK_TYPE_ROW,
-  chunk_size: 0,
-  chunk_overlap: DEFAULT_CHUNK_OVERLAP,
-  n_results: DEFAULT_N_RESULTS,
-};
-
-export function chunkTypeLabel(chunkType: number): string {
-  return chunkType === CHUNK_TYPE_CUSTOM ? "custom size" : "row";
+export interface InventoryCsvPreview {
+  filename: string;
+  table_name?: string;
+  temp_table_name?: string;
+  columns: string[];
+  labels: string[];
+  rows: Record<string, string>[];
+  offset: number;
+  limit: number;
+  startrow?: number;
+  endrow?: number;
+  total_rows: number;
+  has_more: boolean;
+  columns_compatible?: boolean | null;
+  compatibility_error?: string | null;
+  transfer_ok?: boolean | null;
+  transfer_result?: Record<string, unknown> | null;
 }
 
-export function dbTypeLabel(dbType: string | null | undefined): string {
-  return (dbType || DB_TYPE_VECTOR) === DB_TYPE_TABLE ? "table" : "vector";
-}
-
-export function modifiedLabel(modified: number): string {
-  return modified === MODIFIED_NEEDS_EMBED ? "임베딩 필요" : "임베딩 완료";
+export interface InventoryTablePreview {
+  table_name: string;
+  columns: string[];
+  labels: string[];
+  rows: Record<string, string>[];
+  startrow: number;
+  endrow: number;
+  total_rows: number;
+  has_more: boolean;
 }

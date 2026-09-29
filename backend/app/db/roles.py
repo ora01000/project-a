@@ -1,3 +1,47 @@
 ROLE_ADMIN = 0
 ROLE_USER = 1
+ROLE_INFRAADMIN = 2
 ROLE_PENDING = 5
+ROLE_SUPERADMIN = 100
+
+ROOT_USERID = "root"
+AUTO_APPROVE_USERID = "auto_approve"
+
+ASSIGNABLE_ROLES = frozenset({ROLE_ADMIN, ROLE_USER, ROLE_INFRAADMIN, ROLE_PENDING})
+
+
+def is_admin_role(role: int) -> bool:
+    return role == ROLE_ADMIN or role == ROLE_SUPERADMIN
+
+
+def can_run_gap_analysis(role: int) -> bool:
+    return is_admin_role(role) or role == ROLE_INFRAADMIN
+
+
+def can_manage_workflow_templates(role: int) -> bool:
+    """Admin / infraadmin / superadmin may create and edit diagram templates."""
+    return role in {ROLE_ADMIN, ROLE_INFRAADMIN, ROLE_SUPERADMIN}
+
+
+def is_assignable_role(role: int) -> bool:
+    return role in ASSIGNABLE_ROLES
+
+
+def should_mask_ips(role: int) -> bool:
+    """IP masking applies only to ordinary users (role=1)."""
+    return role == ROLE_USER
+
+
+def is_auto_approve_userid(userid: str) -> bool:
+    return userid.strip().lower() == AUTO_APPROVE_USERID
+
+
+def is_hidden_system_user(userid: str, role: int | None = None) -> bool:
+    normalized = userid.strip()
+    if normalized == ROOT_USERID:
+        return True
+    if is_auto_approve_userid(normalized):
+        return True
+    if role is not None and role == ROLE_SUPERADMIN:
+        return True
+    return False

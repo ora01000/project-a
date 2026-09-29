@@ -1,40 +1,43 @@
-import asyncio
 import json
 import logging
 from datetime import date
-from typing import Any, AsyncIterator
+from typing import AsyncIterator
+from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
-from backend.app.agents.base import (
-    AgentInvokeResult,
-    ToolUsage,
-)
-from backend.app.agents.system_agents import is_chat_enabled_system_agent_id
-from backend.app.db.users import get_user_by_userid, parse_agent_ids
+from backend.app.agents.mock_platform_agents import WORKFLOW_AGENT_LOCAL_AGENT_ID
+from backend.app.agents.base import AgentInvokeResult, ToolUsage
+from backend.app.db.roles import is_admin_role
+from backend.app.db.users import parse_agent_ids
+from backend.app.disabled_features import is_removed_agent_id, raise_disabled_feature
 from backend.app.logging.agent_logger import log_agent_interaction
 from backend.app.logging.user_comm_logger import list_user_communications, log_user_communication
-from backend.app.services.agent_invocation import invoke_agent_by_id
-from backend.app.services.inventory_approval import (
-    inventory_approval_session,
-    reject_all_pending,
-    resolve_inventory_approval,
+from backend.app.logging.workflow_logger import log_workflow_agent_interaction
+from backend.app.middleware.session_auth import get_request_auth_user
+from backend.app.services.agent_runtime_client import AgentInvokeRequest
+from backend.app.services.axit_platform_client import format_axit_invoke_error
+from backend.app.services.chat_input_history_store import (
+    append_chat_input_history,
+    get_chat_input_history,
 )
 
 router = APIRouter(tags=["chat"])
 
 logger = logging.getLogger(__name__)
 
+# Feature terminals may expose these without user agent assignment.
+_CHAT_WITHOUT_ASSIGNMENT_AGENT_IDS = frozenset({WORKFLOW_AGENT_LOCAL_AGENT_ID})
+
 
 class ChatRequest(BaseModel):
     message: str = Field(min_length=1)
     userid: str | None = Field(default=None, max_length=50)
-
-
-class InventoryApprovalRequest(BaseModel):
-    approved: bool
+    session_id: str | None = Field(default=None, max_length=100)
+    # WORKFLOW_AGENT: prefer real workflow uuid; create flow may omit (session used).
+    workflow_uuid: str | None = Field(default=None, max_length=64)
 
 
 class UserCommLogEntry(BaseModel):
@@ -50,6 +53,55 @@ class UserCommLogResponse(BaseModel):
     user_id: str
     date: str
     entries: list[UserCommLogEntry]
+
+
+class ChatInputHistoryResponse(BaseModel):
+    agent_id: str
+    messages: list[str]
+
+
+class ChatInputHistoryAppendRequest(BaseModel):
+    message: str = Field(min_length=1)
+
+
+def _ensure_chat_agent_access(request: Request, agent_id: str) -> None:
+    manager = request.app.state.agent_manager
+    if agent_id not in manager.agents:
+        raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
+
+    if agent_id in _CHAT_WITHOUT_ASSIGNMENT_AGENT_IDS:
+        return
+
+    user = get_request_auth_user(request)
+    allowed = set(parse_agent_ids(user.agents))
+    if agent_id not in allowed:
+        raise HTTPException(status_code=403, detail="할당되지 않은 에이전트입니다.")
+
+
+@router.get("/chat/input-history/{agent_id}", response_model=ChatInputHistoryResponse)
+async def get_chat_input_history_endpoint(agent_id: str, request: Request) -> ChatInputHistoryResponse:
+    if is_removed_agent_id(agent_id):
+        raise_disabled_feature()
+
+    _ensure_chat_agent_access(request, agent_id)
+    user = get_request_auth_user(request)
+    messages = await get_chat_input_history(user.userid, agent_id)
+    return ChatInputHistoryResponse(agent_id=agent_id, messages=messages)
+
+
+@router.post("/chat/input-history/{agent_id}", response_model=ChatInputHistoryResponse)
+async def append_chat_input_history_endpoint(
+    agent_id: str,
+    payload: ChatInputHistoryAppendRequest,
+    request: Request,
+) -> ChatInputHistoryResponse:
+    if is_removed_agent_id(agent_id):
+        raise_disabled_feature()
+
+    _ensure_chat_agent_access(request, agent_id)
+    user = get_request_auth_user(request)
+    messages = await append_chat_input_history(user.userid, agent_id, payload.message)
+    return ChatInputHistoryResponse(agent_id=agent_id, messages=messages)
 
 
 def _serialize_tools(tools_used: list[ToolUsage]) -> list[dict[str, str | None]]:
@@ -76,98 +128,84 @@ async def _stream_response(result: AgentInvokeResult) -> AsyncIterator[dict[str,
     }
 
 
-async def _invoke_with_inventory_approval(
-    manager: Any,
+async def _invoke_agent(
+    request: Request,
     agent_id: str,
     message: str,
-    result_holder: list[AgentInvokeResult],
-) -> AsyncIterator[dict[str, str]]:
-    approval_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
-
-    async def on_approval_required(payload: dict[str, Any]) -> None:
-        await approval_queue.put(payload)
-
-    async def run_invoke() -> AgentInvokeResult:
-        async with inventory_approval_session(on_approval_required):
-            return await invoke_agent_by_id(manager, agent_id, message)
-
-    invoke_task = asyncio.create_task(run_invoke())
-
-    try:
-        while not invoke_task.done() or not approval_queue.empty():
-            try:
-                payload = await asyncio.wait_for(approval_queue.get(), timeout=0.2)
-            except asyncio.TimeoutError:
-                continue
-
-            yield {
-                "event": "inventory_approval",
-                "data": json.dumps(payload, ensure_ascii=False),
-            }
-
-        result = await invoke_task
-        result_holder.append(result)
-    except Exception:
-        reject_all_pending()
-        if not invoke_task.done():
-            invoke_task.cancel()
-        raise
-
-    async for event in _stream_response(result):
-        yield event
-
-
-@router.post("/chat/inventory-approvals/{approval_id}")
-async def resolve_inventory_approval_endpoint(
-    approval_id: str,
-    payload: InventoryApprovalRequest,
-) -> dict[str, bool]:
-    if not resolve_inventory_approval(approval_id, approved=payload.approved):
-        raise HTTPException(status_code=404, detail="승인 요청을 찾을 수 없습니다.")
-    return {"ok": True}
+    *,
+    session_id: str | None = None,
+) -> AgentInvokeResult:
+    return await request.app.state.agent_runtime.invoke(
+        AgentInvokeRequest(
+            agent_id=agent_id,
+            message=message,
+            session_id=session_id,
+            trace_id=uuid4().hex,
+            control_plane_base_url=getattr(request.app.state, "control_plane_base_url", None),
+        ),
+    )
 
 
 @router.post("/agents/{agent_id}/chat")
 async def chat_with_agent(agent_id: str, payload: ChatRequest, request: Request):
+    if is_removed_agent_id(agent_id):
+        raise_disabled_feature()
+
     manager = request.app.state.agent_manager
 
     if agent_id not in manager.agents:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
 
-    if payload.userid and not is_chat_enabled_system_agent_id(agent_id):
-        user = get_user_by_userid(request.app.state.database_path, payload.userid)
-        if user is None:
-            raise HTTPException(status_code=404, detail="사용자를 찾을 수 없습니다.")
-        allowed = set(parse_agent_ids(user.agents))
+    auth_user = get_request_auth_user(request)
+    if payload.userid and payload.userid.strip() != auth_user.userid:
+        raise HTTPException(status_code=403, detail="요청 사용자와 세션 사용자가 일치하지 않습니다.")
+
+    if agent_id not in _CHAT_WITHOUT_ASSIGNMENT_AGENT_IDS:
+        allowed = set(parse_agent_ids(auth_user.agents))
         if agent_id not in allowed:
             raise HTTPException(status_code=403, detail="할당되지 않은 에이전트입니다.")
 
-    manager.mark_agent_working(agent_id, "채팅 응답")
-
     async def event_generator() -> AsyncIterator[dict[str, str]]:
-        result_holder: list[AgentInvokeResult] = []
+        chat_task_id = manager.mark_agent_working(agent_id, "채팅 응답", task_id=uuid4().hex)
         try:
-            async for event in _invoke_with_inventory_approval(
-                manager,
+            result = await _invoke_agent(
+                request,
                 agent_id,
                 payload.message,
-                result_holder,
-            ):
+                session_id=payload.session_id,
+            )
+            async for event in _stream_response(result):
                 yield event
 
-            result = result_holder[0]
-            log_agent_interaction(
-                agent_id=agent_id,
-                input_message=payload.message,
-                output_message=result.content,
-                tools_used=result.tools_used,
-            )
+            if agent_id == WORKFLOW_AGENT_LOCAL_AGENT_ID:
+                workflow_key = (
+                    (payload.workflow_uuid or "").strip()
+                    or (payload.session_id or "").strip()
+                    or "unknown"
+                )
+                log_workflow_agent_interaction(
+                    userid=auth_user.userid,
+                    workflow_key=workflow_key,
+                    agent_id=agent_id,
+                    input_message=payload.message,
+                    output_message=result.content,
+                    tools_used=result.tools_used,
+                    user_name=auth_user.username,
+                )
+            else:
+                log_agent_interaction(
+                    agent_id=agent_id,
+                    input_message=payload.message,
+                    output_message=result.content,
+                    tools_used=result.tools_used,
+                    user_id=auth_user.userid,
+                    user_name=auth_user.username,
+                )
 
-            if payload.userid:
                 try:
                     definition = manager.get_definition(agent_id)
                     log_user_communication(
-                        payload.userid,
+                        auth_user.userid,
                         agent_id=agent_id,
                         agent_name=definition.name,
                         user_message=payload.message,
@@ -175,13 +213,17 @@ async def chat_with_agent(agent_id: str, payload: ChatRequest, request: Request)
                         tools_used=result.tools_used,
                     )
                 except ValueError as exc:
-                    logger.warning("Skipped user comm log for %s: %s", payload.userid, exc)
+                    logger.warning("Skipped user comm log for %s: %s", auth_user.userid, exc)
         except Exception as exc:
-            reject_all_pending()
-            manager.mark_agent_error(agent_id, str(exc), input_message=payload.message)
-            raise
+            error_message = format_axit_invoke_error(exc)
+            manager.mark_agent_error(agent_id, error_message, input_message=payload.message)
+            yield {
+                "event": "error",
+                "data": json.dumps({"message": error_message}),
+            }
+            return
         finally:
-            manager.mark_agent_idle(agent_id)
+            manager.mark_agent_idle(agent_id, chat_task_id)
 
     return EventSourceResponse(event_generator())
 
@@ -189,11 +231,17 @@ async def chat_with_agent(agent_id: str, payload: ChatRequest, request: Request)
 @router.get("/chat/logs/{userid}", response_model=UserCommLogResponse)
 async def get_user_chat_logs(
     userid: str,
+    request: Request,
     log_date: str | None = Query(default=None, alias="date"),
 ) -> UserCommLogResponse:
+    viewer = get_request_auth_user(request)
+    normalized_userid = userid.strip()
+    if normalized_userid != viewer.userid and not is_admin_role(viewer.role):
+        raise HTTPException(status_code=403, detail="다른 사용자의 로그를 조회할 수 없습니다.")
+
     try:
         target_date = date.fromisoformat(log_date) if log_date else None
-        payload = list_user_communications(userid, log_date=target_date)
+        payload = list_user_communications(normalized_userid, log_date=target_date)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -208,6 +256,7 @@ async def get_user_chat_logs(
         )
         for entry in payload.get("entries", [])
         if isinstance(entry, dict)
+        and str(entry.get("agent_id") or "").strip() != WORKFLOW_AGENT_LOCAL_AGENT_ID
     ]
 
     return UserCommLogResponse(

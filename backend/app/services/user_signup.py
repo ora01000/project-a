@@ -1,53 +1,15 @@
 import logging
 from pathlib import Path
 
-from backend.app.db.roles import ROLE_ADMIN, ROLE_PENDING, ROLE_USER
-from backend.app.timezone import format_display_datetime
-from backend.app.db.signup_notifications import (
-    create_signup_notification,
-    delete_signup_notification,
-    delete_signup_notifications_for_user,
+from backend.app.db.roles import ROLE_PENDING, ROLE_USER
+from backend.app.db.jobs import JobRecord, create_user_access_request_job
+from backend.app.db.users import User, create_user, delete_users, get_user_by_idx, get_user_by_userid, update_user
+from backend.app.notifications.email_sender import (
+    send_signup_approval_email,
+    send_signup_rejection_email,
 )
-from backend.app.db.users import User, create_user, delete_users, get_user_by_idx, list_users, update_user
-from backend.app.notifications.email_sender import send_signup_rejection_email
 
 logger = logging.getLogger(__name__)
-
-SIGNUP_NOTIFICATION_TITLE = "신규 가입 신청"
-
-
-def _build_signup_message(*, signup_date: str, depart: str, username: str, userid: str) -> str:
-    return (
-        f"가입 날짜: {signup_date}\n"
-        f"조직명: {depart}\n"
-        f"가입자 이름: {username}\n"
-        f"가입자 ID: {userid}"
-    )
-
-
-def _notify_admins(database_path: Path, *, user: User, signup_date: str) -> None:
-    message = _build_signup_message(
-        signup_date=signup_date,
-        depart=user.depart,
-        username=user.username,
-        userid=user.userid,
-    )
-
-    admin_targets: set[str] = set()
-    for admin in list_users(database_path):
-        if admin.role != ROLE_ADMIN:
-            continue
-        admin_targets.add(admin.userid)
-        admin_targets.add(admin.username)
-
-    for target in sorted(admin_targets):
-        create_signup_notification(
-            database_path,
-            user_idx=user.idx,
-            target_user=target,
-            title=SIGNUP_NOTIFICATION_TITLE,
-            message=message,
-        )
 
 
 def register_pending_user(
@@ -58,8 +20,9 @@ def register_pending_user(
     username: str,
     password: str,
     depart: str,
-) -> User:
-    signup_date = format_display_datetime()
+    band: int = 1,
+    request_reason: str = "",
+) -> tuple[User, JobRecord]:
     user = create_user(
         database_path,
         userid=userid,
@@ -68,10 +31,12 @@ def register_pending_user(
         password=password,
         depart=depart,
         role=ROLE_PENDING,
+        band=band,
+        request_reason=request_reason,
     )
-    _notify_admins(database_path, user=user, signup_date=signup_date)
-    logger.info("Pending signup registered for userid=%s", user.userid)
-    return user
+    job = create_user_access_request_job(database_path, user)
+    logger.info("Pending signup registered for userid=%s job=%s", user.userid, job.srnum)
+    return user, job
 
 
 def approve_signup(database_path: Path, user_idx: int) -> User | None:
@@ -91,9 +56,39 @@ def approve_signup(database_path: Path, user_idx: int) -> User | None:
         role=ROLE_USER,
         band=user.band,
     )
-    delete_signup_notifications_for_user(database_path, user_idx)
     logger.info("Signup approved for userid=%s", user.userid)
     return updated
+
+
+async def notify_signup_approved(database_path: Path, user: User) -> None:
+    """Best-effort approval notice to the requester; does not raise on mail failure."""
+    try:
+        await send_signup_approval_email(
+            database_path=database_path,
+            to_address=user.email,
+            username=user.username,
+            userid=user.userid,
+        )
+    except Exception:
+        logger.exception("Signup approval email notify failed for userid=%s", user.userid)
+
+
+def approve_pending_user_for_signup_job(database_path: Path, job: JobRecord) -> User | None:
+    """Activate pending user when a signup access-request job (job_type=10) is approved."""
+    from backend.app.db.jobs import JOB_TYPE_SIGNUP
+
+    if job.job_type != JOB_TYPE_SIGNUP:
+        return None
+
+    userid = str(job.madang_id or "").strip()
+    if not userid:
+        raise ValueError("signup job is missing userid (madang_id)")
+
+    user = get_user_by_userid(database_path, userid)
+    if user is None:
+        raise ValueError(f"signup user not found for userid={userid!r}")
+
+    return approve_signup(database_path, user.idx)
 
 
 async def reject_signup(database_path: Path, user_idx: int, reason: str) -> bool:
@@ -110,11 +105,6 @@ async def reject_signup(database_path: Path, user_idx: int, reason: str) -> bool
         userid=user.userid,
         reason=reason.strip(),
     )
-    delete_signup_notifications_for_user(database_path, user_idx)
     delete_users(database_path, [user_idx])
     logger.info("Signup rejected for userid=%s", user.userid)
     return True
-
-
-def dismiss_signup_notification(database_path: Path, notification_idx: int) -> bool:
-    return delete_signup_notification(database_path, notification_idx)

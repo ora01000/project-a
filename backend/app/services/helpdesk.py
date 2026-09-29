@@ -1,4 +1,4 @@
-"""Helpdesk system agent: route user queries to regular/inventory agents unchanged."""
+"""Helpdesk system agent: route user queries to regular agents."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ import logging
 import re
 from dataclasses import dataclass
 from typing import Any
+from uuid import uuid4
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
@@ -62,7 +63,7 @@ def _extract_json_block(text: str) -> dict[str, Any] | None:
 
 
 def _callable_agent_catalog(agent_manager: Any) -> list[AgentDefinition]:
-    """Regular agents including inventory; exclude system agents and helpdesk itself."""
+    """Regular agents; exclude system agents and helpdesk itself."""
     catalog: list[AgentDefinition] = []
     for definition in getattr(agent_manager, "agent_definitions", []) or []:
         if definition.agent_id == HELPDESK_AGENT.agent_id:
@@ -178,7 +179,7 @@ async def _select_agent(
                 break
 
     if agent_id not in allowed:
-        preferred = next((agent for agent in catalog if "inventory" in agent.agent_id), catalog[0])
+        preferred = catalog[0]
         agent_id = preferred.agent_id
         agent_name = preferred.name
         rationale = rationale or "fallback default agent"
@@ -205,8 +206,13 @@ async def _select_agent(
     return decision
 
 
-async def handle_helpdesk_query(agent_manager: Any, message: str) -> AgentInvokeResult:
-    """Route the user message to one regular/inventory agent, or answer general inquiries directly."""
+async def handle_helpdesk_query(
+    agent_manager: Any,
+    message: str,
+    *,
+    agent_runtime: Any | None = None,
+) -> AgentInvokeResult:
+    """Route the user message to one regular agent, or answer general inquiries directly."""
     from backend.app.services.agent_invocation import AgentInvocationError, invoke_agent_by_id
 
     catalog = _callable_agent_catalog(agent_manager)
@@ -255,21 +261,36 @@ async def handle_helpdesk_query(agent_manager: Any, message: str) -> AgentInvoke
     target_name = decision.agent_name
     rationale = decision.rationale
 
+    route_task_id: str | None = None
     if hasattr(agent_manager, "mark_agent_working"):
-        agent_manager.mark_agent_working(target_id, f"헬프데스크→{target_name}")
+        route_task_id = agent_manager.mark_agent_working(
+            target_id,
+            f"헬프데스크→{target_name}",
+            task_id=uuid4().hex,
+        )
 
     try:
         with prompt_debug_scope(
             caller_agent_id=HELPDESK_AGENT.agent_id,
             caller_agent_name=HELPDESK_AGENT.name,
         ):
-            # Forward the original user message unchanged — no rewrite/retry loop.
-            result = await invoke_agent_by_id(
-                agent_manager,
-                target_id,
-                message,
-                caller_agent_id=HELPDESK_AGENT.agent_id,
-            )
+            if agent_runtime is not None:
+                from backend.app.services.agent_runtime_client import AgentInvokeRequest
+
+                result = await agent_runtime.invoke(
+                    AgentInvokeRequest(
+                        agent_id=target_id,
+                        message=message,
+                        caller_agent_id=HELPDESK_AGENT.agent_id,
+                    ),
+                )
+            else:
+                result = await invoke_agent_by_id(
+                    agent_manager,
+                    target_id,
+                    message,
+                    caller_agent_id=HELPDESK_AGENT.agent_id,
+                )
     except AgentInvocationError as exc:
         if hasattr(agent_manager, "mark_agent_error"):
             agent_manager.mark_agent_error(target_id, str(exc), input_message=message)
@@ -286,8 +307,8 @@ async def handle_helpdesk_query(agent_manager: Any, message: str) -> AgentInvoke
             agent_manager.mark_agent_error(target_id, str(exc), input_message=message)
         raise
     finally:
-        if hasattr(agent_manager, "mark_agent_idle"):
-            agent_manager.mark_agent_idle(target_id)
+        if hasattr(agent_manager, "mark_agent_idle") and route_task_id is not None:
+            agent_manager.mark_agent_idle(target_id, route_task_id)
 
     decorated = decorate_helpdesk_response(result.content)
     tools = list(result.tools_used)

@@ -11,7 +11,7 @@ from backend.app.db.notice_board import (
     update_notice,
     update_notice_welcome_popup,
 )
-from backend.app.db.roles import ROLE_ADMIN
+from backend.app.db.roles import ROLE_ADMIN, is_admin_role
 from backend.app.db.users import build_userid_username_map, get_user_by_userid, resolve_username
 
 router = APIRouter(tags=["notices"])
@@ -81,7 +81,7 @@ class DeleteNoticesRequest(BaseModel):
 
 
 def _require_admin(viewer_role: int) -> None:
-    if viewer_role != ROLE_ADMIN:
+    if not is_admin_role(viewer_role):
         raise HTTPException(status_code=403, detail="관리자만 수행할 수 있습니다.")
 
 

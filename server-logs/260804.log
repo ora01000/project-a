@@ -1,0 +1,203 @@
+INFO:     Started server process [1]
+INFO:     Waiting for application startup.
+INFO:backend.app.main:AGENT_RUNTIME_MODE=http
+INFO:backend.app.main:AGENT_RUNTIME_HTTP_TIMEOUT_SECONDS=300.0
+INFO:backend.app.db.database:Skip user seeding: users table already has 4 record(s)
+INFO:backend.app.db.database:SQLite database initialized at /app/data/app.db
+INFO:backend.app.services.redis_client:Redis connected: redis://redis:6379/0
+INFO:backend.app.services.k8s_collector_loop:k8s collector auto loop is paused (collect_on_startup=false, schedule_enabl                                                                ed=false); use manual collect API
+INFO:backend.app.services.job_processor_loop:job processor started (poll_interval=60s, runtime_mode=http)
+INFO:backend.app.services.mynote_flush_loop:mynote flush loop started (flush_interval=300s)
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8080 (Press CTRL+C to quit)
+INFO:backend.app.services.job_processor_loop:job processor helpdesk target: idx=27 agent_id=c4d35629-2ae1-425a-a7c0-b2d2                                                                887e642d is_orchestrator=True url=https://test.nudp.lguplus.co.kr/aihub/orchestrators/v1/c4d35629-2ae1-425a-a7c0-b2d2887                                                                e642d/invoke
+INFO:     10.129.3.222:59028 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.129.3.222:59034 - "GET /api/jobs?min_status_code=10&approver=isyun HTTP/1.1" 200 OK
+INFO:     10.129.3.222:59036 - "GET /api/jobs/2/result HTTP/1.1" 200 OK
+INFO:     10.129.3.222:39132 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.129.3.222:39150 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.129.3.222:39146 - "GET /api/signup/notifications/%EC%9C%A4%EC%9D%B8%EC%88%98 HTTP/1.1" 200 OK
+INFO:     10.129.3.222:39170 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     10.129.3.222:39136 - "GET /api/signup/notifications/isyun HTTP/1.1" 200 OK
+INFO:     10.129.3.222:39156 - "GET /api/agents HTTP/1.1" 200 OK
+INFO:     10.129.3.222:39178 - "GET /api/users?viewer_role=0 HTTP/1.1" 200 OK
+INFO:     10.129.3.222:39188 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.129.3.222:39202 - "GET /api/jobs?min_status_code=10&approver=isyun HTTP/1.1" 200 OK
+INFO:     10.129.3.222:39210 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.129.3.222:56044 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.129.3.222:56058 - "GET /api/signup/notifications/isyun HTTP/1.1" 200 OK
+INFO:     10.129.3.222:56064 - "GET /api/signup/notifications/%EC%9C%A4%EC%9D%B8%EC%88%98 HTTP/1.1" 200 OK
+INFO:     10.129.3.222:56072 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.129.3.222:56084 - "GET /api/jobs?min_status_code=10&approver=isyun HTTP/1.1" 200 OK
+INFO:     10.129.3.222:56092 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.129.3.222:56096 - "GET /api/agents HTTP/1.1" 200 OK
+INFO:     10.129.3.222:56098 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     10.129.3.222:56114 - "GET /api/users?viewer_role=0 HTTP/1.1" 200 OK
+INFO:     10.129.3.222:42306 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.129.3.222:42318 - "GET /api/signup/notifications/isyun HTTP/1.1" 200 OK
+INFO:     10.129.3.222:42326 - "GET /api/signup/notifications/%EC%9C%A4%EC%9D%B8%EC%88%98 HTTP/1.1" 200 OK
+INFO:     10.129.3.222:42342 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.129.3.222:42350 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.129.3.222:42366 - "GET /api/jobs?min_status_code=10&approver=isyun HTTP/1.1" 200 OK
+INFO:     10.129.3.222:53614 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.129.3.222:53650 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.129.3.222:53626 - "GET /api/signup/notifications/isyun HTTP/1.1" 200 OK
+INFO:     10.129.3.222:53640 - "GET /api/signup/notifications/%EC%9C%A4%EC%9D%B8%EC%88%98 HTTP/1.1" 200 OK
+INFO:     10.129.3.222:53664 - "GET /api/agents HTTP/1.1" 200 OK
+INFO:     10.129.3.222:53666 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     10.129.3.222:53680 - "GET /api/users?viewer_role=0 HTTP/1.1" 200 OK
+INFO:     10.129.3.222:53688 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.129.3.222:53692 - "GET /api/jobs?min_status_code=10&approver=isyun HTTP/1.1" 200 OK
+INFO:     10.129.3.222:53700 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.129.3.222:50504 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.129.3.222:50508 - "GET /api/signup/notifications/isyun HTTP/1.1" 200 OK
+INFO:     10.129.3.222:50510 - "GET /api/signup/notifications/%EC%9C%A4%EC%9D%B8%EC%88%98 HTTP/1.1" 200 OK
+INFO:     10.129.3.222:50522 - "POST /api/jobs/2/rework HTTP/1.1" 200 OK
+INFO:     10.129.3.222:50534 - "GET /api/jobs?min_status_code=10&approver=isyun HTTP/1.1" 200 OK
+INFO:     10.129.3.222:50542 - "GET /api/jobs/1/result HTTP/1.1" 200 OK
+INFO:     10.129.3.222:50544 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.129.3.222:50560 - "GET /api/jobs?min_status_code=10&approver=isyun HTTP/1.1" 200 OK
+INFO:     10.129.3.222:50572 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.129.3.222:50576 - "GET /api/agents HTTP/1.1" 200 OK
+INFO:     10.129.3.222:50588 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     10.129.3.222:50600 - "GET /api/users?viewer_role=0 HTTP/1.1" 200 OK
+INFO:     10.129.3.222:53208 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.129.3.222:53226 - "GET /api/signup/notifications/%EC%9C%A4%EC%9D%B8%EC%88%98 HTTP/1.1" 200 OK
+INFO:     10.129.3.222:53210 - "GET /api/signup/notifications/isyun HTTP/1.1" 200 OK
+INFO:     10.129.3.222:53230 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:backend.app.services.job_processor_loop:job processor delegating srnum=SR20260804_00002 to helpdesk idx=27 is_orchestrator=True url=https://test.nudp.lguplus.co.kr/aihub/orchestrators/v1/c4d35629-2ae1-425a-a7c0-b2d2887e642d/invoke
+INFO:backend.app.services.axit_platform_client:AXIT token request start: method=POST url=https://test.nudp.lguplus.co.kr/portal/auths/v1/token runtime_mode=http client_id=4afb927e-74fe-400f-81d6-c01c369757ae credential_source=default grant_type=client_credentials content_type=application/x-www-form-urlencoded
+INFO:httpx:HTTP Request: POST https://test.nudp.lguplus.co.kr/portal/auths/v1/token "HTTP/1.1 200 OK"
+INFO:backend.app.services.axit_platform_client:AXIT token response received: method=POST url=https://test.nudp.lguplus.co.kr/portal/auths/v1/token status=200 reason=OK
+INFO:backend.app.services.axit_platform_client:AXIT token request success: method=POST url=https://test.nudp.lguplus.co.kr/portal/auths/v1/token expires_in=3600 token_type=Bearer
+INFO:backend.app.services.axit_platform_client:AXIT invoke start: agent_id=c4d35629-2ae1-425a-a7c0-b2d2887e642d is_orchestrator=True url=https://test.nudp.lguplus.co.kr/aihub/orchestrators/v1/c4d35629-2ae1-425a-a7c0-b2d2887e642d/invoke runtime_mode=http read_timeout=300.0s
+INFO:     10.129.3.222:53238 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.129.3.222:53240 - "GET /api/jobs?min_status_code=10&approver=isyun HTTP/1.1" 200 OK
+INFO:     10.129.3.222:56686 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.129.3.222:56706 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.129.3.222:56690 - "GET /api/signup/notifications/isyun HTTP/1.1" 200 OK
+INFO:     10.129.3.222:56700 - "GET /api/signup/notifications/%EC%9C%A4%EC%9D%B8%EC%88%98 HTTP/1.1" 200 OK
+INFO:     10.129.3.222:56708 - "GET /api/agents HTTP/1.1" 200 OK
+INFO:     10.129.3.222:56722 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     10.129.3.222:56724 - "GET /api/users?viewer_role=0 HTTP/1.1" 200 OK
+INFO:     10.129.3.222:56728 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.129.3.222:56738 - "GET /api/jobs?min_status_code=10&approver=isyun HTTP/1.1" 200 OK
+INFO:     10.129.3.222:56744 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.129.3.222:55912 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.129.3.222:55922 - "GET /api/signup/notifications/isyun HTTP/1.1" 200 OK
+INFO:     10.129.3.222:55932 - "GET /api/signup/notifications/%EC%9C%A4%EC%9D%B8%EC%88%98 HTTP/1.1" 200 OK
+INFO:     10.129.3.222:55942 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.129.3.222:55956 - "GET /api/jobs?min_status_code=10&approver=isyun HTTP/1.1" 200 OK
+INFO:     10.129.3.222:55960 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.129.3.222:55972 - "GET /api/agents HTTP/1.1" 200 OK
+INFO:     10.129.3.222:55988 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     10.129.3.222:56000 - "GET /api/users?viewer_role=0 HTTP/1.1" 200 OK
+INFO:     10.129.3.222:46674 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.129.3.222:46680 - "GET /api/signup/notifications/isyun HTTP/1.1" 200 OK
+INFO:     10.129.3.222:46696 - "GET /api/signup/notifications/%EC%9C%A4%EC%9D%B8%EC%88%98 HTTP/1.1" 200 OK
+INFO:     10.129.3.222:46700 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.129.3.222:46708 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.129.3.222:46716 - "GET /api/jobs?min_status_code=10&approver=isyun HTTP/1.1" 200 OK
+INFO:     10.129.3.222:58632 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.129.3.222:58660 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.129.3.222:58642 - "GET /api/signup/notifications/isyun HTTP/1.1" 200 OK
+INFO:     10.129.3.222:58644 - "GET /api/signup/notifications/%EC%9C%A4%EC%9D%B8%EC%88%98 HTTP/1.1" 200 OK
+INFO:     10.129.3.222:58664 - "GET /api/agents HTTP/1.1" 200 OK
+INFO:     10.129.3.222:58684 - "GET /api/users?viewer_role=0 HTTP/1.1" 200 OK
+INFO:     10.129.3.222:58678 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     10.129.3.222:58696 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.129.3.222:58706 - "GET /api/jobs?min_status_code=10&approver=isyun HTTP/1.1" 200 OK
+INFO:     10.129.3.222:58710 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.129.3.222:40160 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.129.3.222:40174 - "GET /api/signup/notifications/isyun HTTP/1.1" 200 OK
+INFO:     10.129.3.222:40186 - "GET /api/signup/notifications/%EC%9C%A4%EC%9D%B8%EC%88%98 HTTP/1.1" 200 OK
+INFO:     10.129.3.222:40192 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.129.3.222:40204 - "GET /api/jobs?min_status_code=10&approver=isyun HTTP/1.1" 200 OK
+INFO:     10.129.3.222:40220 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.129.3.222:40234 - "GET /api/agents HTTP/1.1" 200 OK
+INFO:     10.129.3.222:40250 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     10.129.3.222:40264 - "GET /api/users?viewer_role=0 HTTP/1.1" 200 OK
+INFO:     10.129.3.222:39068 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.129.3.222:39070 - "GET /api/signup/notifications/isyun HTTP/1.1" 200 OK
+INFO:     10.129.3.222:39074 - "GET /api/signup/notifications/%EC%9C%A4%EC%9D%B8%EC%88%98 HTTP/1.1" 200 OK
+INFO:     10.129.3.222:39084 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.129.3.222:39090 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.129.3.222:39098 - "GET /api/jobs?min_status_code=10&approver=isyun HTTP/1.1" 200 OK
+INFO:     10.129.3.222:51586 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.129.3.222:51618 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.129.3.222:51590 - "GET /api/signup/notifications/isyun HTTP/1.1" 200 OK
+INFO:     10.129.3.222:51604 - "GET /api/signup/notifications/%EC%9C%A4%EC%9D%B8%EC%88%98 HTTP/1.1" 200 OK
+INFO:     10.129.3.222:51634 - "GET /api/agents HTTP/1.1" 200 OK
+INFO:     10.129.3.222:51648 - "GET /api/users?viewer_role=0 HTTP/1.1" 200 OK
+INFO:     10.129.3.222:51642 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     10.129.3.222:51662 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.129.3.222:51672 - "GET /api/jobs?min_status_code=10&approver=isyun HTTP/1.1" 200 OK
+INFO:     10.129.3.222:51680 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.129.3.222:35654 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.129.3.222:35658 - "GET /api/signup/notifications/isyun HTTP/1.1" 200 OK
+INFO:     10.129.3.222:35664 - "GET /api/signup/notifications/%EC%9C%A4%EC%9D%B8%EC%88%98 HTTP/1.1" 200 OK
+INFO:     10.129.3.222:35666 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.129.3.222:35672 - "GET /api/jobs?min_status_code=10&approver=isyun HTTP/1.1" 200 OK
+INFO:     10.129.3.222:35688 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.129.3.222:35696 - "GET /api/agents HTTP/1.1" 200 OK
+INFO:     10.129.3.222:35708 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     10.129.3.222:35712 - "GET /api/users?viewer_role=0 HTTP/1.1" 200 OK
+INFO:     10.129.3.222:46124 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.129.3.222:46130 - "GET /api/signup/notifications/isyun HTTP/1.1" 200 OK
+INFO:     10.129.3.222:46134 - "GET /api/signup/notifications/%EC%9C%A4%EC%9D%B8%EC%88%98 HTTP/1.1" 200 OK
+INFO:     10.129.3.222:46150 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.129.3.222:46166 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.129.3.222:46178 - "GET /api/jobs?min_status_code=10&approver=isyun HTTP/1.1" 200 OK
+INFO:     10.129.3.222:40116 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.129.3.222:40142 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.129.3.222:40124 - "GET /api/signup/notifications/isyun HTTP/1.1" 200 OK
+INFO:     10.129.3.222:40132 - "GET /api/signup/notifications/%EC%9C%A4%EC%9D%B8%EC%88%98 HTTP/1.1" 200 OK
+INFO:     10.129.3.222:40152 - "GET /api/agents HTTP/1.1" 200 OK
+INFO:     10.129.3.222:40162 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     10.129.3.222:40166 - "GET /api/users?viewer_role=0 HTTP/1.1" 200 OK
+INFO:     10.129.3.222:40180 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.129.3.222:40188 - "GET /api/jobs?min_status_code=10&approver=isyun HTTP/1.1" 200 OK
+INFO:     10.129.3.222:40194 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.129.3.222:45950 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.129.3.222:45956 - "GET /api/signup/notifications/isyun HTTP/1.1" 200 OK
+INFO:     10.129.3.222:45962 - "GET /api/signup/notifications/%EC%9C%A4%EC%9D%B8%EC%88%98 HTTP/1.1" 200 OK
+INFO:     10.129.3.222:45964 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.129.3.222:45978 - "GET /api/jobs?min_status_code=10&approver=isyun HTTP/1.1" 200 OK
+INFO:     10.129.3.222:45982 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.129.3.222:45994 - "GET /api/agents HTTP/1.1" 200 OK
+INFO:     10.129.3.222:46006 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     10.129.3.222:46018 - "GET /api/users?viewer_role=0 HTTP/1.1" 200 OK
+INFO:     10.129.3.222:50098 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.129.3.222:50112 - "GET /api/signup/notifications/isyun HTTP/1.1" 200 OK
+INFO:     10.129.3.222:50124 - "GET /api/signup/notifications/%EC%9C%A4%EC%9D%B8%EC%88%98 HTTP/1.1" 200 OK
+INFO:     10.129.3.222:50132 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:httpx:HTTP Request: POST https://test.nudp.lguplus.co.kr/aihub/orchestrators/v1/c4d35629-2ae1-425a-a7c0-b2d2887e642d/invoke "HTTP/1.1 504 Gateway Timeout"
+ERROR:backend.app.services.axit_platform_client:AXIT invoke gateway timeout: url=https://test.nudp.lguplus.co.kr/aihub/orchestrators/v1/c4d35629-2ae1-425a-a7c0-b2d2887e642d/invoke status=504 elapsed=119.4s body={"message": "Endpoint request timed out"}
+WARNING:backend.app.main:Agent HELPDESK_AGENT invoke failure latched (degraded): AXIT gateway returned 504 Gateway Timeout
+ERROR:backend.app.services.job_processor_loop:job processor failed job idx=2 srnum=SR20260804_00002: AXIT gateway returned 504 Gateway Timeout
+Traceback (most recent call last):
+  File "/app/backend/app/services/job_processor_loop.py", line 77, in process_approved_job
+    result = await agent_runtime.invoke(
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/backend/app/services/agent_runtime_client.py", line 350, in invoke
+    axit_result = await self._axit_client.invoke(
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/backend/app/services/axit_platform_client.py", line 345, in invoke
+    raise AxitGatewayTimeoutError(
+backend.app.services.axit_platform_client.AxitGatewayTimeoutError: AXIT gateway returned 504 Gateway Timeout
+INFO:     10.129.3.222:50136 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.129.3.222:50142 - "GET /api/jobs?min_status_code=10&approver=isyun HTTP/1.1" 200 OK
+INFO:     10.129.3.222:35456 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.129.3.222:35478 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.129.3.222:35466 - "GET /api/signup/notifications/isyun HTTP/1.1" 200 OK
+INFO:     10.129.3.222:35476 - "GET /api/signup/notifications/%EC%9C%A4%EC%9D%B8%EC%88%98 HTTP/1.1" 200 OK
+INFO:     10.129.3.222:35494 - "GET /api/agents HTTP/1.1" 200 OK
+INFO:     10.129.3.222:35510 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     10.129.3.222:35512 - "GET /api/users?viewer_role=0 HTTP/1.1" 200 OK
+INFO:     10.129.3.222:35516 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.129.3.222:35524 - "GET /api/jobs/2/result HTTP/1.1" 200 OK
+INFO:     10.129.3.222:35530 - "GET /api/jobs?min_status_code=10&approver=isyun HTTP/1.1" 200 OK
+INFO:     10.129.3.222:35544 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.129.3.222:44556 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.129.3.222:44568 - "GET /api/signup/notifications/%EC%9C%A4%EC%9D%B8%EC%88%98 HTTP/1.1" 200 OK
+INFO:     10.129.3.222:44566 - "GET /api/signup/notifications/isyun HTTP/1.1" 200 OK

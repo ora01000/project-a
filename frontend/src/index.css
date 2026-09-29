@@ -18,13 +18,214 @@ body {
   border-radius: 0.75rem;
 }
 
-.topology-flow-line {
-  stroke-dasharray: 10 8;
-  animation: topology-flow 0.8s linear infinite;
+.job-content-html ol,
+.job-content-html ul {
+  margin: 0.5rem 0;
+  padding-left: 1.25rem;
 }
 
-@keyframes topology-flow {
+.job-content-html p {
+  margin: 0.5rem 0;
+}
+
+.job-content-html p:first-child {
+  margin-top: 0;
+}
+
+.job-content-html p:last-child {
+  margin-bottom: 0;
+}
+
+.mermaid-diagram svg,
+.d2-diagram svg {
+  max-width: none;
+  width: auto;
+  height: auto;
+  display: block;
+}
+
+.mermaid-diagram foreignObject {
+  overflow: hidden;
+}
+
+.mermaid-diagram foreignObject div,
+.mermaid-diagram .nodeLabel,
+.mermaid-diagram .nodeLabel p,
+.mermaid-diagram .nodeLabel span,
+.mermaid-diagram .edgeLabel {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  white-space: normal;
+  line-height: 1.25;
+  font-size: 12px;
+}
+
+.mermaid-diagram .nodeLabel p {
+  margin: 0;
+  text-align: center;
+}
+
+.note-preview-panel .markdown-body {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.note-preview-panel .d2-diagram,
+.note-preview-panel .mermaid-diagram {
+  max-width: 100%;
+}
+
+.note-preview-panel .d2-diagram {
+  width: 100%;
+}
+
+.note-preview-panel .mermaid-diagram svg,
+.note-preview-panel .d2-diagram svg {
+  max-width: 100%;
+  width: auto;
+  height: auto;
+}
+
+:root {
+  --wf-run-accent: #f43f5e;
+  --wf-run-glow: rgba(244, 63, 94, 0.75);
+  --wf-run-glow-soft: rgba(244, 63, 94, 0.28);
+  --wf-schedule-accent: #eab308;
+  --wf-schedule-glow: rgba(234, 179, 8, 0.75);
+  --wf-schedule-glow-soft: rgba(234, 179, 8, 0.28);
+  --wf-diagram-node-fill: #0f172a;
+  --wf-diagram-hitl-fill: #1e293b;
+  --wf-diagram-node-text: #f8fafc;
+  --wf-diagram-work-stroke: #38bdf8;
+  --wf-diagram-hitl-stroke: #fbbf24;
+  --wf-diagram-start-stroke: #7dd3fc;
+  --wf-diagram-edge: #94a3b8;
+  --wf-diagram-edge-fail: #fb7185;
+  --wf-diagram-edge-report: #34d399;
+  --wf-diagram-mail-stroke: #34d399;
+}
+
+[data-theme="light"] {
+  --wf-run-accent: #9f1239;
+  --wf-run-glow: rgba(159, 18, 57, 0.65);
+  --wf-run-glow-soft: rgba(190, 18, 60, 0.28);
+  --wf-schedule-accent: #a16207;
+  --wf-schedule-glow: rgba(161, 98, 7, 0.65);
+  --wf-schedule-glow-soft: rgba(202, 138, 4, 0.28);
+  --wf-diagram-node-fill: #ffffff;
+  --wf-diagram-hitl-fill: #fff7ed;
+  --wf-diagram-node-text: #0f172a;
+  --wf-diagram-work-stroke: #0369a1;
+  --wf-diagram-hitl-stroke: #b45309;
+  --wf-diagram-start-stroke: #0284c7;
+  --wf-diagram-edge: #64748b;
+  --wf-diagram-edge-fail: #e11d48;
+  --wf-diagram-edge-report: #059669;
+  --wf-diagram-mail-stroke: #059669;
+}
+
+@keyframes wf-run-pulse {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 1px var(--wf-run-accent),
+      0 0 0 0 var(--wf-run-glow);
+  }
+  50% {
+    box-shadow:
+      0 0 0 1px var(--wf-run-accent),
+      0 0 0 7px var(--wf-run-glow-soft);
+  }
+}
+
+.wf-run-pulse {
+  border-color: var(--wf-run-accent) !important;
+  animation: wf-run-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes wf-schedule-pulse {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 1px var(--wf-schedule-accent),
+      0 0 0 0 var(--wf-schedule-glow);
+  }
+  50% {
+    box-shadow:
+      0 0 0 1px var(--wf-schedule-accent),
+      0 0 0 7px var(--wf-schedule-glow-soft);
+  }
+}
+
+.wf-schedule-pulse {
+  border-color: var(--wf-schedule-accent) !important;
+  animation: wf-schedule-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes wf-run-stroke-dash {
   to {
-    stroke-dashoffset: -18;
+    stroke-dashoffset: -36;
+  }
+}
+
+@keyframes wf-run-halo-pulse {
+  0%,
+  100% {
+    stroke-opacity: 0.95;
+    filter: drop-shadow(0 0 1px var(--wf-run-accent)) drop-shadow(0 0 4px var(--wf-run-glow));
+  }
+  50% {
+    stroke-opacity: 0.55;
+    filter: drop-shadow(0 0 2px var(--wf-run-accent)) drop-shadow(0 0 10px var(--wf-run-glow));
+  }
+}
+
+.wf-run-stroke {
+  fill: none !important;
+  stroke: var(--wf-run-accent) !important;
+  stroke-width: 3 !important;
+  stroke-dasharray: 10 6;
+  stroke-linecap: round;
+  animation: wf-run-stroke-dash 0.85s linear infinite;
+  pointer-events: none;
+}
+
+.wf-run-halo {
+  fill: none !important;
+  stroke: var(--wf-run-accent) !important;
+  stroke-width: 2 !important;
+  animation: wf-run-halo-pulse 1.2s ease-in-out infinite;
+  pointer-events: none;
+}
+
+.wf-schedule-stroke {
+  fill: none !important;
+  stroke: var(--wf-schedule-accent) !important;
+  stroke-width: 3 !important;
+  stroke-dasharray: 10 6;
+  stroke-linecap: round;
+  animation: wf-run-stroke-dash 0.85s linear infinite;
+  pointer-events: none;
+}
+
+.wf-schedule-halo {
+  fill: none !important;
+  stroke: var(--wf-schedule-accent) !important;
+  stroke-width: 2 !important;
+  animation: wf-schedule-halo-pulse 1.2s ease-in-out infinite;
+  pointer-events: none;
+}
+
+@keyframes wf-schedule-halo-pulse {
+  0%,
+  100% {
+    stroke-opacity: 0.95;
+    filter: drop-shadow(0 0 1px var(--wf-schedule-accent))
+      drop-shadow(0 0 4px var(--wf-schedule-glow));
+  }
+  50% {
+    stroke-opacity: 0.55;
+    filter: drop-shadow(0 0 2px var(--wf-schedule-accent))
+      drop-shadow(0 0 10px var(--wf-schedule-glow));
   }
 }

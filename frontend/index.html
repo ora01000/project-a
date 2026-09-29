@@ -1,9 +1,22 @@
 <!doctype html>
-<html lang="ko">
+<html lang="ko" data-theme="dark">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>AX 인프라 운영 콘솔</title>
+    <script>
+      (function () {
+        try {
+          var theme = localStorage.getItem("app-theme");
+          if (theme === "light") {
+            document.documentElement.setAttribute("data-theme", "light");
+            document.documentElement.style.colorScheme = "light";
+          }
+        } catch (_error) {
+          /* ignore */
+        }
+      })();
+    </script>
   </head>
   <body class="bg-slate-950 text-slate-100">
     <div id="root"></div>

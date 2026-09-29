@@ -2,42 +2,62 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { AgentInfo, IntegratedChatResponse, ToolUsage } from "../types/agent";
 import type { AuthUser } from "../types/auth";
-import { agentNodeId, LLM_NODE_ID, mcpNodeId } from "../types/topology";
-import { useTopology } from "../context/TopologyContext";
 import { appendInputHistory, loadInputHistory } from "../utils/inputHistory";
 import { formatResponseTimestamp } from "../utils/messageIndex";
 import { flushSseBuffer, parseSseChunk } from "../utils/parseSse";
+import { createSessionId, isUuidSessionId } from "../utils/sessionId";
 import { AssistantMessageContent } from "./AssistantMessageContent";
 import { CollapsibleUserMessage } from "./CollapsibleUserMessage";
-import {
-  InventoryApprovalCard,
-  type InventoryApprovalRequest,
-} from "./InventoryApprovalCard";
-import { JobNotificationCard } from "./jobs/JobNotificationCard";
-import { SignupNotificationCard } from "./users/SignupNotificationCard";
+import { JobIntakePanel } from "./JobIntakePanel";
+import { OpenAiBillingConfirmDialog } from "./OpenAiBillingConfirmDialog";
 import { ToolUsageList } from "./ToolUsageList";
-import type { JobNotification } from "../types/job";
-import type { SignupNotification } from "../types/signup";
+import { fetchLlmBillingStatus } from "../utils/llmBilling";
+import { WorkflowIcon, type WorkflowIconName } from "./workflow/WorkflowIcon";
 
 interface IntegratedChatPanelProps {
   agents: AgentInfo[];
   user: AuthUser;
   isFullscreen: boolean;
+  panelWidth?: number;
   onToggleFullscreen: () => void;
   onChatComplete?: () => void;
-  jobNotifications?: JobNotification[];
-  signupNotifications?: SignupNotification[];
-  onJobReview?: (jobIdx: number) => void;
-  onJobApprove?: (jobIdx: number) => void;
-  onJobPending?: (jobIdx: number) => void;
-  onJobReject?: (jobIdx: number) => void;
-  onJobDismiss?: (notificationIdx: number) => void;
-  onJobRetry?: (jobIdx: number, notificationIdx: number) => void;
-  onSignupApprove?: (userIdx: number) => void;
-  onSignupReject?: (userIdx: number, reason: string) => void;
-  onSignupHold?: (notificationIdx: number) => void;
-  isJobActionProcessing?: boolean;
-  isSignupActionProcessing?: boolean;
+  onCopyToNote?: (content: string, noteName?: string) => Promise<void>;
+  /** When set, only these agent IDs appear (ignores chat_enabled / assignment filters). */
+  allowedAgentIds?: string[];
+  /** Fill the composer and submit once (nonce must change each request). */
+  externalSubmitRequest?: { nonce: number; message: string } | null;
+  onExternalSubmitHandled?: () => void;
+  /** Fired when an external submit is discarded (e.g. billing cancel) before chat starts. */
+  onExternalSubmitAborted?: () => void;
+  /** Fired after a successful assistant reply (not abort/error). */
+  onAssistantResponse?: (payload: { agentId: string; content: string }) => void;
+  /** Fired when a chat attempt finishes (success, error, or abort). */
+  onChatSettled?: (payload: { agentId: string; ok: boolean; content: string }) => void;
+  /** Expand user message input height for workflow terminal (fixed px; dashboard keeps default). */
+  expandUserInput?: boolean;
+  /** Fixed user input height when expandUserInput is true. Default 300. */
+  userInputHeightPx?: number;
+  collapsed?: boolean;
+  onCollapsedChange?: (collapsed: boolean) => void;
+}
+
+function PanelCollapseRightIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="h-4 w-4"
+      aria-hidden="true"
+    >
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <path d="M15 4v16" />
+      <path d="M9 9l3 3-3 3" />
+    </svg>
+  );
 }
 
 function createResponseId(): string {
@@ -66,6 +86,13 @@ const CHAT_HEADER_HEIGHT = 100;
 const COMPOSER_FORM_CHROME = 24 + 8;
 /** 대화창에 유지·렌더링할 최근 질의/응답 쌍 개수 */
 const VISIBLE_CHAT_RESPONSE_LIMIT = 10;
+
+type TerminalContentTab = "chat" | "job-intake";
+
+const CONTENT_TABS: { id: TerminalContentTab; label: string; icon: WorkflowIconName }[] = [
+  { id: "chat", label: "대화창", icon: "chat" },
+  { id: "job-intake", label: "작업접수", icon: "upload" },
+];
 
 function keepRecentResponses(entries: IntegratedChatResponse[]): IntegratedChatResponse[] {
   if (entries.length <= VISIBLE_CHAT_RESPONSE_LIMIT) {
@@ -99,34 +126,47 @@ export function IntegratedChatPanel({
   agents,
   user,
   isFullscreen,
+  panelWidth = 650,
   onToggleFullscreen,
   onChatComplete,
-  jobNotifications = [],
-  signupNotifications = [],
-  onJobReview,
-  onJobApprove,
-  onJobPending,
-  onJobReject,
-  onJobDismiss,
-  onJobRetry,
-  onSignupApprove,
-  onSignupReject,
-  onSignupHold,
-  isJobActionProcessing = false,
-  isSignupActionProcessing = false,
+  onCopyToNote,
+  allowedAgentIds,
+  externalSubmitRequest = null,
+  onExternalSubmitHandled,
+  onExternalSubmitAborted,
+  onAssistantResponse,
+  onChatSettled,
+  expandUserInput = false,
+  userInputHeightPx = 300,
+  collapsed: controlledCollapsed,
+  onCollapsedChange,
 }: IntegratedChatPanelProps) {
-  const { emitFlow } = useTopology();
-  const [selectedAgentId, setSelectedAgentId] = useState("sys-helpdesk");
+  const [uncontrolledCollapsed, setUncontrolledCollapsed] = useState(true);
+  const isCollapsed = !isFullscreen && (controlledCollapsed ?? uncontrolledCollapsed);
+
+  const setCollapsed = (next: boolean) => {
+    if (controlledCollapsed === undefined) {
+      setUncontrolledCollapsed(next);
+    }
+    onCollapsedChange?.(next);
+  };
+
+  const [selectedAgentId, setSelectedAgentId] = useState("");
   const [input, setInput] = useState("");
   const [responses, setResponses] = useState<IntegratedChatResponse[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [inputHistory, setInputHistory] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
-  const [inventoryApprovals, setInventoryApprovals] = useState<InventoryApprovalRequest[]>([]);
-  const [processingApprovalId, setProcessingApprovalId] = useState<string | null>(null);
+  const [sessionId, setSessionId] = useState(createSessionId);
+  const [billingConfirmPrompt, setBillingConfirmPrompt] = useState<string | null>(null);
+  const [billingConfirmModel, setBillingConfirmModel] = useState<string | null>(null);
+  const [copyingResponseId, setCopyingResponseId] = useState<string | null>(null);
+  const [contentTab, setContentTab] = useState<TerminalContentTab>("chat");
   const conversationScrollRef = useRef<HTMLDivElement>(null);
   const layoutRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const processedExternalNonceRef = useRef<number | null>(null);
+  const sendChatMessageRef = useRef<(trimmed: string) => Promise<boolean>>(async () => false);
   const [agentListHeight, setAgentListHeight] = useState(DEFAULT_AGENT_LIST_HEIGHT);
   const isResizingRef = useRef(false);
   const resizeStartYRef = useRef(0);
@@ -144,6 +184,10 @@ export function IntegratedChatPanel({
         - COMPOSER_FORM_CHROME,
     );
     return Math.min(maxAgentListHeight, Math.max(MIN_AGENT_LIST_HEIGHT, nextHeight));
+  }, []);
+
+  useEffect(() => {
+    setSessionId((current) => (isUuidSessionId(current) ? current : createSessionId()));
   }, []);
 
   useEffect(() => {
@@ -199,6 +243,18 @@ export function IntegratedChatPanel({
   };
 
   const chatAgents = useMemo(() => {
+    const withoutWorkflow = (list: AgentInfo[]) =>
+      list.filter((agent) => agent.id.trim() !== "WORKFLOW_AGENT");
+    if (allowedAgentIds && allowedAgentIds.length > 0) {
+      const allowed = new Set(allowedAgentIds.map((id) => id.trim()).filter(Boolean));
+      const matched = agents.filter((agent) => allowed.has(agent.id));
+      // Preserve allowedAgentIds order when possible
+      const byId = new Map(matched.map((agent) => [agent.id, agent]));
+      const ordered = allowedAgentIds
+        .map((id) => byId.get(id.trim()))
+        .filter((agent): agent is AgentInfo => Boolean(agent));
+      return withoutWorkflow(ordered);
+    }
     const assignedIds = new Set(
       (user.agent_ids ?? []).map((id) => id.trim()).filter(Boolean),
     );
@@ -206,22 +262,12 @@ export function IntegratedChatPanel({
       if (agent.chat_enabled !== true) {
         return false;
       }
-      // System chat agents (e.g. helpdesk) stay available to everyone.
-      if (agent.is_system) {
-        return true;
-      }
       return assignedIds.has(agent.id);
     });
-    return [...enabled].sort((left, right) => {
-      if (left.id === "sys-helpdesk") {
-        return -1;
-      }
-      if (right.id === "sys-helpdesk") {
-        return 1;
-      }
-      return left.name.localeCompare(right.name, "ko");
-    });
-  }, [agents, user.agent_ids]);
+    return withoutWorkflow(
+      [...enabled].sort((left, right) => left.name.localeCompare(right.name, "ko")),
+    );
+  }, [agents, allowedAgentIds, user.agent_ids]);
 
   const selectedAgent = useMemo(
     () => chatAgents.find((agent) => agent.id === selectedAgentId) ?? null,
@@ -247,7 +293,9 @@ export function IntegratedChatPanel({
           return;
         }
 
-        const restored = (payload.entries ?? []).map(mapLogEntryToResponse);
+        const restored = (payload.entries ?? [])
+          .filter((entry) => entry.agent_id !== "WORKFLOW_AGENT")
+          .map(mapLogEntryToResponse);
         setResponses(keepRecentResponses(restored));
       } catch {
         if (!cancelled) {
@@ -272,8 +320,7 @@ export function IntegratedChatPanel({
       if (current && chatAgents.some((agent) => agent.id === current)) {
         return current;
       }
-      const helpdesk = chatAgents.find((agent) => agent.id === "sys-helpdesk");
-      return helpdesk?.id ?? chatAgents[0]?.id ?? "";
+      return chatAgents[0]?.id ?? "";
     });
   }, [chatAgents]);
 
@@ -284,8 +331,17 @@ export function IntegratedChatPanel({
       return;
     }
 
-    setInputHistory(loadInputHistory(selectedAgentId));
+    let cancelled = false;
     setHistoryIndex(-1);
+    void loadInputHistory(selectedAgentId).then((history) => {
+      if (!cancelled) {
+        setInputHistory(history);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
   }, [selectedAgentId]);
 
   const responseScrollKey = useMemo(
@@ -329,6 +385,22 @@ export function IntegratedChatPanel({
     setInput(inputHistory[nextIndex] ?? "");
   };
 
+  const handleNextMessage = () => {
+    if (inputHistory.length === 0 || historyIndex === -1) {
+      return;
+    }
+
+    if (historyIndex >= inputHistory.length - 1) {
+      setHistoryIndex(-1);
+      setInput("");
+      return;
+    }
+
+    const nextIndex = historyIndex + 1;
+    setHistoryIndex(nextIndex);
+    setInput(inputHistory[nextIndex] ?? "");
+  };
+
   const handleInputChange = (value: string) => {
     setInput(value);
     if (historyIndex !== -1) {
@@ -337,57 +409,28 @@ export function IntegratedChatPanel({
   };
 
   const handleStop = () => {
-    void rejectPendingInventoryApprovals();
     abortControllerRef.current?.abort();
   };
 
-  const rejectPendingInventoryApprovals = useCallback(async () => {
-    const pending = inventoryApprovals;
-    if (pending.length === 0) {
-      return;
-    }
-    await Promise.all(
-      pending.map((request) =>
-        fetch(`/api/chat/inventory-approvals/${request.approvalId}`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ approved: false }),
-        }).catch(() => undefined),
-      ),
-    );
-    setInventoryApprovals([]);
-  }, [inventoryApprovals]);
+  const handleResetSession = () => {
+    abortControllerRef.current?.abort();
+    setSessionId(createSessionId());
+    setResponses([]);
+    setInput("");
+    setHistoryIndex(-1);
+  };
 
-  const resolveInventoryApproval = useCallback(async (approvalId: string, approved: boolean) => {
-    setProcessingApprovalId(approvalId);
-    try {
-      const response = await fetch(`/api/chat/inventory-approvals/${approvalId}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ approved }),
-      });
-      if (!response.ok) {
-        throw new Error("인벤토리 승인 처리에 실패했습니다.");
-      }
-      setInventoryApprovals((prev) => prev.filter((request) => request.approvalId !== approvalId));
-    } finally {
-      setProcessingApprovalId(null);
-    }
-  }, []);
-
-  const handleSubmit = async (event: React.FormEvent) => {
-    event.preventDefault();
-    const trimmed = input.trim();
-    if (!trimmed || isLoading || !selectedAgent) {
-      return;
+  const sendChatMessage = async (trimmed: string): Promise<boolean> => {
+    if (!selectedAgent || isLoading) {
+      return false;
     }
 
-    const nextHistory = appendInputHistory(selectedAgent.id, trimmed);
+    const agentId = selectedAgent.id;
+    const nextHistory = await appendInputHistory(agentId, trimmed);
     setInputHistory(nextHistory);
     setHistoryIndex(-1);
     setInput("");
     setIsLoading(true);
-    emitFlow(agentNodeId(selectedAgent.id), LLM_NODE_ID);
 
     const createdAt = new Date().toISOString();
     const responseId = createResponseId();
@@ -396,7 +439,7 @@ export function IntegratedChatPanel({
         ...prev,
         {
           id: responseId,
-          agentId: selectedAgent.id,
+          agentId,
           agentName: selectedAgent.name,
           userContent: trimmed,
           assistantContent: "",
@@ -409,11 +452,19 @@ export function IntegratedChatPanel({
     const abortController = new AbortController();
     abortControllerRef.current = abortController;
 
+    let assistantText = "";
+    let toolsUsed: ToolUsage[] = [];
+    let completedOk = false;
+
     try {
-      const response = await fetch(`/api/agents/${selectedAgent.id}/chat`, {
+      const response = await fetch(`/api/agents/${agentId}/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: trimmed, userid: user.userid }),
+        body: JSON.stringify({
+          message: trimmed,
+          userid: user.userid,
+          session_id: sessionId,
+        }),
         signal: abortController.signal,
       });
 
@@ -428,8 +479,6 @@ export function IntegratedChatPanel({
 
       const decoder = new TextDecoder();
       let buffer = "";
-      let assistantText = "";
-      let toolsUsed: ToolUsage[] = [];
 
       const applyEvents = (events: ReturnType<typeof parseSseChunk>["events"]) => {
         for (const event of events) {
@@ -437,33 +486,9 @@ export function IntegratedChatPanel({
             continue;
           }
 
-          if (event.event === "inventory_approval") {
-            const payload = JSON.parse(event.data) as {
-              approval_id: string;
-              caller_agent_id: string;
-              caller_agent_name: string;
-              query: string;
-            };
-            setInventoryApprovals((prev) => [
-              ...prev,
-              {
-                approvalId: payload.approval_id,
-                callerAgentId: payload.caller_agent_id,
-                callerAgentName: payload.caller_agent_name,
-                query: payload.query,
-              },
-            ]);
-            continue;
-          }
-
           if (event.event === "tools") {
             const payload = JSON.parse(event.data) as { tools: ToolUsage[] };
             toolsUsed = payload.tools ?? [];
-            for (const tool of toolsUsed) {
-              if (tool.mcp_server) {
-                emitFlow(agentNodeId(selectedAgent.id), mcpNodeId(tool.mcp_server));
-              }
-            }
             updateLastResponse(assistantText, toolsUsed);
             continue;
           }
@@ -498,123 +523,301 @@ export function IntegratedChatPanel({
           break;
         }
       }
+      completedOk = Boolean(assistantText.trim());
     } catch (err) {
       if (isAbortError(err)) {
-        return;
+        updateLastResponse("요청이 취소되었습니다.", toolsUsed);
+      } else {
+        const message = err instanceof Error ? err.message : "Unknown error";
+        updateLastResponse(`오류: ${message}`, []);
       }
-      const message = err instanceof Error ? err.message : "Unknown error";
-      updateLastResponse(`오류: ${message}`, []);
     } finally {
-      setInventoryApprovals([]);
       abortControllerRef.current = null;
       setIsLoading(false);
       onChatComplete?.();
+      if (completedOk) {
+        onAssistantResponse?.({ agentId, content: assistantText.trim() });
+      }
+      onChatSettled?.({
+        agentId,
+        ok: completedOk,
+        content: assistantText.trim(),
+      });
     }
+    return true;
+  };
+
+  sendChatMessageRef.current = sendChatMessage;
+
+  const handleSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    const trimmed = input.trim();
+    if (!trimmed || isLoading || !selectedAgent) {
+      return;
+    }
+
+    try {
+      const billingStatus = await fetchLlmBillingStatus();
+      if (billingStatus.requires_confirmation) {
+        setBillingConfirmModel(billingStatus.model);
+        setBillingConfirmPrompt(trimmed);
+        return;
+      }
+    } catch {
+      // 상태 조회 실패 시 로컬 LLM으로 간주하고 기존 흐름 유지
+    }
+
+    await sendChatMessage(trimmed);
+  };
+
+  useEffect(() => {
+    if (!externalSubmitRequest) {
+      return;
+    }
+    if (processedExternalNonceRef.current === externalSubmitRequest.nonce) {
+      return;
+    }
+    // Wait until idle so we never consume the request without attempting send.
+    if (!selectedAgent || isLoading) {
+      return;
+    }
+
+    const trimmed = externalSubmitRequest.message.trim();
+    processedExternalNonceRef.current = externalSubmitRequest.nonce;
+    onExternalSubmitHandled?.();
+
+    if (!trimmed) {
+      onExternalSubmitAborted?.();
+      return;
+    }
+
+    setContentTab("chat");
+    setInput(trimmed);
+
+    const submitExternal = async () => {
+      try {
+        const billingStatus = await fetchLlmBillingStatus();
+        if (billingStatus.requires_confirmation) {
+          setBillingConfirmModel(billingStatus.model);
+          setBillingConfirmPrompt(trimmed);
+          return;
+        }
+      } catch {
+        // keep going
+      }
+      const started = await sendChatMessageRef.current(trimmed);
+      if (!started) {
+        onExternalSubmitAborted?.();
+      }
+    };
+
+    void submitExternal();
+  }, [
+    externalSubmitRequest,
+    selectedAgent,
+    isLoading,
+    onExternalSubmitHandled,
+    onExternalSubmitAborted,
+  ]);
+
+  const handleBillingConfirm = () => {
+    if (!billingConfirmPrompt) {
+      return;
+    }
+    const prompt = billingConfirmPrompt;
+    setBillingConfirmPrompt(null);
+    setBillingConfirmModel(null);
+    void sendChatMessage(prompt).then((started) => {
+      if (!started) {
+        onExternalSubmitAborted?.();
+      }
+    });
+  };
+
+  const handleBillingCancel = () => {
+    setBillingConfirmPrompt(null);
+    setBillingConfirmModel(null);
+    onExternalSubmitAborted?.();
   };
 
   const canShowPrevious = inputHistory.length > 0;
+  const canShowNext = historyIndex !== -1;
+
+  const handleCopyResponseToNote = async (response: IntegratedChatResponse) => {
+    if (!onCopyToNote || !response.assistantContent.trim()) {
+      return;
+    }
+
+    setCopyingResponseId(response.id);
+    try {
+      const noteName = `${response.agentName} ${formatResponseTimestamp(new Date(response.createdAt))}`.slice(
+        0,
+        50,
+      );
+      await onCopyToNote(response.assistantContent, noteName);
+    } finally {
+      setCopyingResponseId(null);
+    }
+  };
 
   return (
-    <aside
-      ref={layoutRef}
-      className={`flex self-stretch flex-col overflow-hidden rounded-xl border border-slate-700 bg-slate-900/90 shadow-lg ${
-        isFullscreen ? "min-h-0 w-full" : "min-h-0 w-[650px] shrink-0"
+    <div
+      className={`relative flex self-stretch overflow-hidden transition-[width] duration-300 ease-in-out ${
+        isFullscreen ? "min-h-0 w-full" : isCollapsed ? "w-9 shrink-0" : "min-h-0 shrink-0"
       }`}
+      style={isFullscreen || isCollapsed ? undefined : { width: panelWidth }}
     >
-      <header className="flex h-[100px] shrink-0 items-center justify-between border-b border-slate-700 px-4">
-        <div className="min-w-0">
-          <h2 className="text-lg font-semibold text-slate-100">통합 채팅</h2>
-          <p className="mt-1 text-sm text-slate-400">에이전트를 선택해 메시지를 전송하세요.</p>
-        </div>
+      {!isFullscreen ? (
         <button
           type="button"
-          onClick={onToggleFullscreen}
-          title={isFullscreen ? "원복" : "전체화면"}
-          className="shrink-0 rounded-md border border-slate-600 px-3 py-1.5 text-sm text-slate-200 hover:bg-slate-800"
+          onClick={() => setCollapsed(false)}
+          aria-label="대화형 터미널 펼치기"
+          aria-hidden={!isCollapsed}
+          tabIndex={isCollapsed ? 0 : -1}
+          className={`absolute inset-y-0 right-0 z-20 flex w-9 flex-col items-center justify-center rounded-xl border border-slate-700 bg-slate-900/90 shadow-lg transition-opacity duration-300 hover:border-slate-500 hover:bg-slate-800/70 ${
+            isCollapsed ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0"
+          }`}
         >
-          {isFullscreen ? "원복" : "전체화면"}
+          <span className="select-none text-xs font-semibold tracking-wide text-slate-200 [writing-mode:vertical-rl]">
+            대화형 터미널
+          </span>
         </button>
+      ) : null}
+
+      <aside
+        ref={layoutRef}
+        aria-hidden={isCollapsed}
+        style={isFullscreen ? undefined : { width: panelWidth }}
+        className={`flex h-full min-h-0 flex-col overflow-hidden rounded-xl border border-slate-700 bg-slate-900/90 shadow-lg transition-transform duration-300 ease-in-out ${
+          isFullscreen
+            ? "w-full"
+            : isCollapsed
+              ? "pointer-events-none translate-x-full"
+              : "translate-x-0"
+        }`}
+      >
+      <header className="flex h-[100px] shrink-0 items-center justify-between border-b border-slate-700 px-4">
+        <div className="min-w-0">
+          <h2 className="inline-flex items-center gap-1.5 text-lg font-semibold text-slate-100">
+            <WorkflowIcon name="chat" size="md" />
+            대화형 터미널
+          </h2>
+          <p className="mt-1 text-sm text-slate-400">에이전트를 선택해 메시지를 전송하세요.</p>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          {!isFullscreen ? (
+            <button
+              type="button"
+              onClick={() => setCollapsed(true)}
+              aria-label="대화형 터미널 접기"
+              title="패널 접기"
+              className="rounded-md border border-slate-700 bg-slate-800/60 p-1.5 text-slate-400 transition-colors hover:border-slate-500 hover:bg-slate-800 hover:text-slate-200"
+            >
+              <PanelCollapseRightIcon />
+            </button>
+          ) : null}
+          <button
+            type="button"
+            onClick={onToggleFullscreen}
+            title={isFullscreen ? "원복" : "전체화면"}
+            className="inline-flex items-center gap-1.5 rounded-md border border-slate-600 px-3 py-1.5 text-sm text-slate-200 hover:bg-slate-800"
+          >
+            <WorkflowIcon name="fullscreen" size="sm" label={isFullscreen ? "원복" : "전체화면"} />
+            {isFullscreen ? "원복" : "전체화면"}
+          </button>
+        </div>
       </header>
 
       <div className="flex min-h-0 flex-1 flex-col">
-        <div className="flex min-h-0 flex-1 flex-col gap-1 px-3 pt-3">
-          <div className="text-xs font-medium tracking-wide text-slate-300">대화창</div>
-          <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-md border border-slate-800 bg-slate-950/50 text-sm">
-            <div
-              ref={conversationScrollRef}
-              className="min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain p-2"
+        <div className="flex shrink-0 gap-1 overflow-x-auto border-b border-slate-700 px-3 pt-2">
+          {CONTENT_TABS.map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => setContentTab(tab.id)}
+              className={`inline-flex shrink-0 items-center gap-1.5 rounded-t-md px-3 py-2 text-xs font-medium ${
+                contentTab === tab.id
+                  ? "border border-b-0 border-slate-600 bg-slate-800 text-sky-200"
+                  : "text-slate-400 hover:bg-slate-800/60 hover:text-slate-200"
+              }`}
             >
-              {jobNotifications.length === 0 &&
-              signupNotifications.length === 0 &&
-              responses.length === 0 ? (
-                <p className="text-slate-500">대화 내용이 여기에 표시됩니다.</p>
-              ) : null}
-
-              {signupNotifications.map((notification) => (
-                <SignupNotificationCard
-                  key={`signup-${notification.idx}`}
-                  notification={notification}
-                  isProcessing={isSignupActionProcessing}
-                  onApprove={(userIdx) => onSignupApprove?.(userIdx)}
-                  onReject={(userIdx, reason) => onSignupReject?.(userIdx, reason)}
-                  onHold={(notificationIdx) => onSignupHold?.(notificationIdx)}
-                />
-              ))}
-
-              {jobNotifications.map((notification) => (
-                <JobNotificationCard
-                  key={notification.idx}
-                  notification={notification}
-                  isProcessing={isJobActionProcessing}
-                  onReview={(jobIdx) => onJobReview?.(jobIdx)}
-                  onApprove={(jobIdx) => onJobApprove?.(jobIdx)}
-                  onPending={(jobIdx) => onJobPending?.(jobIdx)}
-                  onReject={(jobIdx) => onJobReject?.(jobIdx)}
-                  onDismiss={(notificationIdx) => onJobDismiss?.(notificationIdx)}
-                  onRetry={(jobIdx, notificationIdx) => onJobRetry?.(jobIdx, notificationIdx)}
-                />
-              ))}
-
-              {responses.map((response) => (
-                <div key={response.id} className="space-y-2">
-                  <CollapsibleUserMessage
-                    content={response.userContent}
-                    createdAt={response.createdAt}
-                  />
-                  <div className="rounded-md border border-emerald-800/40 bg-emerald-950/35 px-2 py-2 text-slate-100 break-words">
-                    <div className="mb-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] leading-tight text-emerald-300/80">
-                      <span className="rounded-full border border-emerald-700/50 bg-emerald-950/60 px-2 py-0.5 text-emerald-200">
-                        {response.agentName}
-                      </span>
-                      <span>{formatResponseTimestamp(new Date(response.createdAt))}</span>
-                    </div>
-                    <ToolUsageList tools={response.toolsUsed} />
-                    {response.assistantContent ? (
-                      <AssistantMessageContent content={response.assistantContent} />
-                    ) : (
-                      <span className="text-slate-500">응답 생성 중...</span>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            {inventoryApprovals.length > 0 ? (
-              <div className="shrink-0 space-y-2 border-t border-amber-800/40 bg-amber-950/20 p-2">
-                {inventoryApprovals.map((request) => (
-                  <InventoryApprovalCard
-                    key={request.approvalId}
-                    request={request}
-                    isProcessing={processingApprovalId === request.approvalId}
-                    onApprove={(approvalId) => void resolveInventoryApproval(approvalId, true)}
-                    onReject={(approvalId) => void resolveInventoryApproval(approvalId, false)}
-                  />
-                ))}
-              </div>
-            ) : null}
-          </div>
+              <WorkflowIcon name={tab.icon} size="xs" />
+              {tab.label}
+            </button>
+          ))}
         </div>
 
+        <div className="flex min-h-0 flex-1 flex-col gap-1 px-3 pt-2">
+          {contentTab === "chat" ? (
+            <>
+              <div className="flex items-center justify-between gap-2">
+                <div className="text-xs font-medium tracking-wide text-slate-300">대화 내용</div>
+                <button
+                  type="button"
+                  onClick={handleResetSession}
+                  disabled={isLoading}
+                  title="에이전트 호출 세션 UUID를 새로 생성합니다"
+                  className="inline-flex shrink-0 items-center gap-1 rounded-md border border-slate-600 px-2 py-1 text-xs text-slate-200 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <WorkflowIcon name="refresh" size="xs" label="세션 초기화" />
+                  세션 초기화
+                </button>
+              </div>
+              <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-md border border-slate-800 bg-slate-950/50 text-sm">
+                <div
+                  ref={conversationScrollRef}
+                  className="min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain p-2"
+                >
+                  {responses.length === 0 ? (
+                    <p className="text-slate-500">대화 내용이 여기에 표시됩니다.</p>
+                  ) : null}
+
+                  {responses.map((response) => (
+                    <div key={response.id} className="space-y-2">
+                      <CollapsibleUserMessage
+                        content={response.userContent}
+                        createdAt={response.createdAt}
+                      />
+                      <div className="rounded-md border border-emerald-800/40 bg-emerald-950/35 px-2 py-2 text-slate-100 break-words">
+                        <div className="mb-1 flex items-start justify-between gap-2">
+                          <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[10px] leading-tight text-emerald-300/80">
+                            <span className="rounded-full border border-emerald-700/50 bg-emerald-950/60 px-2 py-0.5 text-emerald-200">
+                              {response.agentName}
+                            </span>
+                            <span>{formatResponseTimestamp(new Date(response.createdAt))}</span>
+                          </div>
+                          {response.assistantContent && onCopyToNote ? (
+                            <button
+                              type="button"
+                              disabled={copyingResponseId === response.id}
+                              onClick={() => void handleCopyResponseToNote(response)}
+                              className="shrink-0 rounded-md border border-slate-600 bg-slate-900/80 px-2 py-0.5 text-[10px] font-medium text-slate-200 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40"
+                            >
+                              {copyingResponseId === response.id ? "복사 중..." : "노트로 복사"}
+                            </button>
+                          ) : null}
+                        </div>
+                        <ToolUsageList tools={response.toolsUsed} />
+                        {response.assistantContent ? (
+                          <AssistantMessageContent content={response.assistantContent} />
+                        ) : (
+                          <span className="text-slate-500">응답 생성 중...</span>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </>
+          ) : (
+            <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-md border border-slate-800 bg-slate-950/50 text-sm">
+              <JobIntakePanel user={user} />
+            </div>
+          )}
+        </div>
+
+        {contentTab === "chat" ? (
+          <>
         <div
           role="separator"
           aria-orientation="horizontal"
@@ -629,8 +832,12 @@ export function IntegratedChatPanel({
 
         <form onSubmit={handleSubmit} className="flex shrink-0 flex-col gap-2 p-3">
           <div
-            className="flex min-h-0 shrink-0 flex-col gap-1 text-xs text-slate-400"
-            style={{ height: agentListHeight }}
+            className={
+              expandUserInput
+                ? "flex shrink-0 flex-col gap-1 text-xs text-slate-400"
+                : "flex min-h-0 shrink-0 flex-col gap-1 text-xs text-slate-400"
+            }
+            style={expandUserInput ? undefined : { height: agentListHeight }}
           >
             <span>에이전트</span>
             {chatAgents.length === 0 ? (
@@ -639,7 +846,11 @@ export function IntegratedChatPanel({
               </p>
             ) : (
               <div
-                className="min-h-0 flex-1 overflow-y-auto rounded-md border border-slate-800 bg-slate-950/40 p-2"
+                className={
+                  expandUserInput
+                    ? "rounded-md border border-slate-800 bg-slate-950/40 p-2"
+                    : "min-h-0 flex-1 overflow-y-auto rounded-md border border-slate-800 bg-slate-950/40 p-2"
+                }
                 role="radiogroup"
                 aria-label="에이전트 선택"
               >
@@ -672,17 +883,30 @@ export function IntegratedChatPanel({
 
           <div
             className="flex shrink-0 gap-2"
-            style={{ height: FIXED_USER_INPUT_HEIGHT }}
+            style={{
+              height: expandUserInput ? userInputHeightPx : FIXED_USER_INPUT_HEIGHT,
+            }}
           >
-            <button
-              type="button"
-              onClick={handlePreviousMessage}
-              disabled={isDisabled || isLoading || !canShowPrevious}
-              title="이전 메시지 (최대 10개)"
-              className="rounded-md border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-200 disabled:cursor-not-allowed disabled:text-slate-500"
-            >
-              ↑
-            </button>
+            <div className="flex h-full shrink-0 flex-col gap-1">
+              <button
+                type="button"
+                onClick={handlePreviousMessage}
+                disabled={isDisabled || isLoading || !canShowPrevious}
+                title="이전 메시지 (최대 10개)"
+                className="flex min-h-0 flex-1 items-center justify-center rounded-md border border-slate-700 bg-slate-900 px-2 text-sm text-slate-200 disabled:cursor-not-allowed disabled:text-slate-500"
+              >
+                ↑
+              </button>
+              <button
+                type="button"
+                onClick={handleNextMessage}
+                disabled={isDisabled || isLoading || !canShowNext}
+                title="다음 메시지"
+                className="flex min-h-0 flex-1 items-center justify-center rounded-md border border-slate-700 bg-slate-900 px-2 text-sm text-slate-200 disabled:cursor-not-allowed disabled:text-slate-500"
+              >
+                ↓
+              </button>
+            </div>
             <textarea
               value={input}
               onChange={(event) => handleInputChange(event.target.value)}
@@ -695,6 +919,14 @@ export function IntegratedChatPanel({
                 if (event.key === "ArrowUp" && !event.shiftKey) {
                   event.preventDefault();
                   handlePreviousMessage();
+                  return;
+                }
+                if (event.key === "ArrowDown" && !event.shiftKey) {
+                  if (historyIndex === -1) {
+                    return;
+                  }
+                  event.preventDefault();
+                  handleNextMessage();
                 }
               }}
               placeholder={
@@ -713,7 +945,7 @@ export function IntegratedChatPanel({
                 onClick={handleStop}
                 title="응답 중단"
                 aria-label="응답 중단"
-                className="flex items-center justify-center rounded-md bg-rose-600 px-3 py-2 text-white hover:bg-rose-500"
+                className="flex items-center justify-center self-stretch rounded-md bg-rose-600 px-3 py-2 text-white hover:bg-rose-500"
               >
                 <StopIcon />
               </button>
@@ -721,14 +953,26 @@ export function IntegratedChatPanel({
               <button
                 type="submit"
                 disabled={isDisabled || !input.trim()}
-                className="rounded-md bg-sky-600 px-3 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-slate-700"
+                className="inline-flex items-center gap-1.5 self-stretch rounded-md bg-sky-600 px-3 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-slate-700"
               >
+                <WorkflowIcon name="send" size="sm" label="전송" />
                 전송
               </button>
             )}
           </div>
         </form>
+          </>
+        ) : null}
       </div>
+      {billingConfirmPrompt ? (
+        <OpenAiBillingConfirmDialog
+          prompt={billingConfirmPrompt}
+          model={billingConfirmModel}
+          onConfirm={handleBillingConfirm}
+          onCancel={handleBillingCancel}
+        />
+      ) : null}
     </aside>
+    </div>
   );
 }

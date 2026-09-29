@@ -8,6 +8,9 @@ export interface UserRecord {
   band: number;
   agents?: string;
   agent_ids?: string[];
+  request_reason?: string;
+  last_login?: string | null;
+  whatap_event_sub?: boolean;
 }
 
 export interface UserFormValues {
@@ -21,8 +24,14 @@ export interface UserFormValues {
 }
 
 export function roleLabel(role: number): string {
+  if (role === 100) {
+    return "superadmin";
+  }
   if (role === 0) {
     return "admin";
+  }
+  if (role === 2) {
+    return "infraadmin";
   }
   if (role === 5) {
     return "보류";
@@ -32,7 +41,34 @@ export function roleLabel(role: number): string {
 
 export const ROLE_ADMIN = 0;
 export const ROLE_USER = 1;
+export const ROLE_INFRAADMIN = 2;
 export const ROLE_PENDING = 5;
+export const ROLE_SUPERADMIN = 100;
+
+export const ASSIGNABLE_ROLE_OPTIONS: { value: number; label: string }[] = [
+  { value: ROLE_ADMIN, label: "admin" },
+  { value: ROLE_USER, label: "user" },
+  { value: ROLE_INFRAADMIN, label: "infraadmin" },
+  { value: ROLE_PENDING, label: "보류" },
+];
+
+export function hasAdminAccess(role: number): boolean {
+  return role === ROLE_ADMIN || role === ROLE_SUPERADMIN;
+}
+
+export function canRunGapAnalysis(role: number): boolean {
+  return hasAdminAccess(role) || role === ROLE_INFRAADMIN;
+}
+
+/** Diagram template create/edit (admin / infraadmin / superadmin). */
+export function canManageWorkflowTemplates(role: number): boolean {
+  return role === ROLE_ADMIN || role === ROLE_INFRAADMIN || role === ROLE_SUPERADMIN;
+}
+
+/** IP masking in infra shape detail applies only to ordinary users. */
+export function shouldMaskIps(role: number): boolean {
+  return role === ROLE_USER;
+}
 
 export const BAND_EMPLOYEE = 1;
 export const BAND_SENIOR = 2;

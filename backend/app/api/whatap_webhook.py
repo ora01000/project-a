@@ -36,7 +36,11 @@ async def receive_whatap_webhook(request: Request) -> WhatapWebhookResponse:
         raise HTTPException(status_code=400, detail="JSON payload must be an object")
 
     try:
-        result: WhatapEventResult = await handle_whatap_webhook(payload)
+        database_path = request.app.state.database_path
+        result: WhatapEventResult = await handle_whatap_webhook(
+            payload,
+            database_path=database_path,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:

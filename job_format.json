@@ -1,0 +1,13 @@
+{
+  "job_title": "작업요청서5 - 내 서비스 정보 요청 - 회신테스트",
+  "requester_name": "윤인수 IT플랫폼운영팀",
+  "requester_email": "isyun@lguplus.co.kr",
+  "requester_depart": "IT플랫폼운영팀",
+  "job_content": "<p>안녕하세요</p>\n<ol>\n<li>&nbsp;dprv-k8s 클러스터의 네임스페이스 중 openshift-*, default 등 시스템 네임스페이스를 제외한 네임스페이스 목록</li><li>추출된 네임스페이싀 resourcequota가 있을시 quota 정보</li></ol>\n<p>를 리포팅 해주시기 바랍니다.</p>",
+  "request_date": "2026-07-24T05:35:44.44Z",
+  "madang_id": "isyun",
+  "team_id": "a73b9b17-f8d5-435c-87cb-35077ce2296d",
+  "channel_id": "19:62da302e30604e6481b3287060154a7b@thread.tacv2",
+  "message_id": "1784871344440"
+}
+

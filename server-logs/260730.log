@@ -1,0 +1,313 @@
+INFO:     Started server process [1]
+INFO:     Waiting for application startup.
+INFO:backend.app.main:AGENT_RUNTIME_MODE=http
+INFO:backend.app.db.database:Migrating agentruntime table: drop token_url and agent_url columns
+INFO:backend.app.db.database:agentruntime URL column migration complete
+INFO:backend.app.db.database:Skip user seeding: users table already has 2 record(s)
+INFO:backend.app.db.database:Skip agentruntime mock seeding: type=0 already has 11 record(s)
+INFO:backend.app.db.database:SQLite database initialized at /app/data/app.db
+INFO:backend.app.services.k8s_collector_loop:k8s collector auto loop is paused (collect_on_startup=false, schedule_enabled=false); use manual collect API
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8080 (Press CTRL+C to quit)
+INFO:     10.131.0.232:34158 - "GET /api/auth/provider HTTP/1.1" 200 OK
+INFO:     10.131.0.232:34960 - "POST /api/auth/login HTTP/1.1" 200 OK
+INFO:     10.131.0.232:34974 - "GET /api/chat/logs/isyun HTTP/1.1" 200 OK
+INFO:     10.131.0.232:34980 - "GET /api/signup/notifications/isyun HTTP/1.1" 200 OK
+INFO:     10.131.0.232:34982 - "GET /api/signup/notifications/%EC%9C%A4%EC%9D%B8%EC%88%98 HTTP/1.1" 200 OK
+INFO:     10.131.0.232:34998 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     10.131.0.232:34988 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.131.0.232:35014 - "GET /api/agents HTTP/1.1" 200 OK
+INFO:     10.131.0.232:35026 - "GET /api/users?viewer_role=0 HTTP/1.1" 200 OK
+INFO:     10.131.0.232:35040 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     10.131.0.232:35056 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.131.0.232:35058 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.131.0.232:56050 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.131.0.232:56054 - "GET /api/signup/notifications/isyun HTTP/1.1" 200 OK
+INFO:     10.131.0.232:56058 - "GET /api/signup/notifications/%EC%9C%A4%EC%9D%B8%EC%88%98 HTTP/1.1" 200 OK
+INFO:     10.131.0.232:56072 - "POST /api/agents/KUBERNETES_AGENT/chat HTTP/1.1" 200 OK
+INFO:     10.131.0.232:56088 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:httpx:HTTP Request: POST https://test.nudp.lguplus.co.kr/portal/auths/v1/token "HTTP/1.1 401 Unauthorized"
+WARNING:backend.app.main:Agent KUBERNETES_AGENT invoke failure latched (degraded): Client error '401 Unauthorized' for url 'https://test.nudp.lguplus.co.kr/portal/auths/v1/token'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401
+ERROR:    Exception in ASGI application
+  + Exception Group Traceback (most recent call last):
+  |   File "/app/.venv/lib/python3.12/site-packages/sse_starlette/_utils.py", line 26, in collapse_excgroups
+  |     yield
+  |   File "/app/.venv/lib/python3.12/site-packages/sse_starlette/sse.py", line 479, in __call__
+  |     async with anyio.create_task_group() as task_group:
+  |                ^^^^^^^^^^^^^^^^^^^^^^^^^
+  |   File "/app/.venv/lib/python3.12/site-packages/anyio/_backends/_asyncio.py", line 811, in __aexit__
+  |     raise BaseExceptionGroup(
+  | ExceptionGroup: unhandled errors in a TaskGroup (1 sub-exception)
+  +-+---------------- 1 ----------------
+    | Traceback (most recent call last):
+    |   File "/app/.venv/lib/python3.12/site-packages/uvicorn/protocols/http/httptools_impl.py", line 422, in run_asgi
+    |     result = await app(  # type: ignore[func-returns-value]
+    |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/app/.venv/lib/python3.12/site-packages/uvicorn/middleware/proxy_headers.py", line 63, in __call__
+    |     return await self.app(scope, receive, send)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/app/.venv/lib/python3.12/site-packages/fastapi/applications.py", line 1163, in __call__
+    |     await super().__call__(scope, receive, send)
+    |   File "/app/.venv/lib/python3.12/site-packages/starlette/applications.py", line 90, in __call__
+    |     await self.middleware_stack(scope, receive, send)
+    |   File "/app/.venv/lib/python3.12/site-packages/starlette/middleware/errors.py", line 186, in __call__
+    |     raise exc
+    |   File "/app/.venv/lib/python3.12/site-packages/starlette/middleware/errors.py", line 164, in __call__
+    |     await self.app(scope, receive, _send)
+    |   File "/app/.venv/lib/python3.12/site-packages/starlette/middleware/cors.py", line 96, in __call__
+    |     await self.simple_response(scope, receive, send, request_headers=headers)
+    |   File "/app/.venv/lib/python3.12/site-packages/starlette/middleware/cors.py", line 154, in simple_response
+    |     await self.app(scope, receive, send)
+    |   File "/app/.venv/lib/python3.12/site-packages/starlette/middleware/exceptions.py", line 63, in __call__
+    |     await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+    |   File "/app/.venv/lib/python3.12/site-packages/starlette/_exception_handler.py", line 53, in wrapped_app
+    |     raise exc
+    |   File "/app/.venv/lib/python3.12/site-packages/starlette/_exception_handler.py", line 42, in wrapped_app
+    |     await app(scope, receive, sender)
+    |   File "/app/.venv/lib/python3.12/site-packages/fastapi/middleware/asyncexitstack.py", line 18, in __call__
+    |     await self.app(scope, receive, send)
+    |   File "/app/.venv/lib/python3.12/site-packages/starlette/routing.py", line 660, in __call__
+    |     await self.middleware_stack(scope, receive, send)
+    |   File "/app/.venv/lib/python3.12/site-packages/fastapi/routing.py", line 2683, in app
+    |     await route.handle(scope, receive, send)
+    |   File "/app/.venv/lib/python3.12/site-packages/fastapi/routing.py", line 1753, in handle
+    |     await self.original_router.handle(scope, receive, send)
+    |   File "/app/.venv/lib/python3.12/site-packages/fastapi/routing.py", line 2738, in handle
+    |     await included_router._handle_selected(scope, receive, send)
+    |   File "/app/.venv/lib/python3.12/site-packages/fastapi/routing.py", line 1773, in _handle_selected
+    |     await original_route.handle(scope, receive, send)
+    |   File "/app/.venv/lib/python3.12/site-packages/fastapi/routing.py", line 1264, in handle
+    |     await app(scope, receive, send)
+    |   File "/app/.venv/lib/python3.12/site-packages/fastapi/routing.py", line 150, in app
+    |     await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+    |   File "/app/.venv/lib/python3.12/site-packages/starlette/_exception_handler.py", line 53, in wrapped_app
+    |     raise exc
+    |   File "/app/.venv/lib/python3.12/site-packages/starlette/_exception_handler.py", line 42, in wrapped_app
+    |     await app(scope, receive, sender)
+    |   File "/app/.venv/lib/python3.12/site-packages/fastapi/routing.py", line 137, in app
+    |     await response(scope, receive, send)
+    |   File "/app/.venv/lib/python3.12/site-packages/sse_starlette/sse.py", line 478, in __call__
+    |     with collapse_excgroups():
+    |          ^^^^^^^^^^^^^^^^^^^^
+    |   File "/usr/local/lib/python3.12/contextlib.py", line 158, in __exit__
+    |     self.gen.throw(value)
+    |   File "/app/.venv/lib/python3.12/site-packages/sse_starlette/_utils.py", line 34, in collapse_excgroups
+    |     raise exc
+    |   File "/app/.venv/lib/python3.12/site-packages/anyio/_core/_tasks.py", line 278, in _run_coro
+    |     retval = await self._coro
+    |              ^^^^^^^^^^^^^^^^
+    |   File "/app/.venv/lib/python3.12/site-packages/sse_starlette/sse.py", line 482, in cancel_on_finish
+    |     await coro()
+    |   File "/app/.venv/lib/python3.12/site-packages/sse_starlette/sse.py", line 360, in _stream_response
+    |     async for data in self.body_iterator:
+    |   File "/app/backend/app/api/chat.py", line 104, in event_generator
+    |     result = await _invoke_agent(request, agent_id, payload.message)
+    |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/app/backend/app/api/chat.py", line 72, in _invoke_agent
+    |     return await request.app.state.agent_runtime.invoke(
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/app/backend/app/services/agent_runtime_client.py", line 327, in invoke
+    |     axit_result = await self._axit_client.invoke(
+    |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/app/backend/app/services/axit_platform_client.py", line 163, in invoke
+    |     access_token = await self._fetch_access_token(token_url, runtime_mode=runtime_mode)
+    |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/app/backend/app/services/axit_platform_client.py", line 104, in _fetch_access_token
+    |     response.raise_for_status()
+    |   File "/app/.venv/lib/python3.12/site-packages/httpx/_models.py", line 829, in raise_for_status
+    |     raise HTTPStatusError(message, request=request, response=self)
+    | httpx.HTTPStatusError: Client error '401 Unauthorized' for url 'https://test.nudp.lguplus.co.kr/portal/auths/v1/token'
+    | For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401
+    +------------------------------------
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/app/.venv/lib/python3.12/site-packages/uvicorn/protocols/http/httptools_impl.py", line 422, in run_asgi
+    result = await app(  # type: ignore[func-returns-value]
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/.venv/lib/python3.12/site-packages/uvicorn/middleware/proxy_headers.py", line 63, in __call__
+    return await self.app(scope, receive, send)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/.venv/lib/python3.12/site-packages/fastapi/applications.py", line 1163, in __call__
+    await super().__call__(scope, receive, send)
+  File "/app/.venv/lib/python3.12/site-packages/starlette/applications.py", line 90, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "/app/.venv/lib/python3.12/site-packages/starlette/middleware/errors.py", line 186, in __call__
+    raise exc
+  File "/app/.venv/lib/python3.12/site-packages/starlette/middleware/errors.py", line 164, in __call__
+    await self.app(scope, receive, _send)
+  File "/app/.venv/lib/python3.12/site-packages/starlette/middleware/cors.py", line 96, in __call__
+    await self.simple_response(scope, receive, send, request_headers=headers)
+  File "/app/.venv/lib/python3.12/site-packages/starlette/middleware/cors.py", line 154, in simple_response
+    await self.app(scope, receive, send)
+  File "/app/.venv/lib/python3.12/site-packages/starlette/middleware/exceptions.py", line 63, in __call__
+    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+  File "/app/.venv/lib/python3.12/site-packages/starlette/_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "/app/.venv/lib/python3.12/site-packages/starlette/_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "/app/.venv/lib/python3.12/site-packages/fastapi/middleware/asyncexitstack.py", line 18, in __call__
+    await self.app(scope, receive, send)
+  File "/app/.venv/lib/python3.12/site-packages/starlette/routing.py", line 660, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "/app/.venv/lib/python3.12/site-packages/fastapi/routing.py", line 2683, in app
+    await route.handle(scope, receive, send)
+  File "/app/.venv/lib/python3.12/site-packages/fastapi/routing.py", line 1753, in handle
+    await self.original_router.handle(scope, receive, send)
+  File "/app/.venv/lib/python3.12/site-packages/fastapi/routing.py", line 2738, in handle
+    await included_router._handle_selected(scope, receive, send)
+  File "/app/.venv/lib/python3.12/site-packages/fastapi/routing.py", line 1773, in _handle_selected
+    await original_route.handle(scope, receive, send)
+  File "/app/.venv/lib/python3.12/site-packages/fastapi/routing.py", line 1264, in handle
+    await app(scope, receive, send)
+  File "/app/.venv/lib/python3.12/site-packages/fastapi/routing.py", line 150, in app
+    await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+  File "/app/.venv/lib/python3.12/site-packages/starlette/_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "/app/.venv/lib/python3.12/site-packages/starlette/_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "/app/.venv/lib/python3.12/site-packages/fastapi/routing.py", line 137, in app
+    await response(scope, receive, send)
+  File "/app/.venv/lib/python3.12/site-packages/sse_starlette/sse.py", line 478, in __call__
+    with collapse_excgroups():
+         ^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/contextlib.py", line 158, in __exit__
+    self.gen.throw(value)
+  File "/app/.venv/lib/python3.12/site-packages/sse_starlette/_utils.py", line 34, in collapse_excgroups
+    raise exc
+  File "/app/.venv/lib/python3.12/site-packages/anyio/_core/_tasks.py", line 278, in _run_coro
+    retval = await self._coro
+             ^^^^^^^^^^^^^^^^
+  File "/app/.venv/lib/python3.12/site-packages/sse_starlette/sse.py", line 482, in cancel_on_finish
+    await coro()
+  File "/app/.venv/lib/python3.12/site-packages/sse_starlette/sse.py", line 360, in _stream_response
+    async for data in self.body_iterator:
+  File "/app/backend/app/api/chat.py", line 104, in event_generator
+    result = await _invoke_agent(request, agent_id, payload.message)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/backend/app/api/chat.py", line 72, in _invoke_agent
+    return await request.app.state.agent_runtime.invoke(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/backend/app/services/agent_runtime_client.py", line 327, in invoke
+    axit_result = await self._axit_client.invoke(
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/backend/app/services/axit_platform_client.py", line 163, in invoke
+    access_token = await self._fetch_access_token(token_url, runtime_mode=runtime_mode)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/backend/app/services/axit_platform_client.py", line 104, in _fetch_access_token
+    response.raise_for_status()
+  File "/app/.venv/lib/python3.12/site-packages/httpx/_models.py", line 829, in raise_for_status
+    raise HTTPStatusError(message, request=request, response=self)
+httpx.HTTPStatusError: Client error '401 Unauthorized' for url 'https://test.nudp.lguplus.co.kr/portal/auths/v1/token'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401
+INFO:     10.131.0.232:56098 - "GET /api/agents HTTP/1.1" 200 OK
+INFO:     10.131.0.232:56114 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     10.131.0.232:56120 - "GET /api/users?viewer_role=0 HTTP/1.1" 200 OK
+INFO:     10.131.0.232:56134 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.131.0.232:56136 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     10.131.0.232:56148 - "GET /api/agents HTTP/1.1" 200 OK
+INFO:     10.131.0.232:56158 - "GET /api/users?viewer_role=0 HTTP/1.1" 200 OK
+INFO:     10.131.0.232:56168 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     10.131.0.232:60764 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.131.0.232:60778 - "GET /api/agent-logs?limit=500 HTTP/1.1" 200 OK
+INFO:     10.131.0.232:60794 - "GET /api/signup/notifications/isyun HTTP/1.1" 200 OK
+INFO:     10.131.0.232:60800 - "GET /api/signup/notifications/%EC%9C%A4%EC%9D%B8%EC%88%98 HTTP/1.1" 200 OK
+INFO:     10.131.0.232:60814 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.131.0.232:60820 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.131.0.232:44962 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.131.0.232:44968 - "GET /api/agent-logs?limit=500 HTTP/1.1" 200 OK
+INFO:     10.131.0.232:44976 - "GET /api/signup/notifications/isyun HTTP/1.1" 200 OK
+INFO:     10.131.0.232:44978 - "GET /api/signup/notifications/%EC%9C%A4%EC%9D%B8%EC%88%98 HTTP/1.1" 200 OK
+INFO:     10.131.0.232:44982 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.131.0.232:44980 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     10.131.0.232:44988 - "GET /api/agents HTTP/1.1" 200 OK
+INFO:     10.131.0.232:45002 - "GET /api/users?viewer_role=0 HTTP/1.1" 200 OK
+INFO:     10.131.0.232:45014 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     10.131.0.232:45028 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.131.0.232:45034 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.131.0.232:59356 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.131.0.232:59360 - "GET /api/agent-logs?limit=500 HTTP/1.1" 200 OK
+INFO:     10.131.0.232:59374 - "GET /api/signup/notifications/isyun HTTP/1.1" 200 OK
+INFO:     10.131.0.232:59378 - "GET /api/signup/notifications/%EC%9C%A4%EC%9D%B8%EC%88%98 HTTP/1.1" 200 OK
+INFO:     10.131.0.232:59392 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.131.0.232:59404 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.131.0.232:59412 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     10.131.0.232:59424 - "GET /api/agents HTTP/1.1" 200 OK
+INFO:     10.131.0.232:59436 - "GET /api/users?viewer_role=0 HTTP/1.1" 200 OK
+INFO:     10.131.0.232:59444 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     10.131.0.232:47880 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.131.0.232:47888 - "GET /api/agent-logs?limit=500 HTTP/1.1" 200 OK
+INFO:     10.131.0.232:47900 - "GET /api/signup/notifications/isyun HTTP/1.1" 200 OK
+INFO:     10.131.0.232:47906 - "GET /api/signup/notifications/%EC%9C%A4%EC%9D%B8%EC%88%98 HTTP/1.1" 200 OK
+INFO:     10.131.0.232:47918 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.131.0.232:47930 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.131.0.232:33988 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.131.0.232:33990 - "GET /api/agent-logs?limit=500 HTTP/1.1" 200 OK
+INFO:     10.131.0.232:33996 - "GET /api/signup/notifications/isyun HTTP/1.1" 200 OK
+INFO:     10.131.0.232:34008 - "GET /api/signup/notifications/%EC%9C%A4%EC%9D%B8%EC%88%98 HTTP/1.1" 200 OK
+INFO:     10.131.0.232:34020 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     10.131.0.232:34030 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.131.0.232:34032 - "GET /api/users?viewer_role=0 HTTP/1.1" 200 OK
+INFO:     10.131.0.232:34042 - "GET /api/agents HTTP/1.1" 200 OK
+INFO:     10.131.0.232:34052 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     10.131.0.232:34056 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.131.0.232:38452 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.131.0.232:38462 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.131.0.232:38466 - "GET /api/agent-logs?limit=500 HTTP/1.1" 200 OK
+INFO:     10.131.0.232:38470 - "GET /api/signup/notifications/isyun HTTP/1.1" 200 OK
+INFO:     10.131.0.232:38474 - "GET /api/signup/notifications/%EC%9C%A4%EC%9D%B8%EC%88%98 HTTP/1.1" 200 OK
+INFO:     10.131.0.232:38488 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.131.0.232:38490 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.131.0.232:38496 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     10.131.0.232:38512 - "GET /api/users?viewer_role=0 HTTP/1.1" 200 OK
+INFO:     10.131.0.232:38526 - "GET /api/agents HTTP/1.1" 200 OK
+INFO:     10.131.0.232:38540 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     10.131.0.232:42456 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.131.0.232:42468 - "GET /api/agent-logs?limit=500 HTTP/1.1" 200 OK
+INFO:     10.131.0.232:42498 - "GET /api/signup/notifications/%EC%9C%A4%EC%9D%B8%EC%88%98 HTTP/1.1" 200 OK
+INFO:     10.131.0.232:42482 - "GET /api/signup/notifications/isyun HTTP/1.1" 200 OK
+INFO:     10.131.0.232:42500 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.131.0.232:42512 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.131.0.232:34632 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.131.0.232:34648 - "GET /api/agent-logs?limit=500 HTTP/1.1" 200 OK
+INFO:     10.131.0.232:34654 - "GET /api/signup/notifications/isyun HTTP/1.1" 200 OK
+INFO:     10.131.0.232:34662 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.131.0.232:34672 - "GET /api/signup/notifications/%EC%9C%A4%EC%9D%B8%EC%88%98 HTTP/1.1" 200 OK
+INFO:     10.131.0.232:34678 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     10.131.0.232:34692 - "GET /api/agents HTTP/1.1" 200 OK
+INFO:     10.131.0.232:34704 - "GET /api/users?viewer_role=0 HTTP/1.1" 200 OK
+INFO:     10.131.0.232:34718 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     10.131.0.232:34728 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.131.0.232:47438 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.131.0.232:47454 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.131.0.232:47470 - "GET /api/agent-logs?limit=500 HTTP/1.1" 200 OK
+INFO:     10.131.0.232:47486 - "GET /api/signup/notifications/isyun HTTP/1.1" 200 OK
+INFO:     10.131.0.232:47498 - "GET /api/signup/notifications/%EC%9C%A4%EC%9D%B8%EC%88%98 HTTP/1.1" 200 OK
+INFO:     10.131.0.232:47504 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.131.0.232:46326 - "GET /api/users?viewer_role=0 HTTP/1.1" 200 OK
+INFO:     10.131.0.232:46324 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.131.0.232:46344 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     10.131.0.232:46364 - "GET /api/signup/notifications/isyun HTTP/1.1" 200 OK
+INFO:     10.131.0.232:46348 - "GET /api/agent-logs?limit=500 HTTP/1.1" 200 OK
+INFO:     10.131.0.232:46322 - "GET /api/agents HTTP/1.1" 200 OK
+INFO:     10.131.0.232:46380 - "GET /api/signup/notifications/%EC%9C%A4%EC%9D%B8%EC%88%98 HTTP/1.1" 200 OK
+INFO:     10.131.0.232:46392 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     10.131.0.232:34062 - "GET /api/agents HTTP/1.1" 200 OK
+INFO:     10.131.0.232:34020 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.131.0.232:34028 - "GET /api/signup/notifications/isyun HTTP/1.1" 200 OK
+INFO:     10.131.0.232:34034 - "GET /api/signup/notifications/%EC%9C%A4%EC%9D%B8%EC%88%98 HTTP/1.1" 200 OK
+INFO:     10.131.0.232:34016 - "GET /api/agent-logs?limit=500 HTTP/1.1" 200 OK
+INFO:     10.131.0.232:34046 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     10.131.0.232:34078 - "GET /api/users?viewer_role=0 HTTP/1.1" 200 OK
+INFO:     10.131.0.232:34088 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     10.131.0.232:55320 - "GET /api/agent-logs?limit=500 HTTP/1.1" 200 OK
+INFO:     10.131.0.232:55332 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     10.131.0.232:55314 - "GET /api/signup/notifications/isyun HTTP/1.1" 200 OK
+INFO:     10.131.0.232:55302 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200 OK
+INFO:     10.131.0.232:55318 - "GET /api/signup/notifications/%EC%9C%A4%EC%9D%B8%EC%88%98 HTTP/1.1" 200 OK
+INFO:     10.131.0.232:55342 - "GET /api/agents HTTP/1.1" 200 OK
+INFO:     10.131.0.232:55356 - "GET /api/users?viewer_role=0 HTTP/1.1" 200 OK
+INFO:     10.131.0.232:55360 - "GET /api/health HTTP/1.1" 200 OK
+

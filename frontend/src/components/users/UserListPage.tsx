@@ -1,13 +1,14 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { ConfirmDialog } from "../ConfirmDialog";
 import { UserFormModal } from "./UserFormModal";
 import type { UserFormValues, UserRecord } from "../../types/user";
-import { ROLE_ADMIN, bandLabel, roleLabel } from "../../types/user";
+import { hasAdminAccess, bandLabel, roleLabel } from "../../types/user";
 
 interface UserListPageProps {
   currentUserIdx: number;
   currentUserRole: number;
+  onClose: () => void;
 }
 
 async function parseError(response: Response, fallback: string): Promise<string> {
@@ -15,19 +16,14 @@ async function parseError(response: Response, fallback: string): Promise<string>
   return payload?.detail ?? fallback;
 }
 
-export function UserListPage({ currentUserIdx, currentUserRole }: UserListPageProps) {
-  const canManageUsers = currentUserRole === ROLE_ADMIN;
+export function UserListPage({ currentUserIdx, currentUserRole, onClose }: UserListPageProps) {
+  const canManageUsers = hasAdminAccess(currentUserRole);
   const [users, setUsers] = useState<UserRecord[]>([]);
-  const [selectedIdxSet, setSelectedIdxSet] = useState<Set<number>>(new Set());
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [formMode, setFormMode] = useState<"create" | "edit" | null>(null);
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-
-  const selectedUsers = useMemo(
-    () => users.filter((user) => selectedIdxSet.has(user.idx)),
-    [users, selectedIdxSet],
-  );
+  const [editingUser, setEditingUser] = useState<UserRecord | null>(null);
+  const [deletingUser, setDeletingUser] = useState<UserRecord | null>(null);
 
   const loadUsers = useCallback(async () => {
     setIsLoading(true);
@@ -39,10 +35,6 @@ export function UserListPage({ currentUserIdx, currentUserRole }: UserListPagePr
       }
       const data = (await response.json()) as UserRecord[];
       setUsers(data);
-      setSelectedIdxSet((current) => {
-        const valid = new Set(data.map((user) => user.idx));
-        return new Set([...current].filter((idx) => valid.has(idx)));
-      });
     } catch (err) {
       setError(err instanceof Error ? err.message : "사용자 목록을 불러오지 못했습니다.");
     } finally {
@@ -54,24 +46,9 @@ export function UserListPage({ currentUserIdx, currentUserRole }: UserListPagePr
     void loadUsers();
   }, [loadUsers]);
 
-  const toggleRow = (idx: number) => {
-    setSelectedIdxSet((current) => {
-      const next = new Set(current);
-      if (next.has(idx)) {
-        next.delete(idx);
-      } else {
-        next.add(idx);
-      }
-      return next;
-    });
-  };
-
-  const toggleAll = () => {
-    if (selectedIdxSet.size === users.length) {
-      setSelectedIdxSet(new Set());
-      return;
-    }
-    setSelectedIdxSet(new Set(users.map((user) => user.idx)));
+  const closeForm = () => {
+    setFormMode(null);
+    setEditingUser(null);
   };
 
   const handleCreate = async (values: UserFormValues) => {
@@ -93,12 +70,11 @@ export function UserListPage({ currentUserIdx, currentUserRole }: UserListPagePr
     if (!canManageUsers) {
       throw new Error("관리자만 사용자를 수정할 수 있습니다.");
     }
-    const target = selectedUsers[0];
-    if (!target) {
+    if (!editingUser) {
       throw new Error("수정할 사용자를 선택해 주세요.");
     }
 
-    const response = await fetch(`/api/users/${target.idx}`, {
+    const response = await fetch(`/api/users/${editingUser.idx}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -120,159 +96,165 @@ export function UserListPage({ currentUserIdx, currentUserRole }: UserListPagePr
   const handleDelete = async () => {
     if (!canManageUsers) {
       setError("관리자만 사용자를 삭제할 수 있습니다.");
-      setShowDeleteConfirm(false);
+      setDeletingUser(null);
       return;
     }
-    if (selectedIdxSet.size === 0) {
+    if (!deletingUser) {
       return;
     }
-    if (selectedIdxSet.has(currentUserIdx)) {
+    if (deletingUser.idx === currentUserIdx) {
       setError("현재 로그인한 사용자는 삭제할 수 없습니다.");
-      setShowDeleteConfirm(false);
+      setDeletingUser(null);
       return;
     }
 
     const response = await fetch("/api/users", {
       method: "DELETE",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ idx_list: [...selectedIdxSet], viewer_role: currentUserRole }),
+      body: JSON.stringify({ idx_list: [deletingUser.idx], viewer_role: currentUserRole }),
     });
     if (!response.ok) {
       setError(await parseError(response, "사용자 삭제에 실패했습니다."));
-      setShowDeleteConfirm(false);
+      setDeletingUser(null);
       return;
     }
 
-    setShowDeleteConfirm(false);
-    setSelectedIdxSet(new Set());
+    setDeletingUser(null);
     await loadUsers();
   };
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-slate-700 bg-slate-900/90">
-      <header className="flex shrink-0 items-center justify-between border-b border-slate-700 px-4 py-3">
-        <div>
-          <h2 className="text-sm font-semibold text-slate-200">사용자 조회</h2>
-          <p className="mt-0.5 text-xs text-slate-500">
-            {canManageUsers
-              ? "users 테이블 데이터를 조회하고 관리합니다."
-              : "users 테이블 데이터를 조회합니다."}
-          </p>
-        </div>
-        {canManageUsers ? (
-          <div className="flex gap-2">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 px-4">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="user-list-title"
+        className="flex max-h-[90vh] w-full max-w-6xl flex-col overflow-hidden rounded-xl border border-slate-700 bg-slate-900 shadow-xl"
+      >
+        <header className="flex shrink-0 items-center justify-between border-b border-slate-700 px-4 py-3">
+          <div>
+            <h2 id="user-list-title" className="text-lg font-semibold text-slate-100">
+              사용자 조회
+            </h2>
+            <p className="mt-0.5 text-xs text-slate-500">
+              {canManageUsers
+                ? "users 테이블 데이터를 조회하고 관리합니다."
+                : "users 테이블 데이터를 조회합니다."}
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            {canManageUsers ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setError(null);
+                  setEditingUser(null);
+                  setFormMode("create");
+                }}
+                className="rounded-md bg-sky-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-sky-500"
+              >
+                추가
+              </button>
+            ) : null}
             <button
               type="button"
-              onClick={() => setShowDeleteConfirm(true)}
-              disabled={selectedIdxSet.size === 0}
-              className="rounded-md border border-rose-800 px-3 py-1.5 text-sm text-rose-200 hover:bg-rose-950/40 disabled:cursor-not-allowed disabled:text-slate-500"
+              onClick={onClose}
+              className="rounded-md border border-slate-700 px-3 py-1.5 text-sm text-slate-200 hover:bg-slate-800"
             >
-              삭제
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                if (selectedUsers.length !== 1) {
-                  setError("수정할 사용자 1명을 선택해 주세요.");
-                  return;
-                }
-                setError(null);
-                setFormMode("edit");
-              }}
-              disabled={selectedUsers.length !== 1}
-              className="rounded-md border border-slate-600 px-3 py-1.5 text-sm text-slate-200 hover:bg-slate-800 disabled:cursor-not-allowed disabled:text-slate-500"
-            >
-              수정
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setError(null);
-                setFormMode("create");
-              }}
-              className="rounded-md bg-sky-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-sky-500"
-            >
-              추가
+              닫기
             </button>
           </div>
+        </header>
+
+        {error ? (
+          <div className="mx-4 mt-4 rounded-md border border-rose-800 bg-rose-950/40 px-3 py-2 text-sm text-rose-200">
+            {error}
+          </div>
         ) : null}
-      </header>
 
-      {error ? (
-        <div className="mx-4 mt-4 rounded-md border border-rose-800 bg-rose-950/40 px-3 py-2 text-sm text-rose-200">
-          {error}
-        </div>
-      ) : null}
-
-      <div className="min-h-0 flex-1 overflow-auto p-4">
-        {isLoading ? (
-          <p className="text-sm text-slate-500">사용자 목록을 불러오는 중...</p>
-        ) : (
-          <table className="min-w-full border-collapse text-sm">
-            <thead>
-              <tr className="border-b border-slate-700 text-left text-slate-400">
-                {canManageUsers ? (
-                  <th className="px-3 py-2">
-                    <input
-                      type="checkbox"
-                      checked={users.length > 0 && selectedIdxSet.size === users.length}
-                      onChange={toggleAll}
-                      aria-label="전체 선택"
-                    />
-                  </th>
-                ) : null}
-                <th className="px-3 py-2">아이디</th>
-                <th className="px-3 py-2">이메일</th>
-                <th className="px-3 py-2">이름</th>
-                <th className="px-3 py-2">직책</th>
-                <th className="px-3 py-2">조직</th>
-                <th className="px-3 py-2">역할</th>
-              </tr>
-            </thead>
-            <tbody>
-              {users.map((user) => (
-                <tr key={user.idx} className="border-b border-slate-800 text-slate-200">
-                  {canManageUsers ? (
-                    <td className="px-3 py-2">
-                      <input
-                        type="checkbox"
-                        checked={selectedIdxSet.has(user.idx)}
-                        onChange={() => toggleRow(user.idx)}
-                        aria-label={`${user.userid} 선택`}
-                      />
-                    </td>
-                  ) : null}
-                  <td className="px-3 py-2">{user.userid}</td>
-                  <td className="px-3 py-2">{user.email}</td>
-                  <td className="px-3 py-2">{user.username}</td>
-                  <td className="px-3 py-2">{bandLabel(user.band)}</td>
-                  <td className="px-3 py-2">{user.depart}</td>
-                  <td className="px-3 py-2">
-                    {user.role}: {roleLabel(user.role)}
-                  </td>
+        <div className="min-h-0 flex-1 overflow-auto p-4">
+          {isLoading ? (
+            <p className="text-sm text-slate-500">사용자 목록을 불러오는 중...</p>
+          ) : (
+            <table className="min-w-full border-collapse text-sm">
+              <thead>
+                <tr className="border-b border-slate-700 text-left text-slate-400">
+                  <th className="px-3 py-2">아이디</th>
+                  <th className="px-3 py-2">이메일</th>
+                  <th className="px-3 py-2">이름</th>
+                  <th className="px-3 py-2">직책</th>
+                  <th className="px-3 py-2">조직</th>
+                  <th className="px-3 py-2">역할</th>
+                  <th className="px-3 py-2">최근 로그인 시각</th>
+                  {canManageUsers ? <th className="px-3 py-2">작업</th> : null}
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
+              </thead>
+              <tbody>
+                {users.map((user) => (
+                  <tr key={user.idx} className="border-b border-slate-800 text-slate-200">
+                    <td className="px-3 py-2">{user.userid}</td>
+                    <td className="px-3 py-2">{user.email}</td>
+                    <td className="px-3 py-2">{user.username}</td>
+                    <td className="px-3 py-2">{bandLabel(user.band)}</td>
+                    <td className="px-3 py-2">{user.depart}</td>
+                    <td className="px-3 py-2">
+                      {user.role}: {roleLabel(user.role)}
+                    </td>
+                    <td className="px-3 py-2 font-mono text-xs text-slate-300">
+                      {user.last_login?.trim() || "-"}
+                    </td>
+                    {canManageUsers ? (
+                      <td className="px-3 py-2">
+                        <div className="flex flex-wrap gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setError(null);
+                              setEditingUser(user);
+                              setFormMode("edit");
+                            }}
+                            className="rounded-md border border-slate-600 px-2 py-1 text-xs text-slate-200 hover:bg-slate-800"
+                          >
+                            수정
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setError(null);
+                              setDeletingUser(user);
+                            }}
+                            disabled={user.idx === currentUserIdx}
+                            className="rounded-md border border-rose-800 px-2 py-1 text-xs text-rose-200 hover:bg-rose-950/40 disabled:cursor-not-allowed disabled:border-slate-700 disabled:text-slate-500"
+                          >
+                            삭제
+                          </button>
+                        </div>
+                      </td>
+                    ) : null}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
       </div>
 
       {canManageUsers && formMode ? (
         <UserFormModal
           mode={formMode}
-          user={formMode === "edit" ? selectedUsers[0] : undefined}
-          onClose={() => setFormMode(null)}
+          user={formMode === "edit" ? editingUser ?? undefined : undefined}
+          onClose={closeForm}
           onSave={formMode === "create" ? handleCreate : handleUpdate}
         />
       ) : null}
 
-      {canManageUsers && showDeleteConfirm ? (
+      {canManageUsers && deletingUser ? (
         <ConfirmDialog
           title="사용자 삭제"
-          message={`선택한 ${selectedIdxSet.size}명의 사용자를 삭제하시겠습니까?`}
+          message={`'${deletingUser.userid}' 사용자를 삭제하시겠습니까?`}
           confirmLabel="예"
           cancelLabel="아니오"
-          onCancel={() => setShowDeleteConfirm(false)}
+          onCancel={() => setDeletingUser(null)}
           onConfirm={() => void handleDelete()}
         />
       ) : null}

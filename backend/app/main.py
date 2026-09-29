@@ -5,45 +5,88 @@ from typing import Any
 
 from pathlib import Path
 
-import httpx
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.app.agents.base import AgentDefinition, _aggregate_mcp_status, build_agent
-from backend.app.agents.inventory_agent import INVENTORY_AGENT_MARKER
-from backend.app.agents.inventory_tool import INVENTORY_AGENT_ID
-from backend.app.agents.registry import load_agent_definitions
-from backend.app.agents.system_agents import (
-    SYSTEM_AGENT_MARKER,
-    is_dashboard_system_agent_id,
-    list_dashboard_system_agent_definitions,
+from backend.app.agents.mock_platform_agents import is_mock_platform_orchestrator_agent
+from backend.app.infra_search_agent.definition import (
+    INFRA_SEARCH_SERVICE_MARKER,
+    is_infra_search_agent_id,
 )
+from backend.app.agents.orchestrator_agent import ORCHESTRATOR_MARKER
+from backend.app.agents.remote_agent import REMOTE_AGENT_MARKER
+from backend.app.mcp.client import MCPClientManager
+from backend.app.agents.registry import load_mock_runtime_definitions, load_server_agent_definitions
+from backend.app.agents.system_agents import is_control_plane_orchestration_agent
 from backend.app.api.agent_logs import router as agent_logs_router
-from backend.app.api.agent_records import router as agent_records_router
+from backend.app.api.agentruntime_records import router as agentruntime_records_router
 from backend.app.api.agents import router as agents_router
 from backend.app.api.auth import router as auth_router
 from backend.app.api.chat import router as chat_router
 from backend.app.api.debug import router as debug_router
-from backend.app.api.inventory import router as inventory_router
 from backend.app.api.jobs import router as jobs_router
-from backend.app.api.k8s_collector import router as k8s_collector_router
+from backend.app.api.llm import router as llm_router
 from backend.app.api.notices import router as notices_router
-from backend.app.api.prompt_debug import router as prompt_debug_router
+from backend.app.api.mock_llm import router as mock_llm_router
+from backend.app.api.mynotes import router as mynotes_router
+from backend.app.api.postman_debug import router as postman_debug_router
 from backend.app.api.release import router as release_router
 from backend.app.api.signup import router as signup_router
-from backend.app.api.token_usage import router as token_usage_router
 from backend.app.api.users import router as users_router
 from backend.app.api.teams_inbound_debug import router as teams_inbound_debug_router
+from backend.app.api.whatap_test import router as whatap_test_router
 from backend.app.api.whatap_webhook import router as whatap_webhook_router
-from backend.app.config import load_job_requester_settings, load_k8s_collector_settings, load_settings
+from backend.app.api.workflow import router as workflow_router
+from backend.app.api.inventory import router as inventory_router
+from backend.app.api.inventory_api_debug import router as inventory_api_debug_router
+from backend.app.api.axit_mock import router as axit_mock_router
+from backend.app.api.k8s_infra import router as k8s_infra_router
+from backend.app.api.mailserver import router as mailserver_router
+from backend.app.api.received_mail import router as received_mail_router
+from backend.app.infra_gap_analysis.api import router as infra_gap_analysis_router
+from backend.app.infra_gap_analysis.agent import infra_gap_analysis_service
+from backend.app.infra_search_agent.api import router as infra_search_agent_router
+from backend.app.infra_search_agent.agent import infra_search_agent_service
+from backend.app.job_decision_agent.api import router as job_decision_agent_router
+from backend.app.job_decision_agent.agent import job_decision_agent_service
+from backend.app.config import (
+    backend_role_runs_workers,
+    load_auth_session_settings,
+    load_backend_role,
+    load_job_decision_loop_settings,
+    load_job_processor_settings,
+    load_k8s_collector_settings,
+    load_mynotes_settings,
+    load_received_mail_settings,
+    load_redis_settings,
+    load_settings,
+    resolve_control_plane_base_url,
+)
+from backend.app.middleware.session_auth import SessionAuthMiddleware
+from backend.app.services.redis_client import close_redis, init_redis
+from backend.app.services.agent_runtime_client import (
+    create_agent_runtime_client,
+    get_runtime_capabilities,
+    normalize_runtime_mode,
+)
 from backend.app.db import init_database
+from backend.app.db.agentruntime import (
+    ensure_mock_ansible_lint_agentruntime,
+    ensure_mock_infra_search_agentruntime,
+    ensure_mock_workflow_agent_agentruntime,
+)
+from backend.app.disabled_features import filter_agent_definitions
 from backend.app.logging.prompt_debug import bind_token_tracker
-from backend.app.logging.agent_logger import ensure_agent_logs_dir, log_agent_error
+from backend.app.logging.agent_logger import ensure_agent_logs_dir, initialize_agent_logs, log_agent_error
 from backend.app.logging.user_comm_logger import initialize_user_comm_logs
-from backend.app.mcp.client import MCPClientManager
-from backend.app.services.inventory import initialize_inventory_service
-from backend.app.services.job_requester import run_job_requester_loop
-from backend.app.services.k8s_collector_loop import run_k8s_collector_loop
+from backend.app.logging.workflow_logger import initialize_workflow_logs
+from backend.app.services.job_decision_loop import run_job_decision_loop
+from backend.app.services.job_processor_loop import run_job_processor_loop
+from backend.app.services.k8s_scrape_scheduler import run_k8s_scrape_scheduler_loop
+from backend.app.services.mail_receive_loop import run_mail_receive_loop
+from backend.app.services.mynote_flush_loop import run_mynote_flush_loop
+from backend.app.services.workflow_cron_scheduler import run_workflow_cron_scheduler_loop
 from backend.app.usage.token_tracker import TokenTracker
 
 logger = logging.getLogger(__name__)
@@ -57,106 +100,171 @@ class AgentManager:
         self.agent_definitions_by_id: dict[str, AgentDefinition] = {}
         self.agent_operation_status: dict[str, str] = {}
         self.agent_operation_errors: dict[str, str] = {}
-        self.agent_operation_details: dict[str, str] = {}
+        self.agent_operation_tasks: dict[str, dict[str, str]] = {}
         self.agent_active_counts: dict[str, int] = {}
         self.agent_health_status: dict[str, str] = {}
-        self.mcp_manager: MCPClientManager | None = None
-        self.llm_status: str = "unknown"
+        self.mcp_manager = None
         self.token_tracker: TokenTracker | None = None
         self.max_context_tokens: int = 32768
+        self.execution_mode: str = "mock"
+        self.agent_runtime: Any | None = None
+        self._runtime_health_cache: dict[str, Any] = {}
         self._health_check_lock = asyncio.Lock()
 
     def _register_system_agents(self) -> None:
-        self.system_agent_definitions = list_dashboard_system_agent_definitions()
-        for definition in self.system_agent_definitions:
-            self.agent_definitions_by_id[definition.agent_id] = definition
-            self.agent_operation_status.setdefault(definition.agent_id, "idle")
-            self.agent_active_counts.setdefault(definition.agent_id, 0)
-            self.agents[definition.agent_id] = SYSTEM_AGENT_MARKER
+        self.system_agent_definitions = []
 
-    async def initialize(self, database_path: Path) -> None:
-        llm_settings, _, mcp_servers, _ = load_settings()
+    def _register_db_agents(self) -> None:
+        for definition in self.agent_definitions:
+            if definition.agent_id not in self.agents:
+                self.agent_operation_status.setdefault(definition.agent_id, "idle")
+                self.agent_active_counts.setdefault(definition.agent_id, 0)
+                if self.uses_remote_runtime():
+                    self.agents[definition.agent_id] = REMOTE_AGENT_MARKER
+
+    async def _build_local_agents(self) -> None:
+        _, _, mcp_servers, _ = load_settings()
+        if self.mcp_manager is None:
+            self.mcp_manager = MCPClientManager(mcp_servers)
+            await self.mcp_manager.initialize()
+
+        next_agent_ids = {definition.agent_id for definition in self.agent_definitions}
+        for agent_id in list(self.agents.keys()):
+            if agent_id not in next_agent_ids:
+                del self.agents[agent_id]
+
+        for definition in self.agent_definitions:
+            try:
+                if is_mock_platform_orchestrator_agent(definition.agent_id):
+                    self.agents[definition.agent_id] = ORCHESTRATOR_MARKER
+                    continue
+                if is_infra_search_agent_id(definition.agent_id):
+                    self.agents[definition.agent_id] = INFRA_SEARCH_SERVICE_MARKER
+                    continue
+                self.agents[definition.agent_id] = await build_agent(definition, self.mcp_manager)
+            except Exception as exc:
+                logger.exception("Failed to build agent %s: %s", definition.agent_id, exc)
+                self.agents.pop(definition.agent_id, None)
+
+    def _load_runtime_definitions(self, database_path: Path) -> list[AgentDefinition]:
+        if self.uses_remote_runtime():
+            return filter_agent_definitions(load_server_agent_definitions(database_path))
+        return filter_agent_definitions(load_mock_runtime_definitions(database_path))
+
+    async def initialize(self, database_path: Path, *, execution_mode: str = "mock") -> None:
+        self.execution_mode = normalize_runtime_mode(execution_mode)
+        llm_settings, _, _, _ = load_settings()
         self.max_context_tokens = llm_settings.max_context_tokens
         self.token_tracker = TokenTracker(max_context_tokens=self.max_context_tokens)
         bind_token_tracker(self.token_tracker)
-        self.mcp_manager = MCPClientManager(mcp_servers)
-        await self.mcp_manager.initialize()
 
-        self.agent_definitions = load_agent_definitions(database_path)
+        if not self.uses_remote_runtime():
+            ensure_mock_ansible_lint_agentruntime(database_path)
+            ensure_mock_workflow_agent_agentruntime(database_path)
+            ensure_mock_infra_search_agentruntime(database_path)
+
+        self.agent_definitions = self._load_runtime_definitions(database_path)
         self.agent_definitions_by_id = {
             definition.agent_id: definition for definition in self.agent_definitions
         }
-
-        for definition in self.agent_definitions:
-            self.agent_operation_status.setdefault(definition.agent_id, "idle")
-            self.agent_active_counts.setdefault(definition.agent_id, 0)
-            if definition.agent_id == INVENTORY_AGENT_ID:
-                self.agents[definition.agent_id] = INVENTORY_AGENT_MARKER
-                continue
-            try:
-                self.agents[definition.agent_id] = await build_agent(definition, self.mcp_manager)
-            except Exception as exc:
-                self.mark_agent_error(
-                    definition.agent_id,
-                    f"Agent build failed: {exc}",
-                )
-
+        self._register_db_agents()
         self._register_system_agents()
-        self.llm_status = await self._check_llm(llm_settings.base_url)
-        self._refresh_agent_health_status()
+        if not self.uses_remote_runtime():
+            await self._build_local_agents()
+        await self.refresh_health()
 
     async def refresh_health(self) -> None:
         async with self._health_check_lock:
-            llm_settings, _, _, _ = load_settings()
-            self.llm_status = await self._check_llm(llm_settings.base_url)
-            if self.mcp_manager is not None:
-                await self.mcp_manager.refresh_health()
+            if self.agent_runtime is not None and get_runtime_capabilities(self.execution_mode).health_summary:
+                try:
+                    self._runtime_health_cache = await self.agent_runtime.get_runtime_summary()
+                except Exception as exc:
+                    logger.exception("Failed to refresh sandbox runtime health: %s", exc)
+                    self._runtime_health_cache = {}
+            else:
+                self._runtime_health_cache = {}
             self._refresh_agent_health_status()
 
+    def uses_remote_runtime(self) -> bool:
+        return self.execution_mode == "http"
+
     def _refresh_agent_health_status(self) -> None:
+        remote_status = self._runtime_health_cache.get("agent_status", {})
+        use_mock_fallback = not get_runtime_capabilities(self.execution_mode).health_summary
         statuses: dict[str, str] = {}
-        for definition in [*self.agent_definitions, *self.system_agent_definitions]:
+        for definition in self.agent_definitions:
             agent_id = definition.agent_id
-            if agent_id == INVENTORY_AGENT_ID:
-                statuses[agent_id] = self.get_inventory_health_status()
-                continue
-            if is_dashboard_system_agent_id(agent_id):
-                statuses[agent_id] = "ready"
-                continue
             if agent_id not in self.agents:
                 statuses[agent_id] = "unavailable"
                 continue
-            if self.mcp_manager is None:
-                statuses[agent_id] = "unknown"
+            if is_control_plane_orchestration_agent(agent_id):
+                statuses[agent_id] = "ready"
                 continue
-            statuses[agent_id] = _aggregate_mcp_status(
-                self.mcp_manager,
-                definition.mcp_server_keys,
-            )
+            if is_mock_platform_orchestrator_agent(agent_id):
+                statuses[agent_id] = "ready"
+                continue
+            if self.agents.get(agent_id) is INFRA_SEARCH_SERVICE_MARKER or (
+                self.uses_remote_runtime() and is_infra_search_agent_id(agent_id)
+            ):
+                mcp_status = infra_search_agent_service.mcp_status
+                if mcp_status == "connected":
+                    statuses[agent_id] = "connected"
+                elif mcp_status in {"partial", "degraded"}:
+                    statuses[agent_id] = "partial"
+                elif infra_search_agent_service.is_ready:
+                    statuses[agent_id] = "partial"
+                else:
+                    statuses[agent_id] = "unavailable"
+                continue
+            if self.uses_remote_runtime():
+                statuses[agent_id] = self.get_axit_agent_connection_status(agent_id)
+                continue
+            if use_mock_fallback:
+                if (
+                    self.mcp_manager is not None
+                    and self.agents.get(agent_id) is not REMOTE_AGENT_MARKER
+                ):
+                    statuses[agent_id] = _aggregate_mcp_status(
+                        self.mcp_manager,
+                        definition.mcp_server_keys,
+                    )
+                else:
+                    statuses[agent_id] = "mock"
+                continue
+            if isinstance(remote_status, dict) and agent_id in remote_status:
+                statuses[agent_id] = str(remote_status[agent_id])
+            else:
+                statuses[agent_id] = "unknown"
         self.agent_health_status = statuses
 
     def get_agent_health_status(self) -> dict[str, str]:
         return dict(self.agent_health_status)
 
-    def get_inventory_health_status(self) -> str:
-        inventory_service = getattr(self, "inventory_service", None)
-        if inventory_service is None:
+    def get_runtime_status(self) -> str:
+        statuses = list(self.agent_health_status.values())
+        if not statuses:
             return "unknown"
-        return inventory_service.status
 
-    async def reload_agents(self, database_path: Path) -> None:
-        if self.mcp_manager is None:
-            raise RuntimeError("AgentManager is not initialized")
+        active_statuses = [status for status in statuses if status != "unavailable"]
+        if not active_statuses:
+            return "unavailable"
+        if all(status in {"connected", "ready", "mock"} for status in active_statuses):
+            return "connected"
+        if any(status in {"connected", "partial", "ready", "degraded"} for status in active_statuses):
+            return "partial"
+        return active_statuses[0]
 
-        self.agent_definitions = load_agent_definitions(database_path)
+    def sync_remote_catalog(self, database_path: Path) -> None:
+        """Refresh http-mode agent catalog and health badges from DB without MCP rebuild."""
+        if not self.uses_remote_runtime():
+            return
+
+        self.agent_definitions = self._load_runtime_definitions(database_path)
         self.agent_definitions_by_id = {
             definition.agent_id: definition for definition in self.agent_definitions
         }
 
-        next_agent_ids = {
-            definition.agent_id
-            for definition in [*self.agent_definitions, *list_dashboard_system_agent_definitions()]
-        }
+        next_agent_ids = {definition.agent_id for definition in self.agent_definitions}
         for agent_id in list(self.agents.keys()):
             if agent_id not in next_agent_ids:
                 del self.agents[agent_id]
@@ -165,36 +273,51 @@ class AgentManager:
                 del self.agent_operation_status[agent_id]
                 self.agent_operation_errors.pop(agent_id, None)
                 self.agent_active_counts.pop(agent_id, None)
-
-        for definition in self.agent_definitions:
-            self.agent_operation_status.setdefault(definition.agent_id, "idle")
-            self.agent_active_counts.setdefault(definition.agent_id, 0)
-            if definition.agent_id == INVENTORY_AGENT_ID:
-                self.agents[definition.agent_id] = INVENTORY_AGENT_MARKER
-                continue
-            try:
-                self.agents[definition.agent_id] = await build_agent(definition, self.mcp_manager)
-                if self.agent_operation_status.get(definition.agent_id) == "error":
-                    self.agent_operation_status[definition.agent_id] = "idle"
-                    self.agent_operation_errors.pop(definition.agent_id, None)
-            except Exception as exc:
-                self.mark_agent_error(
-                    definition.agent_id,
-                    f"Agent rebuild failed: {exc}",
-                )
-
+                self.agent_operation_tasks.pop(agent_id, None)
+        self._register_db_agents()
         self._register_system_agents()
         self._refresh_agent_health_status()
 
-    async def _check_llm(self, base_url: str) -> str:
-        try:
-            async with httpx.AsyncClient(timeout=5.0) as client:
-                response = await client.get(f"{base_url.rstrip('/')}/models")
-                if response.status_code < 500:
-                    return "connected"
-                return f"error: HTTP {response.status_code}"
-        except Exception as exc:
-            return f"error: {exc}"
+    async def reload_agents(self, database_path: Path) -> None:
+        self.agent_definitions = self._load_runtime_definitions(database_path)
+        self.agent_definitions_by_id = {
+            definition.agent_id: definition for definition in self.agent_definitions
+        }
+
+        next_agent_ids = {definition.agent_id for definition in self.agent_definitions}
+        for agent_id in list(self.agents.keys()):
+            if agent_id not in next_agent_ids:
+                del self.agents[agent_id]
+        for agent_id in list(self.agent_operation_status.keys()):
+            if agent_id not in next_agent_ids:
+                del self.agent_operation_status[agent_id]
+                self.agent_operation_errors.pop(agent_id, None)
+                self.agent_active_counts.pop(agent_id, None)
+                self.agent_operation_tasks.pop(agent_id, None)
+
+        self._register_db_agents()
+        self._register_system_agents()
+        if not self.uses_remote_runtime():
+            await self._build_local_agents()
+        await self.refresh_health()
+
+    async def rebuild_langgraph_agents(self) -> None:
+        """Rebuild LangGraph agents so runtime LLM provider changes take effect."""
+        if self.uses_remote_runtime() or self.mcp_manager is None:
+            return
+
+        for definition in self.agent_definitions:
+            agent_id = definition.agent_id
+            if is_mock_platform_orchestrator_agent(agent_id):
+                continue
+            current = self.agents.get(agent_id)
+            if current in (REMOTE_AGENT_MARKER, ORCHESTRATOR_MARKER):
+                continue
+            try:
+                self.agents[agent_id] = await build_agent(definition, self.mcp_manager)
+            except Exception as exc:
+                logger.exception("Failed to rebuild agent %s after LLM change: %s", agent_id, exc)
+                self.agents.pop(agent_id, None)
 
     def get_agent(self, agent_id: str) -> Any:
         if agent_id not in self.agents:
@@ -213,27 +336,70 @@ class AgentManager:
         return self.agent_operation_errors.get(agent_id)
 
     def get_operation_detail(self, agent_id: str) -> str | None:
-        detail = self.agent_operation_details.get(agent_id)
-        if not detail:
+        details = self.get_operation_details(agent_id)
+        if not details:
             return None
-        return detail
+        return details[0]
 
-    def mark_agent_working(self, agent_id: str, detail: str | None = None) -> None:
-        self.agent_active_counts[agent_id] = self.agent_active_counts.get(agent_id, 0) + 1
-        self.agent_operation_status[agent_id] = "working"
-        self.agent_operation_errors.pop(agent_id, None)
-        label = (detail or "").strip()
-        if label:
-            self.agent_operation_details[agent_id] = label
-        elif agent_id not in self.agent_operation_details:
-            self.agent_operation_details[agent_id] = "처리 중"
+    def get_operation_details(self, agent_id: str) -> list[str]:
+        tasks = self.agent_operation_tasks.get(agent_id)
+        if not tasks:
+            return []
+        return list(tasks.values())
 
-    def mark_agent_idle(self, agent_id: str) -> None:
-        active_count = max(0, self.agent_active_counts.get(agent_id, 0) - 1)
-        self.agent_active_counts[agent_id] = active_count
-        if active_count == 0 and self.agent_operation_status.get(agent_id) != "error":
+    def get_active_count(self, agent_id: str) -> int:
+        return len(self.agent_operation_tasks.get(agent_id, {}))
+
+    def _sync_operation_state(self, agent_id: str) -> None:
+        count = len(self.agent_operation_tasks.get(agent_id, {}))
+        self.agent_active_counts[agent_id] = count
+        if count > 0:
+            self.agent_operation_status[agent_id] = "working"
+            return
+        if self.agent_operation_status.get(agent_id) != "error":
             self.agent_operation_status[agent_id] = "idle"
-            self.agent_operation_details.pop(agent_id, None)
+
+    def mark_agent_working(
+        self,
+        agent_id: str,
+        detail: str | None = None,
+        *,
+        task_id: str | None = None,
+    ) -> str:
+        from uuid import uuid4
+
+        key = (task_id or "").strip() or uuid4().hex
+        label = (detail or "").strip() or "처리 중"
+        tasks = self.agent_operation_tasks.setdefault(agent_id, {})
+        tasks[key] = label
+        self.agent_operation_errors.pop(agent_id, None)
+        self._sync_operation_state(agent_id)
+        return key
+
+    def mark_agent_idle(self, agent_id: str, task_id: str | None = None) -> None:
+        tasks = self.agent_operation_tasks.get(agent_id)
+        if tasks:
+            if task_id and task_id in tasks:
+                del tasks[task_id]
+            elif not task_id and tasks:
+                last_key = next(reversed(tasks))
+                del tasks[last_key]
+            if not tasks:
+                self.agent_operation_tasks.pop(agent_id, None)
+        self._sync_operation_state(agent_id)
+
+    def get_axit_agent_connection_status(self, agent_id: str) -> str:
+        """Connection badge: reachable catalog agents stay connected.
+
+        Invoke/runtime errors are reflected in ``operation_status`` (error),
+        not as a degraded connection state.
+        """
+        del agent_id
+        return "connected"
+
+    def mark_agent_invoke_failure(self, agent_id: str, reason: str) -> None:
+        """Log invoke failures without changing connection status."""
+        logger.warning("Agent %s invoke failure (connection stays connected): %s", agent_id, reason)
 
     def mark_agent_error(
         self,
@@ -245,7 +411,7 @@ class AgentManager:
         self.agent_active_counts[agent_id] = 0
         self.agent_operation_status[agent_id] = "error"
         self.agent_operation_errors[agent_id] = reason
-        self.agent_operation_details.pop(agent_id, None)
+        self.agent_operation_tasks.pop(agent_id, None)
         log_agent_error(agent_id, reason=reason, input_message=input_message)
 
 
@@ -267,15 +433,63 @@ async def _health_check_loop(manager: AgentManager, interval_seconds: int) -> No
 async def lifespan(app: FastAPI):
     logging.basicConfig(level=logging.INFO)
     ensure_agent_logs_dir()
+    initialize_agent_logs()
+    initialize_workflow_logs()
     initialize_user_comm_logs()
     _, server_settings, _, database_path = load_settings()
+    runtime_mode = normalize_runtime_mode(server_settings.agent_runtime_mode)
+    logger.info("AGENT_RUNTIME_MODE=%s", runtime_mode)
+    logger.info(
+        "AGENT_RUNTIME_HTTP_TIMEOUT_SECONDS=%s",
+        server_settings.agent_runtime_http_timeout_seconds,
+    )
     app.state.database_path = init_database(database_path)
-    inventory_service = initialize_inventory_service(database_path=app.state.database_path)
-    app.state.inventory_service = inventory_service
-    await agent_manager.initialize(app.state.database_path)
-    agent_manager.inventory_service = inventory_service
-    agent_manager._refresh_agent_health_status()
+    if runtime_mode == "mock":
+        from backend.app.services.mock_llm_runtime import load_persisted_runtime_state
+
+        load_persisted_runtime_state()
+    await agent_manager.initialize(
+        app.state.database_path,
+        execution_mode=runtime_mode,
+    )
     app.state.agent_manager = agent_manager
+    app.state.agent_runtime_mode = runtime_mode
+    app.state.control_plane_base_url = resolve_control_plane_base_url(server_settings)
+    app.state.runtime_api_key = server_settings.agent_runtime_api_key
+    redis_settings = load_redis_settings()
+    await init_redis(redis_settings.url)
+    app.state.auth_session_settings = load_auth_session_settings()
+    app.state.agent_runtime = create_agent_runtime_client(
+        runtime_mode,
+        agent_manager=agent_manager,
+        database_path=app.state.database_path,
+        http_base_url=server_settings.agent_runtime_http_base_url or None,
+        http_api_key=server_settings.agent_runtime_api_key,
+        http_timeout_seconds=server_settings.agent_runtime_http_timeout_seconds,
+    )
+    agent_manager.agent_runtime = app.state.agent_runtime
+
+    try:
+        await infra_gap_analysis_service.initialize(runtime_mode)
+        app.state.infra_gap_analysis = infra_gap_analysis_service
+    except Exception:
+        logger.exception("INFRA_GAP_ANALYSIS initialization failed (agent remains available for lazy init)")
+        app.state.infra_gap_analysis = infra_gap_analysis_service
+
+    try:
+        await infra_search_agent_service.initialize(runtime_mode)
+        app.state.infra_search_agent = infra_search_agent_service
+    except Exception:
+        logger.exception("INFRA_SEARCH_AGENT initialization failed (agent remains available for lazy init)")
+        app.state.infra_search_agent = infra_search_agent_service
+    await agent_manager.refresh_health()
+
+    try:
+        await job_decision_agent_service.initialize(runtime_mode)
+        app.state.job_decision_agent = job_decision_agent_service
+    except Exception:
+        logger.exception("JOB_DECISION_AGENT initialization failed (agent remains available for lazy init)")
+        app.state.job_decision_agent = job_decision_agent_service
 
     health_task = asyncio.create_task(
         _health_check_loop(
@@ -283,25 +497,66 @@ async def lifespan(app: FastAPI):
             server_settings.health_check_interval_seconds,
         )
     )
-    job_requester_settings = load_job_requester_settings()
-    job_requester_task: asyncio.Task | None = None
-    if job_requester_settings.enabled:
-        job_requester_task = asyncio.create_task(
-            run_job_requester_loop(
-                app.state.database_path,
-                job_requester_settings,
+    backend_role = load_backend_role()
+    run_workers = backend_role_runs_workers(backend_role)
+    logger.info("backend role=%s run_workers=%s", backend_role, run_workers)
+
+    job_processor_settings = load_job_processor_settings()
+    job_processor_task: asyncio.Task | None = None
+    if run_workers and job_processor_settings.enabled:
+        job_processor_task = asyncio.create_task(
+            run_job_processor_loop(
+                Path(app.state.database_path),
+                app.state.agent_runtime,
+                runtime_mode=runtime_mode,
+                control_plane_base_url=app.state.control_plane_base_url,
+                settings=job_processor_settings,
                 agent_manager=agent_manager,
             )
         )
-
-    k8s_collector_settings = load_k8s_collector_settings()
-    k8s_collector_task: asyncio.Task | None = None
-    if k8s_collector_settings.enabled:
-        k8s_collector_task = asyncio.create_task(
-            run_k8s_collector_loop(
+    mynotes_settings = load_mynotes_settings()
+    mynote_flush_task: asyncio.Task | None = None
+    if run_workers and mynotes_settings.enabled:
+        mynote_flush_task = asyncio.create_task(
+            run_mynote_flush_loop(
                 Path(app.state.database_path),
-                k8s_collector_settings,
-                agent_manager=agent_manager,
+                mynotes_settings,
+            )
+        )
+    k8s_collector_settings = load_k8s_collector_settings()
+    k8s_scrape_task: asyncio.Task | None = None
+    if run_workers and k8s_collector_settings.schedule_enabled:
+        k8s_scrape_task = asyncio.create_task(
+            run_k8s_scrape_scheduler_loop(
+                Path(app.state.database_path),
+                runtime_mode=runtime_mode,
+                settings=k8s_collector_settings,
+            )
+        )
+    workflow_cron_task: asyncio.Task | None = None
+    if run_workers and app.state.agent_runtime is not None:
+        workflow_cron_task = asyncio.create_task(
+            run_workflow_cron_scheduler_loop(
+                Path(app.state.database_path),
+                app.state.agent_runtime,
+            )
+        )
+    received_mail_settings = load_received_mail_settings()
+    mail_receive_task: asyncio.Task | None = None
+    if run_workers and received_mail_settings.poll_enabled:
+        mail_receive_task = asyncio.create_task(
+            run_mail_receive_loop(
+                Path(app.state.database_path),
+                received_mail_settings,
+            )
+        )
+    job_decision_settings = load_job_decision_loop_settings()
+    job_decision_task: asyncio.Task | None = None
+    if run_workers and job_decision_settings.enabled:
+        job_decision_task = asyncio.create_task(
+            run_job_decision_loop(
+                Path(app.state.database_path),
+                job_decision_settings,
             )
         )
     try:
@@ -310,14 +565,31 @@ async def lifespan(app: FastAPI):
         health_task.cancel()
         with suppress(asyncio.CancelledError):
             await health_task
-        if job_requester_task is not None:
-            job_requester_task.cancel()
+        if job_processor_task is not None:
+            job_processor_task.cancel()
             with suppress(asyncio.CancelledError):
-                await job_requester_task
-        if k8s_collector_task is not None:
-            k8s_collector_task.cancel()
+                await job_processor_task
+        if mynote_flush_task is not None:
+            mynote_flush_task.cancel()
             with suppress(asyncio.CancelledError):
-                await k8s_collector_task
+                await mynote_flush_task
+        if k8s_scrape_task is not None:
+            k8s_scrape_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await k8s_scrape_task
+        if workflow_cron_task is not None:
+            workflow_cron_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await workflow_cron_task
+        if mail_receive_task is not None:
+            mail_receive_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await mail_receive_task
+        if job_decision_task is not None:
+            job_decision_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await job_decision_task
+        await close_redis()
 
 
 def create_app() -> FastAPI:
@@ -329,23 +601,48 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    app.add_middleware(SessionAuthMiddleware)
+
+    @app.get("/healthz")
+    async def healthz():
+        from fastapi.responses import JSONResponse
+
+        return JSONResponse({"status": "ok", "role": load_backend_role()})
+
+    @app.get("/readyz")
+    async def readyz():
+        from fastapi.responses import JSONResponse
+
+        return JSONResponse({"status": "ready", "role": load_backend_role()})
+
     app.include_router(auth_router, prefix="/api")
     app.include_router(signup_router, prefix="/api")
     app.include_router(users_router, prefix="/api")
     app.include_router(agent_logs_router, prefix="/api")
-    app.include_router(prompt_debug_router, prefix="/api")
-    app.include_router(agent_records_router, prefix="/api")
-    app.include_router(token_usage_router, prefix="/api")
+    app.include_router(agentruntime_records_router, prefix="/api")
     app.include_router(agents_router, prefix="/api")
     app.include_router(jobs_router, prefix="/api")
-    app.include_router(k8s_collector_router, prefix="/api")
+    app.include_router(mynotes_router, prefix="/api")
     app.include_router(notices_router, prefix="/api")
     app.include_router(chat_router, prefix="/api")
+    app.include_router(llm_router, prefix="/api")
     app.include_router(debug_router, prefix="/api")
+    app.include_router(postman_debug_router, prefix="/api")
+    app.include_router(mock_llm_router, prefix="/api")
     app.include_router(release_router, prefix="/api")
-    app.include_router(inventory_router, prefix="/api")
-    app.include_router(whatap_webhook_router, prefix="/api")
     app.include_router(teams_inbound_debug_router, prefix="/api")
+    app.include_router(whatap_webhook_router, prefix="/api")
+    app.include_router(whatap_test_router, prefix="/api")
+    app.include_router(k8s_infra_router, prefix="/api")
+    app.include_router(mailserver_router, prefix="/api")
+    app.include_router(received_mail_router, prefix="/api")
+    app.include_router(infra_gap_analysis_router, prefix="/api")
+    app.include_router(infra_search_agent_router, prefix="/api")
+    app.include_router(job_decision_agent_router, prefix="/api")
+    app.include_router(workflow_router, prefix="/api")
+    app.include_router(inventory_router, prefix="/api")
+    app.include_router(inventory_api_debug_router, prefix="/api")
+    app.include_router(axit_mock_router)
     return app
 
 

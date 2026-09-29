@@ -1,16 +1,20 @@
 import json
 import re
-import sqlite3
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from backend.app.db.database import get_connection
+from backend.app.db.engine import is_integrity_error
+from backend.app.db.roles import is_admin_role
+from backend.app.middleware.session_auth import get_request_auth_user
 
 router = APIRouter(tags=["debug"])
 
-_SAFE_IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+# Per-cluster k8s inventory tables use hyphens (e.g. dprv6-k8s_k8s_nodes).
+# Quoted identifiers make hyphenated names safe as long as quotes/control chars are rejected.
+_SAFE_IDENT = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9._-]*$")
 
 
 class TableSnapshot(BaseModel):
@@ -34,6 +38,14 @@ class DeleteTableRowsResponse(BaseModel):
     deleted: int
 
 
+class DropTableRequest(BaseModel):
+    confirm_name: str = Field(min_length=1)
+
+
+class DropTableResponse(BaseModel):
+    dropped: str
+
+
 class UpdateTableRowRequest(BaseModel):
     idx: int
     values: dict[str, Any]
@@ -43,43 +55,68 @@ class UpdateTableRowResponse(BaseModel):
     updated: int
 
 
+def _require_admin(request: Request) -> None:
+    viewer = get_request_auth_user(request)
+    if not is_admin_role(viewer.role):
+        raise HTTPException(status_code=403, detail="관리자만 수행할 수 있습니다.")
+
+
 def _quote_ident(name: str) -> str:
     if not _SAFE_IDENT.match(name):
         raise ValueError(f"Unsafe table name: {name}")
     return f'"{name}"'
 
 
-def _list_user_tables(connection: sqlite3.Connection) -> list[str]:
+def _list_user_tables(connection: Any) -> list[str]:
     rows = connection.execute(
         """
-        SELECT name
-        FROM sqlite_master
-        WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
-        ORDER BY name
+        SELECT tablename AS name
+        FROM pg_tables
+        WHERE schemaname = 'public'
+        ORDER BY tablename
         """
     ).fetchall()
     return [str(row["name"]) for row in rows]
 
 
-def _primary_key_column(connection: sqlite3.Connection, table_name: str) -> str | None:
-    quoted = _quote_ident(table_name)
-    column_info = connection.execute(f"PRAGMA table_info({quoted})").fetchall()
-    for col in column_info:
-        if int(col["pk"]) == 1:
-            return str(col["name"])
-    return None
-
-
 def _table_column_meta(
-    connection: sqlite3.Connection,
+    connection: Any,
     table_name: str,
 ) -> tuple[list[str], dict[str, str], dict[str, bool], str | None]:
-    quoted = _quote_ident(table_name)
-    column_info = connection.execute(f"PRAGMA table_info({quoted})").fetchall()
     columns: list[str] = []
     column_types: dict[str, str] = {}
     notnull: dict[str, bool] = {}
     primary_key: str | None = None
+
+    # Resolve against public schema; inventory tables may contain hyphens.
+    column_info = connection.execute(
+        """
+        SELECT
+            a.attname AS name,
+            pg_catalog.format_type(a.atttypid, a.atttypmod) AS type,
+            CASE WHEN a.attnotnull THEN 1 ELSE 0 END AS notnull,
+            CASE
+                WHEN EXISTS (
+                    SELECT 1
+                    FROM pg_constraint c
+                    WHERE c.conrelid = a.attrelid
+                      AND c.contype = 'p'
+                      AND a.attnum = ANY (c.conkey)
+                ) THEN 1
+                ELSE 0
+            END AS pk
+        FROM pg_attribute a
+        JOIN pg_class r ON a.attrelid = r.oid
+        JOIN pg_namespace n ON r.relnamespace = n.oid
+        WHERE n.nspname = 'public'
+          AND r.relname = ?
+          AND a.attnum > 0
+          AND NOT a.attisdropped
+        ORDER BY a.attnum
+        """,
+        (table_name,),
+    ).fetchall()
+
     for col in column_info:
         name = str(col["name"])
         columns.append(name)
@@ -88,6 +125,11 @@ def _table_column_meta(
         if int(col["pk"]) == 1:
             primary_key = name
     return columns, column_types, notnull, primary_key
+
+
+def _primary_key_column(connection: Any, table_name: str) -> str | None:
+    _columns, _types, _notnull, primary_key = _table_column_meta(connection, table_name)
+    return primary_key
 
 
 def _coerce_value(raw: Any, sqlite_type: str) -> Any:
@@ -172,13 +214,50 @@ async def delete_table_rows(
                 tuple(payload.idx_list),
             )
             connection.commit()
-        except sqlite3.IntegrityError as exc:
+        except Exception as exc:
+            if "integrity" not in type(exc).__name__.lower() and "foreign key" not in str(exc).lower():
+                raise
             raise HTTPException(
                 status_code=400,
                 detail=f"참조 무결성 때문에 삭제할 수 없습니다: {exc}",
             ) from exc
 
     return DeleteTableRowsResponse(deleted=int(cursor.rowcount))
+
+
+@router.post("/debug/tables/{table_name}/drop", response_model=DropTableResponse)
+async def drop_table(
+    table_name: str,
+    payload: DropTableRequest,
+    request: Request,
+) -> DropTableResponse:
+    """DROP TABLE — requires typing the exact table name in confirm_name."""
+    _require_admin(request)
+    confirm = (payload.confirm_name or "").strip()
+    if confirm != table_name:
+        raise HTTPException(
+            status_code=400,
+            detail="확인용 테이블 이름이 일치하지 않습니다.",
+        )
+    try:
+        quoted_table = _quote_ident(table_name)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    database_path = request.app.state.database_path
+    with get_connection(database_path) as connection:
+        if table_name not in _list_user_tables(connection):
+            raise HTTPException(status_code=404, detail=f"테이블을 찾을 수 없습니다: {table_name}")
+        try:
+            connection.execute(f"DROP TABLE IF EXISTS {quoted_table} CASCADE")
+            connection.commit()
+        except Exception as exc:
+            raise HTTPException(
+                status_code=500,
+                detail=f"테이블 삭제에 실패했습니다: {exc}",
+            ) from exc
+
+    return DropTableResponse(dropped=table_name)
 
 
 @router.post("/debug/tables/{table_name}/update", response_model=UpdateTableRowResponse)
@@ -234,13 +313,15 @@ async def update_table_row(
                 params,
             )
             connection.commit()
-        except sqlite3.IntegrityError as exc:
-            raise HTTPException(
-                status_code=400,
-                detail=f"무결성 제약으로 수정할 수 없습니다: {exc}",
-            ) from exc
-        except sqlite3.Error as exc:
-            raise HTTPException(status_code=400, detail=f"수정에 실패했습니다: {exc}") from exc
+        except Exception as exc:
+            if is_integrity_error(exc) or "integrity" in type(exc).__name__.lower():
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"무결성 제약으로 수정할 수 없습니다: {exc}",
+                ) from exc
+            if "psycopg" in type(exc).__module__ or type(exc).__name__.lower().startswith("error"):
+                raise HTTPException(status_code=400, detail=f"수정에 실패했습니다: {exc}") from exc
+            raise
 
         if cursor.rowcount == 0:
             raise HTTPException(status_code=404, detail=f"레코드를 찾을 수 없습니다: idx={payload.idx}")

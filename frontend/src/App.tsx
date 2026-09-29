@@ -1,56 +1,160 @@
 import { useCallback, useEffect, useState } from "react";
 
-import { TopologyProvider } from "./context/TopologyContext";
-import { AgentListPage } from "./components/agents/AgentListPage";
-import { TokenManagementPage } from "./components/agents/TokenManagementPage";
-import { InventoryCsvPage } from "./components/agents/InventoryCsvPage";
 import { DashboardPage } from "./components/DashboardPage";
+import { WorkflowPage } from "./components/workflow/WorkflowPage";
+import { InventoryPage } from "./components/inventory/InventoryPage";
 import { LoginPage } from "./components/LoginPage";
 import { MenuBar } from "./components/MenuBar";
-import { StatusBar } from "./components/StatusBar";
 import { TeamsInboundDebugWatcher } from "./components/TeamsInboundDebugWatcher";
-import { JobCreatePage } from "./components/jobs/JobCreatePage";
-import { JobListPage } from "./components/jobs/JobListPage";
 import { NoticeBoardPage } from "./components/notices/NoticeBoardPage";
+import { AgentConnectionListPage } from "./components/agentruntime/AgentConnectionListPage";
 import { AgentAssignmentPage } from "./components/users/AgentAssignmentPage";
 import { UserListPage } from "./components/users/UserListPage";
-import type { AgentInfo, HealthInfo } from "./types/agent";
+import type { AgentInfo } from "./types/agent";
 import type { AuthUser } from "./types/auth";
 import type { AppView } from "./types/navigation";
-import { ROLE_ADMIN } from "./types/user";
-import { clearAuthUser, loadAuthUser, saveAuthUser, startAuthSession } from "./utils/authSession";
+import { ROLE_PENDING, hasAdminAccess } from "./types/user";
+import { logoutSession, setUnauthorizedHandler } from "./utils/api";
+import {
+  clearAuthUser,
+  getAccessToken,
+  loadAuthUser,
+  saveAuthUser,
+  startAuthSession,
+  userFromAuthResponse,
+} from "./utils/authSession";
+import { clearClientSessionMemory } from "./utils/sessionMemory";
+
+type ShellView = "dashboard" | "workflow" | "inventory";
+
+const OVERLAY_VIEWS: ReadonlySet<AppView> = new Set([
+  "user-list",
+  "agent-assignment",
+  "agent-connections",
+  "notice-board",
+]);
+
+function isShellView(view: AppView): view is ShellView {
+  return view === "dashboard" || view === "workflow" || view === "inventory";
+}
 
 export default function App() {
-  const [user, setUser] = useState<AuthUser | null>(() => loadAuthUser());
+  const [user, setUser] = useState<AuthUser | null>(null);
+  const [authBootstrapping, setAuthBootstrapping] = useState(() => Boolean(getAccessToken()));
   const [activeView, setActiveView] = useState<AppView>("dashboard");
+  /** Keeps dashboard/workflow mounted under modal overlays (user list, agents, notices). */
+  const [shellView, setShellView] = useState<ShellView>("dashboard");
   const [agents, setAgents] = useState<AgentInfo[]>([]);
-  const [health, setHealth] = useState<HealthInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [integratedChatFullscreen, setIntegratedChatFullscreen] = useState(false);
+
+  const handleNavigate = useCallback((view: AppView) => {
+    setActiveView((current) => {
+      if (isShellView(view)) {
+        setShellView(view);
+        return view;
+      }
+      if (OVERLAY_VIEWS.has(view)) {
+        if (isShellView(current)) {
+          setShellView(current);
+        }
+        return view;
+      }
+      return view;
+    });
+  }, []);
 
   const toggleIntegratedChatFullscreen = useCallback(() => {
     setIntegratedChatFullscreen((current) => !current);
   }, []);
 
-  const handleLoginSuccess = useCallback((loggedInUser: AuthUser) => {
-    startAuthSession(loggedInUser);
-    setUser(loggedInUser);
-    setActiveView("dashboard");
-  }, []);
+  const handleLoginSuccess = useCallback(
+    (loggedInUser: AuthUser, accessToken: string, expiresInSeconds: number) => {
+      startAuthSession(loggedInUser, accessToken, expiresInSeconds);
+      setUser(loggedInUser);
+      setShellView("dashboard");
+      setActiveView("dashboard");
+    },
+    [],
+  );
 
   const handleUserUpdated = useCallback((updatedUser: AuthUser) => {
     saveAuthUser(updatedUser);
     setUser(updatedUser);
   }, []);
 
-  const handleLogout = useCallback(() => {
-    clearAuthUser();
+  const resetToLoggedOut = useCallback(() => {
+    clearClientSessionMemory();
     setUser(null);
+    setShellView("dashboard");
     setActiveView("dashboard");
     setAgents([]);
-    setHealth(null);
     setError(null);
     setIntegratedChatFullscreen(false);
+  }, []);
+
+  const handleLogout = useCallback(() => {
+    void logoutSession();
+    resetToLoggedOut();
+  }, [resetToLoggedOut]);
+
+  useEffect(() => {
+    setUnauthorizedHandler(() => {
+      clearAuthUser();
+      resetToLoggedOut();
+    });
+    return () => setUnauthorizedHandler(null);
+  }, [resetToLoggedOut]);
+
+  useEffect(() => {
+    const token = getAccessToken();
+    if (!token) {
+      setAuthBootstrapping(false);
+      return;
+    }
+
+    let cancelled = false;
+    const restoreSession = async () => {
+      try {
+        const response = await fetch("/api/auth/me");
+        if (!response.ok) {
+          clearAuthUser();
+          if (!cancelled) {
+            setUser(null);
+          }
+          return;
+        }
+
+        const payload = (await response.json()) as Record<string, unknown>;
+        const restoredUser = userFromAuthResponse(payload);
+        if (restoredUser.role === ROLE_PENDING) {
+          clearAuthUser();
+          if (!cancelled) {
+            setUser(null);
+          }
+          return;
+        }
+        const expiresIn = typeof payload.expires_in === "number" ? payload.expires_in : 3600;
+        if (!cancelled) {
+          startAuthSession(restoredUser, token, expiresIn);
+          setUser(restoredUser);
+        }
+      } catch {
+        const cachedUser = loadAuthUser();
+        if (!cancelled) {
+          setUser(cachedUser);
+        }
+      } finally {
+        if (!cancelled) {
+          setAuthBootstrapping(false);
+        }
+      }
+    };
+
+    void restoreSession();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -93,20 +197,17 @@ export default function App() {
     }
 
     try {
-      const [agentsResponse, healthResponse, usersResponse] = await Promise.all([
+      const [agentsResponse, usersResponse] = await Promise.all([
         fetch("/api/agents"),
-        fetch("/api/health"),
         fetch(`/api/users?viewer_role=${userRole}`),
       ]);
 
-      if (!agentsResponse.ok || !healthResponse.ok) {
+      if (!agentsResponse.ok) {
         throw new Error("백엔드 API에 연결할 수 없습니다.");
       }
 
       const agentsData = (await agentsResponse.json()) as AgentInfo[];
-      const healthData = (await healthResponse.json()) as HealthInfo;
       setAgents(agentsData);
-      setHealth(healthData);
       setError(null);
 
       if (usersResponse.ok) {
@@ -140,98 +241,101 @@ export default function App() {
   }, [userIdx, userRole]);
 
   useEffect(() => {
-    if (!user || activeView !== "dashboard") {
+    if (!user) {
       return;
     }
 
     loadDashboardData();
     const interval = window.setInterval(loadDashboardData, 15000);
     return () => window.clearInterval(interval);
-  }, [activeView, loadDashboardData, user]);
+  }, [loadDashboardData, user]);
 
   useEffect(() => {
-    if (activeView !== "dashboard") {
+    if (shellView !== "dashboard") {
       setIntegratedChatFullscreen(false);
     }
-  }, [activeView]);
+  }, [shellView]);
 
   useEffect(() => {
     if (!user) {
       return;
     }
-    const adminOnlyViews: AppView[] = [
-      "agent-list",
-      "inventory-csv",
-      "agent-assignment",
-      "token-management",
-    ];
-    if (user.role !== ROLE_ADMIN && adminOnlyViews.includes(activeView)) {
-      setActiveView("dashboard");
+    const adminOnlyViews: AppView[] = ["agent-assignment", "agent-connections"];
+    if (!hasAdminAccess(user.role) && adminOnlyViews.includes(activeView)) {
+      setActiveView(shellView);
     }
-  }, [activeView, user]);
+  }, [activeView, shellView, user]);
+
+  if (authBootstrapping) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-950 text-slate-300">
+        세션 확인 중...
+      </div>
+    );
+  }
 
   if (!user) {
     return <LoginPage onLoginSuccess={handleLoginSuccess} />;
   }
 
-  return (
-    <TopologyProvider>
-      <div className="flex h-screen flex-col overflow-hidden bg-slate-950 px-6 py-6">
-        <header className="mb-4 shrink-0">
-          <h1 className="text-2xl font-bold text-slate-100">AX 인프라 운영 콘솔</h1>
-          <p className="mt-1 text-sm text-slate-400">
-            에이전트 노드와 오른쪽 통합 채팅 창으로 멀티 에이전트를 관리합니다.
-          </p>
-        </header>
+  const closeOverlay = () => setActiveView(shellView);
 
+  return (
+    <>
+      <div className="flex h-screen flex-col overflow-hidden bg-slate-950 px-2 py-1">
         <MenuBar
           activeView={activeView}
+          shellView={shellView}
           user={user}
-          onNavigate={setActiveView}
+          onNavigate={handleNavigate}
           onLogout={handleLogout}
           onUserUpdated={handleUserUpdated}
         />
 
-        {activeView === "dashboard" ? (
-          <>
-            <div className="mb-4">
-              <StatusBar health={health} />
-            </div>
-            <DashboardPage
-              agents={agents}
-              health={health}
-              error={error}
-              user={user}
-              integratedChatFullscreen={integratedChatFullscreen}
-              onToggleIntegratedChatFullscreen={toggleIntegratedChatFullscreen}
-              onChatComplete={loadDashboardData}
-            />
-          </>
-        ) : null}
-
-        {activeView === "agent-list" && user.role === ROLE_ADMIN ? <AgentListPage /> : null}
-
-        {activeView === "inventory-csv" && user.role === ROLE_ADMIN ? <InventoryCsvPage /> : null}
-
-        {activeView === "token-management" && user.role === ROLE_ADMIN ? (
-          <TokenManagementPage viewerRole={user.role} />
-        ) : null}
-
-        {activeView === "job-list" ? <JobListPage user={user} /> : null}
-
-        {activeView === "job-create" ? <JobCreatePage user={user} /> : null}
+        {shellView === "workflow" ? (
+          <WorkflowPage
+            agents={agents}
+            user={user}
+            onChatComplete={loadDashboardData}
+          />
+        ) : shellView === "inventory" ? (
+          <InventoryPage user={user} />
+        ) : (
+          <DashboardPage
+            agents={agents}
+            error={error}
+            user={user}
+            integratedChatFullscreen={integratedChatFullscreen}
+            onToggleIntegratedChatFullscreen={toggleIntegratedChatFullscreen}
+            onChatComplete={loadDashboardData}
+          />
+        )}
 
         {activeView === "user-list" ? (
-          <UserListPage currentUserIdx={user.idx} currentUserRole={user.role} />
+          <UserListPage
+            currentUserIdx={user.idx}
+            currentUserRole={user.role}
+            onClose={closeOverlay}
+          />
         ) : null}
 
-        {activeView === "agent-assignment" && user.role === ROLE_ADMIN ? (
-          <AgentAssignmentPage onClose={() => setActiveView("dashboard")} />
+        {activeView === "agent-assignment" && hasAdminAccess(user.role) ? (
+          <AgentAssignmentPage onClose={closeOverlay} />
         ) : null}
 
-        {activeView === "notice-board" ? <NoticeBoardPage user={user} /> : null}
+        {activeView === "agent-connections" && hasAdminAccess(user.role) ? (
+          <AgentConnectionListPage
+            user={user}
+            onClose={closeOverlay}
+            onAgentRuntimeChanged={loadDashboardData}
+          />
+        ) : null}
+
+        {activeView === "notice-board" ? (
+          <NoticeBoardPage user={user} onClose={closeOverlay} />
+        ) : null}
       </div>
       <TeamsInboundDebugWatcher />
-    </TopologyProvider>
+    </>
   );
 }

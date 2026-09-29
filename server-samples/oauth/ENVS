@@ -1,0 +1,13 @@
+        - name: OAUTH_CLIENT_ID
+          value: b213d43f-1554-41e0-8b1d-7724bc3d8ed6
+        - name: OAUTH_CLIENT_SECRET
+          value: eR5sH2rW5dS2qG7qQ1cK6fR3dE7nG8oU3nS3jK0gY3pS1fM3lC
+        - name: OAUTH_URL
+          value: https://172.21.70.74/uplus/intuser/oauth2/token
+        - name: OAUTH_GRANT_TYPE
+          value: password
+        - name: OAUTH_SCOPE
+          value: EA
+        - name: OAUTH_AUTH_TYPE
+          value: IM
+

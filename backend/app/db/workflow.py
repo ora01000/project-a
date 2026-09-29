@@ -1,0 +1,1981 @@
+"""work_node / workflow tables for the designer screen."""
+
+from __future__ import annotations
+
+import re
+import shutil
+import uuid as uuid_lib
+from dataclasses import dataclass
+from pathlib import Path
+
+from backend.app.config import (
+    find_work_node_upload_dir,
+    sanitize_upload_userid,
+    work_node_upload_dir,
+)
+from backend.app.db.database import get_connection
+from backend.app.db.job_datetime import now_job_datetime
+from backend.app.db.users import get_user_by_idx
+from backend.app.services.workflow_graph import parse_workflow_tokens  # noqa: F401 — used by migration helpers indirectly
+
+SCRIPT_TYPES = frozenset({"kubectl", "ansible", "cli", "prompt"})
+WORKER_TYPES = frozenset({"agent", "hitl"})
+
+_WORK_NODE_SELECT = """
+    idx, uuid, owner, work_name, work_description, target_agent, work_script,
+    script_type, test_result, files, create_date, validate_date,
+    last_start_date, last_end_date, last_success, last_fail_reason,
+    use_previous_work_result, work_report, cron, cron_expr, schedule_wait,
+    worker, upload, upload_path, approver_userid, crud
+"""
+
+_WORKFLOW_SELECT = """
+    idx, uuid, owner, distribute, workflow_name, workflow_description, workflow,
+    create_date, test_result, validate_date,
+    last_start_date, last_end_date,
+    cron, cron_expr, merge_work_result
+"""
+
+DEFAULT_WORKFLOW_CRON_EXPR = "0 9 * * *"  # daily 09:00
+DEFAULT_WORK_NODE_CRON_EXPR = "0 9 * * *"  # time-of-day default (daily 09:00)
+CRUD_LETTERS = ("c", "r", "u", "d")
+
+
+def normalize_script_type(value: str | None) -> str:
+    normalized = (value or "").strip().lower()
+    if not normalized:
+        return ""
+    # Legacy alias from earlier schema drafts.
+    if normalized == "yaml":
+        normalized = "kubectl"
+    if normalized not in SCRIPT_TYPES:
+        raise ValueError("script_type은 kubectl, ansible, cli, prompt 중 하나여야 합니다.")
+    return normalized
+
+
+def normalize_worker(value: str | None) -> str:
+    normalized = (value or "").strip().lower() or "agent"
+    if normalized not in WORKER_TYPES:
+        raise ValueError("worker는 agent 또는 hitl 이어야 합니다.")
+    return normalized
+
+
+def normalize_merge_work_result(value: str | None) -> str:
+    """Normalize comma-separated work_node uuids for ``merge_work_result``."""
+    raw = (value or "").strip()
+    if not raw:
+        return ""
+    parts: list[str] = []
+    seen: set[str] = set()
+    for token in raw.replace(";", ",").split(","):
+        key = token.strip().lower()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        parts.append(key)
+    return ",".join(parts)[:2000]
+
+
+def parse_merge_work_result_uuids(value: str | None) -> list[str]:
+    normalized = normalize_merge_work_result(value)
+    if not normalized:
+        return []
+    return [part for part in normalized.split(",") if part]
+
+
+def normalize_crud(value: object | None) -> str:
+    """Normalize CRUD flags to a compact string in ``crud`` order (e.g. ``cru``).
+
+    Accepts a string (``"c,r"``, ``"CRU"``, ``"c r"``) or a list/tuple of letters.
+    """
+    letters: list[str] = []
+    if value is None:
+        raw_parts: list[str] = []
+    elif isinstance(value, (list, tuple, set)):
+        raw_parts = [str(item) for item in value]
+    else:
+        raw = str(value).strip().lower().replace(";", ",").replace("|", ",")
+        if "," in raw or " " in raw:
+            raw_parts = [part.strip() for part in raw.replace(" ", ",").split(",")]
+        else:
+            raw_parts = list(raw)
+
+    for part in raw_parts:
+        token = part.strip().lower()
+        if not token:
+            continue
+        if len(token) == 1 and token in CRUD_LETTERS:
+            letters.append(token)
+            continue
+        for ch in token:
+            if ch in CRUD_LETTERS:
+                letters.append(ch)
+    ordered = "".join(letter for letter in CRUD_LETTERS if letter in set(letters))
+    return ordered[:4]
+
+
+_UUID_PATTERN = re.compile(
+    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+)
+
+
+def _new_uuid() -> str:
+    return str(uuid_lib.uuid4())
+
+
+def _normalize_uuid(value: str | None) -> str:
+    """Accept a caller-supplied uuid (AI import) or mint a new one.
+
+    Rejects malformed ids up front: flow expressions only resolve tokens that
+    match the uuid shape, so anything else would be unreachable once stored.
+    """
+    text = (value or "").strip()
+    if not text:
+        return _new_uuid()
+    if not _UUID_PATTERN.match(text):
+        raise ValueError(f"uuid 형식이 올바르지 않습니다: {text}")
+    return text.lower()
+
+
+def _column_value(row, name: str, index: int = 0):
+    if hasattr(row, "keys"):
+        return row[name]
+    return row[index]
+
+
+def _table_column_names(connection, table: str) -> set[str]:
+    rows = connection.execute(
+        """
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_schema = current_schema() AND table_name = ?
+        """,
+        (table,),
+    ).fetchall()
+    return {str(_column_value(row, "column_name")).lower() for row in rows}
+
+
+def _primary_key_columns(connection, table: str) -> set[str]:
+    rows = connection.execute(
+        """
+        SELECT a.attname AS column_name
+        FROM pg_index i
+        JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY (i.indkey)
+        WHERE i.indrelid = to_regclass(?) AND i.indisprimary
+        """,
+        (table,),
+    ).fetchall()
+    return {str(_column_value(row, "column_name")).lower() for row in rows}
+
+
+def _backfill_missing_uuids(connection, table: str) -> None:
+    """Give every row a uuid before enforcing NOT NULL / unique on uuid."""
+    rows = connection.execute(
+        f"""
+        SELECT ctid::text AS row_id
+        FROM {table}
+        WHERE uuid IS NULL OR btrim(COALESCE(uuid, '')) = ''
+        """
+    ).fetchall()
+    for row in rows:
+        connection.execute(
+            f"UPDATE {table} SET uuid = ? WHERE ctid = ?::tid",
+            (_new_uuid(), str(_column_value(row, "row_id"))),
+        )
+
+
+def work_uuids_from_expression(expression: str) -> set[str]:
+    """Collect work_node uuids referenced by a workflow expression or JSON document."""
+    from backend.app.services.workflow_document import work_uuids_from_document
+
+    try:
+        return work_uuids_from_document(expression)
+    except ValueError:
+        return set()
+
+
+def resolve_workflow_history_userid(database_path: str | Path, user_idx: int) -> str:
+    """Map history ``user_idx`` to filesystem ``users.userid`` under UPLOAD_HOME."""
+    user = get_user_by_idx(database_path, int(user_idx or 0))
+    if user is not None:
+        key = sanitize_upload_userid(user.userid)
+        if key:
+            return key
+    fallback = sanitize_upload_userid(f"user_{int(user_idx or 0)}")
+    return fallback or "unknown"
+
+
+def _migrate_workflow_history_result_files(connection) -> None:
+    """Copy legacy ``result_file`` absolute paths into normalized ``result.out`` slots."""
+    from backend.app.config import write_workflow_history_result
+
+    columns = _table_column_names(connection, "workflow_history")
+    if "result_file" not in columns:
+        return
+    rows = connection.execute(
+        """
+        SELECT idx, uuid, result_file, user_idx
+        FROM workflow_history
+        WHERE result_file IS NOT NULL AND btrim(result_file) <> ''
+        """
+    ).fetchall()
+    for row in rows:
+        idx = int(_column_value(row, "idx", 0) or 0)
+        workflow_uuid = str(_column_value(row, "uuid", 1) or "").strip()
+        source_text = str(_column_value(row, "result_file", 2) or "").strip()
+        user_idx = int(_column_value(row, "user_idx", 3) or 1) or 1
+        if idx <= 0 or not workflow_uuid or not source_text:
+            continue
+        source = Path(source_text)
+        if not source.is_file():
+            continue
+        try:
+            content = source.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        userid_row = connection.execute(
+            "SELECT userid FROM users WHERE idx = ?",
+            (user_idx,),
+        ).fetchone()
+        userid = ""
+        if userid_row is not None:
+            userid = sanitize_upload_userid(str(_column_value(userid_row, "userid", 0) or ""))
+        if not userid:
+            userid = sanitize_upload_userid(f"user_{user_idx}") or "unknown"
+        try:
+            write_workflow_history_result(
+                workflow_uuid,
+                idx,
+                userid=userid,
+                content=content,
+            )
+        except (OSError, ValueError):
+            continue
+
+
+def rewrite_expression_uuid_map(expression: str, mapping: dict[str, str]) -> str:
+    """Remap work_node uuid tokens in a workflow expression or JSON document."""
+    from backend.app.services.workflow_document import rewrite_document_uuid_map
+
+    return rewrite_document_uuid_map(expression, mapping)
+
+
+def rewrite_expression_idx_to_uuid(expression: str, mapping: dict[str, str]) -> str:
+    """Replace legacy integer work_node tokens with their uuid equivalents.
+
+    Only used while migrating stored ``workflow.workflow`` expressions; the
+    runtime parser accepts uuid tokens exclusively.
+    """
+    return rewrite_expression_uuid_map(expression, mapping)
+
+
+def _migrate_workflow_expressions_to_uuid(connection) -> None:
+    rows = connection.execute("SELECT idx, uuid FROM work_node").fetchall()
+    mapping = {
+        str(_column_value(row, "idx", 0)): str(_column_value(row, "uuid", 1))
+        for row in rows
+        if str(_column_value(row, "uuid", 1) or "").strip()
+    }
+    if not mapping:
+        return
+    for row in connection.execute("SELECT uuid, workflow FROM workflow").fetchall():
+        current = str(_column_value(row, "workflow", 1) or "")
+        rewritten = rewrite_expression_idx_to_uuid(current, mapping)
+        if rewritten == current.strip():
+            continue
+        connection.execute(
+            "UPDATE workflow SET workflow = ? WHERE uuid = ?",
+            (rewritten, str(_column_value(row, "uuid", 0))),
+        )
+
+
+def _migrate_to_idx_primary_key(connection, table: str) -> None:
+    """Ensure ``idx SERIAL`` is the primary key and ``uuid`` stays unique."""
+    columns = _table_column_names(connection, table)
+    if "idx" not in columns:
+        connection.execute(f"ALTER TABLE {table} ADD COLUMN idx SERIAL")
+
+    pk = _primary_key_columns(connection, table)
+    if pk and pk != {"idx"}:
+        connection.execute(f"ALTER TABLE {table} DROP CONSTRAINT IF EXISTS {table}_pkey")
+        pk = _primary_key_columns(connection, table)
+    if pk != {"idx"}:
+        connection.execute(f"ALTER TABLE {table} ADD PRIMARY KEY (idx)")
+
+    connection.execute(f"ALTER TABLE {table} ALTER COLUMN uuid SET NOT NULL")
+    connection.execute(f"ALTER TABLE {table} ALTER COLUMN uuid DROP DEFAULT")
+    # Prefer a unique index so re-runs are idempotent across constraint names.
+    connection.execute(f"DROP INDEX IF EXISTS {table}_uuid_uidx")
+    connection.execute(
+        f"CREATE UNIQUE INDEX IF NOT EXISTS {table}_uuid_uidx ON {table} (uuid)"
+    )
+    connection.execute(f"ALTER TABLE {table} DROP CONSTRAINT IF EXISTS {table}_uuid_key")
+
+
+def _migrate_work_node_script_columns(connection) -> None:
+    connection.execute(
+        """
+        ALTER TABLE work_node
+            ADD COLUMN IF NOT EXISTS work_script TEXT NOT NULL DEFAULT ''
+        """
+    )
+    columns = _table_column_names(connection, "work_node")
+    if "agent_response" in columns:
+        connection.execute(
+            """
+            UPDATE work_node
+            SET work_script = agent_response
+            WHERE btrim(COALESCE(work_script, '')) = ''
+              AND btrim(COALESCE(agent_response, '')) <> ''
+            """
+        )
+        connection.execute("ALTER TABLE work_node DROP COLUMN IF EXISTS agent_response")
+    if "user_prompt" in columns:
+        connection.execute("ALTER TABLE work_node DROP COLUMN IF EXISTS user_prompt")
+
+
+def _migrate_legacy_hitl_and_workflow_json(connection) -> None:
+    """Replace ``H:userid`` tokens with hitl work_nodes and persist JSON documents."""
+    from backend.app.services.workflow_document import (
+        dumps_workflow_json,
+        is_workflow_json_text,
+        normalize_workflow_document,
+        tokens_to_workflow_json,
+    )
+    from backend.app.services.workflow_graph import parse_workflow_tokens
+
+    rows = connection.execute(
+        "SELECT uuid, owner, workflow FROM workflow WHERE workflow IS NOT NULL"
+    ).fetchall()
+    for row in rows:
+        workflow_uuid = str(_column_value(row, "uuid", 0) or "").strip()
+        owner = int(_column_value(row, "owner", 1) or 0)
+        expression = str(_column_value(row, "workflow", 2) or "").strip()
+        if not workflow_uuid or not expression:
+            continue
+        if is_workflow_json_text(expression):
+            try:
+                normalized = normalize_workflow_document(expression)
+            except ValueError:
+                continue
+            if normalized != expression:
+                connection.execute(
+                    "UPDATE workflow SET workflow = ? WHERE uuid = ?",
+                    (normalized, workflow_uuid),
+                )
+            continue
+        try:
+            tokens = parse_workflow_tokens(expression)
+        except ValueError:
+            continue
+        needs_hitl = any(token.kind == "hitl" and not token.work_uuid for token in tokens)
+        if not needs_hitl:
+            try:
+                normalized = normalize_workflow_document(expression)
+            except ValueError:
+                continue
+            if normalized != expression:
+                connection.execute(
+                    "UPDATE workflow SET workflow = ? WHERE uuid = ?",
+                    (normalized, workflow_uuid),
+                )
+            continue
+
+        rewritten_parts: list[str] = []
+        for token in tokens:
+            if token.kind == "hitl" and not token.work_uuid:
+                userid = (token.userid or "").strip()
+                hitl_uuid = _new_uuid()
+                connection.execute(
+                    """
+                    INSERT INTO work_node (
+                        uuid, owner, work_name, work_description, target_agent, work_script,
+                        script_type, test_result, files, create_date, validate_date,
+                        last_start_date, last_end_date, last_success, last_fail_reason,
+                        use_previous_work_result, work_report, cron, cron_expr,
+                        worker, upload, upload_path, approver_userid
+                    ) VALUES (
+                        ?, ?, ?, ?, 0, '', '', 0, '', ?, '',
+                        '', '', 0, '', 0, '', 0, '0 9 * * *',
+                        'hitl', 0, '', ?
+                    )
+                    """,
+                    (
+                        hitl_uuid,
+                        owner,
+                        f"결재승인 ({userid})"[:100] if userid else "결재승인",
+                        "마이그레이션된 HITL 승인 단계",
+                        now_job_datetime(),
+                        userid[:50],
+                    ),
+                )
+                rewritten_parts.append(hitl_uuid)
+                continue
+            rewritten_parts.append(token.raw)
+        new_expression = "->".join(rewritten_parts)
+        try:
+            new_tokens = parse_workflow_tokens(new_expression)
+            normalized = dumps_workflow_json(tokens_to_workflow_json(new_tokens))
+        except ValueError:
+            normalized = new_expression
+        connection.execute(
+            "UPDATE workflow SET workflow = ? WHERE uuid = ?",
+            (normalized, workflow_uuid),
+        )
+
+
+def ensure_workflow_tables(connection) -> None:
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS work_node (
+            idx SERIAL PRIMARY KEY,
+            uuid VARCHAR(36) NOT NULL UNIQUE,
+            owner INTEGER NOT NULL DEFAULT 1,
+            work_name VARCHAR(100) NOT NULL,
+            work_description VARCHAR(500) NOT NULL DEFAULT '',
+            target_agent INTEGER NOT NULL DEFAULT 0,
+            work_script TEXT NOT NULL DEFAULT '',
+            script_type VARCHAR(20) NOT NULL DEFAULT '',
+            test_result INTEGER NOT NULL DEFAULT 0,
+            files VARCHAR(300) NOT NULL DEFAULT '',
+            create_date TEXT NOT NULL DEFAULT '',
+            validate_date TEXT NOT NULL DEFAULT '',
+            last_start_date TEXT NOT NULL DEFAULT '',
+            last_end_date TEXT NOT NULL DEFAULT '',
+            last_success INTEGER NOT NULL DEFAULT 0,
+            last_fail_reason VARCHAR(200) NOT NULL DEFAULT '',
+            use_previous_work_result INTEGER NOT NULL DEFAULT 0,
+            work_report VARCHAR(400) NOT NULL DEFAULT '',
+            cron INTEGER NOT NULL DEFAULT 0,
+            cron_expr VARCHAR(20) NOT NULL DEFAULT '0 9 * * *',
+            schedule_wait INTEGER NOT NULL DEFAULT 0,
+            worker VARCHAR(10) NOT NULL DEFAULT 'agent',
+            upload INTEGER NOT NULL DEFAULT 0,
+            upload_path VARCHAR(500) NOT NULL DEFAULT '',
+            approver_userid VARCHAR(50) NOT NULL DEFAULT '',
+            crud VARCHAR(4) NOT NULL DEFAULT ''
+        )
+        """
+    )
+    connection.execute(
+        """
+        ALTER TABLE work_node
+            ADD COLUMN IF NOT EXISTS uuid VARCHAR(36) NOT NULL DEFAULT ''
+        """
+    )
+    connection.execute(
+        """
+        ALTER TABLE work_node
+            ADD COLUMN IF NOT EXISTS owner INTEGER NOT NULL DEFAULT 1
+        """
+    )
+    connection.execute(
+        """
+        ALTER TABLE work_node
+            ADD COLUMN IF NOT EXISTS work_description VARCHAR(500) NOT NULL DEFAULT ''
+        """
+    )
+    connection.execute(
+        """
+        ALTER TABLE work_node
+            ADD COLUMN IF NOT EXISTS script_type VARCHAR(20) NOT NULL DEFAULT ''
+        """
+    )
+    connection.execute(
+        """
+        ALTER TABLE work_node
+            ADD COLUMN IF NOT EXISTS create_date TEXT NOT NULL DEFAULT ''
+        """
+    )
+    connection.execute(
+        """
+        ALTER TABLE work_node
+            ADD COLUMN IF NOT EXISTS validate_date TEXT NOT NULL DEFAULT ''
+        """
+    )
+    connection.execute(
+        """
+        ALTER TABLE work_node
+            ADD COLUMN IF NOT EXISTS last_start_date TEXT NOT NULL DEFAULT ''
+        """
+    )
+    connection.execute(
+        """
+        ALTER TABLE work_node
+            ADD COLUMN IF NOT EXISTS last_end_date TEXT NOT NULL DEFAULT ''
+        """
+    )
+    connection.execute(
+        """
+        ALTER TABLE work_node
+            ADD COLUMN IF NOT EXISTS last_success INTEGER NOT NULL DEFAULT 0
+        """
+    )
+    connection.execute(
+        """
+        ALTER TABLE work_node
+            ADD COLUMN IF NOT EXISTS last_fail_reason VARCHAR(200) NOT NULL DEFAULT ''
+        """
+    )
+    connection.execute(
+        """
+        ALTER TABLE work_node
+            ADD COLUMN IF NOT EXISTS use_previous_work_result INTEGER NOT NULL DEFAULT 0
+        """
+    )
+    connection.execute(
+        """
+        ALTER TABLE work_node
+            ADD COLUMN IF NOT EXISTS work_report VARCHAR(400) NOT NULL DEFAULT ''
+        """
+    )
+    connection.execute(
+        """
+        ALTER TABLE work_node
+            ALTER COLUMN work_report TYPE VARCHAR(400)
+        """
+    )
+    connection.execute(
+        """
+        ALTER TABLE work_node
+            ADD COLUMN IF NOT EXISTS cron INTEGER NOT NULL DEFAULT 0
+        """
+    )
+    connection.execute(
+        """
+        ALTER TABLE work_node
+            ADD COLUMN IF NOT EXISTS cron_expr VARCHAR(20) NOT NULL DEFAULT '0 9 * * *'
+        """
+    )
+    connection.execute(
+        """
+        ALTER TABLE work_node
+            ADD COLUMN IF NOT EXISTS schedule_wait INTEGER NOT NULL DEFAULT 0
+        """
+    )
+    connection.execute(
+        """
+        ALTER TABLE work_node
+            ADD COLUMN IF NOT EXISTS worker VARCHAR(10) NOT NULL DEFAULT 'agent'
+        """
+    )
+    connection.execute(
+        """
+        ALTER TABLE work_node
+            ADD COLUMN IF NOT EXISTS upload INTEGER NOT NULL DEFAULT 0
+        """
+    )
+    connection.execute(
+        """
+        ALTER TABLE work_node
+            ADD COLUMN IF NOT EXISTS upload_path VARCHAR(500) NOT NULL DEFAULT ''
+        """
+    )
+    connection.execute(
+        """
+        ALTER TABLE work_node
+            ADD COLUMN IF NOT EXISTS approver_userid VARCHAR(50) NOT NULL DEFAULT ''
+        """
+    )
+    connection.execute(
+        """
+        ALTER TABLE work_node
+            ADD COLUMN IF NOT EXISTS crud VARCHAR(4) NOT NULL DEFAULT ''
+        """
+    )
+    _migrate_work_node_script_columns(connection)
+    _migrate_legacy_hitl_and_workflow_json(connection)
+
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS workflow (
+            idx SERIAL PRIMARY KEY,
+            uuid VARCHAR(36) NOT NULL UNIQUE,
+            owner INTEGER NOT NULL DEFAULT 1,
+            distribute BOOLEAN NOT NULL DEFAULT FALSE,
+            workflow_name VARCHAR(100) NOT NULL,
+            workflow_description VARCHAR(500) NOT NULL DEFAULT '',
+            workflow TEXT NOT NULL DEFAULT '',
+            create_date TEXT NOT NULL DEFAULT '',
+            test_result INTEGER NOT NULL DEFAULT 0,
+            validate_date TEXT NOT NULL DEFAULT '',
+            last_start_date TEXT NOT NULL DEFAULT '',
+            last_end_date TEXT NOT NULL DEFAULT '',
+            cron INTEGER NOT NULL DEFAULT 0,
+            cron_expr VARCHAR(20) NOT NULL DEFAULT '0 9 * * *',
+            merge_work_result VARCHAR(2000) NOT NULL DEFAULT ''
+        )
+        """
+    )
+    connection.execute(
+        """
+        ALTER TABLE workflow
+            ADD COLUMN IF NOT EXISTS uuid VARCHAR(36) NOT NULL DEFAULT ''
+        """
+    )
+    connection.execute(
+        """
+        ALTER TABLE workflow
+            ADD COLUMN IF NOT EXISTS owner INTEGER NOT NULL DEFAULT 1
+        """
+    )
+    connection.execute(
+        """
+        ALTER TABLE workflow
+            ADD COLUMN IF NOT EXISTS distribute BOOLEAN NOT NULL DEFAULT FALSE
+        """
+    )
+    connection.execute(
+        """
+        ALTER TABLE workflow
+            ADD COLUMN IF NOT EXISTS create_date TEXT NOT NULL DEFAULT ''
+        """
+    )
+    connection.execute(
+        """
+        ALTER TABLE workflow
+            ADD COLUMN IF NOT EXISTS test_result INTEGER NOT NULL DEFAULT 0
+        """
+    )
+    connection.execute(
+        """
+        ALTER TABLE workflow
+            ADD COLUMN IF NOT EXISTS validate_date TEXT NOT NULL DEFAULT ''
+        """
+    )
+    connection.execute(
+        """
+        ALTER TABLE workflow
+            ADD COLUMN IF NOT EXISTS last_start_date TEXT NOT NULL DEFAULT ''
+        """
+    )
+    connection.execute(
+        """
+        ALTER TABLE workflow
+            ADD COLUMN IF NOT EXISTS last_end_date TEXT NOT NULL DEFAULT ''
+        """
+    )
+    connection.execute(
+        """
+        ALTER TABLE workflow
+            ADD COLUMN IF NOT EXISTS cron INTEGER NOT NULL DEFAULT 0
+        """
+    )
+    connection.execute(
+        """
+        ALTER TABLE workflow
+            ADD COLUMN IF NOT EXISTS cron_expr VARCHAR(20) NOT NULL DEFAULT '0 9 * * *'
+        """
+    )
+    connection.execute(
+        """
+        ALTER TABLE workflow
+            ADD COLUMN IF NOT EXISTS merge_work_result VARCHAR(2000) NOT NULL DEFAULT ''
+        """
+    )
+    connection.execute("ALTER TABLE work_node ALTER COLUMN owner SET DEFAULT 1")
+    connection.execute("ALTER TABLE workflow ALTER COLUMN owner SET DEFAULT 1")
+    # Migrate away from checkin model when upgrading existing DBs.
+    connection.execute("ALTER TABLE workflow DROP COLUMN IF EXISTS checkin_user")
+    connection.execute("ALTER TABLE workflow DROP COLUMN IF EXISTS checkin_time")
+    # Stats live in workflow_history; drop denormalized counters on workflow.
+    connection.execute("ALTER TABLE workflow DROP COLUMN IF EXISTS run_count")
+    connection.execute("ALTER TABLE workflow DROP COLUMN IF EXISTS sucess_count")
+    connection.execute("ALTER TABLE workflow DROP COLUMN IF EXISTS fail_count")
+    connection.execute("ALTER TABLE workflow DROP COLUMN IF EXISTS last_success")
+
+    _backfill_missing_uuids(connection, "work_node")
+    _backfill_missing_uuids(connection, "workflow")
+    if "idx" in _table_column_names(connection, "work_node"):
+        # Legacy expressions may still reference integer work_node ids.
+        _migrate_workflow_expressions_to_uuid(connection)
+    _migrate_to_idx_primary_key(connection, "work_node")
+    _migrate_to_idx_primary_key(connection, "workflow")
+
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS workflow_history (
+            idx SERIAL PRIMARY KEY,
+            uuid VARCHAR(36) NOT NULL,
+            start_date TEXT NOT NULL DEFAULT '',
+            end_date TEXT NOT NULL DEFAULT '',
+            success INTEGER NOT NULL DEFAULT 0,
+            user_idx INTEGER NOT NULL DEFAULT 1
+        )
+        """
+    )
+    connection.execute(
+        """
+        ALTER TABLE workflow_history
+            ADD COLUMN IF NOT EXISTS user_idx INTEGER NOT NULL DEFAULT 1
+        """
+    )
+    connection.execute(
+        """
+        ALTER TABLE workflow_history
+            ADD COLUMN IF NOT EXISTS success INTEGER NOT NULL DEFAULT 0
+        """
+    )
+    history_columns = _table_column_names(connection, "workflow_history")
+    if "finish_success" in history_columns:
+        connection.execute(
+            """
+            UPDATE workflow_history
+            SET success = finish_success
+            """
+        )
+        connection.execute("ALTER TABLE workflow_history DROP COLUMN IF EXISTS finish_success")
+    connection.execute(
+        """
+        UPDATE workflow_history
+        SET user_idx = 1
+        WHERE user_idx IS NULL OR user_idx <= 0
+        """
+    )
+    _migrate_workflow_history_result_files(connection)
+    connection.execute("ALTER TABLE workflow_history DROP COLUMN IF EXISTS result_file")
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS ix_workflow_history_uuid
+            ON workflow_history (uuid)
+        """
+    )
+
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS work_node_history (
+            idx SERIAL PRIMARY KEY,
+            uuid VARCHAR(36) NOT NULL,
+            start_date TEXT NOT NULL DEFAULT '',
+            end_date TEXT NOT NULL DEFAULT '',
+            success INTEGER NOT NULL DEFAULT 0,
+            workflow_history_idx INTEGER NOT NULL DEFAULT 0,
+            user_idx INTEGER NOT NULL DEFAULT 1
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS ix_work_node_history_uuid
+            ON work_node_history (uuid)
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS ix_work_node_history_workflow_history_idx
+            ON work_node_history (workflow_history_idx)
+        """
+    )
+
+
+@dataclass(frozen=True)
+class WorkNodeRecord:
+    idx: int
+    uuid: str
+    work_name: str
+    work_description: str
+    target_agent: int
+    work_script: str
+    script_type: str
+    test_result: bool
+    files: str
+    create_date: str
+    validate_date: str
+    last_start_date: str = ""
+    last_end_date: str = ""
+    last_success: bool = False
+    last_fail_reason: str = ""
+    use_previous_work_result: bool = False
+    work_report: str = ""
+    cron: bool = False
+    cron_expr: str = DEFAULT_WORK_NODE_CRON_EXPR
+    schedule_wait: bool = False
+    owner: int = 0
+    worker: str = "agent"
+    upload: bool = False
+    upload_path: str = ""
+    approver_userid: str = ""
+    crud: str = ""
+
+
+@dataclass(frozen=True)
+class WorkflowRecord:
+    idx: int
+    uuid: str
+    workflow_name: str
+    workflow_description: str
+    workflow: str
+    create_date: str
+    test_result: bool
+    validate_date: str
+    last_start_date: str = ""
+    last_end_date: str = ""
+    owner: int = 0
+    distribute: bool = False
+    cron: bool = False
+    cron_expr: str = DEFAULT_WORKFLOW_CRON_EXPR
+    merge_work_result: str = ""
+
+
+@dataclass(frozen=True)
+class WorkflowRunStats:
+    """Derived from ``workflow_history`` for a single workflow uuid."""
+
+    run_count: int = 0
+    success_count: int = 0
+    fail_count: int = 0
+    last_success: bool = False
+
+
+def user_owns_workflow(record: WorkflowRecord, user_idx: int) -> bool:
+    return int(record.owner or 0) == int(user_idx) and int(user_idx) > 0
+
+
+def user_can_view_workflow(record: WorkflowRecord, user_idx: int) -> bool:
+    if int(user_idx) <= 0:
+        return False
+    return user_owns_workflow(record, user_idx) or bool(record.distribute)
+
+
+def resolve_work_node_upload_userid(
+    database_path: str | Path,
+    owner: int,
+) -> str:
+    """Map ``work_node.owner`` (users.idx) to filesystem ``users.userid`` segment."""
+    user = get_user_by_idx(database_path, int(owner or 0))
+    if user is not None:
+        key = sanitize_upload_userid(user.userid)
+        if key:
+            return key
+    fallback = sanitize_upload_userid(f"owner_{int(owner or 0)}")
+    return fallback or "unknown"
+
+
+def _row_to_work_node(row) -> WorkNodeRecord:
+    keys = row.keys() if hasattr(row, "keys") else []
+    description = row["work_description"] if "work_description" in keys else ""
+    script_type = row["script_type"] if "script_type" in keys else ""
+    create_date = row["create_date"] if "create_date" in keys else ""
+    validate_date = row["validate_date"] if "validate_date" in keys else ""
+    last_start_date = row["last_start_date"] if "last_start_date" in keys else ""
+    last_end_date = row["last_end_date"] if "last_end_date" in keys else ""
+    last_success = row["last_success"] if "last_success" in keys else 0
+    last_fail_reason = row["last_fail_reason"] if "last_fail_reason" in keys else ""
+    use_previous_work_result = (
+        row["use_previous_work_result"] if "use_previous_work_result" in keys else 0
+    )
+    work_report = row["work_report"] if "work_report" in keys else ""
+    cron = row["cron"] if "cron" in keys else 0
+    cron_expr = row["cron_expr"] if "cron_expr" in keys else DEFAULT_WORK_NODE_CRON_EXPR
+    schedule_wait = row["schedule_wait"] if "schedule_wait" in keys else 0
+    owner = row["owner"] if "owner" in keys else 0
+    worker = row["worker"] if "worker" in keys else "agent"
+    upload = row["upload"] if "upload" in keys else 0
+    upload_path = row["upload_path"] if "upload_path" in keys else ""
+    approver_userid = row["approver_userid"] if "approver_userid" in keys else ""
+    crud = row["crud"] if "crud" in keys else ""
+    idx = row["idx"] if "idx" in keys else 0
+    try:
+        script_type_norm = normalize_script_type(str(script_type or ""))
+    except ValueError:
+        script_type_norm = ""
+    try:
+        worker_norm = normalize_worker(str(worker or "agent"))
+    except ValueError:
+        worker_norm = "agent"
+    return WorkNodeRecord(
+        idx=int(idx or 0),
+        uuid=str(row["uuid"] or ""),
+        owner=int(owner or 0),
+        work_name=str(row["work_name"] or ""),
+        work_description=str(description or ""),
+        target_agent=int(row["target_agent"] or 0),
+        work_script=str(row["work_script"] or ""),
+        script_type=script_type_norm,
+        test_result=bool(int(row["test_result"] or 0)),
+        files=str(row["files"] or ""),
+        create_date=str(create_date or ""),
+        validate_date=str(validate_date or ""),
+        last_start_date=str(last_start_date or ""),
+        last_end_date=str(last_end_date or ""),
+        last_success=bool(int(last_success or 0)),
+        last_fail_reason=str(last_fail_reason or "")[:200],
+        use_previous_work_result=bool(int(use_previous_work_result or 0)),
+        work_report=str(work_report or "")[:400],
+        cron=bool(int(cron or 0)),
+        cron_expr=str(cron_expr or DEFAULT_WORK_NODE_CRON_EXPR)[:20],
+        schedule_wait=bool(int(schedule_wait or 0)),
+        worker=worker_norm,
+        upload=bool(int(upload or 0)),
+        upload_path=str(upload_path or "")[:500],
+        approver_userid=str(approver_userid or "")[:50],
+        crud=normalize_crud(crud),
+    )
+
+
+def _row_to_workflow(row) -> WorkflowRecord:
+    keys = row.keys() if hasattr(row, "keys") else []
+    owner = row["owner"] if "owner" in keys else 0
+    distribute = row["distribute"] if "distribute" in keys else False
+    create_date = row["create_date"] if "create_date" in keys else ""
+    validate_date = row["validate_date"] if "validate_date" in keys else ""
+    test_result = row["test_result"] if "test_result" in keys else 0
+    last_start_date = row["last_start_date"] if "last_start_date" in keys else ""
+    last_end_date = row["last_end_date"] if "last_end_date" in keys else ""
+    cron = row["cron"] if "cron" in keys else 0
+    cron_expr = row["cron_expr"] if "cron_expr" in keys else DEFAULT_WORKFLOW_CRON_EXPR
+    merge_work_result = (
+        row["merge_work_result"] if "merge_work_result" in keys else ""
+    )
+    idx = row["idx"] if "idx" in keys else 0
+    return WorkflowRecord(
+        idx=int(idx or 0),
+        uuid=str(row["uuid"] or ""),
+        owner=int(owner or 0),
+        distribute=bool(distribute),
+        workflow_name=str(row["workflow_name"] or ""),
+        workflow_description=str(row["workflow_description"] or ""),
+        workflow=str(row["workflow"] or ""),
+        create_date=str(create_date or ""),
+        test_result=bool(int(test_result or 0)),
+        validate_date=str(validate_date or ""),
+        last_start_date=str(last_start_date or ""),
+        last_end_date=str(last_end_date or ""),
+        cron=bool(int(cron or 0)),
+        cron_expr=str(cron_expr or DEFAULT_WORKFLOW_CRON_EXPR)[:20],
+        merge_work_result=normalize_merge_work_result(str(merge_work_result or "")),
+    )
+
+
+def list_work_nodes(database_path: str | Path) -> list[WorkNodeRecord]:
+    with get_connection(database_path) as connection:
+        ensure_workflow_tables(connection)
+        rows = connection.execute(
+            f"SELECT {_WORK_NODE_SELECT} FROM work_node ORDER BY create_date ASC, uuid ASC"
+        ).fetchall()
+    return [_row_to_work_node(row) for row in rows]
+
+
+def list_work_nodes_visible(database_path: str | Path, user_idx: int) -> list[WorkNodeRecord]:
+    """Owned nodes, or nodes referenced by workflows the user can view."""
+    uid = int(user_idx or 0)
+    with get_connection(database_path) as connection:
+        ensure_workflow_tables(connection)
+        owned_rows = connection.execute(
+            f"""
+            SELECT {_WORK_NODE_SELECT}
+            FROM work_node
+            WHERE owner = ?
+            ORDER BY create_date ASC, uuid ASC
+            """,
+            (uid,),
+        ).fetchall()
+        visible_workflows = connection.execute(
+            f"""
+            SELECT {_WORKFLOW_SELECT}
+            FROM workflow
+            WHERE owner = ? OR distribute = TRUE
+            """,
+            (uid,),
+        ).fetchall()
+    by_uuid = {row["uuid"]: _row_to_work_node(row) for row in owned_rows}
+    referenced: set[str] = set()
+    for wf_row in visible_workflows:
+        record = _row_to_workflow(wf_row)
+        referenced |= work_uuids_from_expression(record.workflow)
+    missing = [key for key in referenced if key not in by_uuid]
+    if missing:
+        with get_connection(database_path) as connection:
+            ensure_workflow_tables(connection)
+            for node_uuid in missing:
+                row = connection.execute(
+                    f"SELECT {_WORK_NODE_SELECT} FROM work_node WHERE uuid = ?",
+                    (node_uuid,),
+                ).fetchone()
+                if row is not None:
+                    by_uuid[node_uuid] = _row_to_work_node(row)
+    return sorted(by_uuid.values(), key=lambda item: (item.create_date, item.uuid))
+
+
+def get_work_node_by_uuid(database_path: str | Path, node_uuid: str) -> WorkNodeRecord | None:
+    key = (node_uuid or "").strip()
+    if not key:
+        return None
+    with get_connection(database_path) as connection:
+        ensure_workflow_tables(connection)
+        row = connection.execute(
+            f"SELECT {_WORK_NODE_SELECT} FROM work_node WHERE uuid = ?",
+            (key,),
+        ).fetchone()
+    return _row_to_work_node(row) if row else None
+
+
+def create_work_node(
+    database_path: str | Path,
+    *,
+    work_name: str,
+    target_agent: int = 0,
+    work_description: str = "",
+    work_script: str = "",
+    script_type: str = "",
+    test_result: bool = False,
+    files: str = "",
+    use_previous_work_result: bool = False,
+    work_report: str = "",
+    cron: bool = False,
+    cron_expr: str | None = None,
+    uuid: str | None = None,
+    owner: int = 0,
+    worker: str = "agent",
+    upload: bool = False,
+    upload_path: str = "",
+    approver_userid: str = "",
+    crud: str = "",
+) -> WorkNodeRecord:
+    from backend.app.db.k8s_inventory import validate_cron_expr
+
+    created_at = now_job_datetime()
+    validate_at = created_at if test_result else ""
+    normalized_script_type = normalize_script_type(script_type)
+    worker_type = normalize_worker(worker)
+    crud_flags = "" if worker_type == "hitl" else normalize_crud(crud)
+    node_uuid = _normalize_uuid(uuid)
+    enabled = bool(cron)
+    expr = validate_cron_expr(cron_expr or DEFAULT_WORK_NODE_CRON_EXPR)
+    with get_connection(database_path) as connection:
+        ensure_workflow_tables(connection)
+        row = connection.execute(
+            f"""
+            INSERT INTO work_node (
+                uuid, owner, work_name, work_description, target_agent, work_script,
+                script_type, test_result, files, create_date, validate_date,
+                last_start_date, last_end_date, last_success, last_fail_reason,
+                use_previous_work_result, work_report, cron, cron_expr,
+                worker, upload, upload_path, approver_userid, crud
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', '', 0, '', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            RETURNING {_WORK_NODE_SELECT}
+            """,
+            (
+                node_uuid,
+                int(owner or 0),
+                work_name.strip() or "새 작업노드",
+                (work_description or "").strip()[:500],
+                int(target_agent),
+                work_script or "",
+                normalized_script_type,
+                1 if test_result else 0,
+                (files or "").strip()[:300],
+                created_at,
+                validate_at,
+                1 if use_previous_work_result else 0,
+                (work_report or "").strip()[:400],
+                1 if enabled else 0,
+                expr,
+                worker_type,
+                1 if upload else 0,
+                (upload_path or "").strip()[:500],
+                (approver_userid or "").strip()[:50],
+                crud_flags,
+            ),
+        ).fetchone()
+    return _row_to_work_node(row)
+
+
+def update_work_node(
+    database_path: str | Path,
+    node_uuid: str,
+    *,
+    work_name: str,
+    work_description: str,
+    target_agent: int,
+    work_script: str,
+    script_type: str,
+    test_result: bool,
+    files: str,
+    use_previous_work_result: bool = False,
+    work_report: str = "",
+    cron: bool | None = None,
+    cron_expr: str | None = None,
+    worker: str | None = None,
+    upload: bool | None = None,
+    upload_path: str | None = None,
+    approver_userid: str | None = None,
+    crud: str | None = None,
+) -> WorkNodeRecord | None:
+    from backend.app.db.k8s_inventory import validate_cron_expr
+
+    existing = get_work_node_by_uuid(database_path, node_uuid)
+    if existing is None:
+        return None
+    if test_result:
+        validate_date = now_job_datetime()
+    else:
+        validate_date = ""
+    normalized_script_type = normalize_script_type(script_type)
+    next_cron = existing.cron if cron is None else bool(cron)
+    if cron_expr is None:
+        next_expr = existing.cron_expr or DEFAULT_WORK_NODE_CRON_EXPR
+    else:
+        next_expr = cron_expr
+    next_expr = validate_cron_expr(next_expr)
+    next_worker = existing.worker if worker is None else normalize_worker(worker)
+    next_upload = existing.upload if upload is None else bool(upload)
+    next_upload_path = (
+        existing.upload_path if upload_path is None else (upload_path or "").strip()[:500]
+    )
+    next_approver = (
+        existing.approver_userid
+        if approver_userid is None
+        else (approver_userid or "").strip()[:50]
+    )
+    if next_worker == "hitl":
+        next_crud = ""
+    elif crud is None:
+        next_crud = existing.crud
+    else:
+        next_crud = normalize_crud(crud)
+    with get_connection(database_path) as connection:
+        ensure_workflow_tables(connection)
+        connection.execute(
+            """
+            UPDATE work_node
+            SET work_name = ?, work_description = ?, target_agent = ?, work_script = ?,
+                script_type = ?, test_result = ?, files = ?, validate_date = ?,
+                use_previous_work_result = ?, work_report = ?, cron = ?, cron_expr = ?,
+                worker = ?, upload = ?, upload_path = ?, approver_userid = ?, crud = ?
+            WHERE uuid = ?
+            """,
+            (
+                work_name.strip() or "새 작업노드",
+                (work_description or "").strip()[:500],
+                int(target_agent),
+                work_script or "",
+                normalized_script_type,
+                1 if test_result else 0,
+                (files or "").strip()[:300],
+                validate_date,
+                1 if use_previous_work_result else 0,
+                (work_report or "").strip()[:400],
+                1 if next_cron else 0,
+                next_expr,
+                next_worker,
+                1 if next_upload else 0,
+                next_upload_path,
+                next_approver,
+                next_crud,
+                existing.uuid,
+            ),
+        )
+    return get_work_node_by_uuid(database_path, existing.uuid)
+
+
+def set_work_node_upload_path(
+    database_path: str | Path,
+    node_uuid: str,
+    upload_path: str,
+) -> WorkNodeRecord | None:
+    existing = get_work_node_by_uuid(database_path, node_uuid)
+    if existing is None:
+        return None
+    path = (upload_path or "").strip()[:500]
+    with get_connection(database_path) as connection:
+        ensure_workflow_tables(connection)
+        connection.execute(
+            "UPDATE work_node SET upload_path = ? WHERE uuid = ?",
+            (path, existing.uuid),
+        )
+    return get_work_node_by_uuid(database_path, existing.uuid)
+
+
+def update_work_node_validation(
+    database_path: str | Path,
+    node_uuid: str,
+    *,
+    test_result: bool,
+) -> WorkNodeRecord | None:
+    """Update only validation flags."""
+    existing = get_work_node_by_uuid(database_path, node_uuid)
+    if existing is None:
+        return None
+    validate_date = now_job_datetime() if test_result else ""
+    with get_connection(database_path) as connection:
+        ensure_workflow_tables(connection)
+        connection.execute(
+            """
+            UPDATE work_node
+            SET test_result = ?, validate_date = ?
+            WHERE uuid = ?
+            """,
+            (1 if test_result else 0, validate_date, existing.uuid),
+        )
+    return get_work_node_by_uuid(database_path, existing.uuid)
+
+
+def delete_work_node(database_path: str | Path, node_uuid: str) -> bool:
+    key = (node_uuid or "").strip()
+    if not key:
+        return False
+    with get_connection(database_path) as connection:
+        ensure_workflow_tables(connection)
+        connection.execute("DELETE FROM work_node_history WHERE uuid = ?", (key,))
+        cursor = connection.execute("DELETE FROM work_node WHERE uuid = ?", (key,))
+        return int(cursor.rowcount or 0) > 0
+
+
+def list_workflows(database_path: str | Path) -> list[WorkflowRecord]:
+    with get_connection(database_path) as connection:
+        ensure_workflow_tables(connection)
+        rows = connection.execute(
+            f"SELECT {_WORKFLOW_SELECT} FROM workflow ORDER BY create_date DESC, uuid DESC"
+        ).fetchall()
+    return [_row_to_workflow(row) for row in rows]
+
+
+def list_workflows_visible(database_path: str | Path, user_idx: int) -> list[WorkflowRecord]:
+    uid = int(user_idx or 0)
+    with get_connection(database_path) as connection:
+        ensure_workflow_tables(connection)
+        rows = connection.execute(
+            f"""
+            SELECT {_WORKFLOW_SELECT}
+            FROM workflow
+            WHERE owner = ? OR distribute = TRUE
+            ORDER BY create_date DESC, uuid DESC
+            """,
+            (uid,),
+        ).fetchall()
+    return [_row_to_workflow(row) for row in rows]
+
+
+def get_workflow_by_uuid(database_path: str | Path, workflow_uuid: str) -> WorkflowRecord | None:
+    key = (workflow_uuid or "").strip()
+    if not key:
+        return None
+    with get_connection(database_path) as connection:
+        ensure_workflow_tables(connection)
+        row = connection.execute(
+            f"SELECT {_WORKFLOW_SELECT} FROM workflow WHERE uuid = ?",
+            (key,),
+        ).fetchone()
+    return _row_to_workflow(row) if row else None
+
+
+def create_workflow(
+    database_path: str | Path,
+    *,
+    workflow_name: str,
+    workflow_description: str = "",
+    workflow: str = "",
+    owner: int = 0,
+    distribute: bool = False,
+    uuid: str | None = None,
+    cron: bool = False,
+    cron_expr: str | None = None,
+    merge_work_result: str = "",
+) -> WorkflowRecord:
+    from backend.app.db.k8s_inventory import validate_cron_expr
+    from backend.app.services.workflow_document import normalize_workflow_document
+
+    created_at = now_job_datetime()
+    workflow_uuid = _normalize_uuid(uuid)
+    enabled = bool(cron)
+    expr = validate_cron_expr(cron_expr) if enabled else validate_cron_expr(
+        cron_expr or DEFAULT_WORKFLOW_CRON_EXPR
+    )
+    workflow_text = normalize_workflow_document(workflow)
+    merge_list = normalize_merge_work_result(merge_work_result)
+    with get_connection(database_path) as connection:
+        ensure_workflow_tables(connection)
+        row = connection.execute(
+            f"""
+            INSERT INTO workflow (
+                uuid, owner, distribute, workflow_name, workflow_description, workflow,
+                create_date, test_result, validate_date,
+                last_start_date, last_end_date,
+                cron, cron_expr, merge_work_result
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, 0, '', '', '', ?, ?, ?)
+            RETURNING {_WORKFLOW_SELECT}
+            """,
+            (
+                workflow_uuid,
+                int(owner or 0),
+                bool(distribute),
+                workflow_name.strip(),
+                (workflow_description or "").strip()[:500],
+                workflow_text,
+                created_at,
+                1 if enabled else 0,
+                expr,
+                merge_list,
+            ),
+        ).fetchone()
+    return _row_to_workflow(row)
+
+
+def update_workflow(
+    database_path: str | Path,
+    workflow_uuid: str,
+    *,
+    workflow_name: str,
+    workflow_description: str,
+    workflow: str,
+    distribute: bool | None = None,
+    cron: bool | None = None,
+    cron_expr: str | None = None,
+    merge_work_result: str | None = None,
+) -> WorkflowRecord | None:
+    from backend.app.db.k8s_inventory import validate_cron_expr
+    from backend.app.services.workflow_document import normalize_workflow_document
+
+    existing = get_workflow_by_uuid(database_path, workflow_uuid)
+    if existing is None:
+        return None
+    next_distribute = existing.distribute if distribute is None else bool(distribute)
+    next_cron = existing.cron if cron is None else bool(cron)
+    if cron_expr is None:
+        next_expr = existing.cron_expr or DEFAULT_WORKFLOW_CRON_EXPR
+    else:
+        next_expr = cron_expr
+    next_expr = validate_cron_expr(next_expr)
+    workflow_text = normalize_workflow_document(workflow)
+    next_merge = (
+        existing.merge_work_result
+        if merge_work_result is None
+        else normalize_merge_work_result(merge_work_result)
+    )
+    with get_connection(database_path) as connection:
+        ensure_workflow_tables(connection)
+        connection.execute(
+            """
+            UPDATE workflow
+            SET workflow_name = ?, workflow_description = ?, workflow = ?, distribute = ?,
+                cron = ?, cron_expr = ?, merge_work_result = ?
+            WHERE uuid = ?
+            """,
+            (
+                workflow_name.strip(),
+                (workflow_description or "").strip()[:500],
+                workflow_text,
+                next_distribute,
+                1 if next_cron else 0,
+                next_expr,
+                next_merge,
+                existing.uuid,
+            ),
+        )
+    return get_workflow_by_uuid(database_path, existing.uuid)
+
+
+def list_scheduled_workflows(database_path: str | Path) -> list[WorkflowRecord]:
+    with get_connection(database_path) as connection:
+        ensure_workflow_tables(connection)
+        rows = connection.execute(
+            f"""
+            SELECT {_WORKFLOW_SELECT}
+            FROM workflow
+            WHERE cron = 1
+            ORDER BY workflow_name ASC, uuid ASC
+            """
+        ).fetchall()
+    return [_row_to_workflow(row) for row in rows]
+
+
+def set_workflow_distribute(
+    database_path: str | Path,
+    workflow_uuid: str,
+    distribute: bool,
+) -> WorkflowRecord | None:
+    existing = get_workflow_by_uuid(database_path, workflow_uuid)
+    if existing is None:
+        return None
+    with get_connection(database_path) as connection:
+        ensure_workflow_tables(connection)
+        connection.execute(
+            "UPDATE workflow SET distribute = ? WHERE uuid = ?",
+            (bool(distribute), existing.uuid),
+        )
+    return get_workflow_by_uuid(database_path, existing.uuid)
+
+
+def disable_workflow_cron(database_path: str | Path, workflow_uuid: str) -> WorkflowRecord | None:
+    """Turn off schedule after a one-shot fire (cron stays stored for UI)."""
+    existing = get_workflow_by_uuid(database_path, workflow_uuid)
+    if existing is None:
+        return None
+    with get_connection(database_path) as connection:
+        ensure_workflow_tables(connection)
+        connection.execute(
+            "UPDATE workflow SET cron = 0 WHERE uuid = ?",
+            (existing.uuid,),
+        )
+    return get_workflow_by_uuid(database_path, existing.uuid)
+
+
+def clone_workflow(
+    database_path: str | Path,
+    source_uuid: str,
+    *,
+    new_owner: int,
+) -> WorkflowRecord:
+    """Deep-copy a workflow and all referenced work_nodes for ``new_owner``."""
+    source = get_workflow_by_uuid(database_path, source_uuid)
+    if source is None:
+        raise ValueError("작업 워크플로우를 찾을 수 없습니다.")
+    owner_idx = int(new_owner or 0)
+    if owner_idx <= 0:
+        raise ValueError("복제 소유자가 올바르지 않습니다.")
+
+    referenced = sorted(work_uuids_from_expression(source.workflow))
+    uuid_map: dict[str, str] = {}
+    for old_uuid in referenced:
+        node = get_work_node_by_uuid(database_path, old_uuid)
+        if node is None:
+            continue
+        new_uuid = _new_uuid()
+        uuid_map[old_uuid] = new_uuid
+        create_work_node(
+            database_path,
+            work_name=node.work_name,
+            work_description=node.work_description,
+            target_agent=node.target_agent,
+            work_script=node.work_script,
+            script_type=node.script_type,
+            test_result=node.test_result,
+            files=node.files,
+            use_previous_work_result=node.use_previous_work_result,
+            work_report=node.work_report,
+            cron=node.cron,
+            cron_expr=node.cron_expr,
+            uuid=new_uuid,
+            owner=owner_idx,
+            worker=node.worker,
+            upload=node.upload,
+            upload_path="",
+            approver_userid=node.approver_userid,
+            crud=node.crud,
+        )
+        source_userid = resolve_work_node_upload_userid(database_path, node.owner)
+        target_userid = resolve_work_node_upload_userid(database_path, owner_idx)
+        source_dir = find_work_node_upload_dir(old_uuid, userid=source_userid)
+        if source_dir.is_dir():
+            target_dir = work_node_upload_dir(new_uuid, userid=target_userid)
+            shutil.copytree(source_dir, target_dir, dirs_exist_ok=True)
+
+    remapped = rewrite_expression_uuid_map(source.workflow, uuid_map)
+    remapped_merge_parts: list[str] = []
+    for old_uuid in parse_merge_work_result_uuids(source.merge_work_result):
+        new_uuid = uuid_map.get(old_uuid)
+        if new_uuid:
+            remapped_merge_parts.append(new_uuid)
+    cloned_name = f"{source.workflow_name} (복제)".strip()
+    if len(cloned_name) > 100:
+        cloned_name = f"{source.workflow_name[:90]}…(복제)"
+    return create_workflow(
+        database_path,
+        workflow_name=cloned_name,
+        workflow_description=source.workflow_description,
+        workflow=remapped,
+        owner=owner_idx,
+        distribute=False,
+        cron=source.cron,
+        cron_expr=source.cron_expr,
+        merge_work_result=",".join(remapped_merge_parts),
+    )
+
+
+def delete_workflow(database_path: str | Path, workflow_uuid: str) -> bool:
+    key = (workflow_uuid or "").strip()
+    if not key:
+        return False
+    with get_connection(database_path) as connection:
+        ensure_workflow_tables(connection)
+        # Drop node-run rows that belong to this workflow's history first.
+        connection.execute(
+            """
+            DELETE FROM work_node_history
+            WHERE workflow_history_idx IN (
+                SELECT idx FROM workflow_history WHERE uuid = ?
+            )
+            """,
+            (key,),
+        )
+        connection.execute("DELETE FROM workflow_history WHERE uuid = ?", (key,))
+        cursor = connection.execute("DELETE FROM workflow WHERE uuid = ?", (key,))
+        return int(cursor.rowcount or 0) > 0
+
+
+def mark_workflow_run_started(database_path: str | Path, workflow_uuid: str) -> WorkflowRecord | None:
+    existing = get_workflow_by_uuid(database_path, workflow_uuid)
+    if existing is None:
+        return None
+    started = now_job_datetime()
+    with get_connection(database_path) as connection:
+        ensure_workflow_tables(connection)
+        connection.execute(
+            """
+            UPDATE workflow
+            SET last_start_date = ?, last_end_date = ''
+            WHERE uuid = ?
+            """,
+            (started, existing.uuid),
+        )
+    return get_workflow_by_uuid(database_path, existing.uuid)
+
+
+def mark_workflow_run_finished(
+    database_path: str | Path,
+    workflow_uuid: str,
+    *,
+    success: bool,
+) -> WorkflowRecord | None:
+    existing = get_workflow_by_uuid(database_path, workflow_uuid)
+    if existing is None:
+        return None
+    ended = now_job_datetime()
+    with get_connection(database_path) as connection:
+        ensure_workflow_tables(connection)
+        # success is recorded in workflow_history by the runner, not on workflow.
+        _ = success
+        connection.execute(
+            """
+            UPDATE workflow
+            SET last_end_date = ?
+            WHERE uuid = ?
+            """,
+            (ended, existing.uuid),
+        )
+    return get_workflow_by_uuid(database_path, existing.uuid)
+
+
+def mark_work_node_run_started(database_path: str | Path, node_uuid: str) -> WorkNodeRecord | None:
+    existing = get_work_node_by_uuid(database_path, node_uuid)
+    if existing is None:
+        return None
+    started = now_job_datetime()
+    with get_connection(database_path) as connection:
+        ensure_workflow_tables(connection)
+        connection.execute(
+            """
+            UPDATE work_node
+            SET last_start_date = ?, last_end_date = '', last_success = 0,
+                last_fail_reason = '', schedule_wait = 0
+            WHERE uuid = ?
+            """,
+            (started, existing.uuid),
+        )
+    return get_work_node_by_uuid(database_path, existing.uuid)
+
+
+def set_work_node_schedule_wait(
+    database_path: str | Path,
+    node_uuid: str,
+    *,
+    waiting: bool,
+) -> WorkNodeRecord | None:
+    existing = get_work_node_by_uuid(database_path, node_uuid)
+    if existing is None:
+        return None
+    with get_connection(database_path) as connection:
+        ensure_workflow_tables(connection)
+        connection.execute(
+            """
+            UPDATE work_node
+            SET schedule_wait = ?
+            WHERE uuid = ?
+            """,
+            (1 if waiting else 0, existing.uuid),
+        )
+    return get_work_node_by_uuid(database_path, existing.uuid)
+
+
+def mark_work_node_run_finished(
+    database_path: str | Path,
+    node_uuid: str,
+    *,
+    success: bool,
+    fail_reason: str = "",
+) -> WorkNodeRecord | None:
+    existing = get_work_node_by_uuid(database_path, node_uuid)
+    if existing is None:
+        return None
+    ended = now_job_datetime()
+    reason = (fail_reason or "").strip()[:200] if not success else ""
+    with get_connection(database_path) as connection:
+        ensure_workflow_tables(connection)
+        connection.execute(
+            """
+            UPDATE work_node
+            SET last_end_date = ?, last_success = ?, last_fail_reason = ?, schedule_wait = 0
+            WHERE uuid = ?
+            """,
+            (ended, 1 if success else 0, reason, existing.uuid),
+        )
+    return get_work_node_by_uuid(database_path, existing.uuid)
+
+
+_WORKFLOW_HISTORY_SELECT = """
+    idx, uuid, start_date, end_date, success, user_idx
+"""
+
+
+@dataclass(frozen=True)
+class WorkflowHistoryRecord:
+    idx: int
+    uuid: str
+    start_date: str
+    end_date: str
+    success: bool
+    user_idx: int = 1
+
+
+def _row_to_workflow_history(row) -> WorkflowHistoryRecord:
+    keys = row.keys() if hasattr(row, "keys") else []
+    user_idx = row["user_idx"] if "user_idx" in keys else 1
+    if "success" in keys:
+        success_raw = row["success"]
+    elif "finish_success" in keys:
+        success_raw = row["finish_success"]
+    else:
+        success_raw = 0
+    return WorkflowHistoryRecord(
+        idx=int(row["idx"]),
+        uuid=str(row["uuid"] or ""),
+        start_date=str(row["start_date"] or ""),
+        end_date=str(row["end_date"] or ""),
+        success=bool(int(success_raw or 0)),
+        user_idx=int(user_idx or 1) or 1,
+    )
+
+
+def insert_workflow_history(
+    database_path: str | Path,
+    *,
+    workflow_uuid: str,
+    start_date: str,
+    end_date: str,
+    success: bool,
+    user_idx: int = 1,
+) -> WorkflowHistoryRecord:
+    key = (workflow_uuid or "").strip()
+    if not key:
+        raise ValueError("workflow uuid가 비어 있습니다.")
+    executor_idx = int(user_idx or 0)
+    if executor_idx <= 0:
+        executor_idx = 1
+    with get_connection(database_path) as connection:
+        ensure_workflow_tables(connection)
+        row = connection.execute(
+            f"""
+            INSERT INTO workflow_history (
+                uuid, start_date, end_date, success, user_idx
+            ) VALUES (?, ?, ?, ?, ?)
+            RETURNING {_WORKFLOW_HISTORY_SELECT}
+            """,
+            (
+                key,
+                (start_date or "").strip(),
+                (end_date or "").strip(),
+                1 if success else 0,
+                executor_idx,
+            ),
+        ).fetchone()
+    return _row_to_workflow_history(row)
+
+
+def get_workflow_run_stats(
+    database_path: str | Path,
+    workflow_uuid: str,
+) -> WorkflowRunStats:
+    """Aggregate run / success / fail counts and latest success from history."""
+    key = (workflow_uuid or "").strip()
+    if not key:
+        return WorkflowRunStats()
+    with get_connection(database_path) as connection:
+        ensure_workflow_tables(connection)
+        row = connection.execute(
+            """
+            SELECT
+                COUNT(*)::int AS run_count,
+                COALESCE(
+                    SUM(
+                        CASE
+                            WHEN success <> 0 AND COALESCE(end_date, '') <> '' THEN 1
+                            ELSE 0
+                        END
+                    ),
+                    0
+                )::int AS success_count,
+                COALESCE(
+                    SUM(
+                        CASE
+                            WHEN success = 0 AND COALESCE(end_date, '') <> '' THEN 1
+                            ELSE 0
+                        END
+                    ),
+                    0
+                )::int AS fail_count,
+                (
+                    SELECT success
+                    FROM workflow_history
+                    WHERE uuid = ?
+                      AND COALESCE(end_date, '') <> ''
+                    ORDER BY idx DESC
+                    LIMIT 1
+                ) AS last_success
+            FROM workflow_history
+            WHERE uuid = ?
+            """,
+            (key, key),
+        ).fetchone()
+    if row is None:
+        return WorkflowRunStats()
+    keys = row.keys() if hasattr(row, "keys") else []
+    last_raw = row["last_success"] if "last_success" in keys else None
+    return WorkflowRunStats(
+        run_count=int(row["run_count"] or 0),
+        success_count=int(row["success_count"] or 0),
+        fail_count=int(row["fail_count"] or 0),
+        last_success=bool(int(last_raw or 0)) if last_raw is not None else False,
+    )
+
+
+def list_workflow_history(
+    database_path: str | Path,
+    workflow_uuid: str,
+) -> list[WorkflowHistoryRecord]:
+    key = (workflow_uuid or "").strip()
+    if not key:
+        return []
+    with get_connection(database_path) as connection:
+        ensure_workflow_tables(connection)
+        rows = connection.execute(
+            f"""
+            SELECT {_WORKFLOW_HISTORY_SELECT}
+            FROM workflow_history
+            WHERE uuid = ?
+            ORDER BY idx DESC
+            """,
+            (key,),
+        ).fetchall()
+    return [_row_to_workflow_history(row) for row in rows]
+
+
+def get_workflow_history_by_idx(
+    database_path: str | Path,
+    history_idx: int,
+) -> WorkflowHistoryRecord | None:
+    with get_connection(database_path) as connection:
+        ensure_workflow_tables(connection)
+        row = connection.execute(
+            f"""
+            SELECT {_WORKFLOW_HISTORY_SELECT}
+            FROM workflow_history
+            WHERE idx = ?
+            """,
+            (int(history_idx),),
+        ).fetchone()
+    return _row_to_workflow_history(row) if row is not None else None
+
+
+def finish_workflow_history(
+    database_path: str | Path,
+    history_idx: int,
+    *,
+    end_date: str,
+    success: bool,
+) -> WorkflowHistoryRecord | None:
+    """Close an in-progress workflow_history row opened at run start."""
+    idx = int(history_idx or 0)
+    if idx <= 0:
+        return None
+    with get_connection(database_path) as connection:
+        ensure_workflow_tables(connection)
+        row = connection.execute(
+            f"""
+            UPDATE workflow_history
+            SET end_date = ?, success = ?
+            WHERE idx = ?
+            RETURNING {_WORKFLOW_HISTORY_SELECT}
+            """,
+            ((end_date or "").strip(), 1 if success else 0, idx),
+        ).fetchone()
+    return _row_to_workflow_history(row) if row is not None else None
+
+
+def get_open_workflow_history(
+    database_path: str | Path,
+    workflow_uuid: str,
+) -> WorkflowHistoryRecord | None:
+    """Latest unfinished history row for a workflow (empty end_date)."""
+    key = (workflow_uuid or "").strip()
+    if not key:
+        return None
+    with get_connection(database_path) as connection:
+        ensure_workflow_tables(connection)
+        row = connection.execute(
+            f"""
+            SELECT {_WORKFLOW_HISTORY_SELECT}
+            FROM workflow_history
+            WHERE uuid = ? AND btrim(COALESCE(end_date, '')) = ''
+            ORDER BY idx DESC
+            LIMIT 1
+            """,
+            (key,),
+        ).fetchone()
+    return _row_to_workflow_history(row) if row is not None else None
+
+
+_WORK_NODE_HISTORY_SELECT = """
+    idx, uuid, start_date, end_date, success, workflow_history_idx, user_idx
+"""
+
+
+@dataclass(frozen=True)
+class WorkNodeHistoryRecord:
+    idx: int
+    uuid: str
+    start_date: str
+    end_date: str
+    success: bool
+    workflow_history_idx: int
+    user_idx: int = 1
+
+
+def _row_to_work_node_history(row) -> WorkNodeHistoryRecord:
+    return WorkNodeHistoryRecord(
+        idx=int(row["idx"]),
+        uuid=str(row["uuid"] or ""),
+        start_date=str(row["start_date"] or ""),
+        end_date=str(row["end_date"] or ""),
+        success=bool(int(row["success"] or 0)),
+        workflow_history_idx=int(row["workflow_history_idx"] or 0),
+        user_idx=int(row["user_idx"] or 1) or 1,
+    )
+
+
+def insert_work_node_history(
+    database_path: str | Path,
+    *,
+    work_uuid: str,
+    start_date: str,
+    workflow_history_idx: int,
+    user_idx: int = 1,
+    end_date: str = "",
+    success: bool = False,
+) -> WorkNodeHistoryRecord:
+    key = (work_uuid or "").strip()
+    if not key:
+        raise ValueError("work_node uuid가 비어 있습니다.")
+    wh = int(workflow_history_idx or 0)
+    if wh <= 0:
+        raise ValueError("workflow_history_idx가 올바르지 않습니다.")
+    executor_idx = int(user_idx or 0) or 1
+    with get_connection(database_path) as connection:
+        ensure_workflow_tables(connection)
+        row = connection.execute(
+            f"""
+            INSERT INTO work_node_history (
+                uuid, start_date, end_date, success, workflow_history_idx, user_idx
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            RETURNING {_WORK_NODE_HISTORY_SELECT}
+            """,
+            (
+                key,
+                (start_date or "").strip(),
+                (end_date or "").strip(),
+                1 if success else 0,
+                wh,
+                executor_idx,
+            ),
+        ).fetchone()
+    return _row_to_work_node_history(row)
+
+
+def finish_work_node_history(
+    database_path: str | Path,
+    history_idx: int,
+    *,
+    end_date: str,
+    success: bool,
+) -> WorkNodeHistoryRecord | None:
+    idx = int(history_idx or 0)
+    if idx <= 0:
+        return None
+    with get_connection(database_path) as connection:
+        ensure_workflow_tables(connection)
+        row = connection.execute(
+            f"""
+            UPDATE work_node_history
+            SET end_date = ?, success = ?
+            WHERE idx = ?
+            RETURNING {_WORK_NODE_HISTORY_SELECT}
+            """,
+            ((end_date or "").strip(), 1 if success else 0, idx),
+        ).fetchone()
+    return _row_to_work_node_history(row) if row is not None else None
+
+
+def get_work_node_history_by_idx(
+    database_path: str | Path,
+    history_idx: int,
+) -> WorkNodeHistoryRecord | None:
+    with get_connection(database_path) as connection:
+        ensure_workflow_tables(connection)
+        row = connection.execute(
+            f"""
+            SELECT {_WORK_NODE_HISTORY_SELECT}
+            FROM work_node_history
+            WHERE idx = ?
+            """,
+            (int(history_idx),),
+        ).fetchone()
+    return _row_to_work_node_history(row) if row is not None else None
+
+
+def list_work_node_history(
+    database_path: str | Path,
+    work_uuid: str,
+    *,
+    workflow_history_idx: int | None = None,
+) -> list[WorkNodeHistoryRecord]:
+    key = (work_uuid or "").strip()
+    if not key:
+        return []
+    with get_connection(database_path) as connection:
+        ensure_workflow_tables(connection)
+        if workflow_history_idx is not None and int(workflow_history_idx) > 0:
+            rows = connection.execute(
+                f"""
+                SELECT {_WORK_NODE_HISTORY_SELECT}
+                FROM work_node_history
+                WHERE uuid = ? AND workflow_history_idx = ?
+                ORDER BY idx DESC
+                """,
+                (key, int(workflow_history_idx)),
+            ).fetchall()
+        else:
+            rows = connection.execute(
+                f"""
+                SELECT {_WORK_NODE_HISTORY_SELECT}
+                FROM work_node_history
+                WHERE uuid = ?
+                ORDER BY idx DESC
+                """,
+                (key,),
+            ).fetchall()
+    return [_row_to_work_node_history(row) for row in rows]
+
+
+def find_workflow_uuid_for_work_node(
+    database_path: str | Path,
+    work_uuid: str,
+) -> str:
+    """Best-effort parent workflow uuid that references ``work_uuid``."""
+    key = (work_uuid or "").strip().lower()
+    if not key:
+        return ""
+    for wf in list_workflows(database_path):
+        if key in {u.lower() for u in work_uuids_from_expression(wf.workflow)}:
+            return wf.uuid
+    return ""

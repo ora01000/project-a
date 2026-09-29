@@ -1,14 +1,15 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import type { AuthUser } from "../../types/auth";
 import type { NoticeFormValues, NoticeRecord } from "../../types/notice";
 import { noticeScheduleStatus } from "../../types/notice";
-import { ROLE_ADMIN } from "../../types/user";
+import { hasAdminAccess } from "../../types/user";
 import { ConfirmDialog } from "../ConfirmDialog";
 import { NoticeFormModal } from "./NoticeFormModal";
 
 interface NoticeBoardPageProps {
   user: AuthUser;
+  onClose: () => void;
 }
 
 async function parseError(response: Response, fallback: string): Promise<string> {
@@ -16,15 +17,14 @@ async function parseError(response: Response, fallback: string): Promise<string>
   return payload?.detail ?? fallback;
 }
 
-export function NoticeBoardPage({ user }: NoticeBoardPageProps) {
-  const isAdmin = user.role === ROLE_ADMIN;
+export function NoticeBoardPage({ user, onClose }: NoticeBoardPageProps) {
+  const isAdmin = hasAdminAccess(user.role);
   const [notices, setNotices] = useState<NoticeRecord[]>([]);
-  const [selectedIdxSet, setSelectedIdxSet] = useState<Set<number>>(new Set());
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [formMode, setFormMode] = useState<"create" | "edit" | null>(null);
   const [editingNotice, setEditingNotice] = useState<NoticeRecord | null>(null);
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deletingNotice, setDeletingNotice] = useState<NoticeRecord | null>(null);
   const [togglingIdx, setTogglingIdx] = useState<number | null>(null);
 
   const loadNotices = useCallback(async () => {
@@ -37,10 +37,6 @@ export function NoticeBoardPage({ user }: NoticeBoardPageProps) {
       }
       const data = (await response.json()) as NoticeRecord[];
       setNotices(data);
-      setSelectedIdxSet((current) => {
-        const valid = new Set(data.map((notice) => notice.idx));
-        return new Set([...current].filter((idx) => valid.has(idx)));
-      });
     } catch (err) {
       setError(err instanceof Error ? err.message : "공지사항을 불러오지 못했습니다.");
     } finally {
@@ -51,31 +47,6 @@ export function NoticeBoardPage({ user }: NoticeBoardPageProps) {
   useEffect(() => {
     void loadNotices();
   }, [loadNotices]);
-
-  const selectedNotices = useMemo(
-    () => notices.filter((notice) => selectedIdxSet.has(notice.idx)),
-    [notices, selectedIdxSet],
-  );
-
-  const toggleRow = (idx: number) => {
-    setSelectedIdxSet((current) => {
-      const next = new Set(current);
-      if (next.has(idx)) {
-        next.delete(idx);
-      } else {
-        next.add(idx);
-      }
-      return next;
-    });
-  };
-
-  const toggleAll = () => {
-    if (selectedIdxSet.size === notices.length) {
-      setSelectedIdxSet(new Set());
-      return;
-    }
-    setSelectedIdxSet(new Set(notices.map((notice) => notice.idx)));
-  };
 
   const handleCreate = async (values: NoticeFormValues) => {
     const response = await fetch("/api/notices", {
@@ -120,24 +91,23 @@ export function NoticeBoardPage({ user }: NoticeBoardPageProps) {
   };
 
   const handleDelete = async () => {
-    if (selectedIdxSet.size === 0) {
+    if (!deletingNotice) {
       return;
     }
     const response = await fetch("/api/notices", {
       method: "DELETE",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        idx_list: [...selectedIdxSet],
+        idx_list: [deletingNotice.idx],
         viewer_role: user.role,
       }),
     });
     if (!response.ok) {
       setError(await parseError(response, "공지사항 삭제에 실패했습니다."));
-      setShowDeleteConfirm(false);
+      setDeletingNotice(null);
       return;
     }
-    setShowDeleteConfirm(false);
-    setSelectedIdxSet(new Set());
+    setDeletingNotice(null);
     await loadNotices();
   };
 
@@ -171,23 +141,22 @@ export function NoticeBoardPage({ user }: NoticeBoardPageProps) {
   };
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-slate-700 bg-slate-900/90">
-      <header className="flex shrink-0 items-center justify-between border-b border-slate-700 px-4 py-3">
-        <div>
-          <h2 className="text-sm font-semibold text-slate-200">공지사항</h2>
-          <p className="mt-0.5 text-xs text-slate-500">notice_board 테이블 공지 목록입니다.</p>
-        </div>
-        <div className="flex gap-2">
-          {isAdmin ? (
-            <>
-              <button
-                type="button"
-                onClick={() => setShowDeleteConfirm(true)}
-                disabled={selectedIdxSet.size === 0}
-                className="rounded-md border border-rose-800 px-3 py-1.5 text-sm text-rose-200 hover:bg-rose-950/40 disabled:cursor-not-allowed disabled:text-slate-500"
-              >
-                삭제
-              </button>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 px-4">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="notice-board-title"
+        className="flex max-h-[90vh] w-full max-w-6xl flex-col overflow-hidden rounded-xl border border-slate-700 bg-slate-900 shadow-xl"
+      >
+        <header className="flex shrink-0 items-center justify-between border-b border-slate-700 px-4 py-3">
+          <div>
+            <h2 id="notice-board-title" className="text-lg font-semibold text-slate-100">
+              공지사항
+            </h2>
+            <p className="mt-0.5 text-xs text-slate-500">notice_board 테이블 공지 목록입니다.</p>
+          </div>
+          <div className="flex items-center gap-2">
+            {isAdmin ? (
               <button
                 type="button"
                 onClick={() => {
@@ -199,129 +168,126 @@ export function NoticeBoardPage({ user }: NoticeBoardPageProps) {
               >
                 추가
               </button>
-            </>
-          ) : null}
-        </div>
-      </header>
+            ) : null}
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-md border border-slate-700 px-3 py-1.5 text-sm text-slate-200 hover:bg-slate-800"
+            >
+              닫기
+            </button>
+          </div>
+        </header>
 
-      {error ? (
-        <div className="mx-4 mt-4 rounded-md border border-rose-800 bg-rose-950/40 px-3 py-2 text-sm text-rose-200">
-          {error}
-        </div>
-      ) : null}
+        {error ? (
+          <div className="mx-4 mt-4 rounded-md border border-rose-800 bg-rose-950/40 px-3 py-2 text-sm text-rose-200">
+            {error}
+          </div>
+        ) : null}
 
-      <div className="min-h-0 flex-1 overflow-auto p-4">
-        {isLoading ? (
-          <p className="text-sm text-slate-500">공지사항을 불러오는 중...</p>
-        ) : notices.length === 0 ? (
-          <p className="text-sm text-slate-500">등록된 공지사항이 없습니다.</p>
-        ) : (
-          <table className="min-w-full border-collapse text-sm">
-            <thead>
-              <tr className="border-b border-slate-700 text-left text-slate-400">
-                {isAdmin ? (
-                  <th className="px-3 py-2">
-                    <input
-                      type="checkbox"
-                      checked={notices.length > 0 && selectedIdxSet.size === notices.length}
-                      onChange={toggleAll}
-                      aria-label="전체 선택"
-                    />
-                  </th>
-                ) : null}
-                <th className="px-3 py-2">글번호</th>
-                <th className="px-3 py-2">제목</th>
-                <th className="px-3 py-2">작성자</th>
-                <th className="px-3 py-2">작성일시</th>
-                <th className="px-3 py-2">공지시작</th>
-                <th className="px-3 py-2">공지기한</th>
-                <th className="px-3 py-2">웰컴백 팝업 표시여부</th>
-                {isAdmin ? <th className="px-3 py-2">수정</th> : null}
-              </tr>
-            </thead>
-            <tbody>
-              {notices.map((notice) => {
-                const scheduleStatus = noticeScheduleStatus(notice);
-                return (
-                <tr key={notice.idx} className="border-b border-slate-800 text-slate-200">
-                  {isAdmin ? (
-                    <td className="px-3 py-2">
-                      <input
-                        type="checkbox"
-                        checked={selectedIdxSet.has(notice.idx)}
-                        onChange={() => toggleRow(notice.idx)}
-                        aria-label={`${notice.title} 선택`}
-                      />
-                    </td>
-                  ) : null}
-                  <td className="px-3 py-2">{notice.idx}</td>
-                  <td className="px-3 py-2">{notice.title}</td>
-                  <td className="px-3 py-2">{notice.writer_name?.trim() || notice.writer}</td>
-                  <td className="px-3 py-2 whitespace-nowrap font-mono text-xs">
-                    {notice.write_date}
-                  </td>
-                  <td className="px-3 py-2 whitespace-nowrap">{notice.from_date}</td>
-                  <td className="px-3 py-2 whitespace-nowrap">{notice.until_date}</td>
-                  <td className="px-3 py-2">
-                    <button
-                      type="button"
-                      role="switch"
-                      aria-checked={notice.welcome_popup}
-                      aria-label={`${notice.title} 웰컴백 팝업`}
-                      disabled={!isAdmin || togglingIdx === notice.idx}
-                      onClick={() => void handleToggleWelcomePopup(notice)}
-                      className={`relative h-6 w-11 rounded-full transition ${
-                        notice.welcome_popup ? "bg-sky-500" : "bg-slate-700"
-                      } ${!isAdmin ? "cursor-default opacity-80" : ""}`}
-                    >
-                      <span
-                        className={`absolute top-0.5 left-0.5 h-5 w-5 rounded-full bg-white transition ${
-                          notice.welcome_popup ? "translate-x-5" : "translate-x-0"
-                        }`}
-                      />
-                    </button>
-                  </td>
-                  {isAdmin ? (
-                    <td className="px-3 py-2">
-                      <div className="flex flex-wrap items-center gap-1.5">
+        <div className="min-h-0 flex-1 overflow-auto p-4">
+          {isLoading ? (
+            <p className="text-sm text-slate-500">공지사항을 불러오는 중...</p>
+          ) : notices.length === 0 ? (
+            <p className="text-sm text-slate-500">등록된 공지사항이 없습니다.</p>
+          ) : (
+            <table className="min-w-full border-collapse text-sm">
+              <thead>
+                <tr className="border-b border-slate-700 text-left text-slate-400">
+                  <th className="px-3 py-2">글번호</th>
+                  <th className="px-3 py-2">제목</th>
+                  <th className="px-3 py-2">작성자</th>
+                  <th className="px-3 py-2">작성일시</th>
+                  <th className="px-3 py-2">공지시작</th>
+                  <th className="px-3 py-2">공지기한</th>
+                  <th className="px-3 py-2">웰컴백 팝업 표시여부</th>
+                  {isAdmin ? <th className="px-3 py-2">작업</th> : null}
+                </tr>
+              </thead>
+              <tbody>
+                {notices.map((notice) => {
+                  const scheduleStatus = noticeScheduleStatus(notice);
+                  return (
+                    <tr key={notice.idx} className="border-b border-slate-800 text-slate-200">
+                      <td className="px-3 py-2">{notice.idx}</td>
+                      <td className="px-3 py-2">{notice.title}</td>
+                      <td className="px-3 py-2">{notice.writer_name?.trim() || notice.writer}</td>
+                      <td className="px-3 py-2 whitespace-nowrap font-mono text-xs">
+                        {notice.write_date}
+                      </td>
+                      <td className="px-3 py-2 whitespace-nowrap">{notice.from_date}</td>
+                      <td className="px-3 py-2 whitespace-nowrap">{notice.until_date}</td>
+                      <td className="px-3 py-2">
                         <button
                           type="button"
-                          onClick={() => {
-                            setError(null);
-                            setEditingNotice(notice);
-                            setFormMode("edit");
-                          }}
-                          className="rounded-md border border-slate-600 px-2 py-1 text-xs text-slate-200 hover:bg-slate-800"
+                          role="switch"
+                          aria-checked={notice.welcome_popup}
+                          aria-label={`${notice.title} 웰컴백 팝업`}
+                          disabled={!isAdmin || togglingIdx === notice.idx}
+                          onClick={() => void handleToggleWelcomePopup(notice)}
+                          className={`relative h-6 w-11 rounded-full transition ${
+                            notice.welcome_popup ? "bg-sky-500" : "bg-slate-700"
+                          } ${!isAdmin ? "cursor-default opacity-80" : ""}`}
                         >
-                          수정
+                          <span
+                            className={`absolute top-0.5 left-0.5 h-5 w-5 rounded-full bg-white transition ${
+                              notice.welcome_popup ? "translate-x-5" : "translate-x-0"
+                            }`}
+                          />
                         </button>
-                        {scheduleStatus === "scheduled" ? (
-                          <button
-                            type="button"
-                            tabIndex={-1}
-                            className="cursor-default rounded-md border border-amber-700/70 bg-amber-950/40 px-2 py-1 text-xs font-medium text-amber-200"
-                          >
-                            공지예정
-                          </button>
-                        ) : null}
-                        {scheduleStatus === "expired" ? (
-                          <button
-                            type="button"
-                            tabIndex={-1}
-                            className="cursor-default rounded-md border border-slate-600 bg-slate-800 px-2 py-1 text-xs font-medium text-slate-400"
-                          >
-                            만료
-                          </button>
-                        ) : null}
-                      </div>
-                    </td>
-                  ) : null}
-                </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        )}
+                      </td>
+                      {isAdmin ? (
+                        <td className="px-3 py-2">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setError(null);
+                                setEditingNotice(notice);
+                                setFormMode("edit");
+                              }}
+                              className="rounded-md border border-slate-600 px-2 py-1 text-xs text-slate-200 hover:bg-slate-800"
+                            >
+                              수정
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setError(null);
+                                setDeletingNotice(notice);
+                              }}
+                              className="rounded-md border border-rose-800 px-2 py-1 text-xs text-rose-200 hover:bg-rose-950/40"
+                            >
+                              삭제
+                            </button>
+                            {scheduleStatus === "scheduled" ? (
+                              <button
+                                type="button"
+                                tabIndex={-1}
+                                className="cursor-default rounded-md border border-amber-700/70 bg-amber-950/40 px-2 py-1 text-xs font-medium text-amber-200"
+                              >
+                                공지예정
+                              </button>
+                            ) : null}
+                            {scheduleStatus === "expired" ? (
+                              <button
+                                type="button"
+                                tabIndex={-1}
+                                className="cursor-default rounded-md border border-slate-600 bg-slate-800 px-2 py-1 text-xs font-medium text-slate-400"
+                              >
+                                만료
+                              </button>
+                            ) : null}
+                          </div>
+                        </td>
+                      ) : null}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
       </div>
 
       {formMode && isAdmin ? (
@@ -338,13 +304,13 @@ export function NoticeBoardPage({ user }: NoticeBoardPageProps) {
         />
       ) : null}
 
-      {showDeleteConfirm && isAdmin ? (
+      {deletingNotice && isAdmin ? (
         <ConfirmDialog
           title="공지사항 삭제"
-          message={`선택한 ${selectedNotices.length}건의 공지사항을 삭제하시겠습니까?`}
+          message={`'${deletingNotice.title}' 공지사항을 삭제하시겠습니까?`}
           confirmLabel="예"
           cancelLabel="아니오"
-          onCancel={() => setShowDeleteConfirm(false)}
+          onCancel={() => setDeletingNotice(null)}
           onConfirm={() => void handleDelete()}
         />
       ) : null}

@@ -3,7 +3,7 @@ from typing import Any
 
 import yaml
 from dotenv import dotenv_values
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -26,6 +26,11 @@ class ServerSettings(BaseModel):
     backend_api_host: str = "localhost"
     backend_api_port: int = 8080
     health_check_interval_seconds: int = 30
+    agent_runtime_mode: str = "mock"
+    agent_runtime_http_base_url: str = ""
+    agent_runtime_http_timeout_seconds: float = 3600.0
+    agent_runtime_api_key: str = ""
+    control_plane_base_url: str = ""
 
 
 class MCPServerConfig(BaseModel):
@@ -41,6 +46,7 @@ class EmailNotificationSettings(BaseModel):
     smtp_username: str = ""
     smtp_password: str = ""
     from_address: str = ""
+    smtp_auth: bool = True
     use_tls: bool = True
     use_ssl: bool = False
     timeout_seconds: float = 30.0
@@ -59,14 +65,9 @@ class TeamsNotificationSettings(BaseModel):
 
 
 class NotificationSettings(BaseModel):
-    email: EmailNotificationSettings = Field(default_factory=EmailNotificationSettings)
+    """Teams webhook settings. Email SMTP is stored in ``mailserver_config`` DB table."""
+
     teams: TeamsNotificationSettings = Field(default_factory=TeamsNotificationSettings)
-
-
-class InventorySettings(BaseModel):
-    chroma_data_path: str = "data/chroma"
-    csv_path: str = "data/inventory/inventory.csv"
-    upload_path: str = "data/inventory/uploads"
 
 
 class WhatapSettings(BaseModel):
@@ -75,7 +76,15 @@ class WhatapSettings(BaseModel):
 
 class UserCommLogSettings(BaseModel):
     log_dir: str = "data/user_comm_logs"
-    retention_days: int = 30
+    keep_count: int = 3
+    archive_keep_count: int = 3
+    # file: local JSON files (single-pod). stdout: structured JSON lines for cluster logging.
+    backend: str = "file"
+
+
+class AgentLogSettings(BaseModel):
+    keep_count: int = 3
+    archive_keep_count: int = 3
 
 
 class JobRequesterSettings(BaseModel):
@@ -84,20 +93,61 @@ class JobRequesterSettings(BaseModel):
     initial_delay_seconds: int = 60
 
 
-class K8sCollectorSettings(BaseModel):
+class JobProcessorSettings(BaseModel):
     enabled: bool = True
-    # Daily local schedule: first agent at HH:MM, then +stagger_minutes per agent order.
-    schedule_hour: int = 0
-    schedule_minute: int = 10
-    stagger_minutes: int = 5
-    collect_on_startup: bool = False
-    # Periodic schedule is paused until explicitly re-enabled.
-    schedule_enabled: bool = False
-    # Default mounted kubeconfig; missing file => local kubernetes access.
-    kubeconfig: str = "/etc/k8s-kubeconfig/k8s-kubeconfig"
+    poll_interval_seconds: int = 60
+    initial_delay_seconds: int = 0
+    # http 모드: agentruntime.local_agent_id (기본 helpdesk, 대안 sys-helpdesk)
+    helpdesk_local_agent_id: str = "helpdesk"
+    # http 모드: AXIT agent_id 직접 지정 시 local_agent_id 조회 생략
+    helpdesk_axit_agent_id: str = ""
+
+
+class JobAuditorSettings(BaseModel):
+    # http 모드: agentruntime.local_agent_id (기본 JOB_AUDITOR_AGENT)
+    local_agent_id: str = "JOB_AUDITOR_AGENT"
+    # http 모드: AXIT agent_id 직접 지정 (선택)
+    axit_agent_id: str = ""
+
+
+class MyNotesSettings(BaseModel):
+    enabled: bool = True
+    flush_interval_seconds: int = 300
+    initial_delay_seconds: int = 0
+    # file: data/mynotes/*.md. database: mynote_contents table (multi-pod safe).
+    content_backend: str = "file"
+
+
+class ReceivedMailSettings(BaseModel):
+    """IMAP inbound mail poller (worker / BACKEND_ROLE=all)."""
+
+    poll_enabled: bool = True
+    poll_interval_seconds: int = 30
+    initial_delay_seconds: int = 5
+    # Shared volume path for api+worker: {home}/{received_mail.uuid}/...
+    attachment_home: Path = Path("data/received_mail_attachments")
+
+
+class JobDecisionLoopSettings(BaseModel):
+    """Pending received_mail → JOB_DECISION_AGENT (independent of mail receive)."""
+
+    enabled: bool = True
+    poll_interval_seconds: int = 30
+    initial_delay_seconds: int = 5
+
+
+class K8sCollectorSettings(BaseModel):
+    # Deployed (http) mount path; mock/local may omit and use ~/.kube/config
+    kubeconfig: str = "/etc/k8s/kubeconfig"
     fallback_to_current_context: bool = True
-    # Optional map: cluster_id -> kubeconfig context name
-    contexts: dict[str, str] = {}
+    # Optional map: cluster_name -> kubeconfig context name
+    contexts: dict[str, str] = Field(default_factory=dict)
+    # Injected from agent runtime mode at load time
+    runtime_mode: str = "mock"
+    # Background cron scrape loop (per-cluster enable lives in infra_cluster.cron)
+    schedule_enabled: bool = True
+    schedule_poll_interval_seconds: int = 30
+    schedule_initial_delay_seconds: int = 5
 
 
 class AppSettings(BaseSettings):
@@ -105,6 +155,7 @@ class AppSettings(BaseSettings):
         env_file=ENV_FILE,
         env_file_encoding="utf-8",
         extra="ignore",
+        populate_by_name=True,
     )
 
     llm_base_url: str = Field(default="http://localhost:8001/v1", alias="LLM_BASE_URL")
@@ -117,18 +168,19 @@ class AppSettings(BaseSettings):
     frontend_port: int = Field(default=9001, alias="FRONTEND_PORT")
     backend_api_host: str = Field(default="localhost", alias="BACKEND_API_HOST")
     backend_api_port: int | None = Field(default=None, alias="BACKEND_API_PORT")
-    database_path: str = Field(default="data/app.db", alias="DATABASE_PATH")
+    database_url: str = Field(default="", alias="DATABASE_URL")
+    backend_role: str = Field(default="all", alias="BACKEND_ROLE")
     health_check_interval_seconds: int = Field(default=30, alias="HEALTH_CHECK_INTERVAL_SECONDS")
-
-    email_enabled: bool = Field(default=False, alias="EMAIL_ENABLED")
-    email_smtp_host: str = Field(default="", alias="EMAIL_SMTP_HOST")
-    email_smtp_port: int = Field(default=587, alias="EMAIL_SMTP_PORT")
-    email_smtp_username: str = Field(default="", alias="EMAIL_SMTP_USERNAME")
-    email_smtp_password: str = Field(default="", alias="EMAIL_SMTP_PASSWORD")
-    email_from_address: str = Field(default="", alias="EMAIL_FROM_ADDRESS")
-    email_use_tls: bool = Field(default=True, alias="EMAIL_USE_TLS")
-    email_use_ssl: bool = Field(default=False, alias="EMAIL_USE_SSL")
-    email_timeout_seconds: float = Field(default=30.0, alias="EMAIL_TIMEOUT_SECONDS")
+    agent_runtime_mode: str = Field(default="mock", alias="AGENT_RUNTIME_MODE")
+    agent_runtime_http_base_url: str = Field(default="", alias="AGENT_RUNTIME_HTTP_BASE_URL")
+    agent_runtime_http_timeout_seconds: float = Field(
+        default=300.0,
+        alias="AGENT_RUNTIME_HTTP_TIMEOUT_SECONDS",
+    )
+    agent_runtime_api_key: str = Field(default="", alias="AGENT_RUNTIME_API_KEY")
+    control_plane_base_url: str = Field(default="", alias="CONTROL_PLANE_BASE_URL")
+    agent_runtime_host: str = Field(default="0.0.0.0", alias="AGENT_RUNTIME_HOST")
+    agent_runtime_port: int = Field(default=8090, alias="AGENT_RUNTIME_PORT")
 
     teams_enabled: bool = Field(default=False, alias="TEAMS_ENABLED")
     teams_mode: str = Field(default="webhook", alias="TEAMS_MODE")
@@ -140,13 +192,25 @@ class AppSettings(BaseSettings):
     teams_channel_id: str = Field(default="", alias="TEAMS_CHANNEL_ID")
     teams_timeout_seconds: float = Field(default=30.0, alias="TEAMS_TIMEOUT_SECONDS")
 
-    chroma_data_path: str = Field(default="data/chroma", alias="CHROMA_DATA_PATH")
-    inventory_csv_path: str = Field(default="data/inventory/inventory.csv", alias="INVENTORY_CSV_PATH")
-    inventory_upload_path: str = Field(default="data/inventory/uploads", alias="INVENTORY_UPLOAD_PATH")
     whatap_webhook_secret: str = Field(default="", alias="WHATAP_WEBHOOK_SECRET")
 
     user_comm_log: str = Field(default="data/user_comm_logs", alias="USER_COMM_LOG")
-    user_comm_retention: int = Field(default=30, alias="USER_COMM_RETENTION")
+    user_comm_keep_count: int | None = Field(default=None, alias="USER_COMM_KEEP_COUNT")
+    user_comm_archive_keep_count: int | None = Field(
+        default=None, alias="USER_COMM_ARCHIVE_KEEP_COUNT"
+    )
+    # Legacy alias for USER_COMM_KEEP_COUNT (plain daily JSON keep count).
+    user_comm_retention: int | None = Field(default=None, alias="USER_COMM_RETENTION")
+    user_comm_log_backend: str | None = Field(default=None, alias="USER_COMM_LOG_BACKEND")
+    agent_log_keep_count: int | None = Field(default=None, alias="AGENT_LOG_KEEP_COUNT")
+    agent_log_archive_keep_count: int | None = Field(
+        default=None, alias="AGENT_LOG_ARCHIVE_KEEP_COUNT"
+    )
+
+    mynotes_content_backend: str | None = Field(
+        default=None,
+        alias="MY_NOTES_CONTENT_BACKEND",
+    )
 
     job_requester_enabled: bool | None = Field(default=None, alias="JOB_REQUESTER_ENABLED")
     job_requester_interval_minutes: int | None = Field(default=None, alias="JOB_REQUESTER_INTERVAL_MINUTES")
@@ -155,32 +219,151 @@ class AppSettings(BaseSettings):
         alias="JOB_REQUESTER_INITIAL_DELAY_SECONDS",
     )
 
-    k8s_collector_enabled: bool | None = Field(default=None, alias="K8S_COLLECTOR_ENABLED")
-    k8s_collector_schedule_hour: int | None = Field(default=None, alias="K8S_COLLECTOR_SCHEDULE_HOUR")
-    k8s_collector_schedule_minute: int | None = Field(
+    job_processor_enabled: bool | None = Field(default=None, alias="JOB_PROCESSOR_ENABLED")
+    job_processor_poll_interval_seconds: int | None = Field(
         default=None,
-        alias="K8S_COLLECTOR_SCHEDULE_MINUTE",
+        alias="JOB_PROCESSOR_POLL_INTERVAL_SECONDS",
     )
-    k8s_collector_stagger_minutes: int | None = Field(
+    job_processor_initial_delay_seconds: int | None = Field(
         default=None,
-        alias="K8S_COLLECTOR_STAGGER_MINUTES",
+        alias="JOB_PROCESSOR_INITIAL_DELAY_SECONDS",
     )
-    k8s_collector_collect_on_startup: bool | None = Field(
+    job_processor_helpdesk_local_agent_id: str | None = Field(
         default=None,
-        alias="K8S_COLLECTOR_COLLECT_ON_STARTUP",
+        alias="JOB_PROCESSOR_HELPDESK_LOCAL_AGENT_ID",
     )
-    k8s_collector_schedule_enabled: bool | None = Field(
+    job_processor_helpdesk_axit_agent_id: str | None = Field(
         default=None,
-        alias="K8S_COLLECTOR_SCHEDULE_ENABLED",
+        alias="JOB_PROCESSOR_HELPDESK_AXIT_AGENT_ID",
     )
+    job_auditor_local_agent_id: str | None = Field(
+        default=None,
+        alias="JOB_AUDITOR_LOCAL_AGENT_ID",
+    )
+    job_auditor_axit_agent_id: str | None = Field(
+        default=None,
+        alias="JOB_AUDITOR_AXIT_AGENT_ID",
+    )
+
+    mynotes_flush_enabled: bool | None = Field(default=None, alias="MY_NOTES_FLUSH_ENABLED")
+    mynotes_flush_interval_seconds: int | None = Field(
+        default=None,
+        alias="MY_NOTES_FLUSH_INTERVAL_SECONDS",
+    )
+    mynotes_flush_initial_delay_seconds: int | None = Field(
+        default=None,
+        alias="MY_NOTES_FLUSH_INITIAL_DELAY_SECONDS",
+    )
+
+    received_mail_poll_enabled: bool | None = Field(
+        default=None,
+        alias="RECEIVED_MAIL_POLL_ENABLED",
+    )
+    received_mail_poll_interval_seconds: int | None = Field(
+        default=None,
+        alias="RECEIVED_MAIL_POLL_INTERVAL_SECONDS",
+    )
+    received_mail_poll_initial_delay_seconds: int | None = Field(
+        default=None,
+        alias="RECEIVED_MAIL_POLL_INITIAL_DELAY_SECONDS",
+    )
+    received_mail_attachment_home: str | None = Field(
+        default=None,
+        alias="RECEIVED_MAIL_ATTACHMENT_HOME",
+    )
+
+    upload_home: str = Field(default="/app/upload", alias="UPLOAD_HOME")
+    inventory_api_base_url: str = Field(
+        # Empty → resolve_inventory_api_base_url() picks mock/http default by AGENT_RUNTIME_MODE.
+        default="",
+        alias="INVENTORY_API_BASE_URL",
+    )
+    inventory_csv_upload_url: str = Field(
+        default="",
+        alias="INVENTORY_CSV_UPLOAD_URL",
+    )
+
+    job_decision_loop_enabled: bool | None = Field(
+        default=None,
+        alias="JOB_DECISION_LOOP_ENABLED",
+    )
+    job_decision_poll_interval_seconds: int | None = Field(
+        default=None,
+        alias="JOB_DECISION_POLL_INTERVAL_SECONDS",
+    )
+    job_decision_poll_initial_delay_seconds: int | None = Field(
+        default=None,
+        alias="JOB_DECISION_POLL_INITIAL_DELAY_SECONDS",
+    )
+
     k8s_collector_kubeconfig: str | None = Field(default=None, alias="K8S_COLLECTOR_KUBECONFIG")
     k8s_collector_fallback_current_context: bool | None = Field(
         default=None,
         alias="K8S_COLLECTOR_FALLBACK_CURRENT_CONTEXT",
     )
+    k8s_collector_schedule_enabled: bool | None = Field(
+        default=None,
+        alias="K8S_COLLECTOR_SCHEDULE_ENABLED",
+    )
+    k8s_collector_schedule_poll_interval_seconds: int | None = Field(
+        default=None,
+        alias="K8S_COLLECTOR_SCHEDULE_POLL_INTERVAL_SECONDS",
+    )
+    k8s_collector_schedule_initial_delay_seconds: int | None = Field(
+        default=None,
+        alias="K8S_COLLECTOR_SCHEDULE_INITIAL_DELAY_SECONDS",
+    )
 
     auth_provider_type: str = Field(default="db", alias="AUTH_PROVIDER_TYPE")
     oauth_proxy: str = Field(default="", alias="OAUTH_PROXY")
+    oauth_url: str = Field(default="", alias="OAUTH_URL")
+    oauth_client_id: str = Field(default="", alias="OAUTH_CLIENT_ID")
+    oauth_client_secret: str = Field(default="", alias="OAUTH_CLIENT_SECRET")
+    oauth_grant_type: str = Field(default="password", alias="OAUTH_GRANT_TYPE")
+    oauth_scope: str = Field(default="EA", alias="OAUTH_SCOPE")
+    oauth_auth_type: str = Field(default="IM", alias="OAUTH_AUTH_TYPE")
+    oauth_verify_ssl: bool | None = Field(default=None, alias="OAUTH_VERIFY_SSL")
+
+    redis_url: str = Field(default="redis://localhost:6379/0", alias="REDIS_URL")
+    auth_session_ttl_seconds: int | None = Field(default=None, alias="AUTH_SESSION_TTL_SECONDS")
+    auth_session_absolute_max_seconds: int | None = Field(
+        default=None,
+        alias="AUTH_SESSION_ABSOLUTE_MAX_SECONDS",
+    )
+
+    @field_validator("backend_port", mode="before")
+    @classmethod
+    def _normalize_backend_port(cls, value: object) -> int:
+        explicit = _merged_env().get("BACKEND_LISTEN_PORT", "").strip()
+        if explicit:
+            return parse_listen_port(explicit, default=8080)
+        return parse_listen_port(value, default=8080)
+
+    @field_validator("frontend_port", mode="before")
+    @classmethod
+    def _normalize_frontend_port(cls, value: object) -> int:
+        explicit = _merged_env().get("FRONTEND_LISTEN_PORT", "").strip()
+        if explicit:
+            return parse_listen_port(explicit, default=9001)
+        return parse_listen_port(value, default=9001)
+
+    @field_validator("agent_runtime_port", mode="before")
+    @classmethod
+    def _normalize_agent_runtime_port(cls, value: object) -> int:
+        explicit = _merged_env().get("AGENT_RUNTIME_LISTEN_PORT", "").strip()
+        if explicit:
+            return parse_listen_port(explicit, default=8090)
+        return parse_listen_port(value, default=8090)
+
+    @field_validator("backend_api_port", mode="before")
+    @classmethod
+    def _normalize_backend_api_port(cls, value: object) -> int | None:
+        if value is None or value == "":
+            return None
+        explicit = _merged_env().get("BACKEND_API_LISTEN_PORT", "").strip()
+        if explicit:
+            return parse_listen_port(explicit, default=8080)
+        return parse_listen_port(value, default=8080)
 
 
 def _merged_env() -> dict[str, str]:
@@ -193,6 +376,67 @@ def _merged_env() -> dict[str, str]:
                 values[key] = value
     values.update(os.environ)
     return values
+
+
+def _env_setting(name: str, *, default: str = "") -> str:
+    return _merged_env().get(name, default).strip()
+
+
+def parse_listen_port(raw: object | None, *, default: int) -> int:
+    """Parse a listen port from int, plain string, or Kubernetes service-link URL (tcp://host:port)."""
+    if raw is None:
+        return default
+    if isinstance(raw, int):
+        return raw
+    text = str(raw).strip()
+    if not text:
+        return default
+    if text.startswith("tcp://"):
+        host_port = text[6:]
+        if ":" in host_port:
+            port_text = host_port.rsplit(":", 1)[-1]
+            try:
+                return int(port_text)
+            except ValueError:
+                return default
+        return default
+    try:
+        return int(text)
+    except (TypeError, ValueError):
+        return default
+
+
+def resolve_backend_listen_port(
+    *,
+    env_settings: AppSettings | None = None,
+    server_yaml: dict[str, Any] | None = None,
+) -> int:
+    explicit = _env_setting("BACKEND_LISTEN_PORT")
+    if explicit:
+        return parse_listen_port(explicit, default=8080)
+    merged = _merged_env().get("BACKEND_PORT", "")
+    if merged:
+        return parse_listen_port(merged, default=8080)
+    if env_settings is not None:
+        return parse_listen_port(env_settings.backend_port, default=8080)
+    yaml = server_yaml or {}
+    return parse_listen_port(yaml.get("backend_port"), default=8080)
+
+
+def resolve_agent_runtime_mode(
+    *,
+    env_settings: AppSettings | None = None,
+    server_yaml: dict[str, Any] | None = None,
+) -> str:
+    """Resolve runtime mode from AGENT_RUNTIME_MODE (env/.env) with yaml fallback."""
+    explicit = _env_setting("AGENT_RUNTIME_MODE")
+    if explicit:
+        return explicit
+    settings = env_settings or AppSettings()
+    if settings.agent_runtime_mode:
+        return settings.agent_runtime_mode
+    yaml = server_yaml or {}
+    return str(yaml.get("agent_runtime_mode") or "mock")
 
 
 def _mcp_server_key_from_env_suffix(suffix: str) -> str:
@@ -242,21 +486,9 @@ def _as_bool(value: Any, default: bool = False) -> bool:
 def load_notification_settings() -> NotificationSettings:
     yaml_settings = _load_yaml(CONFIG_DIR / "settings.yaml")
     notify_yaml = yaml_settings.get("notifications", {})
-    email_yaml = notify_yaml.get("email", {})
     teams_yaml = notify_yaml.get("teams", {})
     env_settings = AppSettings()
 
-    email = EmailNotificationSettings(
-        enabled=_as_bool(env_settings.email_enabled, email_yaml.get("enabled", False)),
-        smtp_host=env_settings.email_smtp_host or email_yaml.get("smtp_host", ""),
-        smtp_port=env_settings.email_smtp_port or email_yaml.get("smtp_port", 587),
-        smtp_username=env_settings.email_smtp_username or email_yaml.get("smtp_username", ""),
-        smtp_password=env_settings.email_smtp_password or email_yaml.get("smtp_password", ""),
-        from_address=env_settings.email_from_address or email_yaml.get("from_address", ""),
-        use_tls=_as_bool(env_settings.email_use_tls, email_yaml.get("use_tls", True)),
-        use_ssl=_as_bool(env_settings.email_use_ssl, email_yaml.get("use_ssl", False)),
-        timeout_seconds=env_settings.email_timeout_seconds or email_yaml.get("timeout_seconds", 30.0),
-    )
     teams = TeamsNotificationSettings(
         enabled=_as_bool(env_settings.teams_enabled, teams_yaml.get("enabled", False)),
         mode=(env_settings.teams_mode or teams_yaml.get("mode", "webhook")).strip().lower(),
@@ -268,19 +500,7 @@ def load_notification_settings() -> NotificationSettings:
         channel_id=env_settings.teams_channel_id or teams_yaml.get("channel_id", ""),
         timeout_seconds=env_settings.teams_timeout_seconds or teams_yaml.get("timeout_seconds", 30.0),
     )
-    return NotificationSettings(email=email, teams=teams)
-
-
-def load_inventory_settings() -> InventorySettings:
-    yaml_settings = _load_yaml(CONFIG_DIR / "settings.yaml")
-    inventory_yaml = yaml_settings.get("inventory", {})
-    env_settings = AppSettings()
-
-    return InventorySettings(
-        chroma_data_path=env_settings.chroma_data_path or inventory_yaml.get("chroma_data_path", "data/chroma"),
-        csv_path=env_settings.inventory_csv_path or inventory_yaml.get("csv_path", "data/inventory/inventory.csv"),
-        upload_path=env_settings.inventory_upload_path or inventory_yaml.get("upload_path", "data/inventory/uploads"),
-    )
+    return NotificationSettings(teams=teams)
 
 
 def load_whatap_settings() -> WhatapSettings:
@@ -298,15 +518,90 @@ def load_user_comm_log_settings() -> UserCommLogSettings:
     comm_yaml = yaml_settings.get("user_comm_log", {})
     env_settings = AppSettings()
 
-    retention_raw = env_settings.user_comm_retention or comm_yaml.get("retention_days", 30)
-    try:
-        retention_days = int(retention_raw)
-    except (TypeError, ValueError):
-        retention_days = 30
+    keep_candidates = [
+        env_settings.user_comm_keep_count,
+        env_settings.user_comm_retention,
+        comm_yaml.get("keep_count"),
+        3,
+    ]
+    keep_count = 3
+    for candidate in keep_candidates:
+        if candidate is None:
+            continue
+        try:
+            keep_count = int(candidate)
+            break
+        except (TypeError, ValueError):
+            continue
+
+    archive_candidates = [
+        env_settings.user_comm_archive_keep_count,
+        comm_yaml.get("archive_keep_count"),
+        3,
+    ]
+    archive_keep_count = 3
+    for candidate in archive_candidates:
+        if candidate is None:
+            continue
+        try:
+            archive_keep_count = int(candidate)
+            break
+        except (TypeError, ValueError):
+            continue
+
+    backend = (
+        env_settings.user_comm_log_backend
+        or str(comm_yaml.get("backend", "file"))
+    ).strip().lower() or "file"
+    if backend not in {"file", "stdout"}:
+        backend = "file"
 
     return UserCommLogSettings(
         log_dir=env_settings.user_comm_log or comm_yaml.get("log_dir", "data/user_comm_logs"),
-        retention_days=max(1, retention_days),
+        keep_count=max(0, keep_count),
+        archive_keep_count=max(0, archive_keep_count),
+        backend=backend,
+    )
+
+
+def load_agent_log_settings() -> AgentLogSettings:
+    yaml_settings = _load_yaml(CONFIG_DIR / "settings.yaml")
+    agent_yaml = yaml_settings.get("agent_log", {})
+    env_settings = AppSettings()
+
+    keep_candidates = [
+        env_settings.agent_log_keep_count,
+        agent_yaml.get("keep_count"),
+        3,
+    ]
+    keep_count = 3
+    for candidate in keep_candidates:
+        if candidate is None:
+            continue
+        try:
+            keep_count = int(candidate)
+            break
+        except (TypeError, ValueError):
+            continue
+
+    archive_candidates = [
+        env_settings.agent_log_archive_keep_count,
+        agent_yaml.get("archive_keep_count"),
+        3,
+    ]
+    archive_keep_count = 3
+    for candidate in archive_candidates:
+        if candidate is None:
+            continue
+        try:
+            archive_keep_count = int(candidate)
+            break
+        except (TypeError, ValueError):
+            continue
+
+    return AgentLogSettings(
+        keep_count=max(0, keep_count),
+        archive_keep_count=max(0, archive_keep_count),
     )
 
 
@@ -346,81 +641,293 @@ def load_job_requester_settings() -> JobRequesterSettings:
     )
 
 
-def load_k8s_collector_settings() -> K8sCollectorSettings:
+def load_job_processor_settings() -> JobProcessorSettings:
     yaml_settings = _load_yaml(CONFIG_DIR / "settings.yaml")
-    collector_yaml = yaml_settings.get("k8s_collector", {})
+    processor_yaml = yaml_settings.get("job_processor", {})
     env_settings = AppSettings()
 
-    def _int_setting(env_value: int | None, yaml_key: str, default: int) -> int:
-        raw = env_value if env_value is not None else collector_yaml.get(yaml_key, default)
-        try:
-            return int(raw)
-        except (TypeError, ValueError):
-            return default
-
-    schedule_hour = _int_setting(env_settings.k8s_collector_schedule_hour, "schedule_hour", 0)
-    schedule_minute = _int_setting(
-        env_settings.k8s_collector_schedule_minute,
-        "schedule_minute",
-        10,
-    )
-    stagger_minutes = _int_setting(
-        env_settings.k8s_collector_stagger_minutes,
-        "stagger_minutes",
-        5,
-    )
-
-    if env_settings.k8s_collector_enabled is not None:
-        enabled = env_settings.k8s_collector_enabled
+    if env_settings.job_processor_poll_interval_seconds is not None:
+        interval_raw = env_settings.job_processor_poll_interval_seconds
     else:
-        enabled = _as_bool(collector_yaml.get("enabled"), True)
+        interval_raw = processor_yaml.get("poll_interval_seconds", 60)
 
-    if env_settings.k8s_collector_collect_on_startup is not None:
-        collect_on_startup = env_settings.k8s_collector_collect_on_startup
+    if env_settings.job_processor_initial_delay_seconds is not None:
+        delay_raw = env_settings.job_processor_initial_delay_seconds
     else:
-        collect_on_startup = _as_bool(collector_yaml.get("collect_on_startup"), False)
+        delay_raw = processor_yaml.get("initial_delay_seconds", 0)
 
-    if env_settings.k8s_collector_schedule_enabled is not None:
-        schedule_enabled = env_settings.k8s_collector_schedule_enabled
+    try:
+        poll_interval_seconds = int(interval_raw)
+    except (TypeError, ValueError):
+        poll_interval_seconds = 60
+    try:
+        initial_delay_seconds = int(delay_raw)
+    except (TypeError, ValueError):
+        initial_delay_seconds = 0
+
+    if env_settings.job_processor_enabled is not None:
+        enabled = env_settings.job_processor_enabled
     else:
-        schedule_enabled = _as_bool(collector_yaml.get("schedule_enabled"), False)
+        enabled = _as_bool(processor_yaml.get("enabled"), True)
 
-    if env_settings.k8s_collector_fallback_current_context is not None:
-        fallback = env_settings.k8s_collector_fallback_current_context
+    if env_settings.job_processor_helpdesk_local_agent_id is not None:
+        helpdesk_local_agent_id = env_settings.job_processor_helpdesk_local_agent_id.strip()
     else:
-        fallback = _as_bool(collector_yaml.get("fallback_to_current_context"), True)
+        helpdesk_local_agent_id = str(
+            processor_yaml.get("helpdesk_local_agent_id", "helpdesk"),
+        ).strip()
 
-    kubeconfig = (
-        env_settings.k8s_collector_kubeconfig
-        if env_settings.k8s_collector_kubeconfig is not None
-        else str(collector_yaml.get("kubeconfig") or "/etc/k8s-kubeconfig/k8s-kubeconfig")
-    ).strip()
+    if env_settings.job_processor_helpdesk_axit_agent_id is not None:
+        helpdesk_axit_agent_id = env_settings.job_processor_helpdesk_axit_agent_id.strip()
+    else:
+        helpdesk_axit_agent_id = str(processor_yaml.get("helpdesk_axit_agent_id", "")).strip()
 
-    raw_contexts = collector_yaml.get("contexts") or {}
-    contexts: dict[str, str] = {}
-    if isinstance(raw_contexts, dict):
-        for key, value in raw_contexts.items():
-            cluster_id = str(key).strip()
-            context_name = str(value).strip()
-            if cluster_id and context_name:
-                contexts[cluster_id] = context_name
-
-    return K8sCollectorSettings(
+    return JobProcessorSettings(
         enabled=enabled,
-        schedule_hour=min(23, max(0, schedule_hour)),
-        schedule_minute=min(59, max(0, schedule_minute)),
-        stagger_minutes=max(1, stagger_minutes),
-        collect_on_startup=collect_on_startup,
-        schedule_enabled=schedule_enabled,
-        kubeconfig=kubeconfig,
-        fallback_to_current_context=fallback,
-        contexts=contexts,
+        poll_interval_seconds=max(1, poll_interval_seconds),
+        initial_delay_seconds=max(0, initial_delay_seconds),
+        helpdesk_local_agent_id=helpdesk_local_agent_id or "helpdesk",
+        helpdesk_axit_agent_id=helpdesk_axit_agent_id,
     )
+
+
+def load_job_auditor_settings() -> JobAuditorSettings:
+    yaml_settings = _load_yaml(CONFIG_DIR / "settings.yaml")
+    auditor_yaml = yaml_settings.get("job_auditor", {})
+    env_settings = AppSettings()
+
+    if env_settings.job_auditor_local_agent_id is not None:
+        local_agent_id = env_settings.job_auditor_local_agent_id.strip()
+    else:
+        local_agent_id = str(
+            auditor_yaml.get("local_agent_id", "JOB_AUDITOR_AGENT"),
+        ).strip()
+
+    if env_settings.job_auditor_axit_agent_id is not None:
+        axit_agent_id = env_settings.job_auditor_axit_agent_id.strip()
+    else:
+        axit_agent_id = str(auditor_yaml.get("axit_agent_id", "")).strip()
+
+    return JobAuditorSettings(
+        local_agent_id=local_agent_id or "JOB_AUDITOR_AGENT",
+        axit_agent_id=axit_agent_id,
+    )
+
+
+def load_mynotes_settings() -> MyNotesSettings:
+    yaml_settings = _load_yaml(CONFIG_DIR / "settings.yaml")
+    mynotes_yaml = yaml_settings.get("mynotes", {})
+    env_settings = AppSettings()
+
+    if env_settings.mynotes_flush_interval_seconds is not None:
+        interval_raw = env_settings.mynotes_flush_interval_seconds
+    else:
+        interval_raw = mynotes_yaml.get("flush_interval_seconds", 300)
+
+    if env_settings.mynotes_flush_initial_delay_seconds is not None:
+        delay_raw = env_settings.mynotes_flush_initial_delay_seconds
+    else:
+        delay_raw = mynotes_yaml.get("initial_delay_seconds", 0)
+
+    try:
+        flush_interval_seconds = int(interval_raw)
+    except (TypeError, ValueError):
+        flush_interval_seconds = 300
+    try:
+        initial_delay_seconds = int(delay_raw)
+    except (TypeError, ValueError):
+        initial_delay_seconds = 0
+
+    if env_settings.mynotes_flush_enabled is not None:
+        enabled = env_settings.mynotes_flush_enabled
+    else:
+        enabled = _as_bool(mynotes_yaml.get("enabled"), True)
+
+    content_backend = (
+        env_settings.mynotes_content_backend
+        or str(mynotes_yaml.get("content_backend", "file"))
+    ).strip().lower() or "file"
+    if content_backend not in {"file", "database"}:
+        content_backend = "file"
+
+    return MyNotesSettings(
+        enabled=enabled,
+        flush_interval_seconds=max(30, flush_interval_seconds),
+        initial_delay_seconds=max(0, initial_delay_seconds),
+        content_backend=content_backend,
+    )
+
+
+def load_received_mail_settings() -> ReceivedMailSettings:
+    yaml_settings = _load_yaml(CONFIG_DIR / "settings.yaml")
+    mail_yaml = yaml_settings.get("received_mail", {})
+    env_settings = AppSettings()
+
+    if env_settings.received_mail_poll_enabled is not None:
+        poll_enabled = env_settings.received_mail_poll_enabled
+    else:
+        poll_enabled = _as_bool(mail_yaml.get("poll_enabled"), True)
+
+    if env_settings.received_mail_poll_interval_seconds is not None:
+        interval_raw = env_settings.received_mail_poll_interval_seconds
+    else:
+        interval_raw = mail_yaml.get("poll_interval_seconds", 30)
+
+    if env_settings.received_mail_poll_initial_delay_seconds is not None:
+        delay_raw = env_settings.received_mail_poll_initial_delay_seconds
+    else:
+        delay_raw = mail_yaml.get("initial_delay_seconds", 5)
+
+    try:
+        poll_interval_seconds = int(interval_raw)
+    except (TypeError, ValueError):
+        poll_interval_seconds = 30
+    try:
+        initial_delay_seconds = int(delay_raw)
+    except (TypeError, ValueError):
+        initial_delay_seconds = 5
+
+    home_raw = (
+        env_settings.received_mail_attachment_home
+        or str(mail_yaml.get("attachment_home", "data/received_mail_attachments"))
+    ).strip() or "data/received_mail_attachments"
+    home_path = Path(home_raw)
+    if not home_path.is_absolute():
+        home_path = PROJECT_ROOT / home_path
+
+    return ReceivedMailSettings(
+        poll_enabled=poll_enabled,
+        poll_interval_seconds=max(5, poll_interval_seconds),
+        initial_delay_seconds=max(0, initial_delay_seconds),
+        attachment_home=home_path,
+    )
+
+
+def load_job_decision_loop_settings() -> JobDecisionLoopSettings:
+    yaml_settings = _load_yaml(CONFIG_DIR / "settings.yaml")
+    loop_yaml = yaml_settings.get("job_decision", {})
+    env_settings = AppSettings()
+
+    if env_settings.job_decision_loop_enabled is not None:
+        enabled = env_settings.job_decision_loop_enabled
+    else:
+        enabled = _as_bool(loop_yaml.get("enabled"), True)
+
+    if env_settings.job_decision_poll_interval_seconds is not None:
+        interval_raw = env_settings.job_decision_poll_interval_seconds
+    else:
+        interval_raw = loop_yaml.get("poll_interval_seconds", 30)
+
+    if env_settings.job_decision_poll_initial_delay_seconds is not None:
+        delay_raw = env_settings.job_decision_poll_initial_delay_seconds
+    else:
+        delay_raw = loop_yaml.get("initial_delay_seconds", 5)
+
+    try:
+        poll_interval_seconds = int(interval_raw)
+    except (TypeError, ValueError):
+        poll_interval_seconds = 30
+    try:
+        initial_delay_seconds = int(delay_raw)
+    except (TypeError, ValueError):
+        initial_delay_seconds = 5
+
+    return JobDecisionLoopSettings(
+        enabled=enabled,
+        poll_interval_seconds=max(5, poll_interval_seconds),
+        initial_delay_seconds=max(0, initial_delay_seconds),
+    )
+
+
+def load_backend_role() -> str:
+    """Return api | worker | all (default all for local single-process)."""
+    env_settings = AppSettings()
+    yaml_settings = _load_yaml(CONFIG_DIR / "settings.yaml")
+    server_yaml = yaml_settings.get("server", {})
+    role = (
+        env_settings.backend_role
+        or str(server_yaml.get("backend_role", "all"))
+    ).strip().lower() or "all"
+    if role not in {"api", "worker", "all"}:
+        return "all"
+    return role
+
+
+def backend_role_runs_api(role: str | None = None) -> bool:
+    resolved = (role or load_backend_role()).strip().lower()
+    return resolved in {"api", "all"}
+
+
+def backend_role_runs_workers(role: str | None = None) -> bool:
+    resolved = (role or load_backend_role()).strip().lower()
+    return resolved in {"worker", "all"}
+
+
+class RedisSettings(BaseModel):
+    url: str = "redis://localhost:6379/0"
+
+
+class AuthSessionSettings(BaseModel):
+    ttl_seconds: int = 7200
+    absolute_max_seconds: int = 28800
 
 
 class AuthProviderSettings(BaseModel):
     provider_type: str = "db"
     oauth_proxy: str = ""
+    oauth_url: str = ""
+    oauth_client_id: str = ""
+    oauth_client_secret: str = ""
+    oauth_grant_type: str = "password"
+    oauth_scope: str = "EA"
+    oauth_auth_type: str = "IM"
+    oauth_verify_ssl: bool = False
+
+
+class AgentRuntimeSettings(BaseModel):
+    host: str = "0.0.0.0"
+    port: int = 8090
+    api_key: str = ""
+
+
+def load_redis_settings() -> RedisSettings:
+    env_settings = AppSettings()
+    yaml_settings = _load_yaml(CONFIG_DIR / "settings.yaml")
+    redis_yaml = yaml_settings.get("redis", {})
+
+    url = (env_settings.redis_url or redis_yaml.get("url") or "redis://localhost:6379/0").strip()
+    return RedisSettings(url=url)
+
+
+def load_auth_session_settings() -> AuthSessionSettings:
+    env_settings = AppSettings()
+    yaml_settings = _load_yaml(CONFIG_DIR / "settings.yaml")
+    session_yaml = yaml_settings.get("auth_session", {})
+
+    ttl_raw = (
+        env_settings.auth_session_ttl_seconds
+        if env_settings.auth_session_ttl_seconds is not None
+        else session_yaml.get("ttl_seconds", 7200)
+    )
+    absolute_raw = (
+        env_settings.auth_session_absolute_max_seconds
+        if env_settings.auth_session_absolute_max_seconds is not None
+        else session_yaml.get("absolute_max_seconds", 28800)
+    )
+
+    try:
+        ttl_seconds = int(ttl_raw)
+    except (TypeError, ValueError):
+        ttl_seconds = 7200
+    try:
+        absolute_max_seconds = int(absolute_raw)
+    except (TypeError, ValueError):
+        absolute_max_seconds = 28800
+
+    return AuthSessionSettings(
+        ttl_seconds=max(60, ttl_seconds),
+        absolute_max_seconds=max(60, absolute_max_seconds),
+    )
 
 
 def load_auth_provider_settings() -> AuthProviderSettings:
@@ -433,7 +940,98 @@ def load_auth_provider_settings() -> AuthProviderSettings:
         raw_type = "db"
 
     oauth_proxy = (env_settings.oauth_proxy or auth_yaml.get("oauth_proxy") or "").strip()
-    return AuthProviderSettings(provider_type=raw_type, oauth_proxy=oauth_proxy)
+    oauth_url = (env_settings.oauth_url or auth_yaml.get("oauth_url") or "").strip()
+    oauth_client_id = (env_settings.oauth_client_id or auth_yaml.get("oauth_client_id") or "").strip()
+    oauth_client_secret = (
+        env_settings.oauth_client_secret or auth_yaml.get("oauth_client_secret") or ""
+    ).strip()
+    oauth_grant_type = (
+        env_settings.oauth_grant_type or auth_yaml.get("oauth_grant_type") or "password"
+    ).strip()
+    oauth_scope = (env_settings.oauth_scope or auth_yaml.get("oauth_scope") or "EA").strip()
+    oauth_auth_type = (env_settings.oauth_auth_type or auth_yaml.get("oauth_auth_type") or "IM").strip()
+    verify_raw = (
+        env_settings.oauth_verify_ssl
+        if env_settings.oauth_verify_ssl is not None
+        else auth_yaml.get("oauth_verify_ssl")
+    )
+    oauth_verify_ssl = _as_bool(verify_raw, default=False)
+
+    return AuthProviderSettings(
+        provider_type=raw_type,
+        oauth_proxy=oauth_proxy,
+        oauth_url=oauth_url,
+        oauth_client_id=oauth_client_id,
+        oauth_client_secret=oauth_client_secret,
+        oauth_grant_type=oauth_grant_type,
+        oauth_scope=oauth_scope,
+        oauth_auth_type=oauth_auth_type,
+        oauth_verify_ssl=oauth_verify_ssl,
+    )
+
+
+def load_k8s_collector_settings() -> K8sCollectorSettings:
+    yaml_settings = _load_yaml(CONFIG_DIR / "settings.yaml")
+    collector_yaml = yaml_settings.get("k8s_collector", {})
+    server_yaml = yaml_settings.get("server", {})
+    env_settings = AppSettings()
+
+    if env_settings.k8s_collector_fallback_current_context is not None:
+        fallback = env_settings.k8s_collector_fallback_current_context
+    else:
+        fallback = _as_bool(collector_yaml.get("fallback_to_current_context"), True)
+
+    kubeconfig = (
+        env_settings.k8s_collector_kubeconfig
+        if env_settings.k8s_collector_kubeconfig is not None
+        else str(collector_yaml.get("kubeconfig") or "/etc/k8s/kubeconfig")
+    ).strip()
+
+    raw_contexts = collector_yaml.get("contexts") or {}
+    contexts: dict[str, str] = {}
+    if isinstance(raw_contexts, dict):
+        for key, value in raw_contexts.items():
+            cluster_name = str(key).strip()
+            context_name = str(value).strip()
+            if cluster_name and context_name:
+                contexts[cluster_name] = context_name
+
+    runtime_mode = resolve_agent_runtime_mode(
+        env_settings=env_settings,
+        server_yaml=server_yaml,
+    )
+
+    if env_settings.k8s_collector_schedule_enabled is not None:
+        schedule_enabled = env_settings.k8s_collector_schedule_enabled
+    else:
+        schedule_enabled = _as_bool(collector_yaml.get("schedule_enabled"), True)
+
+    poll_interval = (
+        env_settings.k8s_collector_schedule_poll_interval_seconds
+        if env_settings.k8s_collector_schedule_poll_interval_seconds is not None
+        else int(
+            collector_yaml.get("schedule_poll_interval_seconds")
+            or K8sCollectorSettings.model_fields["schedule_poll_interval_seconds"].default
+        )
+    )
+    initial_delay = (
+        env_settings.k8s_collector_schedule_initial_delay_seconds
+        if env_settings.k8s_collector_schedule_initial_delay_seconds is not None
+        else int(
+            collector_yaml.get("schedule_initial_delay_seconds")
+            or K8sCollectorSettings.model_fields["schedule_initial_delay_seconds"].default
+        )
+    )
+
+    return K8sCollectorSettings(
+        kubeconfig=kubeconfig,
+        fallback_to_current_context=fallback,
+        contexts=contexts,
+        runtime_mode=runtime_mode,
+        schedule_enabled=schedule_enabled,
+        schedule_poll_interval_seconds=max(5, poll_interval),
+        schedule_initial_delay_seconds=max(0, initial_delay),
+    )
 
 
 def load_settings() -> tuple[LLMSettings, ServerSettings, dict[str, MCPServerConfig], str]:
@@ -455,7 +1053,10 @@ def load_settings() -> tuple[LLMSettings, ServerSettings, dict[str, MCPServerCon
     )
     server = ServerSettings(
         backend_host=env_settings.backend_host or server_yaml.get("backend_host", "0.0.0.0"),
-        backend_port=env_settings.backend_port or server_yaml.get("backend_port", 8080),
+        backend_port=resolve_backend_listen_port(
+            env_settings=env_settings,
+            server_yaml=server_yaml,
+        ),
         frontend_host=env_settings.frontend_host or server_yaml.get("frontend_host", "0.0.0.0"),
         frontend_port=env_settings.frontend_port or server_yaml.get("frontend_port", 9001),
         backend_api_host=env_settings.backend_api_host or server_yaml.get("backend_api_host", "localhost"),
@@ -469,6 +1070,26 @@ def load_settings() -> tuple[LLMSettings, ServerSettings, dict[str, MCPServerCon
             env_settings.health_check_interval_seconds
             or server_yaml.get("health_check_interval_seconds", 30)
         ),
+        agent_runtime_mode=resolve_agent_runtime_mode(
+            env_settings=env_settings,
+            server_yaml=server_yaml,
+        ),
+        agent_runtime_http_base_url=(
+            env_settings.agent_runtime_http_base_url
+            or server_yaml.get("agent_runtime_http_base_url", "")
+        ),
+        agent_runtime_http_timeout_seconds=float(
+            env_settings.agent_runtime_http_timeout_seconds
+            or server_yaml.get("agent_runtime_http_timeout_seconds", 3600.0)
+        ),
+        agent_runtime_api_key=(
+            env_settings.agent_runtime_api_key
+            or server_yaml.get("agent_runtime_api_key", "")
+        ),
+        control_plane_base_url=(
+            env_settings.control_plane_base_url
+            or server_yaml.get("control_plane_base_url", "")
+        ),
     )
 
     mcp_servers: dict[str, MCPServerConfig] = {}
@@ -477,6 +1098,671 @@ def load_settings() -> tuple[LLMSettings, ServerSettings, dict[str, MCPServerCon
 
     mcp_servers = _apply_mcp_env_overrides(mcp_servers)
 
-    database_path = env_settings.database_path or server_yaml.get("database_path", "data/app.db")
+    # Opaque app-state token path (PostgreSQL uses DATABASE_URL; not an SQLite file).
+    database_path = server_yaml.get("database_path", "data/app.db")
 
     return llm, server, mcp_servers, database_path
+
+
+def load_agent_runtime_settings() -> AgentRuntimeSettings:
+    env_settings = AppSettings()
+    yaml_settings = _load_yaml(CONFIG_DIR / "settings.yaml")
+    runtime_yaml = yaml_settings.get("agent_runtime", {})
+
+    return AgentRuntimeSettings(
+        host=env_settings.agent_runtime_host or runtime_yaml.get("host", "0.0.0.0"),
+        port=env_settings.agent_runtime_port or runtime_yaml.get("port", 8090),
+        api_key=env_settings.agent_runtime_api_key or runtime_yaml.get("api_key", ""),
+    )
+
+
+def resolve_control_plane_base_url(server: ServerSettings) -> str:
+    explicit = (server.control_plane_base_url or "").strip()
+    if explicit:
+        return explicit.rstrip("/")
+    host = (server.backend_api_host or "localhost").strip()
+    port = server.backend_api_port
+    return f"http://{host}:{port}".rstrip("/")
+
+
+def resolve_upload_home() -> Path:
+    """Workflow work_node file upload root (``UPLOAD_HOME``, default ``/app/upload``).
+
+    Outside containers the default ``/app/upload`` is often unusable (missing or
+    read-only ``/app``). In that case fall back to ``{PROJECT_ROOT}/upload``.
+    """
+    raw = (AppSettings().upload_home or "/app/upload").strip() or "/app/upload"
+    path = Path(raw).expanduser()
+    if not path.is_absolute():
+        path = PROJECT_ROOT / path
+    if _ensure_upload_home(path):
+        return path
+    fallback = PROJECT_ROOT / "upload"
+    _ensure_upload_home(fallback)
+    return fallback
+
+
+def workflow_template_dir() -> Path:
+    """``{UPLOAD_HOME}/workflow_template`` — runtime diagram template markdown store."""
+    path = resolve_upload_home() / "workflow_template"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def inventory_csv_dir() -> Path:
+    """``{UPLOAD_HOME}/inventory/csv`` — uploaded inventory CSV store."""
+    path = resolve_upload_home() / "inventory" / "csv"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+INVENTORY_API_MOCK_BASE_URL = "http://inventory-api.ora01000.pe.kr:32716"
+INVENTORY_API_HTTP_BASE_URL = "http://inventory-api.mcps.svc.cluster.local:9000"
+
+
+def resolve_inventory_api_base_url() -> str:
+    """Base URL for the remote inventory-api service.
+
+    Explicit ``INVENTORY_API_BASE_URL`` wins. Otherwise:
+    - mock mode → ``http://inventory-api.ora01000.pe.kr:32716``
+    - http mode → ``http://inventory-api.mcps.svc.cluster.local:9000``
+    """
+    raw = (AppSettings().inventory_api_base_url or "").strip()
+    if raw:
+        return raw.rstrip("/")
+    yaml_settings = _load_yaml(CONFIG_DIR / "settings.yaml")
+    mode = resolve_agent_runtime_mode(server_yaml=yaml_settings.get("server", {})).strip().lower()
+    if mode == "http":
+        return INVENTORY_API_HTTP_BASE_URL
+    return INVENTORY_API_MOCK_BASE_URL
+
+
+def resolve_inventory_csv_upload_url() -> str:
+    """External URL for inventory CSV upload (POST multipart)."""
+    explicit = (AppSettings().inventory_csv_upload_url or "").strip()
+    if explicit:
+        return explicit
+    return f"{resolve_inventory_api_base_url()}/uploadCSV"
+
+
+def resolve_inventory_csv_transfer_url() -> str:
+    """External URL for CSV→table transfer (POST JSON ``{filename}``)."""
+    upload = resolve_inventory_csv_upload_url()
+    if upload.endswith("/uploadCSV"):
+        return f"{upload[: -len('/uploadCSV')]}/transferCSV2Table"
+    base = upload.rsplit("/", 1)[0] if "/" in upload else resolve_inventory_api_base_url()
+    return f"{base.rstrip('/')}/transferCSV2Table"
+
+
+def docs_workflow_template_dir() -> Path:
+    """Bundled seed templates under ``docs/workflow_template`` (read-only source)."""
+    return PROJECT_ROOT / "docs" / "workflow_template"
+
+
+def _ensure_upload_home(path: Path) -> bool:
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+        return True
+    except OSError:
+        return False
+
+
+def sanitize_upload_userid(userid: str | None) -> str:
+    """Filesystem-safe segment for ``{UPLOAD_HOME}/{userid}/...`` (no path traversal)."""
+    import re
+
+    text = (userid or "").strip()
+    if not text:
+        return ""
+    text = text.replace("\\", "/").split("/")[-1].strip()
+    if text in {".", ".."}:
+        return ""
+    text = re.sub(r"[^A-Za-z0-9._-]", "_", text)
+    if text in {".", ".."}:
+        return ""
+    return text[:80]
+
+
+def new_attachment_timestamp() -> str:
+    """Digits-only timestamp folder name under ``attachment/``."""
+    import re
+
+    from backend.app.db.job_datetime import now_job_datetime
+
+    return re.sub(r"\D", "", now_job_datetime()) or "0"
+
+
+def attachment_relative_path(userid: str, timestamp: str) -> str:
+    user_key = sanitize_upload_userid(userid)
+    stamp = sanitize_upload_userid(timestamp) or new_attachment_timestamp()
+    if not user_key:
+        raise ValueError("upload userid가 비어 있습니다.")
+    return f"{user_key}/attachment/{stamp}"
+
+
+def attachment_dir(userid: str, timestamp: str) -> Path:
+    """``{UPLOAD_HOME}/{userid}/attachment/{timestamp}``."""
+    rel = attachment_relative_path(userid, timestamp)
+    return resolve_upload_home() / Path(rel)
+
+
+def resolve_attachment_dir(upload_path: str | None) -> Path | None:
+    """Resolve stored upload_path (relative or absolute) to a directory under UPLOAD_HOME."""
+    text = (upload_path or "").strip()
+    if not text:
+        return None
+    path = Path(text).expanduser()
+    home = resolve_upload_home().resolve()
+    if not path.is_absolute():
+        path = home / path
+    try:
+        resolved = path.resolve()
+    except OSError:
+        return None
+    try:
+        resolved.relative_to(home)
+    except ValueError:
+        return None
+    return resolved
+
+
+WORKFLOW_HISTORY_RESULT_FILENAME = "result.out"
+WORK_NODE_RUN_RESULT_FILENAME = "result.out"
+
+
+def workflow_upload_root(workflow_uuid: str, *, userid: str) -> Path:
+    """``{UPLOAD_HOME}/{userid}/{workflow.uuid}`` — covers history + all work_node dirs."""
+    user_key = sanitize_upload_userid(userid)
+    if not user_key:
+        raise ValueError("upload userid가 비어 있습니다.")
+    wf = (workflow_uuid or "").strip().lower()
+    if not wf:
+        raise ValueError("workflow uuid가 비어 있습니다.")
+    return resolve_upload_home() / user_key / wf
+
+
+def _is_under_upload_home(path: Path) -> bool:
+    home = resolve_upload_home().resolve()
+    try:
+        path.resolve().relative_to(home)
+        return True
+    except (OSError, ValueError):
+        return False
+
+
+def remove_upload_path(path: Path | None) -> bool:
+    """Remove a file/dir under UPLOAD_HOME. Returns True when something was removed."""
+    if path is None:
+        return False
+    try:
+        resolved = path.resolve()
+    except OSError:
+        return False
+    if not _is_under_upload_home(resolved):
+        return False
+    if resolved.is_dir():
+        try:
+            import shutil
+
+            shutil.rmtree(resolved)
+            return True
+        except OSError:
+            return False
+    if resolved.is_file():
+        try:
+            resolved.unlink()
+            return True
+        except OSError:
+            return False
+    return False
+
+
+def remove_workflow_upload_dirs(workflow_uuid: str, *, userids: list[str] | set[str]) -> None:
+    """Delete ``{userid}/{workflow.uuid}/`` for each userid (normalized + history tree)."""
+    seen: set[str] = set()
+    for raw in userids:
+        key = sanitize_upload_userid(raw)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        try:
+            root = workflow_upload_root(workflow_uuid, userid=key)
+        except ValueError:
+            continue
+        remove_upload_path(root)
+
+
+def remove_work_node_upload_dirs(
+    work_uuid: str,
+    *,
+    userids: list[str] | set[str],
+    workflow_uuid: str | None = None,
+) -> None:
+    """Delete workflow-scoped and legacy work_node upload directories."""
+    seen: set[str] = set()
+    wf = (workflow_uuid or "").strip()
+    for raw in userids:
+        key = sanitize_upload_userid(raw)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        if wf:
+            try:
+                remove_upload_path(work_node_edit_upload_dir(wf, work_uuid, userid=key))
+            except ValueError:
+                pass
+        try:
+            remove_upload_path(work_node_upload_dir(work_uuid, userid=key))
+        except ValueError:
+            pass
+        # Flat legacy: {UPLOAD_HOME}/{work_uuid}
+        flat = resolve_upload_home() / (work_uuid or "").strip().lower()
+        if flat.name:
+            remove_upload_path(flat)
+
+
+def work_node_edit_upload_dir(
+    workflow_uuid: str,
+    work_uuid: str,
+    *,
+    userid: str,
+) -> Path:
+    """Edit-time uploads: ``{UPLOAD_HOME}/{userid}/{workflow.uuid}/{work_node.uuid}``."""
+    user_key = sanitize_upload_userid(userid)
+    if not user_key:
+        raise ValueError("upload userid가 비어 있습니다.")
+    wf = (workflow_uuid or "").strip().lower()
+    wn = (work_uuid or "").strip().lower()
+    if not wf:
+        raise ValueError("workflow uuid가 비어 있습니다.")
+    if not wn:
+        raise ValueError("work_node uuid가 비어 있습니다.")
+    return resolve_upload_home() / user_key / wf / wn
+
+
+def work_node_run_upload_dir(
+    workflow_uuid: str,
+    work_uuid: str,
+    workflow_history_idx: int,
+    work_node_history_idx: int,
+    *,
+    userid: str,
+) -> Path:
+    """Run-scoped dir: ``.../{workflow.uuid}/{work_node.uuid}/{wh_idx}/{wnh_idx}``."""
+    base = work_node_edit_upload_dir(workflow_uuid, work_uuid, userid=userid)
+    wh = int(workflow_history_idx or 0)
+    wnh = int(work_node_history_idx or 0)
+    if wh <= 0:
+        raise ValueError("workflow_history idx가 올바르지 않습니다.")
+    if wnh <= 0:
+        raise ValueError("work_node_history idx가 올바르지 않습니다.")
+    return base / str(wh) / str(wnh)
+
+
+def work_node_run_result_path(
+    workflow_uuid: str,
+    work_uuid: str,
+    workflow_history_idx: int,
+    work_node_history_idx: int,
+    *,
+    userid: str,
+) -> Path:
+    return (
+        work_node_run_upload_dir(
+            workflow_uuid,
+            work_uuid,
+            workflow_history_idx,
+            work_node_history_idx,
+            userid=userid,
+        )
+        / WORK_NODE_RUN_RESULT_FILENAME
+    )
+
+
+def write_work_node_run_result(
+    workflow_uuid: str,
+    work_uuid: str,
+    workflow_history_idx: int,
+    work_node_history_idx: int,
+    *,
+    userid: str,
+    content: str,
+) -> Path:
+    path = work_node_run_result_path(
+        workflow_uuid,
+        work_uuid,
+        workflow_history_idx,
+        work_node_history_idx,
+        userid=userid,
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content or "", encoding="utf-8")
+    return path
+
+
+def read_work_node_run_result(
+    workflow_uuid: str,
+    work_uuid: str,
+    workflow_history_idx: int,
+    work_node_history_idx: int,
+    *,
+    userid: str,
+) -> str | None:
+    path = work_node_run_result_path(
+        workflow_uuid,
+        work_uuid,
+        workflow_history_idx,
+        work_node_history_idx,
+        userid=userid,
+    )
+    if not path.is_file():
+        return None
+    return path.read_text(encoding="utf-8")
+
+
+def work_node_upload_dir(node_uuid: str, *, userid: str, workflow_uuid: str | None = None) -> Path:
+    """Per-node upload directory.
+
+    Prefer ``{UPLOAD_HOME}/{userid}/{workflow.uuid}/{work_node.uuid}`` when
+    ``workflow_uuid`` is provided; otherwise legacy ``{UPLOAD_HOME}/{userid}/{work_node.uuid}``.
+    """
+    if (workflow_uuid or "").strip():
+        return work_node_edit_upload_dir(workflow_uuid or "", node_uuid, userid=userid)
+    user_key = sanitize_upload_userid(userid)
+    if not user_key:
+        raise ValueError("upload userid가 비어 있습니다.")
+    key = (node_uuid or "").strip().lower()
+    if not key:
+        raise ValueError("work_node uuid가 비어 있습니다.")
+    return resolve_upload_home() / user_key / key
+
+
+def find_work_node_upload_dir(
+    node_uuid: str,
+    *,
+    userid: str,
+    workflow_uuid: str | None = None,
+) -> Path:
+    """Resolve upload dir, preferring workflow-scoped path then legacy flat paths."""
+    if (workflow_uuid or "").strip():
+        preferred = work_node_edit_upload_dir(workflow_uuid or "", node_uuid, userid=userid)
+        if preferred.is_dir():
+            return preferred
+    legacy_user = work_node_upload_dir(node_uuid, userid=userid)
+    if legacy_user.is_dir():
+        return legacy_user
+    key = (node_uuid or "").strip().lower()
+    legacy_flat = resolve_upload_home() / key
+    if legacy_flat.is_dir():
+        return legacy_flat
+    if (workflow_uuid or "").strip():
+        return work_node_edit_upload_dir(workflow_uuid or "", node_uuid, userid=userid)
+    return legacy_user
+
+
+def normalize_work_node_filename(value: str | None) -> str:
+    """Persist ``work_node.files`` as a bare filename (no directories)."""
+    text = (value or "").strip().replace("\\", "/")
+    if not text:
+        return ""
+    name = Path(text).name.strip()
+    if name in {"", ".", ".."}:
+        return ""
+    return name[:300]
+
+
+def work_node_file_path(
+    node_uuid: str,
+    filename: str | None,
+    *,
+    userid: str,
+    workflow_uuid: str | None = None,
+) -> Path | None:
+    """Absolute path under the work-node upload directory (legacy-aware)."""
+    name = normalize_work_node_filename(filename)
+    if not name:
+        return None
+    return find_work_node_upload_dir(
+        node_uuid, userid=userid, workflow_uuid=workflow_uuid
+    ) / name
+
+
+RESULT_LATEST_FILENAME = "result_latest.out"
+
+
+def validation_output_filename(validate_date: str | None) -> str:
+    """Archive filename ``result_{timestamp}.out`` derived from validate_date (digits only)."""
+    import re
+
+    from backend.app.db.job_datetime import now_job_datetime
+
+    digits = re.sub(r"\D", "", (validate_date or "").strip())
+    if not digits:
+        digits = re.sub(r"\D", "", now_job_datetime())
+    return f"result_{digits}.out"
+
+
+def write_work_node_validation_output(
+    node_uuid: str,
+    *,
+    userid: str,
+    validate_date: str,
+    message: str,
+    workflow_uuid: str | None = None,
+) -> str:
+    """Write message to ``result_latest.out`` and a timestamped archive. Returns latest filename."""
+    directory = work_node_upload_dir(node_uuid, userid=userid, workflow_uuid=workflow_uuid)
+    directory.mkdir(parents=True, exist_ok=True)
+    text = message or ""
+    latest = directory / RESULT_LATEST_FILENAME
+    latest.write_text(text, encoding="utf-8")
+    archive_name = validation_output_filename(validate_date)
+    (directory / archive_name).write_text(text, encoding="utf-8")
+    return RESULT_LATEST_FILENAME
+
+
+def is_work_node_result_filename(filename: str | None) -> bool:
+    """True when ``filename`` is ``result_latest.out`` or ``result_*.out``."""
+    import re
+
+    name = normalize_work_node_filename(filename)
+    if not name:
+        return False
+    if name == RESULT_LATEST_FILENAME:
+        return True
+    return bool(re.fullmatch(r"result_\d+\.out", name))
+
+
+def list_work_node_result_outputs(
+    node_uuid: str,
+    *,
+    userid: str,
+    workflow_uuid: str | None = None,
+) -> list[dict[str, object]]:
+    """List saved run/validation outputs for a work node (newest archives after latest)."""
+    directory = find_work_node_upload_dir(
+        node_uuid, userid=userid, workflow_uuid=workflow_uuid
+    )
+    if not directory.is_dir():
+        return []
+    items: list[dict[str, object]] = []
+    for path in directory.iterdir():
+        if not path.is_file() or not is_work_node_result_filename(path.name):
+            continue
+        try:
+            stat = path.stat()
+        except OSError:
+            continue
+        items.append(
+            {
+                "filename": path.name,
+                "mtime": float(stat.st_mtime),
+                "size": int(stat.st_size),
+                "is_latest": path.name == RESULT_LATEST_FILENAME,
+            }
+        )
+    # Also list per-run result.out under {wh_idx}/{wnh_idx}/
+    try:
+        for wh_dir in directory.iterdir():
+            if not wh_dir.is_dir() or not wh_dir.name.isdigit():
+                continue
+            for wnh_dir in wh_dir.iterdir():
+                if not wnh_dir.is_dir() or not wnh_dir.name.isdigit():
+                    continue
+                result = wnh_dir / WORK_NODE_RUN_RESULT_FILENAME
+                if not result.is_file():
+                    continue
+                try:
+                    stat = result.stat()
+                except OSError:
+                    continue
+                items.append(
+                    {
+                        "filename": f"{wh_dir.name}/{wnh_dir.name}/{WORK_NODE_RUN_RESULT_FILENAME}",
+                        "mtime": float(stat.st_mtime),
+                        "size": int(stat.st_size),
+                        "is_latest": False,
+                        "workflow_history_idx": int(wh_dir.name),
+                        "work_node_history_idx": int(wnh_dir.name),
+                    }
+                )
+    except OSError:
+        pass
+    items.sort(
+        key=lambda row: (
+            0 if bool(row.get("is_latest")) else 1,
+            -float(row.get("mtime") or 0.0),
+        )
+    )
+    return items
+
+
+def read_work_node_result_output(
+    node_uuid: str,
+    filename: str,
+    *,
+    userid: str,
+    workflow_uuid: str | None = None,
+) -> str | None:
+    """Read a specific result output file under the work-node upload directory.
+
+    ``filename`` may be a bare ``result_*.out`` / ``result_latest.out``, or a
+    run-scoped relative path ``{wh_idx}/{wnh_idx}/result.out``.
+    """
+    text = (filename or "").strip().replace("\\", "/")
+    if not text:
+        raise ValueError("허용되지 않는 결과 파일입니다.")
+    parts = [p for p in text.split("/") if p and p not in {".", ".."}]
+    if len(parts) == 3 and parts[0].isdigit() and parts[1].isdigit() and parts[2] == WORK_NODE_RUN_RESULT_FILENAME:
+        if not (workflow_uuid or "").strip():
+            raise ValueError("workflow uuid가 필요합니다.")
+        return read_work_node_run_result(
+            workflow_uuid or "",
+            node_uuid,
+            int(parts[0]),
+            int(parts[1]),
+            userid=userid,
+        )
+    name = normalize_work_node_filename(text)
+    if not is_work_node_result_filename(name):
+        raise ValueError("허용되지 않는 결과 파일입니다.")
+    path = work_node_file_path(
+        node_uuid, name, userid=userid, workflow_uuid=workflow_uuid
+    )
+    if path is None or not path.is_file():
+        return None
+    return path.read_text(encoding="utf-8")
+
+
+def read_work_node_validation_output(
+    node_uuid: str,
+    *,
+    userid: str,
+    validate_date: str | None = None,
+    workflow_uuid: str | None = None,
+) -> str | None:
+    """Load ``result_latest.out``; fall back to timestamped archive when needed."""
+    import re
+
+    latest = work_node_file_path(
+        node_uuid,
+        RESULT_LATEST_FILENAME,
+        userid=userid,
+        workflow_uuid=workflow_uuid,
+    )
+    if latest is not None and latest.is_file():
+        return latest.read_text(encoding="utf-8")
+
+    digits = re.sub(r"\D", "", (validate_date or "").strip())
+    if not digits:
+        return None
+    path = work_node_file_path(
+        node_uuid,
+        f"result_{digits}.out",
+        userid=userid,
+        workflow_uuid=workflow_uuid,
+    )
+    if path is None or not path.is_file():
+        return None
+    return path.read_text(encoding="utf-8")
+
+
+WORKFLOW_HISTORY_RESULT_FILENAME = "result.out"
+
+
+def workflow_history_upload_dir(
+    workflow_uuid: str,
+    history_idx: int,
+    *,
+    userid: str,
+) -> Path:
+    """``{UPLOAD_HOME}/{userid}/{workflow.uuid}/{workflow_history.idx}``."""
+    user_key = sanitize_upload_userid(userid)
+    if not user_key:
+        raise ValueError("upload userid가 비어 있습니다.")
+    key = (workflow_uuid or "").strip().lower()
+    if not key:
+        raise ValueError("workflow uuid가 비어 있습니다.")
+    idx = int(history_idx or 0)
+    if idx <= 0:
+        raise ValueError("workflow_history idx가 올바르지 않습니다.")
+    return resolve_upload_home() / user_key / key / str(idx)
+
+
+def workflow_history_result_path(
+    workflow_uuid: str,
+    history_idx: int,
+    *,
+    userid: str,
+) -> Path:
+    """Normalized final result path: ``.../{idx}/result.out``."""
+    return workflow_history_upload_dir(
+        workflow_uuid, history_idx, userid=userid
+    ) / WORKFLOW_HISTORY_RESULT_FILENAME
+
+
+def write_workflow_history_result(
+    workflow_uuid: str,
+    history_idx: int,
+    *,
+    userid: str,
+    content: str,
+) -> Path:
+    """Persist a per-run workflow result snapshot under the normalized path."""
+    path = workflow_history_result_path(workflow_uuid, history_idx, userid=userid)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content or "", encoding="utf-8")
+    return path
+
+
+def read_workflow_history_result(
+    workflow_uuid: str,
+    history_idx: int,
+    *,
+    userid: str,
+) -> str | None:
+    """Load ``result.out`` for a workflow history row, if present."""
+    path = workflow_history_result_path(workflow_uuid, history_idx, userid=userid)
+    if not path.is_file():
+        return None
+    return path.read_text(encoding="utf-8")
