@@ -17,7 +17,7 @@ from backend.app.logging.agent_logger import log_agent_interaction
 from backend.app.logging.user_comm_logger import list_user_communications, log_user_communication
 from backend.app.logging.workflow_logger import log_workflow_agent_interaction
 from backend.app.middleware.session_auth import get_request_auth_user
-from backend.app.services.agent_runtime_client import AgentInvokeRequest
+from backend.app.services.agent_runtime_client import AgentInvokeRequest, normalize_runtime_mode
 from backend.app.services.axit_platform_client import format_axit_invoke_error
 from backend.app.services.chat_input_history_store import (
     append_chat_input_history,
@@ -30,6 +30,17 @@ logger = logging.getLogger(__name__)
 
 # Feature terminals may expose these without user agent assignment.
 _CHAT_WITHOUT_ASSIGNMENT_AGENT_IDS = frozenset({WORKFLOW_AGENT_LOCAL_AGENT_ID})
+
+
+def _is_http_runtime(request: Request) -> bool:
+    return normalize_runtime_mode(getattr(request.app.state, "agent_runtime_mode", "mock")) == "http"
+
+
+def _tools_for_chat_ui(request: Request, tools_used: list[ToolUsage]) -> list[ToolUsage]:
+    """HTTP mode does not surface MCP tool usage in the interactive terminal."""
+    if _is_http_runtime(request):
+        return []
+    return tools_used
 
 
 class ChatRequest(BaseModel):
@@ -111,10 +122,15 @@ def _serialize_tools(tools_used: list[ToolUsage]) -> list[dict[str, str | None]]
     ]
 
 
-async def _stream_response(result: AgentInvokeResult) -> AsyncIterator[dict[str, str]]:
+async def _stream_response(
+    result: AgentInvokeResult,
+    *,
+    tools_used: list[ToolUsage] | None = None,
+) -> AsyncIterator[dict[str, str]]:
+    tools = tools_used if tools_used is not None else result.tools_used
     yield {
         "event": "tools",
-        "data": json.dumps({"tools": _serialize_tools(result.tools_used)}),
+        "data": json.dumps({"tools": _serialize_tools(tools)}),
     }
 
     chunk_size = 80
@@ -124,7 +140,7 @@ async def _stream_response(result: AgentInvokeResult) -> AsyncIterator[dict[str,
 
     yield {
         "event": "done",
-        "data": json.dumps({"content": "", "tools": _serialize_tools(result.tools_used)}),
+        "data": json.dumps({"content": "", "tools": _serialize_tools(tools)}),
     }
 
 
@@ -174,7 +190,8 @@ async def chat_with_agent(agent_id: str, payload: ChatRequest, request: Request)
                 payload.message,
                 session_id=payload.session_id,
             )
-            async for event in _stream_response(result):
+            ui_tools = _tools_for_chat_ui(request, result.tools_used)
+            async for event in _stream_response(result, tools_used=ui_tools):
                 yield event
 
             if agent_id == WORKFLOW_AGENT_LOCAL_AGENT_ID:
@@ -210,7 +227,7 @@ async def chat_with_agent(agent_id: str, payload: ChatRequest, request: Request)
                         agent_name=definition.name,
                         user_message=payload.message,
                         assistant_message=result.content,
-                        tools_used=result.tools_used,
+                        tools_used=ui_tools,
                     )
                 except ValueError as exc:
                     logger.warning("Skipped user comm log for %s: %s", auth_user.userid, exc)
@@ -245,6 +262,7 @@ async def get_user_chat_logs(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    hide_tools = _is_http_runtime(request)
     entries = [
         UserCommLogEntry(
             timestamp=str(entry.get("timestamp", "")),
@@ -252,7 +270,11 @@ async def get_user_chat_logs(
             agent_name=str(entry.get("agent_name", "")),
             user_message=str(entry.get("user_message", "")),
             assistant_message=str(entry.get("assistant_message", "")),
-            tools=entry.get("tools", []) if isinstance(entry.get("tools"), list) else [],
+            tools=(
+                []
+                if hide_tools
+                else (entry.get("tools", []) if isinstance(entry.get("tools"), list) else [])
+            ),
         )
         for entry in payload.get("entries", [])
         if isinstance(entry, dict)

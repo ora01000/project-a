@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import logging
+import math
 import re
 import time
 from dataclasses import dataclass
@@ -56,7 +57,8 @@ def _normalize_axit_session_id(session_id: str | None) -> str:
 DEFAULT_AXIT_HTTP_TIMEOUT_SECONDS = 3600.0
 DEFAULT_AXIT_TOKEN_TIMEOUT_SECONDS = 60.0
 DEFAULT_AXIT_POLL_INTERVAL_SECONDS = 3.0
-DEFAULT_AXIT_POLL_MAX_ATTEMPTS = 100  # 3s × 100 ≈ 5분
+DEFAULT_AXIT_POLL_TIMEOUT_SECONDS = 600.0  # minimum wait when falling back to polling
+DEFAULT_AXIT_POLL_MAX_ATTEMPTS = 200  # 3s × 200 = 10분
 
 _PENDING_INVOCATION_STATUSES = frozenset({"running", "pending"})
 
@@ -200,7 +202,12 @@ class AxitPlatformClient:
         self._token_http_timeout = build_axit_token_http_timeout()
         self._poll_http_timeout = build_axit_token_http_timeout(60.0)
         self._poll_interval_seconds = max(0.5, float(poll_interval_seconds))
-        self._poll_max_attempts = max(1, int(poll_max_attempts))
+        # Enforce at least DEFAULT_AXIT_POLL_TIMEOUT_SECONDS of polling wait.
+        min_attempts = max(
+            1,
+            int(math.ceil(DEFAULT_AXIT_POLL_TIMEOUT_SECONDS / self._poll_interval_seconds)),
+        )
+        self._poll_max_attempts = max(min_attempts, int(poll_max_attempts))
         self._token_cache: dict[str, _CachedAccessToken] = {}
 
     def _resolve_client_id(self, runtime_mode: str) -> str:
@@ -556,10 +563,11 @@ class AxitPlatformClient:
                 )
 
         elapsed = time.monotonic() - started_at
+        budget_seconds = self._poll_max_attempts * self._poll_interval_seconds
         raise AxitInvocationPollTimeoutError(
             (
                 f"AXIT invocation polling timed out after {self._poll_max_attempts} attempts "
-                f"(interval={self._poll_interval_seconds:.0f}s)"
+                f"(interval={self._poll_interval_seconds:.0f}s, budget≈{budget_seconds:.0f}s)"
             ),
             elapsed_seconds=elapsed,
             invoke_url=context.invocations_url,

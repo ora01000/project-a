@@ -171,6 +171,8 @@ export function IntegratedChatPanel({
   const isResizingRef = useRef(false);
   const resizeStartYRef = useRef(0);
   const resizeStartHeightRef = useRef(DEFAULT_AGENT_LIST_HEIGHT);
+  /** HTTP runtime does not surface MCP tool usage in the interactive terminal. */
+  const [showMcpTools, setShowMcpTools] = useState(true);
 
   const clampAgentListHeight = useCallback((nextHeight: number) => {
     const layoutHeight = layoutRef.current?.clientHeight ?? window.innerHeight;
@@ -188,6 +190,29 @@ export function IntegratedChatPanel({
 
   useEffect(() => {
     setSessionId((current) => (isUuidSessionId(current) ? current : createSessionId()));
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadRuntimeMode = async () => {
+      try {
+        const response = await fetch("/api/health");
+        if (!response.ok) {
+          return;
+        }
+        const health = (await response.json()) as { runtime_mode?: string };
+        const mode = (health.runtime_mode || "mock").trim().toLowerCase();
+        if (!cancelled) {
+          setShowMcpTools(mode !== "http");
+        }
+      } catch {
+        // keep default (show tools) when health is unavailable
+      }
+    };
+    void loadRuntimeMode();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -797,7 +822,7 @@ export function IntegratedChatPanel({
                             </button>
                           ) : null}
                         </div>
-                        <ToolUsageList tools={response.toolsUsed} />
+                        {showMcpTools ? <ToolUsageList tools={response.toolsUsed} /> : null}
                         {response.assistantContent ? (
                           <AssistantMessageContent content={response.assistantContent} />
                         ) : (
