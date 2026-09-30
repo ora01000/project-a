@@ -161,6 +161,26 @@ export function AgentConnectionFormModal({
                   className="w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 outline-none focus:border-sky-500"
                 />
               </label>
+              <label className="flex items-center gap-2 text-sm text-slate-300">
+                <input
+                  type="checkbox"
+                  checked={values.talkable}
+                  onChange={(event) => updateField("talkable", event.target.checked)}
+                  disabled={isSaving}
+                  className="h-4 w-4 rounded border-slate-600 bg-slate-950 text-sky-500 focus:ring-sky-500"
+                />
+                <span>대화가능 (talkable)</span>
+              </label>
+              <label className="flex items-center gap-2 text-sm text-slate-300">
+                <input
+                  type="checkbox"
+                  checked={values.is_orchestrator}
+                  onChange={(event) => updateField("is_orchestrator", event.target.checked)}
+                  disabled={isSaving}
+                  className="h-4 w-4 rounded border-slate-600 bg-slate-950 text-sky-500 focus:ring-sky-500"
+                />
+                <span>오케스트레이터 (is_orchestrator)</span>
+              </label>
               {mode === "edit" ? (
                 <label className="block text-sm text-slate-300 md:col-span-2">
                   <span className="mb-1 block">등록일시</span>

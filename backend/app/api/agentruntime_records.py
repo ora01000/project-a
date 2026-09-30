@@ -60,6 +60,8 @@ class AgentRuntimeWriteBody(BaseModel):
     description: str = Field(default="", max_length=255)
     registered_date: str = Field(default="", max_length=40)
     service_id: str = Field(min_length=1, max_length=20)
+    talkable: bool = True
+    is_orchestrator: bool = False
     viewer_role: int
 
 
@@ -118,6 +120,8 @@ async def create_agentruntime(
             description=payload.description,
             service_id=payload.service_id,
             registered_date=payload.registered_date or None,
+            talkable=payload.talkable,
+            is_orchestrator=payload.is_orchestrator,
         )
     except Exception as exc:
         if is_integrity_error(exc):
@@ -156,6 +160,8 @@ async def update_agentruntime(
             description=payload.description,
             service_id=payload.service_id,
             registered_date=payload.registered_date or existing.registered_date,
+            talkable=payload.talkable,
+            is_orchestrator=payload.is_orchestrator,
         )
     except Exception as exc:
         if is_integrity_error(exc):

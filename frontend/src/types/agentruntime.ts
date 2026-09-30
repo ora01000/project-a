@@ -19,6 +19,8 @@ export interface AgentRuntimeFormValues {
   description: string;
   registered_date: string;
   service_id: string;
+  talkable: boolean;
+  is_orchestrator: boolean;
 }
 
 export const AGENTRUNTIME_TYPE_OPTIONS = [
@@ -40,6 +42,8 @@ export function emptyAgentRuntimeForm(defaultType = 0): AgentRuntimeFormValues {
     description: "",
     registered_date: "",
     service_id: "prvops",
+    talkable: true,
+    is_orchestrator: false,
   };
 }
 
@@ -52,6 +56,8 @@ export function agentRuntimeFormFromRecord(record: AgentRuntimeRecord): AgentRun
     description: record.description,
     registered_date: record.registered_date,
     service_id: record.service_id,
+    talkable: record.talkable,
+    is_orchestrator: record.is_orchestrator,
   };
 }
 

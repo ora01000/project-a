@@ -434,6 +434,8 @@ def update_agentruntime_record(
     description: str,
     service_id: str,
     registered_date: str,
+    talkable: bool,
+    is_orchestrator: bool,
 ) -> StoredAgentRuntime | None:
     existing = get_agentruntime_by_idx(database_path, idx)
     if existing is None:
@@ -443,7 +445,8 @@ def update_agentruntime_record(
             """
             UPDATE agentruntime
             SET agent_name = ?, agent_id = ?, local_agent_id = ?,
-                description = ?, registered_date = ?, service_id = ?
+                description = ?, registered_date = ?, service_id = ?,
+                talkable = ?, is_orchestrator = ?
             WHERE idx = ?
             """,
             (
@@ -453,6 +456,8 @@ def update_agentruntime_record(
                 description.strip(),
                 normalize_registered_datetime(registered_date),
                 service_id.strip(),
+                1 if talkable else 0,
+                1 if is_orchestrator else 0,
                 idx,
             ),
         )
