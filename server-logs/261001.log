@@ -1,0 +1,91 @@
+--- input ---
+다음 스크립트를 run_cli 도구로 oc/kubectl/virtctl 명령을 실행하여 수행하고 정의된 결과 JSON 형식에 맞춰 응답하세요.
+-------------
+# 수행 스크립트
+echo '=== Node List & Status ===' && oc --context=dprv-k8s get nodes -o wide && echo '=== Node Conditions ===' && oc --context=dprv-k8s get nodes -o json | jq -r '.items[] | {name: .metadata.name, conditions: [.status.conditions[] | select(.status=="True") | .type]}'
+-------------
+# 결과
+JSON만 응답하세요(마크다운 코드펜스 금지).
+{
+  "success": true 또는 false,
+  "message": "<마크다운 본문>"
+}
+
+## message 작성 규칙 (MUST)
+- `message`에 plain text 요약만 넣지 마세요. 실행 stdout·핵심 결과를 **Markdown**으로 보기 좋게 정리해 넣으세요(취합·리치텍스트 표시용).
+- 권장 구조:
+  1) 한 줄 결론(성공/실패·대상)
+  2) 표·목록으로 정리 가능한 항목은 Markdown 표(`| col |`) 또는 bullet
+  3) 원본 CLI/도구 stdout은 ```text 코드펜스로 보존 (과도한 생략 금지; 반복 노이즈만 짧게 축약)
+- HTML 태그는 쓰지 마세요. Markdown만 사용하세요.
+- `message` 문자열 안의 줄바꿈은 JSON 이스케이프(`\n`)로 넣으세요.
+
+--- output ---
+## 결론
+**dprv-k8s (IT공통 개발기, 상암7층)** 클러스터의 전체 노드는 총 **32개** 모두 `Ready` 상태이며, Condition 조회 결과 전 노드가 `Ready=True`만 보유(비정상 Condition 없음)로 **정상**입니다.
+
+### 노드 역할별 요약
+
+| Role | 노드 수 | 비고 |
+|---|---|---|
+| control-plane,master | 3 | mst01v, mst02v, mst03v |
+| infra | 5 | inf01v, inf02v, inf03v, log01v, log02v |
+| router | 6 | rte01v, rte02v, rti01v~04v |
+| worker | 18 | wkr01v~18(v/p 혼합) |
+| **합계** | **32** | 전체 `Ready` |
+
+- Kubernetes 버전: `v1.25.8+27e744f` (전 노드 동일)
+- OS: `Fedora CoreOS 37.20230322.3.0`, Kernel `6.1.18-200.fc37.x86_64`
+- Container Runtime: `cri-o://1.25.1`
+- Age: 가장 오래된 노드 3y202d(마스터/인프라 그룹), 최근 추가된 worker는 437d~660d 수준
+
+### 원본 CLI 출력
+```text
+=== Node List & Status ===
+NAME                                STATUS   ROLES                  AGE      VERSION           INTERNAL-IP     EXTERNAL-IP   OS-IMAGE                        KERNEL-VERSION           CONTAINER-RUNTIME
+dprvinf01v.dprv-k8s.lguplus.co.kr   Ready    infra                  3y202d   v1.25.8+27e744f   172.23.20.134   <none>        Fedora CoreOS 37.20230322.3.0   6.1.18-200.fc37.x86_64   cri-o://1.25.1
+dprvinf02v.dprv-k8s.lguplus.co.kr   Ready    infra                  3y202d   v1.25.8+27e744f   172.23.20.135   <none>        Fedora CoreOS 37.20230322.3.0   6.1.18-200.fc37.x86_64   cri-o://1.25.1
+dprvinf03v.dprv-k8s.lguplus.co.kr   Ready    infra                  3y202d   v1.25.8+27e744f   172.23.20.136   <none>        Fedora CoreOS 37.20230322.3.0   6.1.18-200.fc37.x86_64   cri-o://1.25.1
+dprvlog01v.dprv-k8s.lguplus.co.kr   Ready    infra                  3y202d   v1.25.8+27e744f   172.23.20.137   <none>        Fedora CoreOS 37.20230322.3.0   6.1.18-200.fc37.x86_64   cri-o://1.25.1
+dprvlog02v.dprv-k8s.lguplus.co.kr   Ready    infra                  636d     v1.25.8+27e744f   172.23.20.13    <none>        Fedora CoreOS 37.20230322.3.0   6.1.18-200.fc37.x86_64   cri-o://1.25.1
+dprvmst01v.dprv-k8s.lguplus.co.kr   Ready    control-plane,master   3y202d   v1.25.8+27e744f   172.23.20.131   <none>        Fedora CoreOS 37.20230322.3.0   6.1.18-200.fc37.x86_64   cri-o://1.25.1
+dprvmst02v.dprv-k8s.lguplus.co.kr   Ready    control-plane,master   3y202d   v1.25.8+27e744f   172.23.20.132   <none>        Fedora CoreOS 37.20230322.3.0   6.1.18-200.fc37.x86_64   cri-o://1.25.1
+dprvmst03v.dprv-k8s.lguplus.co.kr   Ready    control-plane,master   3y202d   v1.25.8+27e744f   172.23.20.133   <none>        Fedora CoreOS 37.20230322.3.0   6.1.18-200.fc37.x86_64   cri-o://1.25.1
+dprvrte01v.dprv-k8s.lguplus.co.kr   Ready    router                 3y202d   v1.25.8+27e744f   172.23.205.58   <none>        Fedora CoreOS 37.20230322.3.0   6.1.18-200.fc37.x86_64   cri-o://1.25.1
+dprvrte02v.dprv-k8s.lguplus.co.kr   Ready    router                 3y202d   v1.25.8+27e744f   172.23.205.59   <none>        Fedora CoreOS 37.20230322.3.0   6.1.18-200.fc37.x86_64   cri-o://1.25.1
+dprvrti01v.dprv-k8s.lguplus.co.kr   Ready    router                 3y202d   v1.25.8+27e744f   172.23.205.56   <none>        Fedora CoreOS 37.20230322.3.0   6.1.18-200.fc37.x86_64   cri-o://1.25.1
+dprvrti02v.dprv-k8s.lguplus.co.kr   Ready    router                 3y202d   v1.25.8+27e744f   172.23.205.57   <none>        Fedora CoreOS 37.20230322.3.0   6.1.18-200.fc37.x86_64   cri-o://1.25.1
+dprvrti03v.dprv-k8s.lguplus.co.kr   Ready    router                 3y132d   v1.25.8+27e744f   172.23.14.243   <none>        Fedora CoreOS 37.20230322.3.0   6.1.18-200.fc37.x86_64   cri-o://1.25.1
+dprvrti04v.dprv-k8s.lguplus.co.kr   Ready    router                 3y131d   v1.25.8+27e744f   172.23.14.244   <none>        Fedora CoreOS 37.20230322.3.0   6.1.18-200.fc37.x86_64   cri-o://1.25.1
+dprvwkr01v.dprv-k8s.lguplus.co.kr   Ready    worker                 3y167d   v1.25.8+27e744f   172.23.20.101   <none>        Fedora CoreOS 37.20230322.3.0   6.1.18-200.fc37.x86_64   cri-o://1.25.1
+dprvwkr02p.dprv-k8s.lguplus.co.kr   Ready    worker                 443d     v1.25.8+27e744f   172.23.20.102   <none>        Fedora CoreOS 37.20230322.3.0   6.1.18-200.fc37.x86_64   cri-o://1.25.1
+dprvwkr03v.dprv-k8s.lguplus.co.kr   Ready    worker                 3y181d   v1.25.8+27e744f   172.23.20.103   <none>        Fedora CoreOS 37.20230322.3.0   6.1.18-200.fc37.x86_64   cri-o://1.25.1
+dprvwkr04p.dprv-k8s.lguplus.co.kr   Ready    worker                 443d     v1.25.8+27e744f   172.23.20.104   <none>        Fedora CoreOS 37.20230322.3.0   6.1.18-200.fc37.x86_64   cri-o://1.25.1
+dprvwkr05v.dprv-k8s.lguplus.co.kr   Ready    worker                 3y181d   v1.25.8+27e744f   172.23.20.105   <none>        Fedora CoreOS 37.20230322.3.0   6.1.18-200.fc37.x86_64   cri-o://1.25.1
+dprvwkr06p.dprv-k8s.lguplus.co.kr   Ready    worker                 442d     v1.25.8+27e744f   172.23.20.106   <none>        Fedora CoreOS 37.20230322.3.0   6.1.18-200.fc37.x86_64   cri-o://1.25.1
+dprvwkr07v.dprv-k8s.lguplus.co.kr   Ready    worker                 3y158d   v1.25.8+27e744f   172.23.20.107   <none>        Fedora CoreOS 37.20230322.3.0   6.1.18-200.fc37.x86_64   cri-o://1.25.1
+dprvwkr08p.dprv-k8s.lguplus.co.kr   Ready    worker                 437d     v1.25.8+27e744f   172.23.20.108   <none>        Fedora CoreOS 37.20230322.3.0   6.1.18-200.fc37.x86_64   cri-o://1.25.1
+dprvwkr09v.dprv-k8s.lguplus.co.kr   Ready    worker                 3y158d   v1.25.8+27e744f   172.23.20.109   <none>        Fedora CoreOS 37.20230322.3.0   6.1.18-200.fc37.x86_64   cri-o://1.25.1
+dprvwkr10p.dprv-k8s.lguplus.co.kr   Ready    worker                 442d     v1.25.8+27e744f   172.23.20.110   <none>        Fedora CoreOS 37.20230322.3.0   6.1.18-200.fc37.x86_64   cri-o://1.25.1
+dprvwkr11v.dprv-k8s.lguplus.co.kr   Ready    worker                 3y122d   v1.25.8+27e744f   172.23.20.111   <none>        Fedora CoreOS 37.20230322.3.0   6.1.18-200.fc37.x86_64   cri-o://1.25.1
+dprvwkr12v.dprv-k8s.lguplus.co.kr   Ready    worker                 2y330d   v1.25.8+27e744f   172.23.20.112   <none>        Fedora CoreOS 37.20230322.3.0   6.1.18-200.fc37.x86_64   cri-o://1.25.1
+dprvwkr13v.dprv-k8s.lguplus.co.kr   Ready    worker                 2y330d   v1.25.8+27e744f   172.23.20.113   <none>        Fedora CoreOS 37.20230322.3.0   6.1.18-200.fc37.x86_64   cri-o://1.25.1
+dprvwkr14v.dprv-k8s.lguplus.co.kr   Ready    worker                 2y330d   v1.25.8+27e744f   172.23.20.114   <none>        Fedora CoreOS 37.20230322.3.0   6.1.18-200.fc37.x86_64   cri-o://1.25.1
+dprvwkr15v.dprv-k8s.lguplus.co.kr   Ready    worker                 2y330d   v1.25.8+27e744f   172.23.20.115   <none>        Fedora CoreOS 37.20230322.3.0   6.1.18-200.fc37.x86_64   cri-o://1.25.1
+dprvwkr16v.dprv-k8s.lguplus.co.kr   Ready    worker                 660d     v1.25.8+27e744f   172.23.20.116   <none>        Fedora CoreOS 37.20230322.3.0   6.1.18-200.fc37.x86_64   cri-o://1.25.1
+dprvwkr17v.dprv-k8s.lguplus.co.kr   Ready    worker                 575d     v1.25.8+27e744f   172.23.20.42    <none>        Fedora CoreOS 37.20230322.3.0   6.1.18-200.fc37.x86_64   cri-o://1.25.1
+dprvwkr18v.dprv-k8s.lguplus.co.kr   Ready    worker                 575d     v1.25.8+27e744f   172.23.20.43    <none>        Fedora CoreOS 37.20230322.3.0   6.1.18-200.fc37.x86_64   cri-o://1.25.1
+
+=== Node Conditions (요약: 전 노드 Ready=True만 존재) ===
+dprvinf01v ~ dprvwkr18v (32개 노드 전부): {"conditions": ["Ready"]}
+```
+
+### 참고
+- Node Conditions 조회에서 `status=="True"`인 조건만 추출한 결과, 모든 노드가 `Ready` 단일 조건만 True이며 `MemoryPressure`, `DiskPressure`, `PIDPressure`, `NetworkUnavailable` 등 이상 조건은 True 상태인 노드가 없습니다.
+
+[2026. 10. 1. 오후 8:33:25]
+event: failure
+status: failed
+fail_reason: 작업 결과에 success 필드가 없습니다.
+--- output ---
+작업 결과에 success 필드가 없습니다.
