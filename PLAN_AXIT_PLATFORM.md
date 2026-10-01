@@ -3005,4 +3005,9 @@ left "작업 워크플로우 목록" 패널의 생성된 작업 워크플로우 
 - http 모드에서 워크플로우 에이전트를 uuid 를 환경변수에서 지정하게 한다. ex) JOB_PROCESSOR_HELPDESK_AXIT_AGENT_ID, JOB_AUDITOR_AXIT_AGENT_ID
 - 호출되는 에이전트 속성 is_orchestrator = 0 이다
 
+# Ansible-lint 에이전트를 스킬 바꾸는 방안
+- 검토사항
+  - 독립적으로 구성된 ansible lint 에이전트를 PRIVATE_CLOUD_AGENT의 skill 로 편입하고자 할 경우 @docs/system-prompt/ansible-lint_PROMPT.md 를 기반으로 ansible lint skill 을 검토해 달라. 코드 수정은 하지 말고 설계안을 제시
+  - 검토 내용을 토대로 판단한 결과 ansible-lint 에이전트는 유지를 하는 것으로 하려 한다. 다만, ansible 작성, 검증 은 스킬로 빼고, PRIVATE_CLOUD_AGENT, WORKFLOW_AGENT에서 활용하고 싶다. 이 부분을 보완 검토 바람
+  - 검증은 스킬에서 뺀다. 작성을 중심으로 
 

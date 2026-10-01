@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from backend.app.agents.base import AgentDefinition
+from backend.app.agents.skill_loader import load_skill
 from backend.app.agents.system_prompt_loader import read_system_prompt
 from backend.app.db.agentruntime import ORCHESTRATOR_LOCAL_AGENT_IDS, MockAgentRuntimePreset
 
@@ -25,6 +26,8 @@ CALLABLE_AGENT_ID_ALIASES: dict[str, str] = {
     "dkvrt-k8s": "kubevirt",
 }
 
+ANSIBLE_PLAYBOOK_SKILL_NAME = "ansible_playbook"
+
 
 @dataclass(frozen=True)
 class MockPlatformAgentSpec:
@@ -35,7 +38,14 @@ class MockPlatformAgentSpec:
 
     def resolved_system_prompt(self) -> str:
         """Load prompt from disk on each call so md edits apply without re-import."""
-        return read_system_prompt(self.agent_id)
+        prompt = read_system_prompt(self.agent_id)
+        if self.agent_id == WORKFLOW_AGENT_LOCAL_AGENT_ID:
+            # Use replace — prompt contains many JSON `{...}` examples.
+            return prompt.replace(
+                "{ansible_playbook_skill}",
+                load_skill(ANSIBLE_PLAYBOOK_SKILL_NAME),
+            )
+        return prompt
 
     def to_agent_definition(self) -> AgentDefinition:
         return AgentDefinition(

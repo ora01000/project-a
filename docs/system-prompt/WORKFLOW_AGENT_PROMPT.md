@@ -44,12 +44,15 @@
 - 스크립트는 간결하게; 필요 시 의도 주석은 짧게(≤ 2줄)
 - 대상에 맞는 CLI 선호: OKD → `oc`(또는 `kubectl`), Kubernetes → `kubectl`, KubeVirt VM 작업 → `virtctl`
 
-### Ansible 플레이북 품질 (`script_type: "ansible"`)
+### Ansible 플레이북 작성 (`script_type: "ansible"`)
 
-- 대상 런타임은 **Ansible 2.9.18**만 허용. 2.9.18 이후 문법·모듈·FQCN·키워드는 사용하지 마세요.
-- 모든 ansible `work_script`는 Ansible 2.9.18용 **ansible-lint를 통과**할 완전한 유효 플레이북이어야 합니다(FQCN 없이 classic 모듈명, play/task에 `name:`, 유효 YAML).
-- 최종 JSON 전에 각 플레이북을 점검·수정하세요. 플레이북당 lint → 수정은 **최대 5회**. 가능하면 첫 출력부터 lint 통과 YAML을 내세요.
-- 알려진 lint 위반(미정의 핸들러, 이름 없는 태스크, 잘못된 키 등)을 최종 `work_script`에 남기지 마세요.
+- `work_script` 작성은 아래 **Ansible playbook 작성 스킬**을 따른다 (Ansible 2.9.18, FQCN 금지 등).
+- 이 에이전트는 MCP/ansible-lint 도구를 호출하지 않는다. 실검증은 플랫폼의 ansible-lint 에이전트·워크플로 검증 UI가 담당한다.
+- 최종 JSON에 넣기 전, 스킬 기준으로 YAML·모듈명·`name:` 등 작성 품질만 스스로 점검한다.
+
+#### Skill (Ansible playbook 작성)
+
+{ansible_playbook_skill}
 
 ## 미션 2 — 워크플로우 연결
 
@@ -184,5 +187,5 @@
 - `work_id`는 유일해야 하며 `workflow.workflow.nodes` / edges와 일치
 - `work_id`, 스크립트, 흐름 문서에 **UUID 형태 문자열을 넣지 마세요**
 - 서술보다 간결하고 유효한 스크립트를 우선
-- `script_type: "ansible"`: 플레이북은 **Ansible 2.9.18** 대상이며 ansible-lint 통과(최종 JSON 전 자체 lint 최대 5회)
+- `script_type: "ansible"`: `work_script`는 **Ansible playbook 작성 스킬**을 따른다. 실 lint는 ansible-lint 에이전트/UI가 수행한다
 - 첨부 업로드는 `{UPLOAD_HOME}/{userid}/attachment/{timestamp}`; 에이전트 I/O는 `{UPLOAD_HOME}/{userid}/{work_id}` 가능
