@@ -3001,5 +3001,8 @@ left "작업 워크플로우 목록" 패널의 생성된 작업 워크플로우 
   4. mcp-nsxt.ora01000.pe.kr
   - ingress 는 모두 로컬 32716 포트로 오픈되므로 실제 클라이언트는 http://<ingress-hostname>:32716/mcp 로 접속
 
+# 워크플로우 생성을 위한 에이전트 호출 설정 보완
+- http 모드에서 워크플로우 에이전트를 uuid 를 환경변수에서 지정하게 한다. ex) JOB_PROCESSOR_HELPDESK_AXIT_AGENT_ID, JOB_AUDITOR_AXIT_AGENT_ID
+- 호출되는 에이전트 속성 is_orchestrator = 0 이다
 
 

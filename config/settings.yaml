@@ -72,6 +72,13 @@ job_auditor:
   # http 모드: AXIT agent_id 직접 지정 (선택)
   axit_agent_id: ""
 
+# 작업 워크플로우 AI 설계 에이전트 (is_orchestrator=0)
+workflow_agent:
+  # mock 기본 local_agent_id / http 후보
+  local_agent_id: WORKFLOW_AGENT
+  # http 모드: AXIT agent_id(uuid) 직접 지정 (선택)
+  axit_agent_id: ""
+
 # 나의 노트: Redis 편집 버퍼 → 주기적 영구 저장
 mynotes:
   enabled: true

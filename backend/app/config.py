@@ -113,6 +113,15 @@ class JobAuditorSettings(BaseModel):
     axit_agent_id: str = ""
 
 
+class WorkflowAgentSettings(BaseModel):
+    """Workflow design AI agent (mock WORKFLOW_AGENT / http AXIT uuid)."""
+
+    # http 모드: agentruntime.local_agent_id (기본 WORKFLOW_AGENT; is_orchestrator=0)
+    local_agent_id: str = "WORKFLOW_AGENT"
+    # http 모드: AXIT agent_id(uuid) 직접 지정 (선택; is_orchestrator=0)
+    axit_agent_id: str = ""
+
+
 class MyNotesSettings(BaseModel):
     enabled: bool = True
     flush_interval_seconds: int = 300
@@ -246,6 +255,14 @@ class AppSettings(BaseSettings):
     job_auditor_axit_agent_id: str | None = Field(
         default=None,
         alias="JOB_AUDITOR_AXIT_AGENT_ID",
+    )
+    workflow_agent_local_agent_id: str | None = Field(
+        default=None,
+        alias="WORKFLOW_AGENT_LOCAL_AGENT_ID",
+    )
+    workflow_agent_axit_agent_id: str | None = Field(
+        default=None,
+        alias="WORKFLOW_AGENT_AXIT_AGENT_ID",
     )
 
     mynotes_flush_enabled: bool | None = Field(default=None, alias="MY_NOTES_FLUSH_ENABLED")
@@ -725,6 +742,29 @@ def load_job_auditor_settings() -> JobAuditorSettings:
 
     return JobAuditorSettings(
         local_agent_id=local_agent_id or "JOB_AUDITOR_AGENT",
+        axit_agent_id=axit_agent_id,
+    )
+
+
+def load_workflow_agent_settings() -> WorkflowAgentSettings:
+    yaml_settings = _load_yaml(CONFIG_DIR / "settings.yaml")
+    workflow_yaml = yaml_settings.get("workflow_agent", {})
+    env_settings = AppSettings()
+
+    if env_settings.workflow_agent_local_agent_id is not None:
+        local_agent_id = env_settings.workflow_agent_local_agent_id.strip()
+    else:
+        local_agent_id = str(
+            workflow_yaml.get("local_agent_id", "WORKFLOW_AGENT"),
+        ).strip()
+
+    if env_settings.workflow_agent_axit_agent_id is not None:
+        axit_agent_id = env_settings.workflow_agent_axit_agent_id.strip()
+    else:
+        axit_agent_id = str(workflow_yaml.get("axit_agent_id", "")).strip()
+
+    return WorkflowAgentSettings(
+        local_agent_id=local_agent_id or "WORKFLOW_AGENT",
         axit_agent_id=axit_agent_id,
     )
 

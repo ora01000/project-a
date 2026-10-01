@@ -23,7 +23,6 @@ NON_TALKABLE_LOCAL_AGENT_IDS: frozenset[str] = frozenset({"job_auditor", "WORKFL
 ORCHESTRATOR_LOCAL_AGENT_IDS: frozenset[str] = frozenset({
     "archi-analysis",
     "job_auditor",
-    "WORKFLOW_AGENT",
 })
 
 _AXIT_AGENT_ID_NAMESPACE = uuid.UUID("00000000-0000-4000-8000-000000000000")
@@ -500,7 +499,7 @@ def ensure_mock_ansible_lint_agentruntime(database_path: str | Path) -> StoredAg
 
 
 def ensure_mock_workflow_agent_agentruntime(database_path: str | Path) -> StoredAgentRuntime | None:
-    """Insert mock-only WORKFLOW_AGENT agentruntime row if missing."""
+    """Insert mock-only WORKFLOW_AGENT agentruntime row if missing (is_orchestrator=0)."""
     from backend.app.agents.mock_platform_agents import (
         WORKFLOW_AGENT_LOCAL_AGENT_ID,
         get_mock_platform_agent_spec,
@@ -512,6 +511,19 @@ def ensure_mock_workflow_agent_agentruntime(database_path: str | Path) -> Stored
         runtime_mode="mock",
     )
     if existing is not None:
+        if existing.is_orchestrator:
+            return update_agentruntime_record(
+                database_path,
+                existing.idx,
+                agent_name=existing.agent_name,
+                agent_id=existing.agent_id,
+                local_agent_id=existing.local_agent_id,
+                description=existing.description,
+                service_id=existing.service_id,
+                registered_date=existing.registered_date,
+                talkable=existing.talkable,
+                is_orchestrator=False,
+            )
         return existing
 
     spec = get_mock_platform_agent_spec(WORKFLOW_AGENT_LOCAL_AGENT_ID)
@@ -527,7 +539,7 @@ def ensure_mock_workflow_agent_agentruntime(database_path: str | Path) -> Stored
         description=spec.description,
         service_id=DEFAULT_SERVICE_ID,
         talkable=default_talkable_for_local_agent_id(WORKFLOW_AGENT_LOCAL_AGENT_ID),
-        is_orchestrator=default_is_orchestrator_for_local_agent_id(WORKFLOW_AGENT_LOCAL_AGENT_ID),
+        is_orchestrator=False,
     )
 
 

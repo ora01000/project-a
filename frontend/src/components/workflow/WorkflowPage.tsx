@@ -18,7 +18,7 @@ import { isRunInProgress } from "./workflowModel";
 import { normalizeCrudFlags } from "./aiWorkflowParse";
 import { canManageWorkflowTemplates } from "../../types/user";
 
-const WORKFLOW_AGENT_ID = "WORKFLOW_AGENT";
+const FALLBACK_WORKFLOW_AGENT_ID = "WORKFLOW_AGENT";
 
 const CRUD_BADGE_META: { key: "c" | "r" | "u" | "d"; label: string }[] = [
   { key: "c", label: "생성" },
@@ -91,10 +91,26 @@ async function parseError(response: Response, fallback: string): Promise<string>
   return typeof payload?.detail === "string" ? payload.detail : fallback;
 }
 
-function resolveWorkflowAgentId(agents: AgentInfo[]): string {
+function resolveWorkflowAgentId(
+  agents: AgentInfo[],
+  configuredAgentId?: string | null,
+): string {
+  const configured = (configuredAgentId || "").trim();
+  if (configured) {
+    const exact = agents.find((agent) => agent.id.trim() === configured);
+    if (exact?.id.trim()) {
+      return exact.id.trim();
+    }
+    // http AXIT catalog may use agent_id uuid not yet mirrored in /api/agents list shape;
+    // still allow configured id through to chat endpoint.
+    return configured;
+  }
   const hit = agents.find((agent) => {
     const id = agent.id.trim();
-    return id === WORKFLOW_AGENT_ID || id.toUpperCase().includes(WORKFLOW_AGENT_ID);
+    return (
+      id === FALLBACK_WORKFLOW_AGENT_ID ||
+      id.toUpperCase().includes(FALLBACK_WORKFLOW_AGENT_ID)
+    );
   });
   if (!hit?.id.trim()) {
     throw new Error("WORKFLOW_AGENT를 찾을 수 없습니다.");
@@ -192,6 +208,7 @@ export function WorkflowPage({ agents, user, onChatComplete }: WorkflowPageProps
 
   const [runningUuid, setRunningUuid] = useState<string | null>(null);
   const [runMessage, setRunMessage] = useState<string | null>(null);
+  const [designAgentId, setDesignAgentId] = useState<string | null>(null);
 
   const selected = items.find((item) => item.uuid === selectedUuid) ?? null;
 
@@ -268,7 +285,7 @@ export function WorkflowPage({ agents, user, onChatComplete }: WorkflowPageProps
     async (prompt: string) => {
       diagramAwaitingRef.current = true;
       try {
-        const agentId = resolveWorkflowAgentId(agents);
+        const agentId = resolveWorkflowAgentId(agents, designAgentId);
         const content = await streamWorkflowAgentChat({
           agentId,
           userid: user.userid,
@@ -292,6 +309,7 @@ export function WorkflowPage({ agents, user, onChatComplete }: WorkflowPageProps
     [
       agents,
       applyAssistantWorkflowPayload,
+      designAgentId,
       onChatComplete,
       pushDiagramAgentEvent,
       selectedUuid,
@@ -402,6 +420,29 @@ export function WorkflowPage({ agents, user, onChatComplete }: WorkflowPageProps
       cancelled = true;
     };
   }, [loadWorkflows, loadWorkNodes]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadDesignAgent = async () => {
+      try {
+        const response = await fetch("/api/workflow-design-agent");
+        if (!response.ok) {
+          return;
+        }
+        const payload = (await response.json()) as { agent_id?: string };
+        const agentId = String(payload.agent_id || "").trim();
+        if (!cancelled && agentId) {
+          setDesignAgentId(agentId);
+        }
+      } catch {
+        // Fallback to agents list lookup in resolveWorkflowAgentId.
+      }
+    };
+    void loadDesignAgent();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const hasDbRunning =
     items.some(

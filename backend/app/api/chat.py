@@ -8,7 +8,6 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
-from backend.app.agents.mock_platform_agents import WORKFLOW_AGENT_LOCAL_AGENT_ID
 from backend.app.agents.base import AgentInvokeResult, ToolUsage
 from backend.app.db.roles import is_admin_role
 from backend.app.db.users import parse_agent_ids
@@ -23,17 +22,27 @@ from backend.app.services.chat_input_history_store import (
     append_chat_input_history,
     get_chat_input_history,
 )
+from backend.app.services.workflow_agent_enrich import enrich_workflow_agent_json
+from backend.app.services.workflow_design_agent import is_workflow_design_agent_id
 
 router = APIRouter(tags=["chat"])
 
 logger = logging.getLogger(__name__)
 
-# Feature terminals may expose these without user agent assignment.
-_CHAT_WITHOUT_ASSIGNMENT_AGENT_IDS = frozenset({WORKFLOW_AGENT_LOCAL_AGENT_ID})
-
 
 def _is_http_runtime(request: Request) -> bool:
     return normalize_runtime_mode(getattr(request.app.state, "agent_runtime_mode", "mock")) == "http"
+
+
+def _is_workflow_design_chat_agent(request: Request, agent_id: str) -> bool:
+    runtime_mode = normalize_runtime_mode(
+        getattr(request.app.state, "agent_runtime_mode", "mock"),
+    )
+    return is_workflow_design_agent_id(
+        agent_id,
+        request.app.state.database_path,
+        runtime_mode,
+    )
 
 
 def _tools_for_chat_ui(request: Request, tools_used: list[ToolUsage]) -> list[ToolUsage]:
@@ -80,7 +89,7 @@ def _ensure_chat_agent_access(request: Request, agent_id: str) -> None:
     if agent_id not in manager.agents:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
 
-    if agent_id in _CHAT_WITHOUT_ASSIGNMENT_AGENT_IDS:
+    if _is_workflow_design_chat_agent(request, agent_id):
         return
 
     user = get_request_auth_user(request)
@@ -176,7 +185,7 @@ async def chat_with_agent(agent_id: str, payload: ChatRequest, request: Request)
     if payload.userid and payload.userid.strip() != auth_user.userid:
         raise HTTPException(status_code=403, detail="요청 사용자와 세션 사용자가 일치하지 않습니다.")
 
-    if agent_id not in _CHAT_WITHOUT_ASSIGNMENT_AGENT_IDS:
+    if not _is_workflow_design_chat_agent(request, agent_id):
         allowed = set(parse_agent_ids(auth_user.agents))
         if agent_id not in allowed:
             raise HTTPException(status_code=403, detail="할당되지 않은 에이전트입니다.")
@@ -190,11 +199,18 @@ async def chat_with_agent(agent_id: str, payload: ChatRequest, request: Request)
                 payload.message,
                 session_id=payload.session_id,
             )
+            if _is_workflow_design_chat_agent(request, agent_id):
+                result = AgentInvokeResult(
+                    content=enrich_workflow_agent_json(result.content),
+                    tools_used=result.tools_used,
+                    input_tokens=result.input_tokens,
+                    output_tokens=result.output_tokens,
+                )
             ui_tools = _tools_for_chat_ui(request, result.tools_used)
             async for event in _stream_response(result, tools_used=ui_tools):
                 yield event
 
-            if agent_id == WORKFLOW_AGENT_LOCAL_AGENT_ID:
+            if _is_workflow_design_chat_agent(request, agent_id):
                 workflow_key = (
                     (payload.workflow_uuid or "").strip()
                     or (payload.session_id or "").strip()
@@ -278,7 +294,11 @@ async def get_user_chat_logs(
         )
         for entry in payload.get("entries", [])
         if isinstance(entry, dict)
-        and str(entry.get("agent_id") or "").strip() != WORKFLOW_AGENT_LOCAL_AGENT_ID
+        and not is_workflow_design_agent_id(
+            str(entry.get("agent_id") or ""),
+            request.app.state.database_path,
+            normalize_runtime_mode(getattr(request.app.state, "agent_runtime_mode", "mock")),
+        )
     ]
 
     return UserCommLogResponse(

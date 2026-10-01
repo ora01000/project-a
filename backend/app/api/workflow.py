@@ -33,6 +33,11 @@ from backend.app.config import (
     write_work_node_validation_output,
 )
 from backend.app.db.agentruntime import get_agentruntime_by_idx
+from backend.app.services.agent_runtime_client import normalize_runtime_mode
+from backend.app.services.workflow_design_agent import (
+    resolve_workflow_agent_id,
+    try_resolve_workflow_agent_runtime_record,
+)
 from backend.app.db.job_datetime import now_job_datetime
 from backend.app.db.jobs import (
     JobRecord,
@@ -382,6 +387,35 @@ async def api_get_workflow_front_guide(request: Request) -> WorkflowFrontGuideRe
     if not path.is_file():
         raise HTTPException(status_code=404, detail="안내 문서를 찾을 수 없습니다.")
     return WorkflowFrontGuideResponse(content=path.read_text(encoding="utf-8"))
+
+
+class WorkflowDesignAgentResponse(BaseModel):
+    agent_id: str
+    local_agent_id: str = ""
+    axit_agent_id: str = ""
+    is_orchestrator: bool = False
+
+
+@router.get("/workflow-design-agent", response_model=WorkflowDesignAgentResponse)
+async def api_get_workflow_design_agent(request: Request) -> WorkflowDesignAgentResponse:
+    """Resolve the agent used for AI workflow design (is_orchestrator=0)."""
+    get_request_auth_user(request)
+    database_path = request.app.state.database_path
+    runtime_mode = normalize_runtime_mode(
+        getattr(request.app.state, "agent_runtime_mode", "mock"),
+    )
+    try:
+        agent_id = resolve_workflow_agent_id(database_path, runtime_mode)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    record = try_resolve_workflow_agent_runtime_record(database_path, runtime_mode)
+    return WorkflowDesignAgentResponse(
+        agent_id=agent_id,
+        local_agent_id=(record.local_agent_id if record else "") or "",
+        axit_agent_id=(record.agent_id if record else "") or "",
+        is_orchestrator=bool(record.is_orchestrator) if record else False,
+    )
 
 
 class WorkNodeResponse(BaseModel):
