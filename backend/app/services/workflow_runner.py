@@ -386,6 +386,29 @@ def _append_previous_result(script: str, previous_result: str, *, use_previous: 
     )
 
 
+def _structured_result_message_rules() -> str:
+    """Instruct target agents to put Markdown-rich stdout in JSON ``message``."""
+    return (
+        "# 결과\n"
+        "JSON만 응답하세요(마크다운 코드펜스 금지).\n"
+        "{\n"
+        '  "success": true 또는 false,\n'
+        '  "message": "<마크다운 본문>"\n'
+        "}\n"
+        "\n"
+        "## message 작성 규칙 (MUST)\n"
+        "- `message`에 plain text 요약만 넣지 마세요. 실행 stdout·핵심 결과를 "
+        "**Markdown**으로 보기 좋게 정리해 넣으세요(취합·리치텍스트 표시용).\n"
+        "- 권장 구조:\n"
+        "  1) 한 줄 결론(성공/실패·대상)\n"
+        "  2) 표·목록으로 정리 가능한 항목은 Markdown 표(`| col |`) 또는 bullet\n"
+        "  3) 원본 CLI/도구 stdout은 ```text 코드펜스로 보존 "
+        "(과도한 생략 금지; 반복 노이즈만 짧게 축약)\n"
+        "- HTML 태그는 쓰지 마세요. Markdown만 사용하세요.\n"
+        "- `message` 문자열 안의 줄바꿈은 JSON 이스케이프(`\\n`)로 넣으세요.\n"
+    )
+
+
 def _wrap_work_script_for_execution(script_type: str, script: str) -> str:
     """Wrap work_script by script_type before sending to target_agent."""
     normalized = (script_type or "").strip().lower()
@@ -404,34 +427,38 @@ def _wrap_work_script_for_execution(script_type: str, script: str) -> str:
     }:
         normalized = "oc/kubectl/virtctl"
     body = script.strip()
+    result_contract = _structured_result_message_rules()
     if normalized == "oc/kubectl/virtctl":
         return (
             "다음 스크립트를 run_cli 도구로 oc/kubectl/virtctl 명령을 실행하여 수행하고 "
-            "정의된 결과 json 형식에 맞춰 응답하세요\n"
+            "정의된 결과 JSON 형식에 맞춰 응답하세요.\n"
             "-------------\n"
             "# 수행 스크립트\n"
             f"{body}\n"
             "-------------\n"
-            "# 결과\n"
-            "{\n"
-            '  "success": [ true | false ],\n'
-            '  "message": "결과 메시지"\n'
-            "}"
+            f"{result_contract}"
         )
     if normalized == "ansible":
         return (
-            "다음 스크립트를 ansible 에이전트 도구를 사용하여 수행하고 정의된 결과 json 형식에 맞춰 응답하세요\n"
+            "다음 스크립트를 ansible 관련 도구로 수행하고 "
+            "정의된 결과 JSON 형식에 맞춰 응답하세요.\n"
             "-------------\n"
             "# 수행 스크립트\n"
             f"{body}\n"
             "-------------\n"
-            "# 결과\n"
-            "{\n"
-            '  "success": [ true | false ],\n'
-            '  "message": "결과 메시지"\n'
-            "}"
+            f"{result_contract}"
         )
-    # prompt: as-is. cli: TBD — currently as-is.
+    if normalized == "cli":
+        return (
+            "다음 bash/cli 스크립트를 수행하고 "
+            "정의된 결과 JSON 형식에 맞춰 응답하세요.\n"
+            "-------------\n"
+            "# 수행 스크립트\n"
+            f"{body}\n"
+            "-------------\n"
+            f"{result_contract}"
+        )
+    # prompt: as-is (natural-language reply; no structured wrap).
     return body
 
 
@@ -506,18 +533,42 @@ def _extract_json_object(raw: str) -> dict[str, Any] | None:
     text = (raw or "").strip()
     if not text:
         return None
-    fenced = re.search(r"```(?:json)?\s*([\s\S]*?)```", text, flags=re.IGNORECASE)
-    if fenced and fenced.group(1):
-        text = fenced.group(1).strip()
+
+    def _loads_object(candidate: str) -> dict[str, Any] | None:
+        try:
+            parsed = json.loads(candidate)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return None
+        return parsed if isinstance(parsed, dict) else None
+
+    # Prefer whole-string / brace-slice parse first so Markdown fences inside
+    # JSON string values (e.g. message with ```text) are not treated as wrappers.
+    direct = _loads_object(text)
+    if direct is not None:
+        return direct
     start = text.find("{")
     end = text.rfind("}")
-    if start < 0 or end <= start:
-        return None
-    try:
-        parsed = json.loads(text[start : end + 1])
-    except (TypeError, ValueError, json.JSONDecodeError):
-        return None
-    return parsed if isinstance(parsed, dict) else None
+    if start >= 0 and end > start:
+        sliced = _loads_object(text[start : end + 1])
+        if sliced is not None:
+            return sliced
+
+    # Fallback: explicit ```json ... ``` wrapper only (not bare ```).
+    fenced = re.search(
+        r"```json\s*([\s\S]*?)```",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if fenced and fenced.group(1):
+        inner = fenced.group(1).strip()
+        loaded = _loads_object(inner)
+        if loaded is not None:
+            return loaded
+        start = inner.find("{")
+        end = inner.rfind("}")
+        if start >= 0 and end > start:
+            return _loads_object(inner[start : end + 1])
+    return None
 
 
 def _coerce_success_flag(value: Any) -> bool | None:
@@ -534,8 +585,7 @@ def _coerce_success_flag(value: Any) -> bool | None:
     return None
 
 
-def _assert_structured_work_success(script_type: str, content: str) -> None:
-    """For oc/kubectl/virtctl and ansible, require JSON ``success: true``; otherwise raise."""
+def _normalize_structured_script_type(script_type: str) -> str:
     normalized = (script_type or "").strip().lower()
     if normalized in {
         "yaml",
@@ -550,8 +600,14 @@ def _assert_structured_work_success(script_type: str, content: str) -> None:
         "k8s",
         "kubernetes",
     }:
-        normalized = "oc/kubectl/virtctl"
-    if normalized not in {"oc/kubectl/virtctl", "ansible"}:
+        return "oc/kubectl/virtctl"
+    return normalized
+
+
+def _assert_structured_work_success(script_type: str, content: str) -> None:
+    """For non-prompt script types, require JSON ``success: true``; otherwise raise."""
+    normalized = _normalize_structured_script_type(script_type)
+    if normalized not in {"oc/kubectl/virtctl", "ansible", "cli"}:
         return
     payload = _extract_json_object(content)
     if payload is None:
@@ -566,22 +622,8 @@ def _assert_structured_work_success(script_type: str, content: str) -> None:
 
 
 def _script_type_uses_structured_result(script_type: str) -> bool:
-    normalized = (script_type or "").strip().lower()
-    if normalized in {
-        "yaml",
-        "kubectl",
-        "oc",
-        "virtctl",
-        "oc/kubectl",
-        "kubectl/virtctl",
-        "oc/virtctl",
-        "okd",
-        "kubevirt",
-        "k8s",
-        "kubernetes",
-    }:
-        normalized = "oc/kubectl/virtctl"
-    return normalized in {"oc/kubectl/virtctl", "ansible"}
+    normalized = _normalize_structured_script_type(script_type)
+    return normalized in {"oc/kubectl/virtctl", "ansible", "cli"}
 
 
 def _format_markdown_table(rows: list[dict[str, Any]]) -> str:
@@ -621,8 +663,12 @@ def _polish_message_paragraphs(message: str) -> str:
         inner = nested["message"].strip()
         if inner:
             text = inner
-    # Keep existing markdown tables / lists as-is; otherwise collapse excess blank lines.
-    if "|" in text and "\n" in text:
+    # Preserve Markdown tables, code fences, and headings as-is.
+    if (
+        ("|" in text and "\n" in text)
+        or "```" in text
+        or re.search(r"(?m)^#{1,6}\s+\S", text)
+    ):
         return text
     lines = [line.rstrip() for line in text.splitlines()]
     compacted: list[str] = []
@@ -1300,7 +1346,7 @@ def _merged_run_result_content(
         if not body:
             continue
         title = (node.work_name or work_uuid).strip() or work_uuid
-        sections.append(f"===== {title} ({node.uuid}) =====\n{body}")
+        sections.append(f"## {title}\n\n{body}")
     return "\n\n".join(sections).strip()
 
 
