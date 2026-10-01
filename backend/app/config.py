@@ -37,6 +37,8 @@ class MCPServerConfig(BaseModel):
     transport: str = "streamable_http"
     url: str
     enabled: bool = True
+    # Optional Bearer token for project-f / OrbStack MCP (Authorization: Bearer …).
+    auth_token: str = ""
 
 
 class EmailNotificationSettings(BaseModel):
@@ -97,16 +99,17 @@ class JobProcessorSettings(BaseModel):
     enabled: bool = True
     poll_interval_seconds: int = 60
     initial_delay_seconds: int = 0
-    # http 모드: agentruntime.local_agent_id (기본 helpdesk, 대안 sys-helpdesk)
-    helpdesk_local_agent_id: str = "helpdesk"
-    # http 모드: AXIT agent_id 직접 지정 시 local_agent_id 조회 생략
+    # agentruntime.local_agent_id for approved-job delegation
+    # (default PRIVATE_CLOUD_AGENT; is_orchestrator=0 in http mode)
+    helpdesk_local_agent_id: str = "PRIVATE_CLOUD_AGENT"
+    # http 모드: AXIT agent_id 직접 지정 시 local_agent_id 조회 생략 (is_orchestrator=0)
     helpdesk_axit_agent_id: str = ""
 
 
 class JobAuditorSettings(BaseModel):
-    # http 모드: agentruntime.local_agent_id (기본 JOB_AUDITOR_AGENT)
+    # http 모드: agentruntime.local_agent_id (기본 JOB_AUDITOR_AGENT; is_orchestrator=0)
     local_agent_id: str = "JOB_AUDITOR_AGENT"
-    # http 모드: AXIT agent_id 직접 지정 (선택)
+    # http 모드: AXIT agent_id 직접 지정 (선택; is_orchestrator=0)
     axit_agent_id: str = ""
 
 
@@ -464,6 +467,18 @@ def _apply_mcp_env_overrides(mcp_servers: dict[str, MCPServerConfig]) -> dict[st
             if server_key not in updated:
                 continue
             updated[server_key] = updated[server_key].model_copy(update={"enabled": enabled})
+            continue
+
+        if env_key.endswith("_AUTH_TOKEN") or env_key.endswith("_TOKEN"):
+            suffix = env_key.removeprefix("MCP_")
+            if suffix.endswith("_AUTH_TOKEN"):
+                server_key = _mcp_server_key_from_env_suffix(suffix.removesuffix("_AUTH_TOKEN"))
+            else:
+                server_key = _mcp_server_key_from_env_suffix(suffix.removesuffix("_TOKEN"))
+            token = raw_value.strip()
+            if not token or server_key not in updated:
+                continue
+            updated[server_key] = updated[server_key].model_copy(update={"auth_token": token})
 
     return updated
 
@@ -674,7 +689,7 @@ def load_job_processor_settings() -> JobProcessorSettings:
         helpdesk_local_agent_id = env_settings.job_processor_helpdesk_local_agent_id.strip()
     else:
         helpdesk_local_agent_id = str(
-            processor_yaml.get("helpdesk_local_agent_id", "helpdesk"),
+            processor_yaml.get("helpdesk_local_agent_id", "PRIVATE_CLOUD_AGENT"),
         ).strip()
 
     if env_settings.job_processor_helpdesk_axit_agent_id is not None:
@@ -686,7 +701,7 @@ def load_job_processor_settings() -> JobProcessorSettings:
         enabled=enabled,
         poll_interval_seconds=max(1, poll_interval_seconds),
         initial_delay_seconds=max(0, initial_delay_seconds),
-        helpdesk_local_agent_id=helpdesk_local_agent_id or "helpdesk",
+        helpdesk_local_agent_id=helpdesk_local_agent_id or "PRIVATE_CLOUD_AGENT",
         helpdesk_axit_agent_id=helpdesk_axit_agent_id,
     )
 

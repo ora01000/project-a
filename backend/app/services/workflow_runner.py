@@ -389,10 +389,25 @@ def _append_previous_result(script: str, previous_result: str, *, use_previous: 
 def _wrap_work_script_for_execution(script_type: str, script: str) -> str:
     """Wrap work_script by script_type before sending to target_agent."""
     normalized = (script_type or "").strip().lower()
+    if normalized in {
+        "yaml",
+        "kubectl",
+        "oc",
+        "virtctl",
+        "oc/kubectl",
+        "kubectl/virtctl",
+        "oc/virtctl",
+        "okd",
+        "kubevirt",
+        "k8s",
+        "kubernetes",
+    }:
+        normalized = "oc/kubectl/virtctl"
     body = script.strip()
-    if normalized == "kubectl":
+    if normalized == "oc/kubectl/virtctl":
         return (
-            "다음 스크립트를 kubectl 도구를 사용하여 수행하고 정의된 결과 json 형식에 맞춰 응답하세요\n"
+            "다음 스크립트를 run_cli 도구로 oc/kubectl/virtctl 명령을 실행하여 수행하고 "
+            "정의된 결과 json 형식에 맞춰 응답하세요\n"
             "-------------\n"
             "# 수행 스크립트\n"
             f"{body}\n"
@@ -520,9 +535,23 @@ def _coerce_success_flag(value: Any) -> bool | None:
 
 
 def _assert_structured_work_success(script_type: str, content: str) -> None:
-    """For kubectl/ansible, require JSON ``success: true``; otherwise raise (fail path)."""
+    """For oc/kubectl/virtctl and ansible, require JSON ``success: true``; otherwise raise."""
     normalized = (script_type or "").strip().lower()
-    if normalized not in {"kubectl", "ansible"}:
+    if normalized in {
+        "yaml",
+        "kubectl",
+        "oc",
+        "virtctl",
+        "oc/kubectl",
+        "kubectl/virtctl",
+        "oc/virtctl",
+        "okd",
+        "kubevirt",
+        "k8s",
+        "kubernetes",
+    }:
+        normalized = "oc/kubectl/virtctl"
+    if normalized not in {"oc/kubectl/virtctl", "ansible"}:
         return
     payload = _extract_json_object(content)
     if payload is None:

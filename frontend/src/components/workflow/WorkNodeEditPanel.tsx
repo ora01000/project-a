@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { AgentRuntimeRecord } from "../../types/agentruntime";
 import { assignableAgentId } from "../../types/agentruntime";
 import type { WorkScriptType } from "../../types/workflow";
-import { WORK_SCRIPT_TYPE_OPTIONS } from "../../types/workflow";
+import { WORK_SCRIPT_TYPE_OPTIONS, normalizeWorkScriptType } from "../../types/workflow";
 import { flushSseBuffer, parseSseChunk } from "../../utils/parseSse";
 import { JobReportEmailModal } from "../jobs/JobReportEmailModal";
 import type { WorkEditorNode } from "./workflowModel";
@@ -47,7 +47,7 @@ function toggleCrudLetter(current: string, letter: "c" | "r" | "u" | "d"): strin
   return order.filter((ch) => selected.has(ch)).join("");
 }
 
-const ALLOWED_SCRIPT_TYPES = new Set(["kubectl", "ansible", "cli", "prompt"]);
+const ALLOWED_SCRIPT_TYPES = new Set(["oc/kubectl/virtctl", "ansible", "cli", "prompt"]);
 
 const SCRIPT_GENERATION_PREAMBLES: Record<Exclude<WorkScriptType, "">, string> = {
   prompt: [
@@ -56,11 +56,12 @@ const SCRIPT_GENERATION_PREAMBLES: Record<Exclude<WorkScriptType, "">, string> =
     "보완 수정된(또는 문제가 없다면 원문 그대로) 문구 외에는 어떤 결과도 덧붙이지 마세요.",
     '결과는 다음 형태로만 응답하세요: {"script_type":"prompt","work_script":"검토된 질의문"}',
   ].join(" "),
-  kubectl: [
-    "다음 질의를 분석하여 kubectl 명령어를 작성하시기 바랍니다.",
+  "oc/kubectl/virtctl": [
+    "다음 질의를 분석하여 oc/kubectl/virtctl 명령어를 작성하시기 바랍니다.",
+    "OKD/Kubernetes는 oc 또는 kubectl, KubeVirt VM은 virtctl을 사용하세요.",
     "단, 절대 도구를 사용해서 작업을 수행하지 마세요.",
-    "답변에는 생성된 kubectl 명령어 외 어떤 결과도 덧붙이지 마세요.",
-    '결과는 다음 형태로만 응답하세요: {"script_type":"kubectl","work_script":"생성된 kubectl cli"}',
+    "답변에는 생성된 oc/kubectl/virtctl 명령어 외 어떤 결과도 덧붙이지 마세요.",
+    '결과는 다음 형태로만 응답하세요: {"script_type":"oc/kubectl/virtctl","work_script":"생성된 oc/kubectl/virtctl cli"}',
   ].join(" "),
   ansible: [
     "다음 질의를 분석하여 ansible playbook을 작성하시기 바랍니다.",
@@ -109,12 +110,12 @@ function parseScriptGenerationPayload(raw: string): {
   const scriptTypeRaw = String(parsed.script_type || "")
     .trim()
     .toLowerCase();
-  const scriptType = (
-    scriptTypeRaw === "yaml" ? "kubectl" : scriptTypeRaw
-  ) as WorkScriptType;
+  const scriptType = normalizeWorkScriptType(scriptTypeRaw) as WorkScriptType;
   const workScript = String(parsed.work_script || parsed.agent_response || "").trim();
   if (!ALLOWED_SCRIPT_TYPES.has(scriptType)) {
-    throw new Error("응답의 script_type이 kubectl, ansible, cli, prompt 중 하나가 아닙니다.");
+    throw new Error(
+      "응답의 script_type이 oc/kubectl/virtctl, ansible, cli, prompt 중 하나가 아닙니다.",
+    );
   }
   if (!workScript) {
     throw new Error("응답에 work_script 스크립트 내용이 없습니다.");
@@ -250,7 +251,7 @@ function looksLikeKubernetesYaml(script: string): boolean {
   if (!trimmed) {
     return false;
   }
-  if (/^\s*kubectl\b/im.test(trimmed)) {
+  if (/^\s*(kubectl|oc|virtctl)\b/im.test(trimmed)) {
     return false;
   }
   return (
@@ -262,9 +263,9 @@ function looksLikeKubernetesYaml(script: string): boolean {
 const MUTATING_KUBECTL_RE =
   /\b(apply|create|delete|patch|replace|edit|scale|annotate|label|taint|cordon|uncordon|drain|rollout\s+undo|set)\b/i;
 
-/** Ensure mutating kubectl lines carry ``--dry-run=server`` (before shell redirects). */
+/** Ensure mutating kubectl/oc lines carry ``--dry-run=server`` (before shell redirects). */
 function injectKubectlDryRun(line: string): string {
-  if (!/\bkubectl\b/i.test(line) || /--dry-run(=|\s|$)/i.test(line)) {
+  if (!/\b(kubectl|oc)\b/i.test(line) || /--dry-run(=|\s|$)/i.test(line)) {
     return line;
   }
   if (!MUTATING_KUBECTL_RE.test(line)) {
@@ -388,14 +389,14 @@ function buildValidationMessage(scriptType: string, script: string): string {
   if (scriptType === "ansible") {
     return buildAnsibleLintMessage(script, 1, null);
   }
-  if (scriptType === "kubectl") {
+  if (scriptType === "oc/kubectl/virtctl") {
     const safeScript = prepareKubectlValidationScript(script);
     return [
       "【검증 전용 · 실제 변경 금지】",
       "이 요청은 클러스터 검증만 수행한다. 리소스를 실제로 생성·변경·삭제하면 안 된다.",
       "아래 명령을 그대로 실행하고 --dry-run 을 제거·우회하지 마라.",
       "읽기 전용(get/describe/logs 등)만 dry-run 없이 허용한다. apply/create/delete/patch/replace 등은 반드시 --dry-run=server(또는 client) 포함.",
-      "YAML 매니페스트는 kubectl apply --dry-run=server -f - 형태만 허용한다.",
+      "YAML 매니페스트는 oc/kubectl apply --dry-run=server -f - 형태만 허용한다.",
       '결과는 다음 JSON만 출력한다: {"valid":true|false,"message":"실행결과"}',
       "",
       "【실행할 명령】",
@@ -619,7 +620,7 @@ export function WorkNodeEditPanel({
     const selectedType = String(node.scriptType || "")
       .trim()
       .toLowerCase();
-    const normalizedType = (selectedType === "yaml" ? "kubectl" : selectedType) as WorkScriptType;
+    const normalizedType = normalizeWorkScriptType(selectedType) as WorkScriptType;
     if (!ALLOWED_SCRIPT_TYPES.has(normalizedType)) {
       setGenerateError("스크립트 종류를 선택하세요.");
       return;
@@ -700,9 +701,7 @@ export function WorkNodeEditPanel({
 
   const handleValidateScript = async () => {
     const script = node.workScript.trim();
-    const scriptType = String(node.scriptType || "")
-      .trim()
-      .toLowerCase();
+    const scriptType = normalizeWorkScriptType(node.scriptType);
     if (!script) {
       setValidateMessage("검증할 스크립트가 없습니다.");
       setValidateResult(null);
@@ -715,8 +714,14 @@ export function WorkNodeEditPanel({
       setIsValidationPanelOpen(true);
       return;
     }
-    if (scriptType !== "kubectl" && scriptType !== "ansible" && scriptType !== "prompt") {
-      setValidateMessage("script_type이 kubectl, ansible, prompt 중 하나가 아닙니다.");
+    if (
+      scriptType !== "oc/kubectl/virtctl" &&
+      scriptType !== "ansible" &&
+      scriptType !== "prompt"
+    ) {
+      setValidateMessage(
+        "script_type이 oc/kubectl/virtctl, ansible, prompt 중 하나가 아닙니다.",
+      );
       setValidateResult(null);
       setIsValidationPanelOpen(true);
       return;

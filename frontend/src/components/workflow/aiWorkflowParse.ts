@@ -1,4 +1,5 @@
 import type { WorkScriptType } from "../../types/workflow";
+import { normalizeWorkScriptType } from "../../types/workflow";
 
 export type AiWorkNodeDraft = {
   /** Opaque link token from AI (`work_id` / `idx` / ignored `uuid`); used only for expression remap. */
@@ -33,7 +34,7 @@ export type AiWorkflowDesignPayload = {
   merge_work_result: string;
 };
 
-const SCRIPT_TYPES = new Set(["kubectl", "ansible", "cli", "prompt"]);
+const SCRIPT_TYPES = new Set(["oc/kubectl/virtctl", "ansible", "cli", "prompt"]);
 /** Prefer short logical ids from the agent; also accept opaque tokens (incl. guardrail-masked text). */
 const LOGICAL_ID_RE = /^[^\s]{1,200}$/;
 const DEFAULT_CRON_EXPR = "0 9 * * *";
@@ -287,9 +288,11 @@ export function parseAiWorkflowDesignResponse(raw: string): AiWorkflowDesignPayl
     const workerRaw = asString(row.worker).toLowerCase() || "agent";
     const worker = workerRaw === "hitl" ? "hitl" : "agent";
     const scriptTypeRaw = asString(row.script_type).toLowerCase();
-    const scriptType = scriptTypeRaw === "yaml" ? "kubectl" : scriptTypeRaw;
+    const scriptType = normalizeWorkScriptType(scriptTypeRaw);
     if (worker === "agent" && scriptType && !SCRIPT_TYPES.has(scriptType)) {
-      throw new Error(`script_type은 kubectl|ansible|cli|prompt 중 하나여야 합니다: ${scriptType}`);
+      throw new Error(
+        `script_type은 oc/kubectl/virtctl|ansible|cli|prompt 중 하나여야 합니다: ${scriptType}`,
+      );
     }
 
     const uuid = newUuid();

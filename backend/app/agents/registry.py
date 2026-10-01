@@ -9,6 +9,7 @@ from backend.app.agents.mock_platform_agents import (
     MOCK_PLATFORM_AGENT_IDS,
     load_mock_platform_agent_definitions,
 )
+from backend.app.agents.private_cloud_agent import PRIVATE_CLOUD_AGENT
 from backend.app.agents.vcenter_agent import VCENTER_AGENT
 from backend.app.infra_search_agent.definition import INFRA_SEARCH_AGENT
 from backend.app.db.agentruntime import catalog_agent_id, list_agentruntime_records
@@ -17,6 +18,7 @@ AGENT_DEFINITIONS: list[AgentDefinition] = [
     *K8S_CLUSTER_AGENTS,
     KUBEVIRT_AGENT,
     VCENTER_AGENT,
+    PRIVATE_CLOUD_AGENT,
     ANSIBLE_AGENT,
     ANSIBLE_LINT_AGENT,
 ]

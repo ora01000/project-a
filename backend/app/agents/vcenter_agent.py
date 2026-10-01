@@ -4,7 +4,7 @@ from backend.app.agents.system_prompt_loader import load_system_prompt
 VCENTER_AGENT = AgentDefinition(
     agent_id="vcenter",
     name="VMware Agent",
-    role="VMware vCenter 정보 조회",
-    mcp_server_keys=["vcenter"],
+    role="VMware vCenter / NSX-T 정보 조회",
+    mcp_server_keys=["vcenter", "nsxt"],
     system_prompt=load_system_prompt("vcenter"),
 )

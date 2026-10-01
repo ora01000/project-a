@@ -1,11 +1,32 @@
-export type WorkScriptType = "" | "kubectl" | "ansible" | "cli" | "prompt";
+export type WorkScriptType = "" | "oc/kubectl/virtctl" | "ansible" | "cli" | "prompt";
 
 export const WORK_SCRIPT_TYPE_OPTIONS: { value: Exclude<WorkScriptType, "">; label: string }[] = [
   { value: "prompt", label: "자연어(프롬프트)" },
-  { value: "kubectl", label: "kubectl(Kubernetes)" },
+  { value: "oc/kubectl/virtctl", label: "OKD/KubeVirt" },
   { value: "ansible", label: "playbook" },
   { value: "cli", label: "cli(bash)" },
 ];
+
+/** Map legacy / truncated script_type values to the current enum. */
+export function normalizeWorkScriptType(value: string | undefined | null): string {
+  const normalized = String(value || "")
+    .trim()
+    .toLowerCase();
+  const aliases: Record<string, string> = {
+    yaml: "oc/kubectl/virtctl",
+    kubectl: "oc/kubectl/virtctl",
+    oc: "oc/kubectl/virtctl",
+    virtctl: "oc/kubectl/virtctl",
+    "oc/kubectl": "oc/kubectl/virtctl",
+    "kubectl/virtctl": "oc/kubectl/virtctl",
+    "oc/virtctl": "oc/kubectl/virtctl",
+    okd: "oc/kubectl/virtctl",
+    kubevirt: "oc/kubectl/virtctl",
+    k8s: "oc/kubectl/virtctl",
+    kubernetes: "oc/kubectl/virtctl",
+  };
+  return aliases[normalized] ?? normalized;
+}
 
 export interface WorkNodeItem {
   idx?: number;

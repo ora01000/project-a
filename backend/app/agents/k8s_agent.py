@@ -28,7 +28,7 @@ def create_k8s_cluster_agent(cluster_id: str, display_name: str) -> AgentDefinit
         agent_id=cluster_id,
         name=display_name,
         role=f"{display_name} Kubernetes 클러스터 정보 조회",
-        mcp_server_keys=["kubernetes", "kubectl_ai"],
+        mcp_server_keys=["kubernetes"],
         system_prompt=_build_k8s_system_prompt(cluster_id, display_name),
     )
 

@@ -223,8 +223,8 @@ async def _dispatch_pending_jobs(
     )
     if helpdesk_agent_id is None:
         logger.warning(
-            "job processor skipped %s approved job(s): helpdesk orchestrator agentruntime not found "
-            "(http mode, is_orchestrator=1 required). Register orchestrator or set "
+            "job processor skipped %s approved job(s): helpdesk agentruntime not found "
+            "(http mode, is_orchestrator=0 required). Register non-orchestrator agent or set "
             "JOB_PROCESSOR_HELPDESK_LOCAL_AGENT_ID / JOB_PROCESSOR_HELPDESK_AXIT_AGENT_ID.",
             len(jobs),
         )
@@ -295,8 +295,8 @@ async def run_job_processor_loop(
         )
         if helpdesk_runtime_record is None:
             logger.warning(
-                "job processor: no helpdesk orchestrator agentruntime record in http mode "
-                "(is_orchestrator=1). Approved jobs will be skipped until configured "
+                "job processor: no helpdesk agentruntime record in http mode "
+                "(is_orchestrator=0). Approved jobs will be skipped until configured "
                 "(JOB_PROCESSOR_HELPDESK_LOCAL_AGENT_ID or JOB_PROCESSOR_HELPDESK_AXIT_AGENT_ID)."
             )
         else:

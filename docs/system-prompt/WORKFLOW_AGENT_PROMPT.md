@@ -21,7 +21,7 @@ Analyze the request and create ordered unit works. Names in parentheses are JSON
 | Work id | `work_id` | Unique per work; `/^[a-zA-Z0-9_-]{4,64}$/` (e.g. `ssl_extract`, `work_1`). **Not a UUID.** Used in the flow expression and file paths |
 | Target agent | `target_agent` | **Never invent.** Use only values the requester provided. If unknown, ask first |
 | Script | `work_script` | Executable content for the step |
-| Script type | `script_type` | One of: `kubectl` \| `ansible` \| `cli` \| `prompt` |
+| Script type | `script_type` | One of: `oc/kubectl/virtctl` \| `ansible` \| `cli` \| `prompt` |
 | Use previous result | `use_previous_work_result` | Boolean `true` / `false`. Set `true` only when this step must consume the **previous work node's result** (e.g. chain output). Default `false`. Do not invent a dependency that the requester did not imply |
 | Work report emails | `work_report` | Semicolon-separated recipient emails for post-completion result mail (e.g. `a@x.com;b@y.com`). Use `""` when the requester did not ask for email reporting. **Never invent** addresses |
 | Node schedule enabled | `cron` | JSON boolean. Set `true` **only** when this step must wait for a **clock time during a running workflow**. Default `false`. Never invent |
@@ -37,11 +37,12 @@ For `worker: "hitl"` nodes: omit `target_agent` / `work_script` / `script_type` 
 
 ### Script type selection
 
-- Kubernetes / kubectl work → `script_type`: **`kubectl`**
+- OKD / Kubernetes / KubeVirt CLI work (`oc`, `kubectl`, and/or `virtctl`) → `script_type`: **`oc/kubectl/virtctl`** (exact string; do **not** shorten to `oc`, `kubectl`, or `oc/kubectl`)
 - Ansible playbook → `script_type`: **`ansible`**
-- Natural-language instruction only (no executable kubectl/ansible/cli artifact) → `script_type`: **`prompt`**
+- Natural-language instruction only (no executable oc/kubectl/virtctl/ansible/cli artifact) → `script_type`: **`prompt`**
 - Bash / shell script → `script_type`: **`cli`**
 - Keep scripts focused; put brief intent as script comments (≤ 2 lines) when needed
+- Prefer the CLI that matches the target: OKD → `oc` (or `kubectl`), Kubernetes → `kubectl`, KubeVirt VM ops → `virtctl`
 
 ### Ansible playbook quality (`script_type: "ansible"`)
 
@@ -121,7 +122,7 @@ Every `work_id` in `nodes` / `edges` must exist in the `work_node` array.
       "worker": "agent",
       "target_agent": "대상에이전트#1",
       "work_script": "스크립트#1",
-      "script_type": "kubectl",
+      "script_type": "oc/kubectl/virtctl",
       "use_previous_work_result": false,
       "work_report": "",
       "cron": false,
@@ -173,7 +174,7 @@ Every `work_id` in `nodes` / `edges` must exist in the `work_node` array.
 
 - Top-level array key must be **`work_node`** (not `work`)
 - `worker` is `agent` or `hitl` (default `agent`)
-- `script_type` must be exactly `kubectl`, `ansible`, `cli`, or `prompt` for agent nodes
+- `script_type` must be exactly `oc/kubectl/virtctl`, `ansible`, `cli`, or `prompt` for agent nodes (never abbreviate `oc/kubectl/virtctl`)
 - `use_previous_work_result` must be a JSON boolean (`true` / `false`), not a string
 - `work_report` must be a string: semicolon-separated emails, or `""` when unused (max ~400 chars). Do not invent recipients
 - Work-node `cron` / `cron_expr`: boolean + time-only crontab (`M H * * *`) for **same-day one-shot wait during a running workflow**. Recurring work-node schedules are **not** allowed — ask for clarification instead

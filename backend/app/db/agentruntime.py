@@ -21,7 +21,6 @@ DEFAULT_SERVICE_ID = "prvops"
 NON_TALKABLE_LOCAL_AGENT_IDS: frozenset[str] = frozenset({"job_auditor", "WORKFLOW_AGENT"})
 
 ORCHESTRATOR_LOCAL_AGENT_IDS: frozenset[str] = frozenset({
-    "helpdesk",
     "archi-analysis",
     "job_auditor",
     "WORKFLOW_AGENT",
@@ -558,4 +557,32 @@ def ensure_mock_infra_search_agentruntime(database_path: str | Path) -> StoredAg
         service_id=DEFAULT_SERVICE_ID,
         talkable=default_talkable_for_local_agent_id(AGENT_ID),
         is_orchestrator=default_is_orchestrator_for_local_agent_id(AGENT_ID),
+    )
+
+
+def ensure_mock_private_cloud_agentruntime(database_path: str | Path) -> StoredAgentRuntime | None:
+    """Insert mock-only PRIVATE_CLOUD_AGENT agentruntime row if missing."""
+    from backend.app.agents.private_cloud_agent import (
+        PRIVATE_CLOUD_AGENT,
+        PRIVATE_CLOUD_AGENT_ID,
+    )
+
+    existing = get_agentruntime_by_local_agent_id(
+        database_path,
+        PRIVATE_CLOUD_AGENT_ID,
+        runtime_mode="mock",
+    )
+    if existing is not None:
+        return existing
+
+    return create_agentruntime_record(
+        database_path,
+        runtime_type=AGENTRUNTIME_TYPE_MOCKUP,
+        agent_name=PRIVATE_CLOUD_AGENT.name,
+        agent_id=build_axit_agent_id(PRIVATE_CLOUD_AGENT_ID),
+        local_agent_id=PRIVATE_CLOUD_AGENT_ID,
+        description=PRIVATE_CLOUD_AGENT.role,
+        service_id=DEFAULT_SERVICE_ID,
+        talkable=True,
+        is_orchestrator=False,
     )

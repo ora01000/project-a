@@ -1,4 +1,4 @@
-"""Resolve job auditor orchestrator and build review messages."""
+"""Resolve job auditor agent and build review messages."""
 
 from __future__ import annotations
 
@@ -16,6 +16,10 @@ from backend.app.db.jobs import JobRecord
 from backend.app.services.agent_runtime_client import normalize_runtime_mode
 
 
+def _is_non_orchestrator(record: StoredAgentRuntime | None) -> bool:
+    return record is not None and not record.is_orchestrator
+
+
 def _find_http_job_auditor_record(
     database_path: str | Path,
     *,
@@ -27,7 +31,7 @@ def _find_http_job_auditor_record(
             settings.axit_agent_id,
             runtime_mode="http",
         )
-        if record is not None and record.is_orchestrator:
+        if _is_non_orchestrator(record):
             return record
 
     local_candidates: list[str] = []
@@ -46,7 +50,7 @@ def _find_http_job_auditor_record(
             local_agent_id,
             runtime_mode="http",
         )
-        if record is not None and record.is_orchestrator:
+        if _is_non_orchestrator(record):
             return record
 
     return None
@@ -112,7 +116,7 @@ def resolve_job_auditor_agent_id(
             if auditor_settings.axit_agent_id
             else ""
         )
-        + "). Register an orchestrator (is_orchestrator=1) in agentruntime or set "
+        + "). Register a non-orchestrator agent (is_orchestrator=0) in agentruntime or set "
         "JOB_AUDITOR_LOCAL_AGENT_ID / JOB_AUDITOR_AXIT_AGENT_ID."
     )
 

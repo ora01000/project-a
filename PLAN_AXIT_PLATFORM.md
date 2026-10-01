@@ -2958,3 +2958,48 @@ left "작업 워크플로우 목록" 패널의 생성된 작업 워크플로우 
   - 편집 속성 중 다음 속성을 변경하도록 추가한다.
     - 대화가능(talkable)
     - 오케스트레이터(is_orchestrator)
+
+- Whatap 이벤트 수신 이후 job processor 에서 helpdesk 로 고정적으로 위임하는 것을 다음과 같이 변경한다.s
+  - 이제 호출하는 에이전트는 is_orchestrator=0 이다.
+- Job_auditor 가 호출하는 에이전트 역시 is_orchestrator=0 이다
+
+
+# 목업 환경에서 에이전트 도구 변경됨
+- 목업에 등록된 에이전트의 도구가 다음과 같이 변경되었다.
+  - kubernetes mcp 도구 -> orbstack/mcp/mcp-okd
+  - vsphere mcp 도구 -> orbstack/mcp/mcp-vsphere
+  - kubevirt mcp 도구 -> orbstack/mcp/mcp-kubevirt
+  - 신규 nsx-t 도구 -> vSphere 에이전트에 등록 -> orbstack/mcp/mcp-nsxt
+
+- 각 도구는 기존 기능별로 툴을 제공하던 방식과 달리 run-cli 하나의 도구만 제공하고 모두 각 플랫폼 별 cli 를 기반으로 처리한다. 개발된 소스코드는 ~/ora01000/project-f 를 참고한다.
+
+# script type
+- 도구가 모두 cli 기반으로 변경되어 작업 워크플로우도 스크립트를 활용할 수 잇다.
+- 작업 워크플로우에서 script_type 중 다음을 수정한다.
+  ----
+  값 | UI레이블 | 용도 |
+  ---|---|---|
+  kubectl -> oc/kubectl/virtctl | kubectl(Kubernetes) -> OKD/KubeVirt | kubectl 명령 -> oc/kubectl/virtctl 명령 |
+  ----
+- 이에 맞춰 workflow 에이전트의 시스템 프롬프트도 보완한다.
+
+# 목업 환경 에이전트 구성 변경
+- 다음 에이전트를 생성한다. agentruntime 에 추가한다.
+  - Private 클라우드 통합 에이전트
+  - PRIVATE_CLOUD_AGENT
+  - agent_id : uuid 생성
+  - talkable : true
+  - is_orchestrator : false
+  - mcp-okd/mcp-vsphere/mcp-kubevirt/mcp-nsxt 를 모두 등록한다.
+  - inventory_sql.md 스킬을 적용한다.
+
+- 새로 등록한 mcp 에 대한 ingress 구성하고 코드의 mcp 연동 부분에 적용한다.
+  - ingressClass : haproxy
+  1. mcp-vsphere.ora01000.pe.kr
+  2. mcp-okd.ora01000.pe.kr
+  3. mcp-kubevirt.ora01000.pe.kr
+  4. mcp-nsxt.ora01000.pe.kr
+  - ingress 는 모두 로컬 32716 포트로 오픈되므로 실제 클라이언트는 http://<ingress-hostname>:32716/mcp 로 접속
+
+
+

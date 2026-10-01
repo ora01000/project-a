@@ -66,11 +66,6 @@ MOCK_PLATFORM_AGENT_SPECS: tuple[MockPlatformAgentSpec, ...] = (
         description="인프라의 설계 구성 분석/도식화",
     ),
     MockPlatformAgentSpec(
-        agent_id="helpdesk",
-        agent_name="헬프데스크",
-        description="문의응대",
-    ),
-    MockPlatformAgentSpec(
         agent_id=JOB_AUDITOR_LOCAL_AGENT_ID,
         agent_name="작업검토",
         description="작업 내용에 대한 검토를 수행하고 필요시 작업 계획서를 작성",

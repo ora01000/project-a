@@ -18,7 +18,21 @@ from backend.app.db.job_datetime import now_job_datetime
 from backend.app.db.users import get_user_by_idx
 from backend.app.services.workflow_graph import parse_workflow_tokens  # noqa: F401 — used by migration helpers indirectly
 
-SCRIPT_TYPES = frozenset({"kubectl", "ansible", "cli", "prompt"})
+SCRIPT_TYPES = frozenset({"oc/kubectl/virtctl", "ansible", "cli", "prompt"})
+# Legacy / LLM-truncated aliases → canonical script_type.
+_SCRIPT_TYPE_ALIASES = {
+    "yaml": "oc/kubectl/virtctl",
+    "kubectl": "oc/kubectl/virtctl",
+    "oc": "oc/kubectl/virtctl",
+    "virtctl": "oc/kubectl/virtctl",
+    "oc/kubectl": "oc/kubectl/virtctl",
+    "kubectl/virtctl": "oc/kubectl/virtctl",
+    "oc/virtctl": "oc/kubectl/virtctl",
+    "okd": "oc/kubectl/virtctl",
+    "kubevirt": "oc/kubectl/virtctl",
+    "k8s": "oc/kubectl/virtctl",
+    "kubernetes": "oc/kubectl/virtctl",
+}
 WORKER_TYPES = frozenset({"agent", "hitl"})
 
 _WORK_NODE_SELECT = """
@@ -45,11 +59,11 @@ def normalize_script_type(value: str | None) -> str:
     normalized = (value or "").strip().lower()
     if not normalized:
         return ""
-    # Legacy alias from earlier schema drafts.
-    if normalized == "yaml":
-        normalized = "kubectl"
+    normalized = _SCRIPT_TYPE_ALIASES.get(normalized, normalized)
     if normalized not in SCRIPT_TYPES:
-        raise ValueError("script_type은 kubectl, ansible, cli, prompt 중 하나여야 합니다.")
+        raise ValueError(
+            "script_type은 oc/kubectl/virtctl, ansible, cli, prompt 중 하나여야 합니다."
+        )
     return normalized
 
 

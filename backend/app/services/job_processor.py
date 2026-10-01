@@ -1,9 +1,10 @@
-"""Resolve helpdesk agent id and build delegation messages for approved jobs."""
+"""Resolve job-delegation agent id and build messages for approved jobs."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
+from backend.app.agents.private_cloud_agent import PRIVATE_CLOUD_AGENT_ID
 from backend.app.agents.system_agents import HELPDESK_AGENT_ID
 from backend.app.config import JobProcessorSettings, load_job_processor_settings
 from backend.app.db.agentruntime import (
@@ -15,8 +16,12 @@ from backend.app.db.agentruntime import (
 from backend.app.db.jobs import JobRecord
 from backend.app.services.agent_runtime_client import normalize_runtime_mode
 
-MOCK_HELPDESK_AGENT_ID = "helpdesk"
-HELPDESK_LOCAL_AGENT_ID = "helpdesk"
+# Mock / unset-env default: PRIVATE_CLOUD_AGENT (replaces former helpdesk).
+DEFAULT_JOB_DELEGATION_LOCAL_AGENT_ID = PRIVATE_CLOUD_AGENT_ID
+
+
+def _is_non_orchestrator(record: StoredAgentRuntime | None) -> bool:
+    return record is not None and not record.is_orchestrator
 
 
 def _find_http_helpdesk_record(
@@ -30,13 +35,13 @@ def _find_http_helpdesk_record(
             settings.helpdesk_axit_agent_id,
             runtime_mode="http",
         )
-        if record is not None and record.is_orchestrator:
+        if _is_non_orchestrator(record):
             return record
 
     local_candidates: list[str] = []
     for candidate in (
         settings.helpdesk_local_agent_id,
-        HELPDESK_LOCAL_AGENT_ID,
+        DEFAULT_JOB_DELEGATION_LOCAL_AGENT_ID,
         HELPDESK_AGENT_ID,
     ):
         normalized = candidate.strip()
@@ -49,7 +54,7 @@ def _find_http_helpdesk_record(
             local_agent_id,
             runtime_mode="http",
         )
-        if record is not None and record.is_orchestrator:
+        if _is_non_orchestrator(record):
             return record
 
     return None
@@ -61,7 +66,7 @@ def try_resolve_helpdesk_runtime_record(
     *,
     settings: JobProcessorSettings | None = None,
 ) -> StoredAgentRuntime | None:
-    """Return helpdesk orchestrator agentruntime record for http mode."""
+    """Return delegation agentruntime record (is_orchestrator=0) for http mode."""
     if normalize_runtime_mode(runtime_mode) == "mock":
         return None
 
@@ -75,14 +80,18 @@ def try_resolve_helpdesk_agent_id(
     *,
     settings: JobProcessorSettings | None = None,
 ) -> str | None:
-    """Return catalog agent id for helpdesk, or None when http mode has no matching record."""
+    """Return catalog agent id for job delegation, or None when http has no match."""
+    processor_settings = settings or load_job_processor_settings()
     if normalize_runtime_mode(runtime_mode) == "mock":
-        return MOCK_HELPDESK_AGENT_ID
+        return (
+            processor_settings.helpdesk_local_agent_id.strip()
+            or DEFAULT_JOB_DELEGATION_LOCAL_AGENT_ID
+        )
 
     record = try_resolve_helpdesk_runtime_record(
         database_path,
         runtime_mode,
-        settings=settings,
+        settings=processor_settings,
     )
     if record is None:
         return None
@@ -96,25 +105,25 @@ def resolve_helpdesk_agent_id(
     settings: JobProcessorSettings | None = None,
 ) -> str:
     """Mock uses local catalog id; AXIT runtime uses agentruntime catalog id."""
+    processor_settings = settings or load_job_processor_settings()
     agent_id = try_resolve_helpdesk_agent_id(
         database_path,
         runtime_mode,
-        settings=settings,
+        settings=processor_settings,
     )
     if agent_id is not None:
         return agent_id
 
-    processor_settings = settings or load_job_processor_settings()
     raise RuntimeError(
-        "agentruntime record not found for helpdesk delegation "
+        "agentruntime record not found for job delegation "
         f"(local_agent_id candidates: {processor_settings.helpdesk_local_agent_id!r}, "
-        f"{HELPDESK_LOCAL_AGENT_ID!r}, {HELPDESK_AGENT_ID!r}"
+        f"{DEFAULT_JOB_DELEGATION_LOCAL_AGENT_ID!r}, {HELPDESK_AGENT_ID!r}"
         + (
             f"; axit_agent_id={processor_settings.helpdesk_axit_agent_id!r}"
             if processor_settings.helpdesk_axit_agent_id
             else ""
         )
-        + "). Register an orchestrator (is_orchestrator=1) in agentruntime or set "
+        + "). Register a non-orchestrator agent (is_orchestrator=0) in agentruntime or set "
         "JOB_PROCESSOR_HELPDESK_LOCAL_AGENT_ID / JOB_PROCESSOR_HELPDESK_AXIT_AGENT_ID."
     )
 

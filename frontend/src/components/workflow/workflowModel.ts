@@ -1,4 +1,5 @@
 import type { WorkNodeItem, WorkScriptType } from "../../types/workflow";
+import { normalizeWorkScriptType } from "../../types/workflow";
 
 /** DB last_start_date / last_end_date 로 실행중 여부 판별 */
 export function isRunInProgress(
@@ -148,7 +149,7 @@ export function workFieldsFromItem(
     targetAgentName: item.target_agent_name || "",
     userPrompt: "",
     workScript: item.work_script || "",
-    scriptType: item.script_type === "yaml" ? "kubectl" : item.script_type || "",
+    scriptType: normalizeWorkScriptType(item.script_type) || "",
     testResult: item.test_result,
     files: item.files,
     createDate: item.create_date || "",

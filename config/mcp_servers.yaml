@@ -1,32 +1,45 @@
 servers:
   # MCP 설정은 환경변수로 오버라이드 가능
-  #   MCP_<SERVER_KEY>_URL      예: MCP_KUBERNETES_URL
-  #   MCP_<SERVER_KEY>_ENABLED  예: MCP_KUBERNETES_ENABLED=true
+  #   MCP_<SERVER_KEY>_URL        예: MCP_KUBERNETES_URL
+  #   MCP_<SERVER_KEY>_ENABLED    예: MCP_KUBERNETES_ENABLED=true
+  #   MCP_<SERVER_KEY>_AUTH_TOKEN 예: MCP_KUBERNETES_AUTH_TOKEN (Bearer)
+  # OrbStack project-f run_cli MCP via HAProxy Ingress (port 32716)
+  #   kubernetes  → mcp-okd.ora01000.pe.kr      (kubectl/oc)
+  #   kubevirt    → mcp-kubevirt.ora01000.pe.kr (kubectl/oc/virtctl)
+  #   vcenter     → mcp-vsphere.ora01000.pe.kr  (govc)
+  #   nsxt        → mcp-nsxt.ora01000.pe.kr     (nsx) — vCenter/Private Cloud 에이전트에 등록
   kubernetes:
     transport: streamable_http
-    url: "http://k8smcp.ora01000.pe.kr:32716/mcp"
+    url: "http://mcp-okd.ora01000.pe.kr:32716/mcp"
     enabled: true
-  kubectl_ai:
-    transport: streamable_http
-    url: "http://kubectl-ai.ora01000.pe.kr:32716/mcp"
-    enabled: true
+    auth_token: "c0af2e80fa279a613c1aae3664d2d7b3302b8985ed7e0174ef415900ceee7e08"
   kubevirt:
     transport: streamable_http
-    url: "http://k8smcp.ora01000.pe.kr:32716/mcp"
+    url: "http://mcp-kubevirt.ora01000.pe.kr:32716/mcp"
     enabled: true
+    auth_token: "9d48912f8b7652d40e264f46eaf5080a8f315d54dee68bfa5f38597b4473c991"
   vcenter:
     transport: streamable_http
-    url: "http://vmware-aiops.ora01000.pe.kr:32716/mcp"
+    url: "http://mcp-vsphere.ora01000.pe.kr:32716/mcp"
     enabled: true
+    auth_token: "77248ed8192109bc4f724a13de7341bcc7aac4c0d89d5396017965bb04ae8a9b"
+  nsxt:
+    transport: streamable_http
+    url: "http://mcp-nsxt.ora01000.pe.kr:32716/mcp"
+    enabled: true
+    auth_token: "5355eab2c2a1aa8b3aa2609a588260b30a9ec77ce0df94fd40978a64a658e44e"
   ansible:
     transport: streamable_http
     url: "http://ansible-lint.ora01000.pe.kr:32716/mcp"
     enabled: true
+    auth_token: ""
   ansible_lint:
     transport: streamable_http
     url: "http://ansible-lint.ora01000.pe.kr:32716/mcp"
     enabled: true
+    auth_token: ""
   inventory:
     transport: streamable_http
     url: "http://inventory-mcp.ora01000.pe.kr:32716/mcp"
     enabled: true
+    auth_token: ""
