@@ -565,6 +565,132 @@ def _assert_structured_work_success(script_type: str, content: str) -> None:
     raise ValueError(message[:200])
 
 
+def _script_type_uses_structured_result(script_type: str) -> bool:
+    normalized = (script_type or "").strip().lower()
+    if normalized in {
+        "yaml",
+        "kubectl",
+        "oc",
+        "virtctl",
+        "oc/kubectl",
+        "kubectl/virtctl",
+        "oc/virtctl",
+        "okd",
+        "kubevirt",
+        "k8s",
+        "kubernetes",
+    }:
+        normalized = "oc/kubectl/virtctl"
+    return normalized in {"oc/kubectl/virtctl", "ansible"}
+
+
+def _format_markdown_table(rows: list[dict[str, Any]]) -> str:
+    if not rows:
+        return ""
+    keys: list[str] = []
+    seen: set[str] = set()
+    for row in rows:
+        for key in row.keys():
+            name = str(key)
+            if name not in seen:
+                seen.add(name)
+                keys.append(name)
+    if not keys:
+        return ""
+
+    def cell(value: Any) -> str:
+        text = "" if value is None else str(value)
+        return text.replace("|", "\\|").replace("\n", " ").strip()
+
+    header = "| " + " | ".join(keys) + " |"
+    separator = "| " + " | ".join("---" for _ in keys) + " |"
+    body = [
+        "| " + " | ".join(cell(row.get(key)) for key in keys) + " |"
+        for row in rows
+    ]
+    return "\n".join([header, separator, *body])
+
+
+def _polish_message_paragraphs(message: str) -> str:
+    """Normalize whitespace into readable paragraphs without dumping JSON."""
+    text = (message or "").strip()
+    if not text:
+        return ""
+    nested = _extract_json_object(text)
+    if nested is not None and isinstance(nested.get("message"), str):
+        inner = nested["message"].strip()
+        if inner:
+            text = inner
+    # Keep existing markdown tables / lists as-is; otherwise collapse excess blank lines.
+    if "|" in text and "\n" in text:
+        return text
+    lines = [line.rstrip() for line in text.splitlines()]
+    compacted: list[str] = []
+    blank_pending = False
+    for line in lines:
+        if not line.strip():
+            blank_pending = True
+            continue
+        if compacted and blank_pending:
+            compacted.append("")
+        compacted.append(line.strip())
+        blank_pending = False
+    return "\n".join(compacted).strip()
+
+
+def _humanize_structured_payload(payload: dict[str, Any]) -> str:
+    parts: list[str] = []
+    message = _polish_message_paragraphs(str(payload.get("message") or ""))
+    if message:
+        parts.append(message)
+
+    for key in ("rows", "data", "items", "results", "table"):
+        value = payload.get(key)
+        if (
+            isinstance(value, list)
+            and value
+            and all(isinstance(item, dict) for item in value)
+        ):
+            table = _format_markdown_table(value)
+            if table:
+                parts.append(table)
+            break
+
+    extras: list[str] = []
+    skip = {"success", "message", "rows", "data", "items", "results", "table"}
+    for key, value in payload.items():
+        if key in skip or isinstance(value, (dict, list)):
+            continue
+        text = str(value).strip()
+        if text:
+            extras.append(f"- **{key}**: {text}")
+    if extras:
+        parts.append("\n".join(extras))
+
+    if parts:
+        return "\n\n".join(parts).strip()
+
+    flag = _coerce_success_flag(payload.get("success"))
+    if flag is True:
+        return "작업이 성공적으로 완료되었습니다."
+    if flag is False:
+        return "작업이 실패했습니다."
+    return "작업 결과를 정리할 수 없습니다."
+
+
+def _format_structured_work_result(script_type: str, content: str) -> str:
+    """Turn structured agent JSON into message-centric display text for storage/UI."""
+    raw = (content or "").strip()
+    if not raw:
+        return ""
+    if not _script_type_uses_structured_result(script_type):
+        return raw
+    payload = _extract_json_object(raw)
+    if payload is None:
+        return raw
+    return _humanize_structured_payload(payload)
+
+
 async def _await_work_node_schedule_if_needed(
     database_path: Path | str,
     node: WorkNodeRecord,
@@ -1423,6 +1549,7 @@ async def _execute_from_index(
                 workflow_uuid=workflow.uuid,
             )
             _assert_structured_work_success(node.script_type, content)
+            display_content = _format_structured_work_result(node.script_type, content)
             finished_node = mark_work_node_run_finished(database_path, node.uuid, success=True)
             stamp = (
                 finished_node.last_end_date
@@ -1438,12 +1565,12 @@ async def _execute_from_index(
                 workflow_uuid=workflow.uuid,
                 workflow_history_idx=history_idx,
                 work_node_history_idx=node_history_idx,
-                content=content,
+                content=display_content,
             )
             await _maybe_send_work_report_email(
-                database_path, node=node, result_content=content
+                database_path, node=node, result_content=display_content
             )
-            previous = content
+            previous = display_content
             steps.append(
                 WorkflowRunStep(
                     kind="work",
@@ -1547,6 +1674,9 @@ async def _execute_from_index(
                         workflow_uuid=workflow.uuid,
                     )
                     _assert_structured_work_success(fail_node.script_type, fail_content)
+                    fail_display = _format_structured_work_result(
+                        fail_node.script_type, fail_content
+                    )
                     finished_fail = mark_work_node_run_finished(
                         database_path, fail_node.uuid, success=True
                     )
@@ -1564,12 +1694,12 @@ async def _execute_from_index(
                         workflow_uuid=workflow.uuid,
                         workflow_history_idx=history_idx,
                         work_node_history_idx=fail_history_idx,
-                        content=fail_content,
+                        content=fail_display,
                     )
                     await _maybe_send_work_report_email(
-                        database_path, node=fail_node, result_content=fail_content
+                        database_path, node=fail_node, result_content=fail_display
                     )
-                    previous = fail_content
+                    previous = fail_display
                     steps.append(
                         WorkflowRunStep(
                             kind="work",
