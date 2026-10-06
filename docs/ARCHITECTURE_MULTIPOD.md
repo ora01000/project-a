@@ -36,6 +36,7 @@ Shared PVC  ← 수신 메일 첨부 (`RECEIVED_MAIL_ATTACHMENT_HOME`, api+worke
 - [`backend/app/db/engine.py`](../backend/app/db/engine.py): PostgreSQL only (`DATABASE_URL` 필수)
 - [`get_connection()`](../backend/app/db/database.py): psycopg 연결
 - 스키마: [`backend/app/db/schema.postgres.sql`](../backend/app/db/schema.postgres.sql)
+- 테이블 명세서: [`docs/DB_TABLE_SPEC.md`](DB_TABLE_SPEC.md)
 
 ### 운영 원칙
 
