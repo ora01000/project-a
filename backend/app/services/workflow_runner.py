@@ -388,24 +388,28 @@ def _append_previous_result(script: str, previous_result: str, *, use_previous: 
 
 def _structured_result_message_rules() -> str:
     """Instruct target agents to put Markdown-rich stdout in JSON ``message``."""
+    # Keep the outer contract as plain JSON. Do not use Markdown headings in this
+    # block — models tend to copy them as the top-level reply and drop success/message.
     return (
-        "# 결과\n"
-        "JSON만 응답하세요(마크다운 코드펜스 금지).\n"
+        "# 결과 (절대 규칙)\n"
+        "1. 최종 응답은 **오직 JSON 객체 하나**여야 합니다. "
+        "JSON 바깥에 제목·표·설명·코드펜스를 두지 마세요.\n"
+        "2. 최상위 키는 반드시 `success`(boolean)와 `message`(string)입니다.\n"
+        "3. Markdown(표, 제목, stdout 코드펜스)은 **오직 `message` 문자열 값 안**에만 넣으세요.\n"
+        "4. 응답이 `{`로 시작하지 않거나 `success` 키가 없으면 실패로 처리됩니다.\n"
+        "\n"
+        "출력 스키마(이 형태만 허용):\n"
         "{\n"
-        '  "success": true 또는 false,\n'
-        '  "message": "<마크다운 본문>"\n'
+        '  "success": true,\n'
+        '  "message": "## 결론\\n정상\\n\\n| Role | 수 |\\n| --- | --- |\\n| worker | 18 |\\n\\n'
+        '```text\\noc get nodes ...\\n```"\n'
         "}\n"
         "\n"
-        "## message 작성 규칙 (MUST)\n"
-        "- `message`에 plain text 요약만 넣지 마세요. 실행 stdout·핵심 결과를 "
-        "**Markdown**으로 보기 좋게 정리해 넣으세요(취합·리치텍스트 표시용).\n"
-        "- 권장 구조:\n"
-        "  1) 한 줄 결론(성공/실패·대상)\n"
-        "  2) 표·목록으로 정리 가능한 항목은 Markdown 표(`| col |`) 또는 bullet\n"
-        "  3) 원본 CLI/도구 stdout은 ```text 코드펜스로 보존 "
-        "(과도한 생략 금지; 반복 노이즈만 짧게 축약)\n"
-        "- HTML 태그는 쓰지 마세요. Markdown만 사용하세요.\n"
-        "- `message` 문자열 안의 줄바꿈은 JSON 이스케이프(`\\n`)로 넣으세요.\n"
+        "`message` 내용 가이드 (문자열 내부 전용):\n"
+        "- plain 요약만 쓰지 말고, 표/목록 + 원본 stdout을 Markdown으로 정리\n"
+        "- stdout은 message 안에서 text 코드펜스로 보존(과도한 생략 금지)\n"
+        "- 줄바꿈은 JSON 문자열 이스케이프(`\\n`)로 넣기\n"
+        "- HTML 금지\n"
     )
 
 

@@ -11,6 +11,7 @@ import tempfile
 from pathlib import Path
 
 from backend.app.notifications.fossflow_renderer import apply_fossflow_to_email_markdown
+from backend.app.notifications.whatap_json_renderer import apply_whatap_json_to_email_markdown
 
 logger = logging.getLogger(__name__)
 
@@ -124,6 +125,8 @@ def _image_html(data: bytes, mime_subtype: str, *, alt: str = "D2 diagram") -> s
 def prepare_markdown_for_email(markdown_text: str) -> tuple[str, str]:
     """Split markdown into plain text and HTML-oriented markdown with embedded diagrams."""
     plain_body, html_markdown = apply_fossflow_to_email_markdown(markdown_text)
+    plain_body, _ = apply_whatap_json_to_email_markdown(plain_body)
+    _, html_markdown = apply_whatap_json_to_email_markdown(html_markdown)
 
     for match in reversed(list(D2_FENCE_PATTERN.finditer(html_markdown))):
         start, end = match.span()

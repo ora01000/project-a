@@ -8,6 +8,7 @@ servers:
   #   kubevirt    → mcp-kubevirt.ora01000.pe.kr (kubectl/oc/virtctl)
   #   vcenter     → mcp-vsphere.ora01000.pe.kr  (govc)
   #   nsxt        → mcp-nsxt.ora01000.pe.kr     (nsx) — vCenter/Private Cloud 에이전트에 등록
+  #   ansible     → mcp-ansible.ora01000.pe.kr:32714 (playbook lint/check/run)
   kubernetes:
     transport: streamable_http
     url: "http://mcp-okd.ora01000.pe.kr:32716/mcp"
@@ -30,14 +31,9 @@ servers:
     auth_token: "5355eab2c2a1aa8b3aa2609a588260b30a9ec77ce0df94fd40978a64a658e44e"
   ansible:
     transport: streamable_http
-    url: "http://ansible-lint.ora01000.pe.kr:32716/mcp"
+    url: "http://mcp-ansible.ora01000.pe.kr:32716/mcp"
     enabled: true
-    auth_token: ""
-  ansible_lint:
-    transport: streamable_http
-    url: "http://ansible-lint.ora01000.pe.kr:32716/mcp"
-    enabled: true
-    auth_token: ""
+    auth_token: "fc99c1bad13c5320f0cdb2d24def06b482761d9f816c007d50437c9cfcea4889"
   inventory:
     transport: streamable_http
     url: "http://inventory-mcp.ora01000.pe.kr:32716/mcp"

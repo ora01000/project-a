@@ -5,10 +5,12 @@ import type { Components } from "react-markdown";
 
 import { parseFossflowCompactJson } from "../types/fossflow";
 import type { FossflowCompactDiagram } from "../types/fossflow";
+import { parseWhatapJson } from "../types/whatapJson";
 import { embedFossflowJsonFences, parseEmbeddedFossflowJson } from "../utils/fossflowExtract";
 import { hasMarkdownSyntax } from "../utils/markdown";
 import { D2Diagram } from "./D2Diagram";
 import { MermaidDiagram } from "./MermaidDiagram";
+import { WhatapJsonChart } from "./WhatapJsonChart";
 
 const FossFlowDiagram = lazy(() =>
   import("./FossFlowDiagram").then((module) => ({ default: module.FossFlowDiagram })),
@@ -36,7 +38,10 @@ function normalizeExcessiveNewlines(content: string): string {
 function isDiagramElement(child: unknown): boolean {
   return (
     isValidElement(child) &&
-    (child.type === MermaidDiagram || child.type === D2Diagram || child.type === FossFlowDiagramPreview)
+    (child.type === MermaidDiagram ||
+      child.type === D2Diagram ||
+      child.type === FossFlowDiagramPreview ||
+      child.type === WhatapJsonChart)
   );
 }
 
@@ -49,7 +54,7 @@ const MARKDOWN_COMPONENTS: Components = {
   ol: ({ children }) => <ol className="list-decimal space-y-1 pl-5">{children}</ol>,
   li: ({ children }) => <li>{children}</li>,
   code: ({ className, children }) => {
-    const language = /language-(\w+)/.exec(className || "")?.[1];
+    const language = /language-([\w-]+)/.exec(className || "")?.[1];
     const text = String(children).replace(/\n$/, "");
 
     if (language === "mermaid") {
@@ -58,6 +63,19 @@ const MARKDOWN_COMPONENTS: Components = {
 
     if (language === "d2") {
       return <D2Diagram chart={text} />;
+    }
+
+    if (language === "whatap-json" || language === "whatap") {
+      const chart = parseWhatapJson(text);
+      if (chart) {
+        return <WhatapJsonChart raw={text} />;
+      }
+      return <p className="text-xs text-amber-300">whatap-json 시계열 데이터를 해석하지 못했습니다.</p>;
+    }
+
+    const whatapFallback = parseWhatapJson(text);
+    if (whatapFallback) {
+      return <WhatapJsonChart raw={text} />;
     }
 
     const compact = parseFossflowCompactJson(text);

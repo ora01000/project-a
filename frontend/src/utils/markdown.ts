@@ -8,6 +8,8 @@ const MARKDOWN_PATTERNS = [
   /```d2[\s\S]*?```/,
   /```fossflow[\s\S]*?```/,
   /```isoflow[\s\S]*?```/,
+  /```whatap-json[\s\S]*?```/,
+  /```whatap[\s\S]*?```/,
   /```[\s\S]*?```/,
   /`[^`]+`/,
   /^\s*[-*+]\s/m,

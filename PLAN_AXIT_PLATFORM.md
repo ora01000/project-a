@@ -3011,6 +3011,41 @@ left "작업 워크플로우 목록" 패널의 생성된 작업 워크플로우 
   - 검토 내용을 토대로 판단한 결과 ansible-lint 에이전트는 유지를 하는 것으로 하려 한다. 다만, ansible 작성, 검증 은 스킬로 빼고, PRIVATE_CLOUD_AGENT, WORKFLOW_AGENT에서 활용하고 싶다. 이 부분을 보완 검토 바람
   - 검증은 스킬에서 뺀다. 작성을 중심으로 
 
+# 작업노드에서 script_type 이 자연어(프롬프트)가 아닌 타입을 수행할 때 생성하는 프롬프트가 다음을 수행할 수 있도록 보완한다.
+- 결과 포맷의 message 에 답변을 넣을 때 script 의 stdout 을 markdown 형태로 beutify 하고 rich text로 출력될 수 있도록 한다. 현재는 script의 stdout과 결과 내용을 요약해서 출력하여 최종 취합시 각각의 plain text로만 보여진다.
+
+# 성능 처트
+- 에이전트 응답 결과중 시계열 데이터 json 이 올 경우가 있다. 차트로 표현한다. fossdiagram 과 같이 변환하고, 메일 발송, 노트 복사 시에도 차트가 유지되게 한다
+```whatap-json
+{
+  "source": "whatap apm metric thread_count",
+  "project": "1234",
+  "metric": "thread_count",
+  "unit": "count",
+  "from": "2026-10-02T09:00:00+09:00",
+  "to": "2026-10-02T10:00:00+09:00",
+  "interval_s": 300,
+  "series": [
+    {"name": "TC-29-96-8082", "oid": 1482741919, "points": [["2026-10-02T09:00:00+09:00", 98.11], ["2026-10-02T09:05:00+09:00", 81.44]]}
+  ]
+}
+```
+
+# ansible 도구 포함
+- PRIVATE_CLOUD_AGENT 에이전트에 다음 도구를 포함한다.
+  - http://mcp-ansible.ora01000.pe.kr:32716/mcp
+  - bearer key :fc99c1bad13c5320f0cdb2d24def06b482761d9f816c007d50437c9cfcea4889
+- skill
+  - /Users/insu/project-f/src/project_f/skills/ansible-cli/SKILL.md 를 스킬로 등록한다
 
 
+- ansible-lint 에이전트에 도구를 추하고 PRIVATE_CLOUD_AGENT에서는 삭제한다.
+  - 기존 ansible_lint MCP 는 제거한다
+  - http://mcp-ansible.ora01000.pe.kr:32716/mcp
+  - bearer key :fc99c1bad13c5320f0cdb2d24def06b482761d9f816c007d50437c9cfcea4889
+- skill
+  - /Users/insu/project-f/src/project_f/skills/ansible-cli/SKILL.md 를 스킬로 등록한다
+  
+
+  
 
