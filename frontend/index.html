@@ -8,9 +8,10 @@
       (function () {
         try {
           var theme = localStorage.getItem("app-theme");
-          if (theme === "light") {
-            document.documentElement.setAttribute("data-theme", "light");
-            document.documentElement.style.colorScheme = "light";
+          if (theme === "light" || theme === "homebrew" || theme === "monochrome") {
+            document.documentElement.setAttribute("data-theme", theme);
+            document.documentElement.style.colorScheme =
+              theme === "light" ? "light" : "dark";
           }
         } catch (_error) {
           /* ignore */

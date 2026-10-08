@@ -5,6 +5,8 @@ import { ThemeProvider } from "./context/ThemeContext";
 import { installAuthFetchInterceptor } from "./utils/api";
 import "./index.css";
 import "./styles/theme-light.css";
+import "./styles/theme-homebrew.css";
+import "./styles/theme-monochrome.css";
 
 installAuthFetchInterceptor();
 

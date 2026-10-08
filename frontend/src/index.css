@@ -124,6 +124,44 @@ body {
   --wf-diagram-mail-stroke: #059669;
 }
 
+[data-theme="homebrew"] {
+  --wf-run-accent: #e50000;
+  --wf-run-glow: rgba(229, 0, 0, 0.65);
+  --wf-run-glow-soft: rgba(153, 0, 0, 0.28);
+  --wf-schedule-accent: #e5e500;
+  --wf-schedule-glow: rgba(229, 229, 0, 0.65);
+  --wf-schedule-glow-soft: rgba(153, 153, 0, 0.28);
+  --wf-diagram-node-fill: #000000;
+  --wf-diagram-hitl-fill: #1a1a00;
+  --wf-diagram-node-text: #00ff00;
+  --wf-diagram-work-stroke: #00d900;
+  --wf-diagram-hitl-stroke: #e5e500;
+  --wf-diagram-start-stroke: #23ff18;
+  --wf-diagram-edge: #00a600;
+  --wf-diagram-edge-fail: #e50000;
+  --wf-diagram-edge-report: #00d900;
+  --wf-diagram-mail-stroke: #00d900;
+}
+
+[data-theme="monochrome"] {
+  --wf-run-accent: #e5e5e5;
+  --wf-run-glow: rgba(229, 229, 229, 0.55);
+  --wf-run-glow-soft: rgba(163, 163, 163, 0.28);
+  --wf-schedule-accent: #a3a3a3;
+  --wf-schedule-glow: rgba(163, 163, 163, 0.55);
+  --wf-schedule-glow-soft: rgba(115, 115, 115, 0.28);
+  --wf-diagram-node-fill: #000000;
+  --wf-diagram-hitl-fill: #1a1a1a;
+  --wf-diagram-node-text: #f5f5f5;
+  --wf-diagram-work-stroke: #e5e5e5;
+  --wf-diagram-hitl-stroke: #a3a3a3;
+  --wf-diagram-start-stroke: #ffffff;
+  --wf-diagram-edge: #737373;
+  --wf-diagram-edge-fail: #d4d4d4;
+  --wf-diagram-edge-report: #a3a3a3;
+  --wf-diagram-mail-stroke: #a3a3a3;
+}
+
 @keyframes wf-run-pulse {
   0%,
   100% {

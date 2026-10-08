@@ -8,7 +8,7 @@ interface ThemeSettingsModalProps {
   onClose: () => void;
 }
 
-const THEME_OPTIONS: AppTheme[] = ["dark", "light"];
+const THEME_OPTIONS: AppTheme[] = ["dark", "light", "homebrew", "monochrome"];
 
 export function ThemeSettingsModal({ onClose }: ThemeSettingsModalProps) {
   const { theme, setTheme } = useTheme();
@@ -30,7 +30,7 @@ export function ThemeSettingsModal({ onClose }: ThemeSettingsModalProps) {
         <h2 id="theme-settings-title" className="text-lg font-semibold text-slate-100">
           화면 테마
         </h2>
-        <p className="mt-1 text-sm text-slate-400">콘솔 화면의 밝기 테마를 선택합니다.</p>
+        <p className="mt-1 text-sm text-slate-400">콘솔 화면의 색상 테마를 선택합니다.</p>
 
         <div className="mt-4 space-y-2">
           {THEME_OPTIONS.map((option) => (

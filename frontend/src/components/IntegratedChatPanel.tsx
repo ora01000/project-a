@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { useTheme } from "../context/ThemeContext";
 import type { AgentInfo, IntegratedChatResponse, ToolUsage } from "../types/agent";
 import type { AuthUser } from "../types/auth";
 import { appendInputHistory, loadInputHistory } from "../utils/inputHistory";
@@ -118,6 +119,8 @@ export function IntegratedChatPanel({
   expandUserInput = false,
   userInputHeightPx = 300,
 }: IntegratedChatPanelProps) {
+  const { theme } = useTheme();
+  const isLight = theme === "light";
   const [selectedAgentId, setSelectedAgentId] = useState("");
   const [input, setInput] = useState("");
   const [responses, setResponses] = useState<IntegratedChatResponse[]>([]);
@@ -912,7 +915,11 @@ export function IntegratedChatPanel({
               <button
                 type="submit"
                 disabled={isDisabled || !input.trim()}
-                className="inline-flex items-center gap-1.5 self-stretch rounded-md bg-sky-600 px-3 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-slate-700"
+                className={
+                  isLight
+                    ? "inline-flex items-center gap-1.5 self-stretch rounded-md border border-sky-600 bg-white px-3 py-2 text-sm font-medium text-sky-700 hover:bg-sky-50 disabled:cursor-not-allowed disabled:border-slate-300 disabled:bg-slate-100 disabled:text-slate-400"
+                    : "inline-flex items-center gap-1.5 self-stretch rounded-md bg-sky-600 px-3 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-slate-700"
+                }
               >
                 <WorkflowIcon name="send" size="sm" label="전송" />
                 전송
