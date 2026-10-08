@@ -37,7 +37,7 @@ flowchart TD
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │ 헤더: AX 인프라 운영 콘솔                                        │
-│      에이전트 노드와 오른쪽 대화형 터미널로 멀티 에이전트를 관리…   │
+│      작업 노트와 오른쪽 대화형 터미널로 멀티 에이전트를 관리…   │
 ├─────────────────────────────────────────────────────────────────┤
 │ MenuBar                                                         │
 ├─────────────────────────────────────────────────────────────────┤
@@ -74,9 +74,8 @@ flowchart TD
 
 ```
 ┌─ 좌측 영역 ─────────────────────────┬─ 우측 ────────────────┐
-│ AgentNodeListPanel │ JobNotesPanel  │ IntegratedChatPanel  │
-│ 에이전트 노드 목록  │ 작업 노트       │ 대화형 터미널         │
-├────────────────────┴────────────────┤  [대화창|작업접수]    │
+│ JobNotesPanel (작업 노트)            │ IntegratedChatPanel  │
+├─────────────────────────────────────┤  [대화창|작업접수]    │
 │ DetailInfoPanel (상세 정보, 접기 가능)│                      │
 └─────────────────────────────────────┴──────────────────────┘
 ```
@@ -85,12 +84,11 @@ flowchart TD
 
 | 패널 | 파일 | 라벨 |
 |------|------|------|
-| 에이전트 목록 | `AgentNodeListPanel` → `AgentGrid`/`AgentTile` | 에이전트 노드 목록 |
 | 작업 노트 | `JobNotesPanel` | 작업 노트 |
 | 상세 | `DetailInfoPanel` | 상세 정보 |
 | 채팅 | `IntegratedChatPanel` | 대화형 터미널 |
 
-**AgentTile:** 할당 에이전트만 (`user.agent_ids`). 이름·역할·연결/동작 상태. MCP·토큰 수 미표시.
+제거됨: `AgentNodeListPanel` / `AgentGrid` / `AgentTile` (대시보드 에이전트 노드 목록).
 
 ### JobNotesPanel 탭
 
@@ -238,7 +236,6 @@ frontend/src/
 ├── types/navigation.ts
 ├── components/
 │   ├── MenuBar.tsx · LoginPage.tsx · DashboardPage.tsx
-│   ├── AgentNodeListPanel.tsx · AgentGrid.tsx · AgentTile.tsx
 │   ├── JobNotesPanel.tsx · DetailInfoPanel.tsx · IntegratedChatPanel.tsx
 │   ├── JobIntakePanel.tsx · JobWorkflowPanel.tsx
 │   ├── jobs/          # 검토·결과·형상·노트 등

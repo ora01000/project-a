@@ -5,11 +5,17 @@ import { WorkflowIcon } from "../workflow/WorkflowIcon";
 import {
   ClusterCapacityPanel,
   NodeCapacityPanel,
+  RequestDonut,
   StorageCapacityPanel,
   type ClusterShapeCapacity,
 } from "./ClusterCapacityPanel";
+import { InfraTypeIcon } from "./InfraTypeIcon";
 import { ShapeDetailPanel } from "./ShapeDetailPanel";
 import { VsphereShapeDetailPanel } from "./VsphereShapeDetailPanel";
+
+const ALL_CLUSTERS = "__all__";
+/** Previous width 178px × 1.2 */
+const INFRA_LIST_PANEL_WIDTH_CLASS = "w-[214px]";
 
 interface ShapeCluster {
   idx: number;
@@ -146,6 +152,14 @@ function clusterListPrimaryLabel(cluster: {
 }): string {
   const display = (cluster.display_name ?? "").trim();
   return display || cluster.cluster_name;
+}
+
+function formatCapacityTotal(value: number | null | undefined): string {
+  if (value == null || !Number.isFinite(value)) {
+    return "-";
+  }
+  const fixed = value.toFixed(2);
+  return fixed.replace(/\.?0+$/, "");
 }
 
 function groupClustersByInfraType(
@@ -346,7 +360,7 @@ export function InfraShapeTab({
   onCopyToNote,
 }: InfraShapeTabProps) {
   const [clusters, setClusters] = useState<ShapeCluster[]>([]);
-  const [selectedName, setSelectedName] = useState<string | null>(null);
+  const [selectedName, setSelectedName] = useState<string | null>(ALL_CLUSTERS);
   const [analysis, setAnalysis] = useState<ShapeAnalysis | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoadingList, setIsLoadingList] = useState(false);
@@ -354,9 +368,13 @@ export function InfraShapeTab({
   const [isGapAnalyzing, setIsGapAnalyzing] = useState(false);
   const [gapAnalysisMessage, setGapAnalysisMessage] = useState<string | null>(null);
   const [capacity, setCapacity] = useState<ClusterShapeCapacity | null>(null);
+  const [allCapacities, setAllCapacities] = useState<Record<string, ClusterShapeCapacity | null>>(
+    {},
+  );
   const [isLoadingCapacity, setIsLoadingCapacity] = useState(false);
   const [collapsedInfraTypes, setCollapsedInfraTypes] = useState<Record<string, boolean>>({});
 
+  const isAllSelected = selectedName === ALL_CLUSTERS;
   const groupedClusters = useMemo(() => groupClustersByInfraType(clusters), [clusters]);
 
   const toggleInfraTypeGroup = (infraType: string) => {
@@ -377,14 +395,17 @@ export function InfraShapeTab({
       const data = (await response.json()) as ShapeCluster[];
       setClusters(data);
       setSelectedName((current) => {
+        if (current === ALL_CLUSTERS) {
+          return ALL_CLUSTERS;
+        }
         if (current && data.some((item) => item.cluster_name === current)) {
           return current;
         }
-        return data[0]?.cluster_name ?? null;
+        return ALL_CLUSTERS;
       });
     } catch (err) {
       setClusters([]);
-      setSelectedName(null);
+      setSelectedName(ALL_CLUSTERS);
       setError(err instanceof Error ? err.message : "인프라 목록을 불러오지 못했습니다.");
     } finally {
       setIsLoadingList(false);
@@ -429,6 +450,31 @@ export function InfraShapeTab({
     }
   }, []);
 
+  const loadAllCapacities = useCallback(async (items: ShapeCluster[]) => {
+    setIsLoadingCapacity(true);
+    try {
+      const entries = await Promise.all(
+        items.map(async (cluster) => {
+          try {
+            const response = await fetch(
+              `/api/k8s-infra/shape/clusters/${encodeURIComponent(cluster.cluster_name)}/capacity`,
+            );
+            if (!response.ok) {
+              return [cluster.cluster_name, null] as const;
+            }
+            const data = (await response.json()) as ClusterShapeCapacity;
+            return [cluster.cluster_name, data] as const;
+          } catch {
+            return [cluster.cluster_name, null] as const;
+          }
+        }),
+      );
+      setAllCapacities(Object.fromEntries(entries));
+    } finally {
+      setIsLoadingCapacity(false);
+    }
+  }, []);
+
   useEffect(() => {
     if (!active) {
       return;
@@ -439,11 +485,40 @@ export function InfraShapeTab({
   useEffect(() => {
     if (!active || !selectedName) {
       setCapacity(null);
+      setAnalysis(null);
       return;
     }
+    if (selectedName === ALL_CLUSTERS) {
+      setAnalysis(null);
+      setCapacity(null);
+      if (clusters.length > 0) {
+        void loadAllCapacities(clusters);
+      } else {
+        setAllCapacities({});
+      }
+      return;
+    }
+    setAllCapacities({});
     void loadAnalysis(selectedName);
     void loadCapacity(selectedName);
-  }, [active, selectedName, loadAnalysis, loadCapacity]);
+  }, [active, selectedName, clusters, loadAnalysis, loadCapacity, loadAllCapacities]);
+
+  const allOverviewRows = useMemo(() => {
+    return clusters.map((cluster) => {
+      const cap = allCapacities[cluster.cluster_name];
+      return {
+        cluster_name: cluster.cluster_name,
+        display_name: (cluster.display_name ?? "").trim() || "-",
+        infra_type: normalizeInfraType(cluster.infra_type),
+        cpu_total: formatCapacityTotal(cap?.cpu?.capacity),
+        mem_total: formatCapacityTotal(cap?.mem?.capacity),
+        node_count:
+          cap?.node_count != null && Number.isFinite(cap.node_count)
+            ? String(cap.node_count)
+            : "-",
+      };
+    });
+  }, [clusters, allCapacities]);
 
   const summaryItems = useMemo(() => {
     if (!analysis) {
@@ -486,7 +561,7 @@ export function InfraShapeTab({
   }, [analysis?.infra_type, clusters, selectedName]);
 
   const runGapAnalysis = useCallback(async () => {
-    if (!canRunGapAnalysis || !selectedName) {
+    if (!canRunGapAnalysis || !selectedName || selectedName === ALL_CLUSTERS) {
       return;
     }
     const infraType = selectedInfraType;
@@ -538,9 +613,26 @@ export function InfraShapeTab({
 
   return (
     <div className="flex min-h-0 flex-1 gap-3 p-3">
-      <aside className="flex w-[178px] shrink-0 flex-col border-r border-slate-700/80 pr-3">
+      <aside
+        className={`flex ${INFRA_LIST_PANEL_WIDTH_CLASS} shrink-0 flex-col border-r border-slate-700/80 pr-3`}
+      >
         <h3 className="mb-2 text-xs font-semibold text-slate-300">인프라 목록</h3>
         <div className="min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain">
+          <button
+            type="button"
+            onClick={() => setSelectedName(ALL_CLUSTERS)}
+            className={`block w-full rounded-md border px-2.5 py-1.5 text-left text-[11px] font-medium transition-colors ${clusterButtonClass(isAllSelected)}`}
+            title="모든 클러스터 용량 요약"
+          >
+            <span className="block truncate">전체</span>
+            <span
+              className={`mt-0.5 block truncate text-[10px] font-normal ${
+                isAllSelected ? "text-sky-300/80" : "text-slate-500"
+              }`}
+            >
+              {clusters.length}개 클러스터
+            </span>
+          </button>
           {isLoadingList && clusters.length === 0 ? (
             <p className="text-xs text-slate-500">불러오는 중...</p>
           ) : null}
@@ -612,87 +704,204 @@ export function InfraShapeTab({
             </div>
           ) : null}
 
-          <section className="shrink-0 rounded-lg border border-slate-700/80 bg-slate-950/40 p-3">
-            <h3 className="mb-2 text-xs font-semibold text-slate-300">요약</h3>
-            {isLoadingAnalysis && !analysis ? (
-              <p className="text-xs text-slate-500">불러오는 중...</p>
-            ) : !analysis ? (
-              <p className="text-xs text-slate-500">클러스터를 선택해 주세요.</p>
-            ) : (
-              <dl className="grid grid-cols-2 gap-x-4 gap-y-2 sm:grid-cols-3">
-                {summaryItems.map((item) => (
-                  <div key={item.label} className="min-w-0">
-                    <dt className="text-[11px] text-slate-500">{item.label}</dt>
-                    <dd className="truncate font-mono text-sm text-slate-100" title={item.value}>
-                      {item.value}
-                    </dd>
-                  </div>
-                ))}
-              </dl>
-            )}
-          </section>
-
-          <div className="grid shrink-0 grid-cols-3 gap-3">
-            <ClusterCapacityPanel capacity={capacity} isLoading={isLoadingCapacity} />
-            <NodeCapacityPanel capacity={capacity} isLoading={isLoadingCapacity} />
-            <StorageCapacityPanel capacity={capacity} isLoading={isLoadingCapacity} />
-          </div>
-
-          <section className="flex min-h-0 flex-1 flex-col rounded-lg border border-slate-700/80 bg-slate-950/40 p-3">
-            <div className="mb-1 flex shrink-0 items-center justify-between gap-2">
-              <h3 className="text-xs font-semibold text-slate-300">형상 추이</h3>
-              {canRunGapAnalysis ? (
-                <button
-                  type="button"
-                  disabled={!selectedName || isGapAnalyzing}
-                  onClick={() => void runGapAnalysis()}
-                  className="inline-flex items-center gap-1 rounded border border-sky-700 bg-sky-950/50 px-2 py-0.5 text-[11px] font-medium text-sky-200 hover:bg-sky-900/60 disabled:cursor-not-allowed disabled:opacity-40"
-                  title={
-                    selectedName
-                      ? `${selectedName} (${selectedInfraType}) AI 갭분석`
-                      : "클러스터를 선택해 주세요"
-                  }
-                  aria-busy={isGapAnalyzing}
-                >
-                  <WorkflowIcon
-                    name={isGapAnalyzing ? "refresh" : "ai"}
-                    size="xs"
-                    className={isGapAnalyzing ? "animate-spin" : undefined}
-                    label={isGapAnalyzing ? "분석 중" : undefined}
-                  />
-                  {isGapAnalyzing ? "분석 중…" : "AI갭분석"}
-                </button>
-              ) : null}
-            </div>
-            <p className="mb-2 text-[11px] text-slate-500">
-              최신 테이블과 백업(최대 4세대) 기준 개수 변화
-            </p>
-            {gapAnalysisMessage ? (
-              <p
-                className={`mb-2 shrink-0 rounded-md border px-2 py-1 text-[11px] ${
-                  gapAnalysisMessage.startsWith("갭분석 실패")
-                    ? "border-rose-800 bg-rose-950/40 text-rose-200"
-                    : "border-emerald-800 bg-emerald-950/30 text-emerald-200"
-                }`}
-              >
-                {gapAnalysisMessage}
-              </p>
-            ) : null}
-            <div className="min-h-0 flex-1 overflow-hidden">
-              {analysis ? (
-                <ShapeTrendChart
-                  history={analysis.history}
-                  infraType={analysis.infra_type || "k8s"}
-                />
+          {isAllSelected ? (
+            <section className="flex min-h-0 flex-1 flex-col rounded-lg border border-slate-700/80 bg-slate-950/40 p-3">
+              <h3 className="mb-2 shrink-0 text-xs font-semibold text-slate-300">
+                전체 클러스터 용량
+              </h3>
+              {isLoadingCapacity && Object.keys(allCapacities).length === 0 ? (
+                <p className="text-xs text-slate-500">불러오는 중...</p>
+              ) : clusters.length === 0 ? (
+                <p className="text-xs text-slate-500">등록된 클러스터가 없습니다.</p>
               ) : (
-                <p className="text-xs text-slate-500">추이 차트를 표시할 클러스터가 없습니다.</p>
+                <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+                    {clusters.map((cluster) => {
+                      const cap = allCapacities[cluster.cluster_name];
+                      const displayName = (cluster.display_name ?? "").trim();
+                      const infraType = normalizeInfraType(cluster.infra_type);
+                      return (
+                        <button
+                          key={cluster.idx}
+                          type="button"
+                          onClick={() => setSelectedName(cluster.cluster_name)}
+                          className="relative flex w-full flex-col items-center rounded-md border border-slate-700/70 bg-slate-900/40 p-2 pt-3 text-left transition-colors hover:border-slate-500 hover:bg-slate-800/50"
+                          title={`${cluster.cluster_name} 선택`}
+                        >
+                          <InfraTypeIcon
+                            infraType={infraType}
+                            size="md"
+                            className="absolute right-2 top-2"
+                          />
+                          <div className="mb-2 w-full pr-6 text-left">
+                            <p
+                              className="truncate text-[11px] font-semibold text-slate-200"
+                              title={cluster.cluster_name}
+                            >
+                              {cluster.cluster_name}
+                            </p>
+                            <p
+                              className="mt-0.5 truncate text-[10px] text-slate-400"
+                              title={displayName || "-"}
+                            >
+                              {displayName || "-"}
+                            </p>
+                          </div>
+                          {!cap ? (
+                            <p className="py-8 text-xs text-slate-500">데이터 없음</p>
+                          ) : !cap.supported || !cap.cpu || !cap.mem ? (
+                            <p className="py-8 text-xs text-slate-500">용량 미지원</p>
+                          ) : (
+                            <RequestDonut cpu={cap.cpu} mem={cap.mem} size={128} />
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
               )}
-            </div>
-          </section>
+            </section>
+          ) : (
+            <>
+              <section className="shrink-0 rounded-lg border border-slate-700/80 bg-slate-950/40 p-3">
+                <h3 className="mb-2 text-xs font-semibold text-slate-300">요약</h3>
+                {isLoadingAnalysis && !analysis ? (
+                  <p className="text-xs text-slate-500">불러오는 중...</p>
+                ) : !analysis ? (
+                  <p className="text-xs text-slate-500">클러스터를 선택해 주세요.</p>
+                ) : (
+                  <dl className="grid grid-cols-2 gap-x-4 gap-y-2 sm:grid-cols-3">
+                    {summaryItems.map((item) => (
+                      <div key={item.label} className="min-w-0">
+                        <dt className="text-[11px] text-slate-500">{item.label}</dt>
+                        <dd
+                          className="truncate font-mono text-sm text-slate-100"
+                          title={item.value}
+                        >
+                          {item.value}
+                        </dd>
+                      </div>
+                    ))}
+                  </dl>
+                )}
+              </section>
+
+              <div className="grid shrink-0 grid-cols-3 gap-3">
+                <ClusterCapacityPanel capacity={capacity} isLoading={isLoadingCapacity} />
+                <NodeCapacityPanel capacity={capacity} isLoading={isLoadingCapacity} />
+                <StorageCapacityPanel capacity={capacity} isLoading={isLoadingCapacity} />
+              </div>
+
+              <section className="flex min-h-0 flex-1 flex-col rounded-lg border border-slate-700/80 bg-slate-950/40 p-3">
+                <div className="mb-1 flex shrink-0 items-center justify-between gap-2">
+                  <h3 className="text-xs font-semibold text-slate-300">형상 추이</h3>
+                  {canRunGapAnalysis ? (
+                    <button
+                      type="button"
+                      disabled={!selectedName || isGapAnalyzing}
+                      onClick={() => void runGapAnalysis()}
+                      className="inline-flex items-center gap-1 rounded border border-sky-700 bg-sky-950/50 px-2 py-0.5 text-[11px] font-medium text-sky-200 hover:bg-sky-900/60 disabled:cursor-not-allowed disabled:opacity-40"
+                      title={
+                        selectedName
+                          ? `${selectedName} (${selectedInfraType}) AI 갭분석`
+                          : "클러스터를 선택해 주세요"
+                      }
+                      aria-busy={isGapAnalyzing}
+                    >
+                      <WorkflowIcon
+                        name={isGapAnalyzing ? "refresh" : "ai"}
+                        size="xs"
+                        className={isGapAnalyzing ? "animate-spin" : undefined}
+                        label={isGapAnalyzing ? "분석 중" : undefined}
+                      />
+                      {isGapAnalyzing ? "분석 중…" : "AI갭분석"}
+                    </button>
+                  ) : null}
+                </div>
+                <p className="mb-2 text-[11px] text-slate-500">
+                  최신 테이블과 백업(최대 4세대) 기준 개수 변화
+                </p>
+                {gapAnalysisMessage ? (
+                  <p
+                    className={`mb-2 shrink-0 rounded-md border px-2 py-1 text-[11px] ${
+                      gapAnalysisMessage.startsWith("갭분석 실패")
+                        ? "border-rose-800 bg-rose-950/40 text-rose-200"
+                        : "border-emerald-800 bg-emerald-950/30 text-emerald-200"
+                    }`}
+                  >
+                    {gapAnalysisMessage}
+                  </p>
+                ) : null}
+                <div className="min-h-0 flex-1 overflow-hidden">
+                  {analysis ? (
+                    <ShapeTrendChart
+                      history={analysis.history}
+                      infraType={analysis.infra_type || "k8s"}
+                    />
+                  ) : (
+                    <p className="text-xs text-slate-500">추이 차트를 표시할 클러스터가 없습니다.</p>
+                  )}
+                </div>
+              </section>
+            </>
+          )}
         </div>
 
         <div className="flex min-h-0 min-w-0 flex-[2] flex-col">
-          {selectedInfraType === "vSphere" && selectedName ? (
+          {isAllSelected ? (
+            <section className="flex min-h-0 flex-1 flex-col rounded-lg border border-slate-700/80 bg-slate-950/40 p-3">
+              <h3 className="mb-2 shrink-0 text-xs font-semibold text-slate-300">상세 정보</h3>
+              {isLoadingCapacity && allOverviewRows.length === 0 ? (
+                <p className="text-xs text-slate-500">불러오는 중...</p>
+              ) : allOverviewRows.length === 0 ? (
+                <p className="text-xs text-slate-500">등록된 클러스터가 없습니다.</p>
+              ) : (
+                <div className="min-h-0 flex-1 overflow-auto">
+                  <table className="w-full min-w-[36rem] border-collapse text-left text-[11px]">
+                    <thead className="sticky top-0 bg-slate-950">
+                      <tr className="border-b border-slate-700 text-slate-400">
+                        <th className="px-2 py-1.5 font-semibold">클러스터 명</th>
+                        <th className="px-2 py-1.5 font-semibold">표시명</th>
+                        <th className="px-2 py-1.5 font-semibold">타입</th>
+                        <th className="px-2 py-1.5 font-semibold tabular-nums">CPU total</th>
+                        <th className="px-2 py-1.5 font-semibold tabular-nums">MEM total</th>
+                        <th className="px-2 py-1.5 font-semibold tabular-nums">노드개수</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {allOverviewRows.map((row) => (
+                        <tr
+                          key={row.cluster_name}
+                          role="button"
+                          tabIndex={0}
+                          onClick={() => setSelectedName(row.cluster_name)}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter" || event.key === " ") {
+                              event.preventDefault();
+                              setSelectedName(row.cluster_name);
+                            }
+                          }}
+                          className="cursor-pointer border-b border-slate-800/80 text-slate-200 hover:bg-slate-800/60"
+                          title={`${row.cluster_name} 선택`}
+                        >
+                          <td className="px-2 py-1.5 font-mono" title={row.cluster_name}>
+                            {row.cluster_name}
+                          </td>
+                          <td className="px-2 py-1.5" title={row.display_name}>
+                            {row.display_name}
+                          </td>
+                          <td className="px-2 py-1.5">{row.infra_type}</td>
+                          <td className="px-2 py-1.5 font-mono tabular-nums">{row.cpu_total}</td>
+                          <td className="px-2 py-1.5 font-mono tabular-nums">{row.mem_total}</td>
+                          <td className="px-2 py-1.5 font-mono tabular-nums">{row.node_count}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </section>
+          ) : selectedInfraType === "vSphere" && selectedName ? (
             <VsphereShapeDetailPanel active={active} clusterName={selectedName} />
           ) : (
             <ShapeDetailPanel

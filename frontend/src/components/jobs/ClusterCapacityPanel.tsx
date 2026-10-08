@@ -84,16 +84,17 @@ function usedStrokeColor(
   return isLight ? "#059669" : "#34d399";
 }
 
-function RequestDonut({
+export function RequestDonut({
   cpu,
   mem,
+  size = 148,
 }: {
   cpu: ResourceCapacity;
   mem: ResourceCapacity;
+  size?: number;
 }) {
   const { theme } = useTheme();
   const isLight = theme === "light";
-  const size = 148;
   const cx = size / 2;
   const cy = size / 2;
   const outerStroke = 12;

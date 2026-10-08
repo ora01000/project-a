@@ -3046,6 +3046,20 @@ left "작업 워크플로우 목록" 패널의 생성된 작업 워크플로우 
 - skill
   - /Users/insu/project-f/src/project_f/skills/ansible-cli/SKILL.md 를 스킬로 등록한다
   
+# UI 개선
+- 대시보드 > 에이전트 노드 목록 패널 삭제
+- 대시보드 > 작업 노트 > 인프라 형상 탭
+  - 인프라 목록 패널 width 를 20% 확장
+  - 인프라 목록에 "전체" 카드를 추가
+    - infra_cluster 테이블의 목록 외 "전체" 카드를 최상단에 배치하고 default 선택한다.
+    - "전체" 카드는 다음 정보를 보여준다.
+      - 모든 클러스터의 클러스터 용량 차트(원차트)를 각 클러스터 별로 이름을 붙여서 배열한다.(display_name도 함께 표시)
+      - 각 클러스터의 차트에서 cluster_name, display_name 은 패널 내에서 왼쪽 상단에 배치
+      - 각 클러스터 차트를 클릭하면 인프라 목록 패널의 카드를 클릭하는 것과 동일한 기능을 한다.
+      - infra_type 은 k8s(okd), kubevirt, vsphere 별로 icon asset 을 만들고, 패널의 오른쪽 상단에 표시한다
+      - "전체" 카드일때 상세 정보는 다음 테이블을 출력한다.
+      - 상세정보 에서 row 클릭시 인프라 목록 패널의 카드를 클릭하는 것과 동일한 기능을 한다.
 
-  
-
+|클러스터 명|표시명|타입|CPU total|MEM total|노드개수|
+---|---|---|---|---|---|
+|infra_cluster.cluster_name|infra_cluster.display_name|infra_cluster.infra_type| 1. k8s, kubevirt 인 경우 워커노드 cpu 총합, 2. vsphere는 호스트 전체 cpu 총합| 1. k8s, kubevirt 인 경우 워커노드 mem 총합, 2. vsphere는 호스트 전체 mem 총합 | 1. k8s, kubevirt 인 경우 워커노드 개수, 2. vsphere는 호스트 전체 개수|

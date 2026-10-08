@@ -1,17 +1,13 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { AgentInfo } from "../types/agent";
 import type { AuthUser } from "../types/auth";
-import { AgentGrid } from "./AgentGrid";
-import { AgentNodeListPanel } from "./AgentNodeListPanel";
 import { DetailInfoPanel, type DetailTab } from "./DetailInfoPanel";
 import { IntegratedChatPanel } from "./IntegratedChatPanel";
 import { JobNotesPanel } from "./JobNotesPanel";
 
 const DEFAULT_CHAT_PANEL_WIDTH = 650;
 const MIN_CHAT_PANEL_WIDTH = 360;
-const AGENT_LIST_PANEL_WIDTH = 280;
-const AGENT_LIST_COLLAPSED_WIDTH = 36;
 const MIN_JOB_NOTES_PANEL_WIDTH = 240;
 const PANEL_RESIZE_HANDLE_WIDTH = 8;
 
@@ -37,15 +33,12 @@ export function DashboardPage({
     async () => {},
   );
   const [chatPanelWidth, setChatPanelWidth] = useState(DEFAULT_CHAT_PANEL_WIDTH);
-  const [isAgentListCollapsed, setIsAgentListCollapsed] = useState(false);
   const [isChatCollapsed, setIsChatCollapsed] = useState(true);
   const isResizingRef = useRef(false);
   const resizeStartXRef = useRef(0);
   const resizeStartWidthRef = useRef(DEFAULT_CHAT_PANEL_WIDTH);
 
-  const minCenterPanelWidth =
-    (isAgentListCollapsed ? AGENT_LIST_COLLAPSED_WIDTH : AGENT_LIST_PANEL_WIDTH) +
-    MIN_JOB_NOTES_PANEL_WIDTH;
+  const minCenterPanelWidth = MIN_JOB_NOTES_PANEL_WIDTH;
 
   const clampChatPanelWidth = useCallback(
     (nextWidth: number) => {
@@ -108,16 +101,9 @@ export function DashboardPage({
 
   useEffect(() => {
     setChatPanelWidth((current) => clampChatPanelWidth(current));
-  }, [clampChatPanelWidth, isAgentListCollapsed, isChatCollapsed]);
+  }, [clampChatPanelWidth, isChatCollapsed]);
 
   const [detailTab, setDetailTab] = useState<DetailTab>("workflow");
-
-  const assignedAgents = useMemo(() => {
-    const assignedIds = new Set(
-      (user.agent_ids ?? []).map((id) => id.trim()).filter(Boolean),
-    );
-    return agents.filter((agent) => assignedIds.has(agent.id));
-  }, [agents, user.agent_ids]);
 
   const handleCopyToNoteReady = useCallback(
     (handler: (content: string, noteName?: string) => Promise<void>) => {
@@ -143,13 +129,6 @@ export function DashboardPage({
           <>
             <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-4 self-stretch">
               <div className="flex min-h-0 flex-1 gap-4">
-                <AgentNodeListPanel
-                  collapsed={isAgentListCollapsed}
-                  onCollapsedChange={setIsAgentListCollapsed}
-                >
-                  {assignedAgents.length > 0 ? <AgentGrid agents={assignedAgents} /> : null}
-                </AgentNodeListPanel>
-
                 <JobNotesPanel
                   className="min-w-0 flex-1"
                   currentUser={user}
