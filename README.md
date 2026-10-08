@@ -2,7 +2,7 @@
 
 인프라 운영을 위한 웹 콘솔입니다. 작업 요청·검토, 인프라 형상 조회, 통합 채팅, 메일 알림을 한곳에서 다룹니다.
 
-**현재 버전:** 1.9 / 릴리즈 `260916` — 상세 변경 이력은 [RELEASE.md](RELEASE.md)를 참고하세요.
+**현재 버전:** 2.0 / 릴리즈 `261008` — 상세 변경 이력은 [RELEASE.md](RELEASE.md)를 참고하세요.
 
 ## 아키텍처 요약
 
@@ -104,16 +104,16 @@ mock 모드에서 제한되는 런타임 API는 [docs/MOCK_RUNTIME.md](docs/MOCK
 
 ## Docker 이미지
 
-Postgres multipod 배포용 태그는 **`pgYYMMDD`** 형식입니다 (예: `pg260916`).
+Postgres multipod 배포용 태그는 **`pgYYMMDD`** 형식입니다 (예: `pg261008`).
 
 ```bash
-IMAGE_TAG=pg260916 PUSH=true PLATFORMS=linux/amd64 bash scripts/docker-build-push.sh
+IMAGE_TAG=pg261008 PUSH=true PLATFORMS=linux/amd64 bash scripts/docker-build-push.sh
 ```
 
 | 이미지 | 예시 태그 |
 |--------|-----------|
-| `ora01000/project-a-backend` | `pg260916` |
-| `ora01000/project-a-frontend` | `pg260916` |
+| `ora01000/project-a-backend` | `pg261008` |
+| `ora01000/project-a-frontend` | `pg261008` |
 
 OKD 매니페스트 예시는 [`deploy/okd/`](deploy/okd/)을 참고하세요.
 

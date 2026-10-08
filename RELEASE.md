@@ -3,7 +3,37 @@
 프로젝트 최초 개발일(2026-07-08) 이후 변경 이력을 **최근순**으로 요약합니다.  
 출처: git 커밋, `ADDITIONAL_PLAN.md`, 워킹 트리 반영분(2026-07-15~18).
 
-**현재 버전:** 1.9 / 릴리즈 `260916`
+**현재 버전:** 2.0 / 릴리즈 `261008`
+
+---
+
+## 2026-10-08 — 인프라 형상 전체 요약·에이전트·워크플로 고도화 (`261008` / `pg261008`)
+
+### 대시보드·인프라 형상
+- 대시보드 **에이전트 노드 목록** 패널 제거 — 작업 노트·대화형 터미널 중심 레이아웃
+- 인프라 형상 **전체** 카드(기본 선택): 클러스터별 용량 원차트·상세 요약 테이블
+- 차트/테이블 행 클릭 시 인프라 목록 카드 선택과 동일하게 개별 클러스터로 진입
+- infra_type 아이콘(`okd` / `kubevirt` / `vsphere`, dark·light)
+
+### 에이전트·MCP·스킬
+- 목업 MCP를 OrbStack run_cli·Ingress로 이전, **PRIVATE_CLOUD_AGENT**를 기본 위임 대상으로 사용
+- ansible playbook 작성 스킬(`ansible_cli`)을 PRIVATE_CLOUD·WORKFLOW·lint 에이전트에 연동
+- mcp-ansible 도구를 ansible-lint 에이전트에 연결, 기존 ansible_lint MCP 제거
+- http 모드 워크플로우 설계 에이전트 ID를 환경변수 UUID로 지정, 시스템 프롬프트 한글화
+- 에이전트 연결 편집: 대화가능(`talkable`)·오케스트레이터(`is_orchestrator`) 속성 수정
+
+### 워크플로·차트·메일
+- 작업 노드 결과: script stdout을 Markdown으로 정리해 노트/취합에 반영
+- whatap-json 시계열을 차트로 렌더(메일·노트 복사 유지)
+- 메일 회신 스레딩, read 작업 자동승인(`auto_approve`)
+- 대화형 터미널 응답 대기 최소 10분, http 모드에서 사용 MCP 도구 목록 비표시
+
+### 문서
+- PostgreSQL 테이블 명세서 `docs/DB_TABLE_SPEC.md` 현행화
+
+### 릴리즈
+- About: 버전 **2.0**, 릴리즈 **261008**
+- Docker 이미지 태그: `pg261008` (`linux/amd64`)
 
 ---
 
@@ -527,12 +557,12 @@
 | 항목 | 내용 |
 |------|------|
 | 제품명 | AX 인프라 운영 콘솔 |
-| 버전 | 1.8 |
-| 릴리즈 | 260819 |
+| 버전 | 2.0 |
+| 릴리즈 | 261008 |
 | 백엔드 이미지 | `ora01000/project-a-backend:<tag>` |
 | 프론트 이미지 | `ora01000/project-a-frontend:<tag>` |
 | 최근 태그 예 | `260805`, `260806`, `260807` |
-| multi-pod(Postgres) 태그 | `pgYYMMDD` (예: `pg260819`) — `dev-axplatform-multi-pod` 배포용 |
+| multi-pod(Postgres) 태그 | `pgYYMMDD` (예: `pg261008`) — `dev-axplatform-multi-pod` 배포용 |
 
 ---
 
