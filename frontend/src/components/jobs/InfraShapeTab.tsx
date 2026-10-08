@@ -503,23 +503,6 @@ export function InfraShapeTab({
     void loadCapacity(selectedName);
   }, [active, selectedName, clusters, loadAnalysis, loadCapacity, loadAllCapacities]);
 
-  const allOverviewRows = useMemo(() => {
-    return clusters.map((cluster) => {
-      const cap = allCapacities[cluster.cluster_name];
-      return {
-        cluster_name: cluster.cluster_name,
-        display_name: (cluster.display_name ?? "").trim() || "-",
-        infra_type: normalizeInfraType(cluster.infra_type),
-        cpu_total: formatCapacityTotal(cap?.cpu?.capacity),
-        mem_total: formatCapacityTotal(cap?.mem?.capacity),
-        node_count:
-          cap?.node_count != null && Number.isFinite(cap.node_count)
-            ? String(cap.node_count)
-            : "-",
-      };
-    });
-  }, [clusters, allCapacities]);
-
   const summaryItems = useMemo(() => {
     if (!analysis) {
       return [];
@@ -696,81 +679,111 @@ export function InfraShapeTab({
         </div>
       </aside>
 
-      <div className="flex min-h-0 min-w-0 flex-1 gap-3">
-        <div className="flex min-h-0 min-w-0 flex-[3] flex-col gap-3">
-          {error ? (
-            <div className="rounded-md border border-rose-800 bg-rose-950/40 px-3 py-2 text-sm text-rose-200">
-              {error}
-            </div>
-          ) : null}
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-3">
+        {error ? (
+          <div className="shrink-0 rounded-md border border-rose-800 bg-rose-950/40 px-3 py-2 text-sm text-rose-200">
+            {error}
+          </div>
+        ) : null}
 
-          {isAllSelected ? (
-            <section className="flex min-h-0 flex-1 flex-col rounded-lg border border-slate-700/80 bg-slate-950/40 p-3">
-              <h3 className="mb-2 shrink-0 text-xs font-semibold text-slate-300">
-                전체 클러스터 용량
-              </h3>
-              {isLoadingCapacity && Object.keys(allCapacities).length === 0 ? (
-                <p className="text-xs text-slate-500">불러오는 중...</p>
-              ) : clusters.length === 0 ? (
-                <p className="text-xs text-slate-500">등록된 클러스터가 없습니다.</p>
-              ) : (
-                <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
-                  <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
-                    {clusters.map((cluster) => {
-                      const cap = allCapacities[cluster.cluster_name];
-                      const displayName = (cluster.display_name ?? "").trim();
-                      const infraType = normalizeInfraType(cluster.infra_type);
-                      return (
-                        <button
-                          key={cluster.idx}
-                          type="button"
-                          onClick={() => setSelectedName(cluster.cluster_name)}
-                          className="relative flex w-full flex-col items-center rounded-md border border-slate-700/70 bg-slate-900/40 p-2 pt-3 text-left transition-colors hover:border-slate-500 hover:bg-slate-800/50"
-                          title={`${cluster.cluster_name} 선택`}
-                        >
-                          <InfraTypeIcon
-                            infraType={infraType}
-                            size="md"
-                            className="absolute right-2 top-2"
-                          />
-                          <div className="mb-2 w-full pr-6 text-left">
-                            <p
-                              className="truncate text-[11px] font-semibold text-slate-200"
-                              title={cluster.cluster_name}
-                            >
-                              {cluster.cluster_name}
+        {isAllSelected ? (
+          <section className="flex min-h-0 flex-1 flex-col rounded-lg border border-slate-700/80 bg-slate-950/40 p-3">
+            <h3 className="mb-2 shrink-0 text-xs font-semibold text-slate-300">
+              전체 클러스터 용량
+            </h3>
+            {isLoadingCapacity && Object.keys(allCapacities).length === 0 ? (
+              <p className="text-xs text-slate-500">불러오는 중...</p>
+            ) : clusters.length === 0 ? (
+              <p className="text-xs text-slate-500">등록된 클러스터가 없습니다.</p>
+            ) : (
+              <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+                  {clusters.map((cluster) => {
+                    const cap = allCapacities[cluster.cluster_name];
+                    const displayName = (cluster.display_name ?? "").trim();
+                    const infraType = normalizeInfraType(cluster.infra_type);
+                    const cpuTotal = formatCapacityTotal(cap?.cpu?.capacity);
+                    const memTotal = formatCapacityTotal(cap?.mem?.capacity);
+                    const nodeCount =
+                      cap?.node_count != null && Number.isFinite(cap.node_count)
+                        ? String(cap.node_count)
+                        : "-";
+                    return (
+                      <button
+                        key={cluster.idx}
+                        type="button"
+                        onClick={() => setSelectedName(cluster.cluster_name)}
+                        className="relative flex w-full flex-col items-center rounded-md border border-slate-700/70 bg-slate-900/40 p-2 pt-3 text-left transition-colors hover:border-slate-500 hover:bg-slate-800/50"
+                        title={`${cluster.cluster_name} 선택`}
+                      >
+                        <InfraTypeIcon
+                          infraType={infraType}
+                          size="md"
+                          className="absolute right-2 top-2"
+                        />
+                        <div className="mb-1 w-full pr-6 text-left">
+                          <p
+                            className="truncate text-[11px] font-semibold text-slate-200"
+                            title={cluster.cluster_name}
+                          >
+                            {cluster.cluster_name}
+                          </p>
+                          <p
+                            className="mt-0.5 truncate text-[10px] text-slate-400"
+                            title={displayName || "-"}
+                          >
+                            {displayName || "-"}
+                          </p>
+                        </div>
+                        <div className="flex w-full items-end gap-2">
+                          <div className="flex min-w-0 flex-1 items-center justify-center">
+                            {!cap ? (
+                              <p className="py-8 text-xs text-slate-500">데이터 없음</p>
+                            ) : !cap.supported || !cap.cpu || !cap.mem ? (
+                              <p className="py-8 text-xs text-slate-500">용량 미지원</p>
+                            ) : (
+                              <RequestDonut cpu={cap.cpu} mem={cap.mem} size={128} />
+                            )}
+                          </div>
+                          <div className="shrink-0 space-y-0.5 pb-1 text-right text-[10px] leading-tight text-slate-400">
+                            <p>
+                              CPU Total{" "}
+                              <span className="font-mono tabular-nums text-slate-200">
+                                {cpuTotal}
+                              </span>
                             </p>
-                            <p
-                              className="mt-0.5 truncate text-[10px] text-slate-400"
-                              title={displayName || "-"}
-                            >
-                              {displayName || "-"}
+                            <p>
+                              MEM Total{" "}
+                              <span className="font-mono tabular-nums text-slate-200">
+                                {memTotal}
+                              </span>
+                            </p>
+                            <p>
+                              노드 개수{" "}
+                              <span className="font-mono tabular-nums text-slate-200">
+                                {nodeCount}
+                              </span>
                             </p>
                           </div>
-                          {!cap ? (
-                            <p className="py-8 text-xs text-slate-500">데이터 없음</p>
-                          ) : !cap.supported || !cap.cpu || !cap.mem ? (
-                            <p className="py-8 text-xs text-slate-500">용량 미지원</p>
-                          ) : (
-                            <RequestDonut cpu={cap.cpu} mem={cap.mem} size={128} />
-                          )}
-                        </button>
-                      );
-                    })}
-                  </div>
+                        </div>
+                      </button>
+                    );
+                  })}
                 </div>
-              )}
-            </section>
-          ) : (
-            <>
-              <section className="shrink-0 rounded-lg border border-slate-700/80 bg-slate-950/40 p-3">
-                <h3 className="mb-2 text-xs font-semibold text-slate-300">요약</h3>
+              </div>
+            )}
+          </section>
+        ) : (
+          <>
+            <div className="grid h-[240px] shrink-0 grid-cols-3 gap-3 overflow-hidden">
+              <section className="col-span-2 flex min-h-0 flex-col overflow-hidden rounded-lg border border-slate-700/80 bg-slate-950/40 p-3">
+                <h3 className="mb-2 shrink-0 text-xs font-semibold text-slate-300">요약</h3>
                 {isLoadingAnalysis && !analysis ? (
                   <p className="text-xs text-slate-500">불러오는 중...</p>
                 ) : !analysis ? (
                   <p className="text-xs text-slate-500">클러스터를 선택해 주세요.</p>
                 ) : (
-                  <dl className="grid grid-cols-2 gap-x-4 gap-y-2 sm:grid-cols-3">
+                  <dl className="grid min-h-0 flex-1 grid-cols-2 content-start gap-x-4 gap-y-2 sm:grid-cols-3">
                     {summaryItems.map((item) => (
                       <div key={item.label} className="min-w-0">
                         <dt className="text-[11px] text-slate-500">{item.label}</dt>
@@ -786,13 +799,7 @@ export function InfraShapeTab({
                 )}
               </section>
 
-              <div className="grid shrink-0 grid-cols-3 gap-3">
-                <ClusterCapacityPanel capacity={capacity} isLoading={isLoadingCapacity} />
-                <NodeCapacityPanel capacity={capacity} isLoading={isLoadingCapacity} />
-                <StorageCapacityPanel capacity={capacity} isLoading={isLoadingCapacity} />
-              </div>
-
-              <section className="flex min-h-0 flex-1 flex-col rounded-lg border border-slate-700/80 bg-slate-950/40 p-3">
+              <section className="col-span-1 flex min-h-0 min-w-0 flex-col overflow-hidden rounded-lg border border-slate-700/80 bg-slate-950/40 p-3">
                 <div className="mb-1 flex shrink-0 items-center justify-between gap-2">
                   <h3 className="text-xs font-semibold text-slate-300">형상 추이</h3>
                   {canRunGapAnalysis ? (
@@ -818,8 +825,8 @@ export function InfraShapeTab({
                     </button>
                   ) : null}
                 </div>
-                <p className="mb-2 text-[11px] text-slate-500">
-                  최신 테이블과 백업(최대 4세대) 기준 개수 변화
+                <p className="mb-2 shrink-0 text-[11px] text-slate-500">
+                  최신·백업(최대 4세대) 개수 변화
                 </p>
                 {gapAnalysisMessage ? (
                   <p
@@ -843,75 +850,28 @@ export function InfraShapeTab({
                   )}
                 </div>
               </section>
-            </>
-          )}
-        </div>
+            </div>
 
-        <div className="flex min-h-0 min-w-0 flex-[2] flex-col">
-          {isAllSelected ? (
-            <section className="flex min-h-0 flex-1 flex-col rounded-lg border border-slate-700/80 bg-slate-950/40 p-3">
-              <h3 className="mb-2 shrink-0 text-xs font-semibold text-slate-300">상세 정보</h3>
-              {isLoadingCapacity && allOverviewRows.length === 0 ? (
-                <p className="text-xs text-slate-500">불러오는 중...</p>
-              ) : allOverviewRows.length === 0 ? (
-                <p className="text-xs text-slate-500">등록된 클러스터가 없습니다.</p>
+            <div className="grid h-[240px] shrink-0 grid-cols-3 gap-3 overflow-hidden">
+              <ClusterCapacityPanel capacity={capacity} isLoading={isLoadingCapacity} />
+              <NodeCapacityPanel capacity={capacity} isLoading={isLoadingCapacity} />
+              <StorageCapacityPanel capacity={capacity} isLoading={isLoadingCapacity} />
+            </div>
+
+            <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+              {selectedInfraType === "vSphere" && selectedName ? (
+                <VsphereShapeDetailPanel active={active} clusterName={selectedName} />
               ) : (
-                <div className="min-h-0 flex-1 overflow-auto">
-                  <table className="w-full min-w-[36rem] border-collapse text-left text-[11px]">
-                    <thead className="sticky top-0 bg-slate-950">
-                      <tr className="border-b border-slate-700 text-slate-400">
-                        <th className="px-2 py-1.5 font-semibold">클러스터 명</th>
-                        <th className="px-2 py-1.5 font-semibold">표시명</th>
-                        <th className="px-2 py-1.5 font-semibold">타입</th>
-                        <th className="px-2 py-1.5 font-semibold tabular-nums">CPU total</th>
-                        <th className="px-2 py-1.5 font-semibold tabular-nums">MEM total</th>
-                        <th className="px-2 py-1.5 font-semibold tabular-nums">노드개수</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {allOverviewRows.map((row) => (
-                        <tr
-                          key={row.cluster_name}
-                          role="button"
-                          tabIndex={0}
-                          onClick={() => setSelectedName(row.cluster_name)}
-                          onKeyDown={(event) => {
-                            if (event.key === "Enter" || event.key === " ") {
-                              event.preventDefault();
-                              setSelectedName(row.cluster_name);
-                            }
-                          }}
-                          className="cursor-pointer border-b border-slate-800/80 text-slate-200 hover:bg-slate-800/60"
-                          title={`${row.cluster_name} 선택`}
-                        >
-                          <td className="px-2 py-1.5 font-mono" title={row.cluster_name}>
-                            {row.cluster_name}
-                          </td>
-                          <td className="px-2 py-1.5" title={row.display_name}>
-                            {row.display_name}
-                          </td>
-                          <td className="px-2 py-1.5">{row.infra_type}</td>
-                          <td className="px-2 py-1.5 font-mono tabular-nums">{row.cpu_total}</td>
-                          <td className="px-2 py-1.5 font-mono tabular-nums">{row.mem_total}</td>
-                          <td className="px-2 py-1.5 font-mono tabular-nums">{row.node_count}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                <ShapeDetailPanel
+                  active={active}
+                  clusterName={selectedName}
+                  infraType={selectedInfraType}
+                  maskIps={maskIps}
+                />
               )}
-            </section>
-          ) : selectedInfraType === "vSphere" && selectedName ? (
-            <VsphereShapeDetailPanel active={active} clusterName={selectedName} />
-          ) : (
-            <ShapeDetailPanel
-              active={active}
-              clusterName={selectedName}
-              infraType={selectedInfraType}
-              maskIps={maskIps}
-            />
-          )}
-        </div>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );

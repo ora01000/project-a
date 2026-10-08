@@ -629,9 +629,14 @@ export function VsphereShapeDetailPanel({ clusterName, active }: VsphereShapeDet
   }, [active, clusterName, category, selectedIdx]);
 
   const hasSelection = selectedIdx != null;
+  const contentLayoutClass = hasSelection
+    ? "flex min-h-0 flex-1 flex-row gap-2"
+    : "flex min-h-0 flex-1 flex-col gap-2";
   const listPanelClass = hasSelection
-    ? "max-h-[45%] min-h-0 overflow-auto rounded border border-slate-800"
+    ? "min-h-0 min-w-0 flex-1 overflow-auto rounded border border-slate-800"
     : "min-h-0 flex-1 overflow-auto rounded border border-slate-800";
+  const detailPanelClass =
+    "min-h-0 min-w-0 flex-1 overflow-auto rounded border border-slate-800";
 
   return (
     <section className="flex h-full min-h-0 flex-col rounded-lg border border-slate-700/80 bg-slate-950/40 p-3">
@@ -660,7 +665,7 @@ export function VsphereShapeDetailPanel({ clusterName, active }: VsphereShapeDet
       {!category ? (
         <p className="text-xs text-slate-500">클러스터 / ESXi호스트를 선택하세요.</p>
       ) : (
-        <div className="flex min-h-0 flex-1 flex-col gap-2">
+        <div className={contentLayoutClass}>
           <div className={listPanelClass}>
             {isLoadingList ? (
               <p className="p-2 text-xs text-slate-500">불러오는 중...</p>
@@ -688,7 +693,7 @@ export function VsphereShapeDetailPanel({ clusterName, active }: VsphereShapeDet
           </div>
 
           {hasSelection ? (
-            <div className="min-h-0 flex-1 overflow-auto rounded border border-slate-800">
+            <div className={detailPanelClass}>
               {isLoadingDetail ? (
                 <p className="p-2 text-xs text-slate-500">상세 불러오는 중...</p>
               ) : category === "clusters" ? (

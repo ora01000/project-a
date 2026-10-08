@@ -33,7 +33,6 @@ export function DashboardPage({
     async () => {},
   );
   const [chatPanelWidth, setChatPanelWidth] = useState(DEFAULT_CHAT_PANEL_WIDTH);
-  const [isChatCollapsed, setIsChatCollapsed] = useState(true);
   const isResizingRef = useRef(false);
   const resizeStartXRef = useRef(0);
   const resizeStartWidthRef = useRef(DEFAULT_CHAT_PANEL_WIDTH);
@@ -101,7 +100,7 @@ export function DashboardPage({
 
   useEffect(() => {
     setChatPanelWidth((current) => clampChatPanelWidth(current));
-  }, [clampChatPanelWidth, isChatCollapsed]);
+  }, [clampChatPanelWidth]);
 
   const [detailTab, setDetailTab] = useState<DetailTab>("workflow");
 
@@ -147,10 +146,7 @@ export function DashboardPage({
               type="button"
               aria-label="패널 가로 비율 조절"
               onMouseDown={handlePanelResizeStart}
-              disabled={isChatCollapsed}
-              className={`group flex w-2 shrink-0 cursor-col-resize items-center justify-center self-stretch rounded-md border border-transparent hover:border-slate-600 hover:bg-slate-800/60 ${
-                isChatCollapsed ? "pointer-events-none opacity-0" : ""
-              }`}
+              className="group flex w-2 shrink-0 cursor-col-resize items-center justify-center self-stretch rounded-md border border-transparent hover:border-slate-600 hover:bg-slate-800/60"
             >
               <span className="h-12 w-1 rounded-full bg-slate-600 group-hover:bg-slate-400" />
             </button>
@@ -162,8 +158,6 @@ export function DashboardPage({
           user={user}
           isFullscreen={integratedChatFullscreen}
           panelWidth={chatPanelWidth}
-          collapsed={isChatCollapsed}
-          onCollapsedChange={setIsChatCollapsed}
           onToggleFullscreen={onToggleIntegratedChatFullscreen}
           onChatComplete={onChatComplete}
           onCopyToNote={handleCopyToNote}

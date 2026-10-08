@@ -1457,9 +1457,14 @@ export function ShapeDetailPanel({
   }, [active, clusterName, category, selectedIdx]);
 
   const hasSelection = selectedIdx != null;
+  const contentLayoutClass = hasSelection
+    ? "flex min-h-0 flex-1 flex-row gap-2"
+    : "flex min-h-0 flex-1 flex-col gap-2";
   const listPanelClass = hasSelection
-    ? "max-h-[45%] shrink-0 overflow-y-auto overscroll-contain border-b border-slate-800 pb-2"
+    ? "min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain border-r border-slate-800 pr-2"
     : "min-h-0 flex-1 overflow-y-auto overscroll-contain";
+  const detailPanelClass =
+    "min-h-0 min-w-0 flex-1 space-y-3 overflow-y-auto overscroll-contain pl-1";
 
   if (!clusterName) {
     return (
@@ -1497,7 +1502,7 @@ export function ShapeDetailPanel({
       {!category ? (
         <p className="text-xs text-slate-500">네임스페이스 / 노드{infraType === "kubevirt" ? " / VM" : ""}을 선택하세요.</p>
       ) : (
-        <div className="flex min-h-0 flex-1 flex-col gap-2">
+        <div className={contentLayoutClass}>
           {category === "namespaces" ? (
             <>
               <div className={listPanelClass}>
@@ -1512,7 +1517,7 @@ export function ShapeDetailPanel({
                 )}
               </div>
               {hasSelection ? (
-                <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain">
+                <div className={detailPanelClass}>
                   {isLoadingDetail && !namespaceDetail ? (
                     <p className="text-[11px] text-slate-500">불러오는 중...</p>
                   ) : (
@@ -1548,7 +1553,7 @@ export function ShapeDetailPanel({
                 )}
               </div>
               {hasSelection ? (
-                <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain">
+                <div className={detailPanelClass}>
                   <div>
                     <p className="mb-1 text-[10px] font-semibold text-slate-500">
                       {displayValue(
@@ -1596,7 +1601,7 @@ export function ShapeDetailPanel({
                 )}
               </div>
               {hasSelection ? (
-                <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+                <div className={`${detailPanelClass} space-y-0`}>
                   <div className="mb-2 border-b border-slate-800 pb-2">
                     <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
                       VM 상세
