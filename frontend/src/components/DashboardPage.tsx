@@ -9,7 +9,7 @@ import { JobNotesPanel } from "./JobNotesPanel";
 const DEFAULT_CHAT_PANEL_WIDTH = 650;
 const MIN_CHAT_PANEL_WIDTH = 360;
 const MIN_JOB_NOTES_PANEL_WIDTH = 240;
-const PANEL_RESIZE_HANDLE_WIDTH = 8;
+const PANEL_RESIZE_HANDLE_WIDTH = 1;
 
 interface DashboardPageProps {
   agents: AgentInfo[];
@@ -44,7 +44,7 @@ export function DashboardPage({
       const containerWidth = splitLayoutRef.current?.clientWidth ?? window.innerWidth;
       const maxWidth = Math.max(
         MIN_CHAT_PANEL_WIDTH,
-        containerWidth - minCenterPanelWidth - PANEL_RESIZE_HANDLE_WIDTH - 16,
+        containerWidth - minCenterPanelWidth - PANEL_RESIZE_HANDLE_WIDTH - 8,
       );
       return Math.min(maxWidth, Math.max(MIN_CHAT_PANEL_WIDTH, nextWidth));
     },
@@ -123,7 +123,7 @@ export function DashboardPage({
         </div>
       ) : null}
 
-      <div ref={splitLayoutRef} className="flex min-h-0 flex-1 items-stretch gap-4">
+      <div ref={splitLayoutRef} className="flex min-h-0 flex-1 items-stretch gap-1">
         {!integratedChatFullscreen ? (
           <>
             <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-4 self-stretch">
@@ -146,9 +146,13 @@ export function DashboardPage({
               type="button"
               aria-label="패널 가로 비율 조절"
               onMouseDown={handlePanelResizeStart}
-              className="group flex w-2 shrink-0 cursor-col-resize items-center justify-center self-stretch rounded-md border border-transparent hover:border-slate-600 hover:bg-slate-800/60"
+              className="group relative z-10 w-px shrink-0 cursor-col-resize self-stretch bg-slate-700 transition-colors hover:bg-sky-500"
             >
-              <span className="h-12 w-1 rounded-full bg-slate-600 group-hover:bg-slate-400" />
+              {/* 레이아웃은 1px만 차지하고, 드래그 히트 영역만 좌우로 확장 */}
+              <span
+                aria-hidden
+                className="absolute inset-y-0 -left-1.5 -right-1.5"
+              />
             </button>
           </>
         ) : null}

@@ -3163,3 +3163,6 @@ Status	| Case
   - MCP getInventoryList hides all of these fields and keeps its previous output.
 
   - UI: API KEY 인증 방식은 bearer(1) / header(2) 중 선택. header 인 경우 API KEY 를 `<key>:<value>` 형태로 입력받는다.
+
+## UI 개선
+- 대시보드 화면의 왼쪽 패널과 오른쪽 대화형 터미널 사이 가변 드래그 세로 선의 width 를 차지하는 영역이 시각적으로 넓다. 왼쪽 패널과 오늘쪽 패널의 패널 라인이 좌우로 공간이 있어 더욱 그런 것으로 보여진다. 이 세로선이 가늘게 보일 수 있도록 디자인을 개선할 수 있나?
