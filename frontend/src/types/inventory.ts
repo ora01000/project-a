@@ -7,6 +7,13 @@ export interface InventoryItem {
   created_by_username: string;
   origin_csv: string;
   created_at?: string;
+  origin_type?: number;
+  origin_api_url?: string;
+  /** 1 = bearer, 2 = header */
+  origin_api_auth_type?: number;
+  has_api_key?: boolean;
+  is_scheduled?: boolean;
+  api_crawling_cron?: string;
 }
 
 export interface InventoryStatsRow {
@@ -20,6 +27,12 @@ export interface InventoryStatsRow {
   row_count: number;
   column_count: number;
   error?: string | null;
+  origin_type?: number;
+  origin_api_url?: string;
+  origin_api_auth_type?: number;
+  has_api_key?: boolean;
+  is_scheduled?: boolean;
+  api_crawling_cron?: string;
 }
 
 export interface InventoryApiStatsRow {
@@ -64,7 +77,11 @@ export interface InventoryCsvPreview {
   compatibility_error?: string | null;
   transfer_ok?: boolean | null;
   transfer_result?: Record<string, unknown> | null;
+  response_json?: unknown;
 }
+
+/** 1 = bearer, 2 = custom header (key:value) */
+export type InventoryApiAuthType = 1 | 2;
 
 export interface InventoryTablePreview {
   table_name: string;
@@ -76,3 +93,6 @@ export interface InventoryTablePreview {
   total_rows: number;
   has_more: boolean;
 }
+
+/** 1 = CSV upload, 2 = API crawl */
+export type InventoryOriginMode = "csv" | "api";

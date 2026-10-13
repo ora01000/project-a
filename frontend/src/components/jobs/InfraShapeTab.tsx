@@ -735,8 +735,8 @@ export function InfraShapeTab({
                             {displayName || "-"}
                           </p>
                         </div>
-                        <div className="flex w-full items-end gap-2">
-                          <div className="flex min-w-0 flex-1 items-center justify-center">
+                        <div className="flex w-full items-end gap-2 [--shape-summary-w:4rem]">
+                          <div className="flex min-w-0 flex-1 items-center justify-center pl-[var(--shape-summary-w)]">
                             {!cap ? (
                               <p className="py-8 text-xs text-slate-500">데이터 없음</p>
                             ) : !cap.supported || !cap.cpu || !cap.mem ? (
@@ -745,23 +745,23 @@ export function InfraShapeTab({
                               <RequestDonut cpu={cap.cpu} mem={cap.mem} size={128} />
                             )}
                           </div>
-                          <div className="shrink-0 space-y-0.5 pb-1 text-right text-[10px] leading-tight text-slate-400">
-                            <p>
-                              CPU Total{" "}
+                          <div className="flex w-[var(--shape-summary-w)] shrink-0 flex-col items-end gap-1 pb-1 text-[10px] leading-tight text-slate-400">
+                            <p className="flex items-center gap-1.5" title="CPU Total">
+                              <WorkflowIcon name="cpu" size="sm" label="CPU Total" />
                               <span className="font-mono tabular-nums text-slate-200">
-                                {cpuTotal}
+                                {cpuTotal === "-" ? "-" : `${cpuTotal} 개`}
                               </span>
                             </p>
-                            <p>
-                              MEM Total{" "}
+                            <p className="flex items-center gap-1.5" title="MEM Total">
+                              <WorkflowIcon name="mem" size="sm" label="MEM Total" />
                               <span className="font-mono tabular-nums text-slate-200">
-                                {memTotal}
+                                {memTotal === "-" ? "-" : `${memTotal} GB`}
                               </span>
                             </p>
-                            <p>
-                              노드 개수{" "}
+                            <p className="flex items-center gap-1.5" title="노드 개수">
+                              <WorkflowIcon name="nodes" size="sm" label="노드 개수" />
                               <span className="font-mono tabular-nums text-slate-200">
-                                {nodeCount}
+                                {nodeCount === "-" ? "-" : `${nodeCount} 개`}
                               </span>
                             </p>
                           </div>

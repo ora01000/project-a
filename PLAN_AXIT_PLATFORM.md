@@ -3058,9 +3058,9 @@ left "작업 워크플로우 목록" 패널의 생성된 작업 워크플로우 
       - 각 클러스터 차트를 클릭하면 인프라 목록 패널의 카드를 클릭하는 것과 동일한 기능을 한다.
       - infra_type 은 k8s(okd), kubevirt, vsphere 별로 icon asset 을 만들고, 패널의 오른쪽 상단에 표시한다
       - "전체" 카드 중앙 패널의 각 클러스터 별 차트에 다음 정보를 추가한다. 정보는 차트와 동일 row의 오른쪽 컬럼(하단 정렬)에 배치하여 패널 세로가 길어지지 않게 한다
-        - CPU Total
-        - MEM Total
-        - 노드 개수
+        - CPU Total -> CPU를 표시하는 icon asset으로 변경
+        - MEM Total -> MEM을 표시하는 icon asset으로 변경
+        - 노드 개수 -> 노드를 표시하는 icon asset으로 변경
       - "전체" 카드 중앙 패널에서 상세정보 패널은 삭제한다.
   - 인프라 형상 탭의 요약 패널 width 를 2/3 로 조정하고, 동일 row 오른쪽 1/3 영역에 형상 추이 패널을 공간에 맞춰 배치한다.
   - 인프라 형상 탭의 오른쪽 패널 1행·2행(클러스터 용량·노드별 용량 등 차트 표시 row) height 는 240px 로 고정한다.
@@ -3071,3 +3071,95 @@ left "작업 워크플로우 목록" 패널의 생성된 작업 워크플로우 
 - 색상 테마를 하나 더 추가(테스트)
   - MacOS 터미널 프로파일 중 homebrew 와 유사한 테마
   - 모노크롬 테마 추가
+
+# 인벤토리 구성 기능 개선
+- API를 통해 crawling 하는 방식을 추가한다.
+  - UI
+    - 새로운 인벤토리 생성시 기존 1. CSV파일 업로드 방식, 2. API 호출 방식 2개 중 1개를 선택한다.
+    1. CSV파일 업로드 방식은 기존과 동일하다.
+    2. API 호출 방식을 선택하면 다음 입력 창이 추가된다.
+      - API 경로
+      - API KEY
+      - 스케줄링 여부(토글 버튼)
+      - 스케줄링(cron expr로 입력)
+
+  - CSV 업로드 인벤토리 생성 순서는 일반적으로 다음 절차이다(참조)
+    1. POST /api/inventories/temp/cleanup — 이전 임시 테이블 정리 (재업로드·이탈 시)
+    2. POST /api/inventories/csv/upload — CSV 업로드 → temp 테이블·미리보기
+    3. GET /api/inventories/tables/{table}/preview — 미리보기 추가 로드 (필요 시)
+    4. POST /api/inventories — 저장(등록) (temp → 확정 테이블)
+    5. GET /api/inventories / …/stats / …/api-stats — 목록·통계 새로고침
+  - API 호출 인벤토리 생성 순서는 다음 절차로 진행한다.
+    1. POST /api/inventories/temp/cleanup — 이전 임시 테이블 정리 (API경로 수정, 이탈 시)
+    2. POST /api/inventories/apicall/test — API 테스트(요약 팝업). 성공(ok=true) 시 다음 단계로 자동 진행
+    3. POST /api/inventories/apicall/retrieve — MCP /retrieve + /transferJSON2Table → temp 테이블·미리보기
+    4. GET /api/inventories/tables/{table}/preview — 미리보기 추가 로드 (필요 시)
+    5. POST /api/inventories — 저장(등록) (response_json → 확정 테이블 + addInventory)
+    6. GET /api/inventories / …/stats / …/api-stats — 목록·통계 새로고침
+    - UI: 「API 테스트」 성공 시 CSV 업로드와 동일하게 임시 테이블 생성·미리보기를 수행한다. 「API 조회」는 동일 retrieve를 수동 재실행한다.
+  - 인벤토리 목록 카드
+    - API호출인지, CSV업로드 타입인지를 구분해서 표시한다. 작성자 row 의 오른쪽 끝에 배치
+    - 스케줄인 경우 스케줄 icon asset 으로 표시
+  - 스케줄링 시 입력 폼 수정
+    - 스케줄링 true 시 입력폼을 cron expr 텍스트 필드로 된것을 보완한다. 작업 워크플로우의 새로운 작업 워크플로우 생성과 동일한 디자인으로 토글 버튼과 입력 다이얼로그 패널로 변경한다
+
+** 참고 ** 아래는 변경된 API 명세임
+
+# Spec summary
+
+- POST /addInventory
+
+---
+Field	| Rule
+---
+table_name	| Required
+display_name, description, created_by	| Optional
+origin_type	| 1 = csv (default), 2 = api
+origin_csv	| Required only when origin_type=1
+origin_api_url	| Required when origin_type=2, http(s) only
+origin_api_auth_type	| New. 1 = bearer (default), 2 = header
+origin_api_key	| Optional; format-checked according to the auth type; never returned
+is_scheduled	| Default false; only allowed when origin_type=2
+api_crawling_cron	| Required when is_scheduled=true; 5-field crontab in KST
+---
+
+  - Re-saving the same table_name overwrites all the origin fields, so omitting the key deletes the stored one. A successful save immediately updates the schedule.
+
+- POST /retrieve
+{ "api_url": "...", "api_key": "<optional>", "auth_type": 1 }
+
+  - Returns: api_url, status_code, size_bytes, response_json (the body as is).
+  - Errors:
+---
+Status	| Case
+---
+502 retrieve_failed	| Remote failure
+400 invalid_json	| Response isn’t JSON
+400 invalid_api_url	| Invalid URL
+400 invalid_api_auth	| Invalid key format
+---
+
+- POST /testAPI
+{ "url": "...", "token": "<optional>", "auth_type": 1 }
+
+  - Returns a summary only: ok, status_code, elapsed_ms, content_type, size_bytes, is_json, row_count, columns, error, message.
+  - Remote failures (bad auth, timeout, non-JSON, rows can’t be extracted, empty array) come back as 200 with ok=false.
+  - Errors: only an invalid URL (400 invalid_api_url) or an invalid key format (400 invalid_api_auth) return an HTTP error.
+  - Doesn’t change the DB.
+
+- POST /transferJSON2Table
+{ "response_json": <JSON from retrieve>, "tablename": "assets" }
+
+  - Builds a data table from the JSON; any table with the same name is replaced. Doesn’t write to the catalog.
+  - Rows:
+    - An array of objects: each object becomes a row.
+    - An object holding exactly one array of objects, like {"data":[...]}: that array is used.
+    - Any other object: it becomes a single row.
+  - Values: stored as text. Nested values are stored as JSON strings.
+
+- GET /getInventoryList
+  - New fields: origin_type, origin_api_url, origin_api_auth_type, has_api_key (bool), is_scheduled, api_crawling_cron.
+  - The key is never returned.
+  - MCP getInventoryList hides all of these fields and keeps its previous output.
+
+  - UI: API KEY 인증 방식은 bearer(1) / header(2) 중 선택. header 인 경우 API KEY 를 `<key>:<value>` 형태로 입력받는다.

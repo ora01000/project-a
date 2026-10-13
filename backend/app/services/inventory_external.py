@@ -469,20 +469,94 @@ async def list_external_inventories(
     raise InventoryExternalApiError("인벤토리 목록 응답 형식이 올바르지 않습니다.")
 
 
+ORIGIN_API_AUTH_BEARER = 1
+ORIGIN_API_AUTH_HEADER = 2
+
+
+def normalize_origin_api_auth_type(auth_type: int | None) -> int:
+    resolved = ORIGIN_API_AUTH_BEARER if auth_type is None else int(auth_type)
+    if resolved not in (ORIGIN_API_AUTH_BEARER, ORIGIN_API_AUTH_HEADER):
+        raise InventoryExternalApiError("invalid_api_auth")
+    return resolved
+
+
+def validate_origin_api_key_format(
+    auth_type: int | None,
+    api_key: str | None,
+) -> tuple[int, str | None]:
+    """Validate optional key for bearer(1) / header(2=``key:value``)."""
+    resolved = normalize_origin_api_auth_type(auth_type)
+    key = (api_key or "").strip()
+    if not key:
+        return resolved, None
+    if resolved == ORIGIN_API_AUTH_HEADER:
+        if ":" not in key:
+            raise InventoryExternalApiError("invalid_api_auth")
+        header_name, header_value = key.split(":", 1)
+        if not header_name.strip() or not header_value.strip():
+            raise InventoryExternalApiError("invalid_api_auth")
+    return resolved, key
+
+
+def _inventory_api_client_error(result: dict[str, Any], *, default: str) -> InventoryExternalApiError:
+    status = int(result.get("status_code") or 0)
+    body = result.get("body")
+    detail = ""
+    if isinstance(body, dict):
+        raw = body.get("detail") or body.get("error") or body.get("message")
+        detail = str(raw or "").strip()
+    if not detail:
+        detail = str(result.get("error") or result.get("raw_body") or default).strip()
+    lowered = detail.lower()
+    if "invalid_api_auth" in lowered:
+        return InventoryExternalApiError("invalid_api_auth")
+    if "invalid_api_url" in lowered:
+        return InventoryExternalApiError("invalid_api_url")
+    if "invalid_json" in lowered:
+        return InventoryExternalApiError("invalid_json")
+    if "retrieve_failed" in lowered:
+        return InventoryExternalApiError("retrieve_failed")
+    if status == 400 and not detail:
+        return InventoryExternalApiError(default)
+    return InventoryExternalApiError(detail or default)
+
+
 async def add_external_inventory(
     *,
     table_name: str,
-    origin_csv: str,
+    origin_csv: str | None = None,
     display_name: str | None = None,
     description: str | None = None,
     created_by: int | None = None,
+    origin_type: int | None = None,
+    origin_api_url: str | None = None,
+    origin_api_key: str | None = None,
+    origin_api_auth_type: int | None = None,
+    is_scheduled: bool | None = None,
+    api_crawling_cron: str | None = None,
     base_url: str | None = None,
     timeout_seconds: float = _DEFAULT_TIMEOUT,
 ) -> dict[str, Any]:
     body: dict[str, object] = {
         "table_name": table_name,
-        "origin_csv": origin_csv,
     }
+    resolved_type = int(origin_type) if origin_type is not None else 1
+    body["origin_type"] = resolved_type
+    if resolved_type == 1:
+        body["origin_csv"] = (origin_csv or "").strip()
+    else:
+        auth_type, key = validate_origin_api_key_format(origin_api_auth_type, origin_api_key)
+        if origin_csv is not None and str(origin_csv).strip():
+            body["origin_csv"] = str(origin_csv).strip()
+        if origin_api_url is not None:
+            body["origin_api_url"] = str(origin_api_url).strip()
+        body["origin_api_auth_type"] = auth_type
+        # Always send key for type=2 so omitting/empty clears the stored secret.
+        body["origin_api_key"] = key or ""
+        if is_scheduled is not None:
+            body["is_scheduled"] = bool(is_scheduled)
+        if api_crawling_cron is not None:
+            body["api_crawling_cron"] = str(api_crawling_cron).strip()
     if display_name is not None:
         body["display_name"] = display_name
     if description is not None:
@@ -496,7 +570,109 @@ async def add_external_inventory(
         json_body=body,
         timeout_seconds=timeout_seconds,
     )
-    payload = _raise_if_api_error(result, action="인벤토리 등록")
+    if not result.get("ok"):
+        raise _inventory_api_client_error(result, default="인벤토리 등록 실패")
+    payload = result.get("body")
+    return payload if isinstance(payload, dict) else {"result": payload}
+
+
+async def test_origin_api_via_inventory_api(
+    *,
+    api_url: str,
+    api_key: str | None = None,
+    auth_type: int | None = None,
+    base_url: str | None = None,
+    timeout_seconds: float = _DEFAULT_TIMEOUT,
+) -> dict[str, Any]:
+    """Delegate origin API probe to remote inventory-api ``POST /testAPI``."""
+    url = (api_url or "").strip()
+    if not url.lower().startswith(("http://", "https://")):
+        raise InventoryExternalApiError("invalid_api_url")
+    resolved_auth, token = validate_origin_api_key_format(auth_type, api_key)
+    body: dict[str, object] = {"url": url, "auth_type": resolved_auth}
+    if token:
+        body["token"] = token
+    result = await call_inventory_api(
+        method="POST",
+        path="/testAPI",
+        base_url=base_url,
+        json_body=body,
+        timeout_seconds=timeout_seconds,
+    )
+    status = int(result.get("status_code") or 0)
+    if status == 400:
+        raise _inventory_api_client_error(result, default="invalid_api_url")
+    if status >= 500:
+        raise InventoryExternalApiError(
+            str(result.get("error") or "inventory-api testAPI 호출 실패")
+        )
+    payload = result.get("body")
+    if isinstance(payload, dict):
+        return payload
+    raise InventoryExternalApiError("testAPI 응답 형식이 올바르지 않습니다.")
+
+
+async def retrieve_origin_api_via_inventory_api(
+    *,
+    api_url: str,
+    api_key: str | None = None,
+    auth_type: int | None = None,
+    base_url: str | None = None,
+    timeout_seconds: float = _DEFAULT_TIMEOUT,
+) -> dict[str, Any]:
+    """Delegate fetch to inventory-api ``POST /retrieve`` (returns response_json)."""
+    url = (api_url or "").strip()
+    if not url.lower().startswith(("http://", "https://")):
+        raise InventoryExternalApiError("invalid_api_url")
+    resolved_auth, token = validate_origin_api_key_format(auth_type, api_key)
+    body: dict[str, object] = {"api_url": url, "auth_type": resolved_auth}
+    if token:
+        body["api_key"] = token
+    result = await call_inventory_api(
+        method="POST",
+        path="/retrieve",
+        base_url=base_url,
+        json_body=body,
+        timeout_seconds=timeout_seconds,
+    )
+    status = int(result.get("status_code") or 0)
+    if status == 400:
+        raise _inventory_api_client_error(result, default="invalid_api_url")
+    if status == 502 or not result.get("ok"):
+        raise _inventory_api_client_error(result, default="retrieve_failed")
+    payload = result.get("body")
+    if not isinstance(payload, dict):
+        raise InventoryExternalApiError("retrieve 응답 형식이 올바르지 않습니다.")
+    if "response_json" not in payload:
+        raise InventoryExternalApiError("invalid_json")
+    return payload
+
+
+async def transfer_json_to_external_table(
+    *,
+    response_json: Any,
+    tablename: str,
+    base_url: str | None = None,
+    timeout_seconds: float = _DEFAULT_TIMEOUT,
+) -> dict[str, Any]:
+    """POST ``/transferJSON2Table`` to stage/replace a data table from JSON."""
+    table = (tablename or "").strip()
+    if not table:
+        raise InventoryExternalUploadError("transferJSON2Table 에 필요한 tablename이 없습니다.")
+    if len(table) > 50:
+        raise InventoryExternalUploadError("tablename은 50자를 넘을 수 없습니다.")
+    result = await call_inventory_api(
+        method="POST",
+        path="/transferJSON2Table",
+        base_url=base_url,
+        json_body={"response_json": response_json, "tablename": table},
+        timeout_seconds=timeout_seconds,
+    )
+    if not result.get("ok"):
+        raise InventoryExternalUploadError(
+            str(result.get("error") or "JSON→테이블 전환 실패")
+        )
+    payload = result.get("body")
     return payload if isinstance(payload, dict) else {"result": payload}
 
 

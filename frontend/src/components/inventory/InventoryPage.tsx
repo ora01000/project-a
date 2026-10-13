@@ -1,12 +1,25 @@
 import { useEffect, useRef, useState } from "react";
 
 import type { AuthUser } from "../../types/auth";
-import type { InventoryCsvPreview, InventoryItem } from "../../types/inventory";
+import type {
+  InventoryApiAuthType,
+  InventoryCsvPreview,
+  InventoryItem,
+  InventoryOriginMode,
+} from "../../types/inventory";
 import { InventoryApiPanel } from "./InventoryApiPanel";
 import { InventoryCsvPreviewPanel } from "./InventoryCsvPreviewPanel";
 import { InventoryListPanel } from "./InventoryListPanel";
+import {
+  InventoryOriginApiTestModal,
+  type InventoryOriginApiTestResult,
+} from "./InventoryOriginApiTestModal";
 import { InventoryStatsPanel } from "./InventoryStatsPanel";
 import { WorkflowIcon } from "../workflow/WorkflowIcon";
+import {
+  DEFAULT_WORKFLOW_CRON_EXPR,
+  WorkflowScheduleField,
+} from "../workflow/WorkflowScheduleField";
 
 interface InventoryPageProps {
   user: AuthUser;
@@ -77,6 +90,16 @@ export function InventoryPage({ user }: InventoryPageProps) {
   const [tableName, setTableName] = useState(TABLE_NAME_PREFIX);
   const [baselineCsv, setBaselineCsv] = useState<string | null>(null);
   const [originCsv, setOriginCsv] = useState<string | null>(null);
+  const [originMode, setOriginMode] = useState<InventoryOriginMode>("csv");
+  const [originApiUrl, setOriginApiUrl] = useState("");
+  const [originApiKey, setOriginApiKey] = useState("");
+  const [originApiAuthType, setOriginApiAuthType] = useState<InventoryApiAuthType>(1);
+  const [stagedResponseJson, setStagedResponseJson] = useState<unknown>(null);
+  const [isScheduled, setIsScheduled] = useState(false);
+  const [apiCrawlingCron, setApiCrawlingCron] = useState("");
+  const [retrieving, setRetrieving] = useState(false);
+  const [testingApi, setTestingApi] = useState(false);
+  const [apiTestResult, setApiTestResult] = useState<InventoryOriginApiTestResult | null>(null);
   const [tempTableName, setTempTableName] = useState<string | null>(null);
   const [uploadPreview, setUploadPreview] = useState<InventoryCsvPreview | null>(null);
   const [csvMismatch, setCsvMismatch] = useState(false);
@@ -100,13 +123,27 @@ export function InventoryPage({ user }: InventoryPageProps) {
       user.role === 100);
   const fieldsEditable = isCreate || (isView && canEditSelected);
   const tableNameError = isCreate ? validateTableNameClient(tableName) : null;
+  const hasStagedData = isCreate
+    ? Boolean(
+        tempTableName &&
+          (originMode === "csv" ? originCsv : stagedResponseJson != null),
+      )
+    : originMode === "csv"
+      ? Boolean(originCsv)
+      : Boolean(originApiUrl.trim());
+  const apiFieldsReady =
+    originMode !== "api" ||
+    (Boolean(originApiUrl.trim()) &&
+      (!isScheduled || Boolean(apiCrawlingCron.trim())));
   const saveDisabled =
     saving ||
     uploading ||
+    retrieving ||
     csvMismatch ||
     !fieldsEditable ||
-    !originCsv ||
+    !hasStagedData ||
     !displayName.trim() ||
+    !apiFieldsReady ||
     (isCreate && (tableNameError != null || !tempTableName));
 
   const previewTableName =
@@ -183,6 +220,13 @@ export function InventoryPage({ user }: InventoryPageProps) {
     setTableName(TABLE_NAME_PREFIX);
     setBaselineCsv(null);
     setOriginCsv(null);
+    setOriginMode("csv");
+    setOriginApiUrl("");
+    setOriginApiKey("");
+    setOriginApiAuthType(1);
+    setStagedResponseJson(null);
+    setIsScheduled(false);
+    setApiCrawlingCron("");
     setUploadPreview(null);
     setCsvMismatch(false);
     setError(null);
@@ -200,6 +244,13 @@ export function InventoryPage({ user }: InventoryPageProps) {
     setTableName(item.table_name || TABLE_NAME_PREFIX);
     setBaselineCsv(item.origin_csv || null);
     setOriginCsv(item.origin_csv || null);
+    setOriginMode(item.origin_type === 2 ? "api" : "csv");
+    setOriginApiUrl(item.origin_api_url || "");
+    setOriginApiKey("");
+    setOriginApiAuthType(item.origin_api_auth_type === 2 ? 2 : 1);
+    setStagedResponseJson(null);
+    setIsScheduled(Boolean(item.is_scheduled));
+    setApiCrawlingCron(item.api_crawling_cron || "");
     setUploadPreview(null);
     setCsvMismatch(false);
     setError(null);
@@ -288,6 +339,131 @@ export function InventoryPage({ user }: InventoryPageProps) {
     }
   };
 
+  const runApiRetrieve = async (): Promise<boolean> => {
+    if (!fieldsEditable || originMode !== "api") {
+      return false;
+    }
+    const resolvedTable = (isCreate ? tableName : selected?.table_name || tableName)
+      .trim()
+      .toLowerCase();
+    if (isCreate) {
+      const tableError = validateTableNameClient(resolvedTable);
+      if (tableError) {
+        setError(tableError);
+        return false;
+      }
+    } else if (!resolvedTable) {
+      setError("인벤토리 테이블 명이 없습니다.");
+      return false;
+    }
+    const url = originApiUrl.trim();
+    if (!url) {
+      setError("API 경로를 입력하세요.");
+      return false;
+    }
+    if (!/^https?:\/\//i.test(url)) {
+      setError("API 경로는 http(s)로 시작해야 합니다.");
+      return false;
+    }
+
+    setRetrieving(true);
+    setError(null);
+    try {
+      await discardTemp();
+      const response = await fetch("/api/inventories/apicall/retrieve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          table_name: resolvedTable,
+          api_url: url,
+          api_key: originApiKey.trim() || null,
+          auth_type: originApiAuthType,
+          display_name: displayName.trim() || null,
+          description: description.trim() || null,
+        }),
+      });
+      if (!response.ok) {
+        throw new Error(await readErrorDetail(response, "API 조회에 실패했습니다."));
+      }
+      const preview = (await response.json()) as InventoryCsvPreview;
+      setOriginCsv(null);
+      setStagedResponseJson(preview.response_json ?? null);
+      setTempTableName(preview.temp_table_name || null);
+      setUploadPreview(preview);
+      setCsvMismatch(false);
+      setStatusMessage(
+        `임시 테이블·미리보기 준비 완료 → ${preview.temp_table_name || resolvedTable} (${preview.total_rows}행)`,
+      );
+      return true;
+    } catch (err) {
+      setStagedResponseJson(null);
+      setUploadPreview(null);
+      setTempTableName(null);
+      setCsvMismatch(false);
+      setError(err instanceof Error ? err.message : "API 조회 실패");
+      return false;
+    } finally {
+      setRetrieving(false);
+    }
+  };
+
+  const handleTestOriginApi = async () => {
+    const url = originApiUrl.trim();
+    if (!url) {
+      setError("API 경로를 입력하세요.");
+      return;
+    }
+    if (!/^https?:\/\//i.test(url)) {
+      setError("API 경로는 http(s)로 시작해야 합니다.");
+      return;
+    }
+    if (isCreate) {
+      const tableError = validateTableNameClient(tableName.trim().toLowerCase());
+      if (tableError) {
+        setError(tableError);
+        return;
+      }
+    }
+    setTestingApi(true);
+    setError(null);
+    try {
+      const response = await fetch("/api/inventories/apicall/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          api_url: url,
+          api_key: originApiKey.trim() || null,
+          auth_type: originApiAuthType,
+        }),
+      });
+      if (!response.ok) {
+        throw new Error(await readErrorDetail(response, "API 테스트에 실패했습니다."));
+      }
+      const payload = (await response.json()) as InventoryOriginApiTestResult;
+      setApiTestResult(payload);
+      if (!payload.ok) {
+        setStagedResponseJson(null);
+        setUploadPreview(null);
+        setTempTableName(null);
+        setStatusMessage(null);
+        setError(payload.error || payload.message || "API 테스트가 실패했습니다.");
+        return;
+      }
+      // CSV 업로드와 동일하게: 테스트 성공 후 temp 테이블·미리보기 생성
+      setStatusMessage("API 테스트 성공. 임시 테이블을 생성합니다…");
+      setTestingApi(false);
+      await runApiRetrieve();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "API 테스트 실패");
+    } finally {
+      setTestingApi(false);
+    }
+  };
+
+  const handleRetrieve = async () => {
+    await runApiRetrieve();
+  };
+
   const handleSave = async () => {
     if (saveDisabled) {
       return;
@@ -297,9 +473,30 @@ export function InventoryPage({ user }: InventoryPageProps) {
       setError("인벤토리 이름을 입력하세요.");
       return;
     }
-    if (!originCsv) {
+    if (originMode === "csv" && !originCsv) {
       setError("CSV 파일을 업로드하세요.");
       return;
+    }
+    if (originMode === "api") {
+      if (!originApiUrl.trim()) {
+        setError("API 경로를 입력하세요.");
+        return;
+      }
+      if (isScheduled && !apiCrawlingCron.trim()) {
+        setError("스케줄링 cron 표현식을 입력하세요.");
+        return;
+      }
+      if (stagedResponseJson == null && isCreate) {
+        setError("API 조회를 먼저 수행하세요.");
+        return;
+      }
+      if (originApiAuthType === 2 && originApiKey.trim()) {
+        const parts = originApiKey.trim().split(":");
+        if (parts.length < 2 || !parts[0].trim() || !parts.slice(1).join(":").trim()) {
+          setError("header 인증은 key:value 형식으로 입력하세요.");
+          return;
+        }
+      }
     }
     if (isCreate) {
       const tableError = validateTableNameClient(tableName);
@@ -308,7 +505,11 @@ export function InventoryPage({ user }: InventoryPageProps) {
         return;
       }
       if (!tempTableName) {
-        setError("임시 테이블이 없습니다. CSV를 다시 업로드하세요.");
+        setError(
+          originMode === "api"
+            ? "임시 테이블이 없습니다. API 조회를 다시 수행하세요."
+            : "임시 테이블이 없습니다. CSV를 다시 업로드하세요.",
+        );
         return;
       }
     }
@@ -330,9 +531,18 @@ export function InventoryPage({ user }: InventoryPageProps) {
           body: JSON.stringify({
             display_name: name,
             description: description.trim(),
-            origin_csv: originCsv,
+            origin_csv: originMode === "csv" ? originCsv : null,
             table_name: tableName.trim().toLowerCase(),
             temp_table_name: tempTableName,
+            origin_type: originMode === "api" ? 2 : 1,
+            origin_api_url: originMode === "api" ? originApiUrl.trim() : null,
+            origin_api_key: originMode === "api" ? originApiKey.trim() || null : null,
+            origin_api_auth_type: originMode === "api" ? originApiAuthType : 1,
+            is_scheduled: originMode === "api" ? isScheduled : false,
+            api_crawling_cron:
+              originMode === "api" && isScheduled ? apiCrawlingCron.trim() : null,
+            transfer_filename: originMode === "csv" ? originCsv : null,
+            response_json: originMode === "api" ? stagedResponseJson : null,
           }),
         });
         if (!response.ok) {
@@ -355,8 +565,17 @@ export function InventoryPage({ user }: InventoryPageProps) {
         body: JSON.stringify({
           display_name: name,
           description: description.trim(),
-          origin_csv: originCsv,
+          origin_csv: originMode === "csv" ? originCsv : null,
           temp_table_name: tempTableName,
+          origin_type: originMode === "api" ? 2 : 1,
+          origin_api_url: originMode === "api" ? originApiUrl.trim() : null,
+          origin_api_key: originMode === "api" ? originApiKey.trim() || null : null,
+          origin_api_auth_type: originMode === "api" ? originApiAuthType : 1,
+          is_scheduled: originMode === "api" ? isScheduled : false,
+          api_crawling_cron:
+            originMode === "api" && isScheduled ? apiCrawlingCron.trim() : null,
+          transfer_filename: originMode === "csv" ? originCsv : null,
+          response_json: originMode === "api" ? stagedResponseJson : null,
         }),
       });
       if (!response.ok) {
@@ -447,6 +666,8 @@ export function InventoryPage({ user }: InventoryPageProps) {
               const author =
                 (item.created_by_username || "").trim() ||
                 (item.created_by ? `user#${item.created_by}` : "-");
+              const isApiOrigin = item.origin_type === 2;
+              const originLabel = isApiOrigin ? "API 호출" : "CSV 업로드";
               return (
                 <div
                   key={item.table_name || item.idx}
@@ -482,13 +703,38 @@ export function InventoryPage({ user }: InventoryPageProps) {
                       </button>
                     ) : null}
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => beginView(item)}
-                    className="text-left text-[11px] text-slate-400 hover:text-slate-300"
-                  >
-                    작성자 : {author}
-                  </button>
+                  <div className="flex min-w-0 items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => beginView(item)}
+                      className="min-w-0 flex-1 truncate text-left text-[11px] text-slate-400 hover:text-slate-300"
+                    >
+                      작성자 : {author}
+                    </button>
+                    <span className="inline-flex shrink-0 items-center gap-1">
+                      <span
+                        className={`rounded border px-1.5 py-0.5 text-[10px] font-medium ${
+                          isApiOrigin
+                            ? "border-violet-700/70 bg-violet-950/40 text-violet-200"
+                            : "border-sky-700/70 bg-sky-950/40 text-sky-200"
+                        }`}
+                        title={originLabel}
+                      >
+                        {isApiOrigin ? "API" : "CSV"}
+                      </span>
+                      {item.is_scheduled ? (
+                        <span
+                          title={
+                            item.api_crawling_cron
+                              ? `스케줄 ${item.api_crawling_cron}`
+                              : "스케줄"
+                          }
+                        >
+                          <WorkflowIcon name="schedule" size="xs" label="스케줄" />
+                        </span>
+                      ) : null}
+                    </span>
+                  </div>
                 </div>
               );
             })}
@@ -540,8 +786,8 @@ export function InventoryPage({ user }: InventoryPageProps) {
                   </h1>
                   <p className="mt-0.5 text-xs text-slate-500">
                     {isCreate
-                      ? "CSV를 업로드해 임시 테이블로 미리본 뒤 저장합니다."
-                      : "이름·설명을 수정하거나 origin_csv를 동일 컬럼으로 교체할 수 있습니다."}
+                      ? "CSV 업로드 또는 API 호출로 임시 테이블을 미리본 뒤 저장합니다."
+                      : "이름·설명을 수정하거나 데이터 출처를 동일 컬럼으로 교체할 수 있습니다."}
                   </p>
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
@@ -624,41 +870,201 @@ export function InventoryPage({ user }: InventoryPageProps) {
                         </span>
                       )}
                     </label>
-                    <div className="flex flex-wrap items-center gap-3">
-                      {fieldsEditable ? (
-                        <>
+                    {isCreate ? (
+                      <div className="flex flex-col gap-2">
+                        <span className="text-xs font-medium text-slate-300">데이터 출처</span>
+                        <div className="flex flex-wrap gap-2">
+                          {(
+                            [
+                              { id: "csv" as const, label: "CSV 파일 업로드" },
+                              { id: "api" as const, label: "API 호출" },
+                            ] as const
+                          ).map((option) => (
+                            <button
+                              key={option.id}
+                              type="button"
+                              disabled={!fieldsEditable}
+                              onClick={() => {
+                                if (originMode === option.id) {
+                                  return;
+                                }
+                                void discardTemp();
+                                setOriginMode(option.id);
+                                setOriginCsv(null);
+                                                            setStagedResponseJson(null);
+                                setUploadPreview(null);
+                                setCsvMismatch(false);
+                                setStatusMessage(null);
+                                resetFileInput();
+                              }}
+                              className={`rounded-md border px-3 py-1.5 text-sm ${
+                                originMode === option.id
+                                  ? "border-sky-500 bg-sky-950/50 text-sky-100"
+                                  : "border-slate-600 bg-slate-800/70 text-slate-200 hover:bg-slate-800"
+                              }`}
+                            >
+                              {option.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+
+                    {originMode === "csv" ? (
+                      <div className="flex flex-wrap items-center gap-3">
+                        {fieldsEditable ? (
+                          <>
+                            <input
+                              ref={fileInputRef}
+                              type="file"
+                              accept=".csv,text/csv"
+                              className="hidden"
+                              onChange={(event) => {
+                                const file = event.target.files?.[0] ?? null;
+                                void handleUpload(file);
+                              }}
+                            />
+                            <button
+                              type="button"
+                              disabled={uploading}
+                              onClick={() => fileInputRef.current?.click()}
+                              className="inline-flex items-center justify-center gap-1.5 rounded-md border border-slate-600 bg-slate-800/70 px-3 py-2 text-sm text-slate-100 hover:bg-slate-800 disabled:opacity-50"
+                            >
+                              <WorkflowIcon
+                                name="upload"
+                                size="sm"
+                                label={isCreate ? "CSV 업로드" : "CSV 교체"}
+                              />
+                              {uploading
+                                ? "업로드 중…"
+                                : isCreate
+                                  ? "CSV 파일 업로드"
+                                  : "CSV 파일 교체"}
+                            </button>
+                          </>
+                        ) : null}
+                        {originCsv ? (
+                          <span className="truncate text-xs text-slate-400" title={originCsv}>
+                            {originCsv}
+                            {tempTableName ? ` · ${tempTableName}` : ""}
+                          </span>
+                        ) : null}
+                      </div>
+                    ) : (
+                      <div className="flex flex-col gap-3">
+                        <label className="flex flex-col gap-1">
+                          <span className="text-xs font-medium text-slate-300">API 경로</span>
                           <input
-                            ref={fileInputRef}
-                            type="file"
-                            accept=".csv,text/csv"
-                            className="hidden"
-                            onChange={(event) => {
-                              const file = event.target.files?.[0] ?? null;
-                              void handleUpload(file);
-                            }}
+                            type="url"
+                            value={originApiUrl}
+                            onChange={(event) => setOriginApiUrl(event.target.value)}
+                            disabled={!fieldsEditable}
+                            maxLength={500}
+                            className="rounded-md border border-slate-700 bg-slate-950/80 px-3 py-2 font-mono text-sm text-slate-100 outline-none focus:border-sky-600 disabled:opacity-70"
+                            placeholder="https://example.internal/api/assets"
                           />
-                          <button
-                            type="button"
-                            disabled={uploading}
-                            onClick={() => fileInputRef.current?.click()}
-                            className="inline-flex items-center justify-center gap-1.5 rounded-md border border-slate-600 bg-slate-800/70 px-3 py-2 text-sm text-slate-100 hover:bg-slate-800 disabled:opacity-50"
-                          >
-                            <WorkflowIcon name="upload" size="sm" label={isCreate ? "CSV 업로드" : "CSV 교체"} />
-                            {uploading
-                              ? "업로드 중…"
-                              : isCreate
-                                ? "CSV 파일 업로드"
-                                : "CSV 파일 교체"}
-                          </button>
-                        </>
-                      ) : null}
-                      {originCsv ? (
-                        <span className="truncate text-xs text-slate-400" title={originCsv}>
-                          {originCsv}
-                          {tempTableName ? ` · ${tempTableName}` : ""}
-                        </span>
-                      ) : null}
-                    </div>
+                        </label>
+                        <div className="flex flex-col gap-2">
+                          <span className="text-xs font-medium text-slate-300">API 인증 방식</span>
+                          <div className="flex flex-wrap gap-2">
+                            {(
+                              [
+                                { id: 1 as const, label: "Bearer" },
+                                { id: 2 as const, label: "Header" },
+                              ] as const
+                            ).map((option) => (
+                              <button
+                                key={option.id}
+                                type="button"
+                                disabled={!fieldsEditable}
+                                onClick={() => setOriginApiAuthType(option.id)}
+                                className={`rounded-md border px-3 py-1.5 text-sm ${
+                                  originApiAuthType === option.id
+                                    ? "border-sky-500 bg-sky-950/50 text-sky-100"
+                                    : "border-slate-600 bg-slate-800/70 text-slate-200 hover:bg-slate-800"
+                                }`}
+                              >
+                                {option.label}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                        <label className="flex flex-col gap-1">
+                          <span className="text-xs font-medium text-slate-300">API KEY</span>
+                          <input
+                            type="password"
+                            value={originApiKey}
+                            onChange={(event) => setOriginApiKey(event.target.value)}
+                            disabled={!fieldsEditable}
+                            maxLength={500}
+                            autoComplete="off"
+                            className="rounded-md border border-slate-700 bg-slate-950/80 px-3 py-2 font-mono text-sm text-slate-100 outline-none focus:border-sky-600 disabled:opacity-70"
+                            placeholder={
+                              originApiAuthType === 2
+                                ? "Header-Name:value"
+                                : isView && selected?.has_api_key
+                                  ? "변경 시에만 입력 (비우면 저장 시 키가 삭제될 수 있음)"
+                                  : "Bearer 토큰 (선택)"
+                            }
+                          />
+                          {originApiAuthType === 2 ? (
+                            <span className="text-[11px] text-slate-500">
+                              header 방식은 <span className="font-mono">key:value</span> 형식으로 입력합니다.
+                            </span>
+                          ) : null}
+                        </label>
+                        <WorkflowScheduleField
+                          enabled={isScheduled}
+                          cronExpr={apiCrawlingCron || DEFAULT_WORKFLOW_CRON_EXPR}
+                          readOnly={!fieldsEditable}
+                          onChange={({ enabled, cronExpr }) => {
+                            setIsScheduled(enabled);
+                            setApiCrawlingCron(
+                              enabled
+                                ? (cronExpr || DEFAULT_WORKFLOW_CRON_EXPR).slice(0, 100)
+                                : apiCrawlingCron,
+                            );
+                          }}
+                        />
+                        {fieldsEditable ? (
+                          <div className="flex flex-wrap items-center gap-3">
+                            <button
+                              type="button"
+                              disabled={testingApi || retrieving || !originApiUrl.trim()}
+                              onClick={() => void handleTestOriginApi()}
+                              className="inline-flex items-center justify-center gap-1.5 rounded-md border border-slate-600 bg-slate-800/70 px-3 py-2 text-sm text-slate-100 hover:bg-slate-800 disabled:opacity-50"
+                            >
+                              <WorkflowIcon name="validate" size="sm" label="API 테스트" />
+                              {testingApi || retrieving
+                                ? "테스트·미리보기 중…"
+                                : "API 테스트"}
+                            </button>
+                            <button
+                              type="button"
+                              disabled={retrieving || testingApi || !originApiUrl.trim()}
+                              onClick={() => void handleRetrieve()}
+                              className="inline-flex items-center justify-center gap-1.5 rounded-md border border-slate-600 bg-slate-800/70 px-3 py-2 text-sm text-slate-100 hover:bg-slate-800 disabled:opacity-50"
+                            >
+                              <WorkflowIcon name="refresh" size="sm" label="API 조회" />
+                              {retrieving && !testingApi ? "조회 중…" : "미리보기 다시 조회"}
+                            </button>
+                            {tempTableName || stagedResponseJson != null ? (
+                              <span className="truncate text-xs text-slate-400">
+                                {stagedResponseJson != null ? "조회 완료" : ""}
+                                {tempTableName ? ` · ${tempTableName}` : ""}
+                              </span>
+                            ) : null}
+                          </div>
+                        ) : selected?.origin_api_url ? (
+                          <p className="truncate text-xs text-slate-400" title={selected.origin_api_url}>
+                            {selected.origin_api_url}
+                            {selected.is_scheduled && selected.api_crawling_cron
+                              ? ` · cron ${selected.api_crawling_cron}`
+                              : ""}
+                          </p>
+                        ) : null}
+                      </div>
+                    )}
                     {csvMismatch ? (
                       <p className="text-xs text-rose-300">
                         컬럼이 일치하지 않아 저장할 수 없습니다. 동일 컬럼의 CSV로 다시 업로드하세요.
@@ -687,6 +1093,12 @@ export function InventoryPage({ user }: InventoryPageProps) {
           )}
         </section>
       </div>
+      {apiTestResult ? (
+        <InventoryOriginApiTestModal
+          result={apiTestResult}
+          onClose={() => setApiTestResult(null)}
+        />
+      ) : null}
     </div>
   );
 }
