@@ -4,6 +4,7 @@ import type { AuthUser } from "../../types/auth";
 import type { JobRecord } from "../../types/job";
 import { requestJobWorkflowRefresh } from "../../utils/jobWorkflowRefresh";
 import { ConfirmDialog } from "../ConfirmDialog";
+import { JobApproveScheduleDialog } from "./JobApproveScheduleDialog";
 import { JobBlockField, JobInlineField } from "./JobFieldLabel";
 import { JobAiAuditCommentBlock } from "./JobAiAuditCommentBlock";
 import { JobAiReviewButton } from "./JobAiReviewButton";
@@ -184,7 +185,10 @@ export function MyJobReviewTab({ active, currentUser, onCopyToNote }: MyJobRevie
     }
   };
 
-  const handleApprove = async () => {
+  const handleApprove = async (payload: {
+    isScheduled: boolean;
+    scheduledAt: string | null;
+  }) => {
     if (!selectedJob) {
       return;
     }
@@ -200,7 +204,11 @@ export function MyJobReviewTab({ active, currentUser, onCopyToNote }: MyJobRevie
       const response = await fetch(`/api/jobs/${selectedJob.idx}/approve`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ actor_userid: currentUser.userid }),
+        body: JSON.stringify({
+          actor_userid: currentUser.userid,
+          is_scheduled: payload.isScheduled,
+          scheduled_at: payload.isScheduled ? payload.scheduledAt : null,
+        }),
       });
       if (!response.ok) {
         throw new Error(await parseError(response, "작업 승인에 실패했습니다."));
@@ -376,11 +384,9 @@ export function MyJobReviewTab({ active, currentUser, onCopyToNote }: MyJobRevie
       </div>
 
       {confirmApproveOpen && selectedJob ? (
-        <ConfirmDialog
-          title="작업 승인"
-          message={`${selectedJob.srnum} 작업을 승인하시겠습니까?`}
-          confirmLabel="승인"
-          onConfirm={() => void handleApprove()}
+        <JobApproveScheduleDialog
+          srnum={selectedJob.srnum}
+          onConfirm={(payload) => void handleApprove(payload)}
           onCancel={() => setConfirmApproveOpen(false)}
         />
       ) : null}

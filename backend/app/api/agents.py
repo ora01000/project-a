@@ -60,6 +60,9 @@ def _mcp_status_for_definition(
         from backend.app.infra_search_agent.agent import infra_search_agent_service
         from backend.app.infra_search_agent.settings import STATIC_CONFIG
 
+        # http 모드에서는 in-process MCP 를 쓰지 않음
+        if not infra_search_agent_service.is_ready:
+            return {}
         return {STATIC_CONFIG.mcp_server_key: infra_search_agent_service.mcp_status}
     return {key: mcp_connection_status.get(key, "unknown") for key in definition.mcp_server_keys}
 

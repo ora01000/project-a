@@ -56,6 +56,7 @@ from backend.app.services.workflow_runner import (
 from backend.app.services.agent_runtime_client import AgentInvokeRequest
 from backend.app.services.job_auditor import (
     build_job_review_message,
+    load_job_review_attachments,
     resolve_job_auditor_agent_id,
     try_resolve_job_auditor_runtime_record,
 )
@@ -185,6 +186,8 @@ class JobRecordResponse(BaseModel):
     ai_audit_comment: str = ""
     ai_audit_date: str | None = None
     ai_audit_cnt: int = 0
+    is_scheduled: bool = False
+    scheduled_at: str | None = None
 
     @classmethod
     def from_record(cls, record: JobRecord) -> "JobRecordResponse":
@@ -211,6 +214,8 @@ class JobRecordResponse(BaseModel):
             ai_audit_comment=record.ai_audit_comment,
             ai_audit_date=record.ai_audit_date,
             ai_audit_cnt=record.ai_audit_cnt,
+            is_scheduled=record.is_scheduled,
+            scheduled_at=record.scheduled_at,
         )
 
 
@@ -306,6 +311,9 @@ class JobWorkflowItemResponse(BaseModel):
     approver_name: str = ""
     status_code: int
     steps: list[JobWorkflowStepResponse]
+    is_scheduled: bool = False
+    scheduled_at: str | None = None
+    schedule_waiting: bool = False
 
     @classmethod
     def from_item(cls, item: JobWorkflowItem) -> "JobWorkflowItemResponse":
@@ -318,6 +326,9 @@ class JobWorkflowItemResponse(BaseModel):
             approver_name=item.approver_name,
             status_code=item.status_code,
             steps=[JobWorkflowStepResponse.from_step(step) for step in item.steps],
+            is_scheduled=item.is_scheduled,
+            scheduled_at=item.scheduled_at,
+            schedule_waiting=item.schedule_waiting,
         )
 
 
@@ -536,6 +547,8 @@ async def assign_job_approver_endpoint(
 
 class DirectApproveJobRequest(BaseModel):
     actor_userid: str = Field(min_length=1, max_length=20)
+    is_scheduled: bool = False
+    scheduled_at: str | None = None
 
 
 @router.post("/jobs/{idx}/direct-approve", response_model=JobRecordResponse)
@@ -552,7 +565,13 @@ async def direct_approve_job_endpoint(
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
     try:
-        record = direct_approve_job(database_path, idx, approver_userid=body.actor_userid)
+        record = direct_approve_job(
+            database_path,
+            idx,
+            approver_userid=body.actor_userid,
+            is_scheduled=body.is_scheduled,
+            scheduled_at=body.scheduled_at,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
@@ -567,6 +586,11 @@ class JobReviewActionRequest(BaseModel):
     actor_userid: str = Field(min_length=1, max_length=20)
 
 
+class JobApproveRequest(JobReviewActionRequest):
+    is_scheduled: bool = False
+    scheduled_at: str | None = None
+
+
 class JobRejectRequest(JobReviewActionRequest):
     drop_reason: str = Field(min_length=1, max_length=200)
 
@@ -579,7 +603,7 @@ class JobCancelRequest(JobReviewActionRequest):
 async def approve_job_review(
     request: Request,
     idx: int,
-    body: JobReviewActionRequest,
+    body: JobApproveRequest,
 ) -> JobRecordResponse:
     database_path = request.app.state.database_path
     existing = get_job_by_idx(database_path, idx)
@@ -589,7 +613,13 @@ async def approve_job_review(
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
     try:
-        record = approve_assigned_job(database_path, idx, actor_userid=body.actor_userid)
+        record = approve_assigned_job(
+            database_path,
+            idx,
+            actor_userid=body.actor_userid,
+            is_scheduled=body.is_scheduled,
+            scheduled_at=body.scheduled_at,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
@@ -691,7 +721,8 @@ async def ai_review_job(
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
-    message = build_job_review_message(job)
+    attachments = load_job_review_attachments(database_path, job)
+    message = build_job_review_message(job, attachments=attachments)
     review_task_id = f"job-ai-review-{job.idx}"
 
     if agent_manager is not None:

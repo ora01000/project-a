@@ -3002,7 +3002,7 @@ left "작업 워크플로우 목록" 패널의 생성된 작업 워크플로우 
   - ingress 는 모두 로컬 32716 포트로 오픈되므로 실제 클라이언트는 http://<ingress-hostname>:32716/mcp 로 접속
 
 # 워크플로우 생성을 위한 에이전트 호출 설정 보완
-- http 모드에서 워크플로우 에이전트를 uuid 를 환경변수에서 지정하게 한다. ex) JOB_PROCESSOR_HELPDESK_AXIT_AGENT_ID, JOB_AUDITOR_AXIT_AGENT_ID
+- http 모드 외부 에이전트 AXIT uuid 는 환경변수가 아니라 agentruntime.agent_id 에 등록하고 local_agent_id 로 조회한다 (WORKFLOW_AGENT, JOB_AUDITOR_AGENT, INFRA_SEARCH_AGENT, PRIVATE_CLOUD_AGENT 등).
 - 호출되는 에이전트 속성 is_orchestrator = 0 이다
 
 # Ansible-lint 에이전트를 스킬 바꾸는 방안
@@ -3167,3 +3167,29 @@ Status	| Case
 ## UI 개선
 - 대시보드 화면의 왼쪽 패널과 오른쪽 대화형 터미널 사이 가변 드래그 세로 선의 width 를 차지하는 영역이 시각적으로 넓다. 왼쪽 패널과 오늘쪽 패널의 패널 라인이 좌우로 공간이 있어 더욱 그런 것으로 보여진다. 이 세로선이 가늘게 보일 수 있도록 디자인을 개선할 수 있나?
   - 좌/우 패널 사이 gap-4 -> gap-1 로 변경
+- 대화형 터미널의 에이전트 선택 패널
+  - 패널의 세로 크기를 축소한다. 에이전트 한 줄 정도만 표시되게 줄이고 대화창의 세로 비유을 그만큼 확장한다.
+- 브라우저의 처음 크기에 따라서 대시보드 패널 비율 조정
+  - 브라우저의 가로 크기에 따라 대화형 터미널의 비율을 가변 설정한다.
+    - 가로 크기가 FHD 이하인 경우 : 현행 유지
+    - 가로 크기가 QHD 의 80% 이상인 경우 : 대화형 터미널을 50% 확장된 크기로 배치
+
+## 등록된 작업을 스케줄 처리
+- jobs에 등록된 작업을 처리할 때 즉시처리, 또는 scheduled_at 을 넣어 지정된 시간에 처리하는 기능을 넣는다.
+  - jobs 테이블 컬럼 추가
+    - is_schduled boolean : false -> 즉시 처리, true -> scheduled_at 시간에 맞춰 수행
+    - scheduled_at datetime : 년월일시분을 지정
+- jobs 의 schuduled_at 에 맞춰 작업을 처리하는 스케줄링 로직을 추가한다. 스케줄러가 jobs 테이블을 직접 보는 것은 레코드가 많아지면 부하가 있을 듯 하다. 따라서 jobs_scheduled 태이블을 추가한다.
+  - jobs_scheduled
+    - idx int primary key
+    - job_idx int : jobs.idx
+  - jobs 에 등록될 때 is_schduled 인 경우 jobs_schedule 에 job_idx 를 넣는다. 스케줄러 로직은 이 테이블과 jobs.scheduled_at 시각을 가지고 배치 수행한다. 배치가 시작되면 jobs_scheduled 에서 삭제한다.
+
+- UI 에서 작업 승인자가 승인하기 전에 다음을 입력받는다.
+  - 계획 작업 : 토글 버튼
+  - 계획 작업인 경우 년월일시분초를 입력하도록 -> 캘린더 다이얼로그를 띄우게 하고 시각은 21:00:00 를 default로 한다.
+  - "작업 진행" 탭의 작업 목록에서 계획된 작업 에 대한 표시를 하고, 계획 시각을 표시한다
+- AI검토시 첨부(텍스트) 파일을 프롬프트에 넣어서 작업에 필요한 정보가 포함되어 있는지, 적합한 파일인지를 함께 검토 요청한다
+- 메일 작업 접수의 requester_name 은 From 표시명을 넣고, 표시명이 없으면 이메일로 둔다. AI검토는 발신 메일 주소만 있어도 요청자 신원 확인으로 본다.
+- INFRA_SEARCH_AGENT: mock=in-process+inventory MCP, http=외부 AXIT(agentruntime.local_agent_id=INFRA_SEARCH_AGENT). WORKFLOW/JOB_AUDITOR/HELPDESK 의 AXIT uuid 도 env가 아니라 agentruntime.agent_id 사용.
+- Teams/Power Automate pending 디버그 메시지 저장소는 backend pod n개 동기화를 위해 Redis 공유로 전환한다.

@@ -9,7 +9,6 @@ from backend.app.config import WorkflowAgentSettings, load_workflow_agent_settin
 from backend.app.db.agentruntime import (
     StoredAgentRuntime,
     catalog_agent_id,
-    get_agentruntime_by_agent_id,
     get_agentruntime_by_local_agent_id,
 )
 from backend.app.services.agent_runtime_client import normalize_runtime_mode
@@ -24,15 +23,7 @@ def _find_http_workflow_agent_record(
     *,
     settings: WorkflowAgentSettings,
 ) -> StoredAgentRuntime | None:
-    if settings.axit_agent_id:
-        record = get_agentruntime_by_agent_id(
-            database_path,
-            settings.axit_agent_id,
-            runtime_mode="http",
-        )
-        if _is_non_orchestrator(record):
-            return record
-
+    """Resolve by agentruntime.local_agent_id only (AXIT uuid comes from DB agent_id)."""
     local_candidates: list[str] = []
     for candidate in (
         settings.local_agent_id,
@@ -133,14 +124,9 @@ def resolve_workflow_agent_id(
     raise RuntimeError(
         "agentruntime record not found for workflow design agent "
         f"(local_agent_id candidates: {agent_settings.local_agent_id!r}, "
-        f"{WORKFLOW_AGENT_LOCAL_AGENT_ID!r}"
-        + (
-            f"; axit_agent_id={agent_settings.axit_agent_id!r}"
-            if agent_settings.axit_agent_id
-            else ""
-        )
-        + "). Register a non-orchestrator agent (is_orchestrator=0) in agentruntime or set "
-        "WORKFLOW_AGENT_LOCAL_AGENT_ID / WORKFLOW_AGENT_AXIT_AGENT_ID."
+        f"{WORKFLOW_AGENT_LOCAL_AGENT_ID!r}). "
+        "Register a non-orchestrator agent (is_orchestrator=0) with "
+        "local_agent_id=WORKFLOW_AGENT in agentruntime (http) or set WORKFLOW_AGENT_LOCAL_AGENT_ID."
     )
 
 

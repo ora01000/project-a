@@ -14,4 +14,7 @@ export interface JobWorkflowItem {
   approver_name: string;
   status_code: number;
   steps: JobWorkflowStep[];
+  is_scheduled?: boolean;
+  scheduled_at?: string | null;
+  schedule_waiting?: boolean;
 }

@@ -40,8 +40,23 @@ async def infra_search_agent_invoke(
     request: Request,
 ) -> InfraSearchInvokeResponse:
     auth_user = get_request_auth_user(request)
+    runtime_mode = getattr(request.app.state, "agent_runtime_mode", "mock")
+    message = body.message.strip()
     try:
-        result = await infra_search_agent_service.invoke(body.message.strip())
+        if str(runtime_mode).strip().lower() == "http":
+            agent_runtime = request.app.state.agent_runtime
+            if agent_runtime is None:
+                raise RuntimeError("agent_runtime is not available")
+            from backend.app.services.agent_runtime_client import AgentInvokeRequest
+
+            result = await agent_runtime.invoke(
+                AgentInvokeRequest(
+                    agent_id=STATIC_CONFIG.agent_id,
+                    message=message,
+                )
+            )
+        else:
+            result = await infra_search_agent_service.invoke(message)
     except Exception as exc:
         logger.exception("INFRA_SEARCH_AGENT invoke failed")
         log_agent_error(

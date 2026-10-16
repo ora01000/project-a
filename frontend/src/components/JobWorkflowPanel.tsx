@@ -159,6 +159,19 @@ export function JobWorkflowPanel({ currentUser, active }: JobWorkflowPanelProps)
             <div className={`${JOB_INFO_COLUMN_CLASS} flex flex-col gap-0.5 text-xs whitespace-nowrap text-slate-300`}>
               <span className="font-semibold text-slate-100">{item.srnum}</span>
               <span>요청자 {item.requester_name}</span>
+              {item.is_scheduled ? (
+                <span
+                  className={`mt-0.5 inline-flex w-fit items-center rounded border px-1.5 py-0.5 text-[10px] font-medium ${
+                    item.schedule_waiting
+                      ? "border-violet-700/80 bg-violet-950/50 text-violet-100"
+                      : "border-slate-600 bg-slate-900/80 text-slate-300"
+                  }`}
+                  title={item.scheduled_at ? `계획 시각 ${formatWorkflowTimestamp(item.scheduled_at)}` : "계획 작업"}
+                >
+                  계획 작업
+                  {item.scheduled_at ? ` · ${formatWorkflowTimestamp(item.scheduled_at)}` : ""}
+                </span>
+              ) : null}
             </div>
 
             <div className="flex min-w-0 items-center gap-1.5 overflow-x-auto">

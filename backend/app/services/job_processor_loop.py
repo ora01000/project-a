@@ -20,6 +20,7 @@ from backend.app.db.jobs import (
     list_jobs,
     update_job_status,
 )
+from backend.app.db.jobs_scheduled import list_scheduled_job_idxs
 from backend.app.db.agentruntime import StoredAgentRuntime, build_agent_chat_url
 from backend.app.db.jobs_result import upsert_job_result
 from backend.app.notifications.email_sender import (
@@ -215,6 +216,12 @@ async def _dispatch_pending_jobs(
     if not jobs:
         return
 
+    waiting_idxs = await asyncio.to_thread(list_scheduled_job_idxs, database_path)
+    if waiting_idxs:
+        jobs = [job for job in jobs if job.idx not in waiting_idxs]
+    if not jobs:
+        return
+
     helpdesk_agent_id = await asyncio.to_thread(
         try_resolve_helpdesk_agent_id,
         database_path,
@@ -225,7 +232,7 @@ async def _dispatch_pending_jobs(
         logger.warning(
             "job processor skipped %s approved job(s): helpdesk agentruntime not found "
             "(http mode, is_orchestrator=0 required). Register non-orchestrator agent or set "
-            "JOB_PROCESSOR_HELPDESK_LOCAL_AGENT_ID / JOB_PROCESSOR_HELPDESK_AXIT_AGENT_ID.",
+            "JOB_PROCESSOR_HELPDESK_LOCAL_AGENT_ID.",
             len(jobs),
         )
         return
@@ -297,7 +304,7 @@ async def run_job_processor_loop(
             logger.warning(
                 "job processor: no helpdesk agentruntime record in http mode "
                 "(is_orchestrator=0). Approved jobs will be skipped until configured "
-                "(JOB_PROCESSOR_HELPDESK_LOCAL_AGENT_ID or JOB_PROCESSOR_HELPDESK_AXIT_AGENT_ID)."
+                "(JOB_PROCESSOR_HELPDESK_LOCAL_AGENT_ID)."
             )
         else:
             logger.info(

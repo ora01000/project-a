@@ -58,7 +58,7 @@ def _capture_headers(request: Request) -> dict[str, str]:
 async def receive_teams_power_automate_message(request: Request) -> TeamsInboundReceiveResponse:
     raw_body = await request.body()
     content_type = request.headers.get("content-type", "")
-    entry = record_teams_inbound_message(
+    entry = await record_teams_inbound_message(
         raw_body=raw_body,
         content_type=content_type,
         headers=_capture_headers(request),
@@ -72,15 +72,13 @@ async def receive_teams_power_automate_message(request: Request) -> TeamsInbound
 
 @router.get("/debug/teams-power-automate/pending", response_model=TeamsInboundPendingResponse)
 async def get_pending_teams_power_automate_messages() -> TeamsInboundPendingResponse:
-    messages = [
-        TeamsInboundDebugEntryResponse(**entry.to_dict())
-        for entry in list_pending_teams_inbound_messages()
-    ]
+    entries = await list_pending_teams_inbound_messages()
+    messages = [TeamsInboundDebugEntryResponse(**entry.to_dict()) for entry in entries]
     return TeamsInboundPendingResponse(messages=messages)
 
 
 @router.post("/debug/teams-power-automate/{entry_id}/dismiss", response_model=DismissResponse)
 async def dismiss_teams_power_automate_message(entry_id: int) -> dict[str, Any]:
-    if not dismiss_teams_inbound_message(entry_id):
+    if not await dismiss_teams_inbound_message(entry_id):
         raise HTTPException(status_code=404, detail="메시지를 찾을 수 없습니다.")
     return {"ok": True}

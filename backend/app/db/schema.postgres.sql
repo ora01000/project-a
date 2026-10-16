@@ -63,7 +63,14 @@ CREATE TABLE IF NOT EXISTS jobs (
     drop_reason VARCHAR(200) NOT NULL DEFAULT '',
     ai_audit_comment TEXT,
     ai_audit_date TEXT,
-    ai_audit_cnt INTEGER NOT NULL DEFAULT 0
+    ai_audit_cnt INTEGER NOT NULL DEFAULT 0,
+    is_scheduled INTEGER NOT NULL DEFAULT 0,
+    scheduled_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS jobs_scheduled (
+    idx BIGSERIAL PRIMARY KEY,
+    job_idx BIGINT NOT NULL UNIQUE REFERENCES jobs(idx) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS jobs_result (

@@ -7,9 +7,24 @@ import { IntegratedChatPanel } from "./IntegratedChatPanel";
 import { JobNotesPanel } from "./JobNotesPanel";
 
 const DEFAULT_CHAT_PANEL_WIDTH = 650;
+/** QHD(2560)의 80% 이상일 때 대화형 터미널을 50% 확장 */
+const WIDE_CHAT_PANEL_WIDTH = Math.round(DEFAULT_CHAT_PANEL_WIDTH * 1.5);
+const FHD_VIEWPORT_WIDTH = 1920;
+const QHD_WIDE_THRESHOLD = Math.round(2560 * 0.8); // 2048
 const MIN_CHAT_PANEL_WIDTH = 360;
 const MIN_JOB_NOTES_PANEL_WIDTH = 240;
 const PANEL_RESIZE_HANDLE_WIDTH = 1;
+
+function resolveInitialChatPanelWidth(viewportWidth: number): number {
+  // FHD 이하: 현행 유지 / QHD 80% 이상: 50% 확장 / 그 사이: 현행 유지
+  if (viewportWidth <= FHD_VIEWPORT_WIDTH) {
+    return DEFAULT_CHAT_PANEL_WIDTH;
+  }
+  if (viewportWidth >= QHD_WIDE_THRESHOLD) {
+    return WIDE_CHAT_PANEL_WIDTH;
+  }
+  return DEFAULT_CHAT_PANEL_WIDTH;
+}
 
 interface DashboardPageProps {
   agents: AgentInfo[];
@@ -32,10 +47,12 @@ export function DashboardPage({
   const copyToNoteRef = useRef<(content: string, noteName?: string) => Promise<void>>(
     async () => {},
   );
-  const [chatPanelWidth, setChatPanelWidth] = useState(DEFAULT_CHAT_PANEL_WIDTH);
+  const [chatPanelWidth, setChatPanelWidth] = useState(() =>
+    resolveInitialChatPanelWidth(window.innerWidth),
+  );
   const isResizingRef = useRef(false);
   const resizeStartXRef = useRef(0);
-  const resizeStartWidthRef = useRef(DEFAULT_CHAT_PANEL_WIDTH);
+  const resizeStartWidthRef = useRef(chatPanelWidth);
 
   const minCenterPanelWidth = MIN_JOB_NOTES_PANEL_WIDTH;
 

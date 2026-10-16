@@ -60,6 +60,30 @@ def extract_sender_email(from_address: str) -> str:
     return ""
 
 
+def extract_sender_display_name(from_address: str) -> str:
+    """Display name from From header (e.g. ``Name <user@host>``). Empty if absent."""
+    for name, addr in getaddresses([from_address or ""]):
+        cleaned_addr = (addr or "").strip()
+        if "@" not in cleaned_addr or cleaned_addr.startswith("@") or cleaned_addr.endswith("@"):
+            continue
+        display = (name or "").strip().strip('"').strip("'")
+        if display and display.lower() != cleaned_addr.lower():
+            return display
+    return ""
+
+
+def resolve_mail_requester(from_address: str) -> tuple[str, str]:
+    """Return ``(requester_name, requester_email)`` for jobs intake.
+
+    Prefer From display name for name; fall back to email when name is missing.
+    """
+    email = extract_sender_email(from_address)
+    if not email:
+        return "", ""
+    display = extract_sender_display_name(from_address)
+    return (display or email)[:100], email[:100]
+
+
 def madang_id_from_email(email: str) -> str:
     local = (email or "").split("@", 1)[0].strip()
     return (local or "unknown")[:50]
@@ -94,15 +118,15 @@ def create_job_from_received_mail(
     record: ReceivedMailRecord,
     parsed: ParsedDecision,
 ) -> JobRecord:
-    sender = extract_sender_email(record.from_address)
+    requester_name, sender = resolve_mail_requester(record.from_address)
     if not sender:
         raise ValueError("sender email is required to create a job")
     auto_approve = is_read_job_kind(parsed.job_kind)
     approved_at = now_job_datetime() if auto_approve else None
     payload = JobIntakePayload(
         job_title=build_job_title(record.subject),
-        requester_name=sender[:100],
-        requester_email=sender[:100],
+        requester_name=requester_name,
+        requester_email=sender,
         requester_depart=UNKNOWN_DEPART,
         job_content=build_job_content(record, parsed),
         request_date=now_job_datetime(),

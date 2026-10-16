@@ -5,6 +5,7 @@ import type { JobRecord } from "../../types/job";
 import type { UserRecord } from "../../types/user";
 import { requestJobWorkflowRefresh } from "../../utils/jobWorkflowRefresh";
 import { ConfirmDialog } from "../ConfirmDialog";
+import { JobApproveScheduleDialog } from "./JobApproveScheduleDialog";
 import { JobBlockField, JobFieldLabel, JobInlineField } from "./JobFieldLabel";
 import { JobAiAuditCommentBlock } from "./JobAiAuditCommentBlock";
 import { JobAiReviewButton } from "./JobAiReviewButton";
@@ -163,7 +164,10 @@ export function JobReviewTab({ active, currentUser, onCopyToNote }: JobReviewTab
     await assignApprover(selectedApproverUserid);
   };
 
-  const handleDirectApprove = async () => {
+  const handleDirectApprove = async (payload: {
+    isScheduled: boolean;
+    scheduledAt: string | null;
+  }) => {
     if (!selectedJob) {
       return;
     }
@@ -174,7 +178,11 @@ export function JobReviewTab({ active, currentUser, onCopyToNote }: JobReviewTab
       const response = await fetch(`/api/jobs/${selectedJob.idx}/direct-approve`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ actor_userid: currentUser.userid }),
+        body: JSON.stringify({
+          actor_userid: currentUser.userid,
+          is_scheduled: payload.isScheduled,
+          scheduled_at: payload.isScheduled ? payload.scheduledAt : null,
+        }),
       });
       if (!response.ok) {
         throw new Error(await parseError(response, "직접승인에 실패했습니다."));
@@ -379,11 +387,12 @@ export function JobReviewTab({ active, currentUser, onCopyToNote }: JobReviewTab
         />
       ) : null}
       {confirmDirectApproveOpen && selectedJob ? (
-        <ConfirmDialog
+        <JobApproveScheduleDialog
+          srnum={selectedJob.srnum}
           title="직접승인"
           message={`${selectedJob.srnum} 작업을 ${currentUser.username}(으)로 직접 승인하시겠습니까?`}
           confirmLabel="직접승인"
-          onConfirm={() => void handleDirectApprove()}
+          onConfirm={(payload) => void handleDirectApprove(payload)}
           onCancel={() => setConfirmDirectApproveOpen(false)}
         />
       ) : null}

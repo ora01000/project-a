@@ -57,7 +57,9 @@ JOB_SELECT_COLUMNS = """
     drop_reason,
     ai_audit_comment,
     ai_audit_date,
-    ai_audit_cnt
+    ai_audit_cnt,
+    is_scheduled,
+    scheduled_at
 """
 
 
@@ -85,6 +87,8 @@ class JobRecord:
     ai_audit_comment: str = ""
     ai_audit_date: str | None = None
     ai_audit_cnt: int = 0
+    is_scheduled: bool = False
+    scheduled_at: str | None = None
 
 
 @dataclass(frozen=True)
@@ -137,11 +141,24 @@ def _row_to_job(row) -> JobRecord:
             else None
         ),
         ai_audit_cnt=int(row["ai_audit_cnt"] if row["ai_audit_cnt"] is not None else 0),
+        is_scheduled=bool(int(row["is_scheduled"] if row["is_scheduled"] is not None else 0)),
+        scheduled_at=(
+            str(row["scheduled_at"]).strip()
+            if row["scheduled_at"] is not None and str(row["scheduled_at"]).strip()
+            else None
+        ),
     )
+
+
+def _ensure_jobs_schedule_schema(connection) -> None:
+    from backend.app.db.jobs_scheduled import ensure_jobs_scheduled_table
+
+    ensure_jobs_scheduled_table(connection)
 
 
 def get_job_by_idx(database_path: str | Path, idx: int) -> JobRecord | None:
     with get_connection(database_path) as connection:
+        _ensure_jobs_schedule_schema(connection)
         row = connection.execute(
             f"""
             SELECT {JOB_SELECT_COLUMNS}
@@ -214,6 +231,7 @@ def list_jobs(
 
     where_sql = f"WHERE {' AND '.join(clauses)}" if clauses else ""
     with get_connection(database_path) as connection:
+        _ensure_jobs_schedule_schema(connection)
         rows = connection.execute(
             f"""
             SELECT {JOB_SELECT_COLUMNS}
@@ -235,6 +253,7 @@ def find_pending_workflow_approval_job(
     if len(prefix) <= len("workflow:"):
         return None
     with get_connection(database_path) as connection:
+        _ensure_jobs_schedule_schema(connection)
         row = connection.execute(
             f"""
             SELECT {JOB_SELECT_COLUMNS}
@@ -260,6 +279,7 @@ def map_pending_workflow_approval_jobs(
 ) -> dict[str, JobRecord]:
     """workflow_uuid(lower) → latest pending HITL approval job."""
     with get_connection(database_path) as connection:
+        _ensure_jobs_schedule_schema(connection)
         rows = connection.execute(
             f"""
             SELECT {JOB_SELECT_COLUMNS}
@@ -314,6 +334,7 @@ def list_jobs_for_workflow(
 
     where_sql = f"WHERE {' AND '.join(clauses)}" if clauses else ""
     with get_connection(database_path) as connection:
+        _ensure_jobs_schedule_schema(connection)
         rows = connection.execute(
             f"""
             SELECT {JOB_SELECT_COLUMNS}
@@ -661,16 +682,46 @@ def direct_approve_job(
     idx: int,
     *,
     approver_userid: str,
+    is_scheduled: bool = False,
+    scheduled_at: str | None = None,
 ) -> JobRecord:
+    from backend.app.db.jobs_scheduled import enqueue_scheduled_job
+
     existing = get_job_by_idx(database_path, idx)
     if existing is None:
         raise ValueError("job not found")
+    target_status = approval_target_status_code(existing)
+    schedule_enabled = bool(is_scheduled) and target_status == JOB_STATUS_DIRECT_APPROVED
+    normalized_scheduled_at: str | None = None
+    if schedule_enabled:
+        if not (scheduled_at or "").strip():
+            raise ValueError("scheduled_at is required when is_scheduled is true")
+        normalized_scheduled_at = normalize_job_datetime(scheduled_at.strip())
+
     updated = assign_job_approver(
         database_path,
         idx,
         approver_userid=approver_userid,
-        status_code=approval_target_status_code(existing),
+        status_code=target_status,
     )
+    with get_connection(database_path) as connection:
+        _ensure_jobs_schedule_schema(connection)
+        connection.execute(
+            """
+            UPDATE jobs
+            SET is_scheduled = ?,
+                scheduled_at = ?
+            WHERE idx = ?
+            """,
+            (1 if schedule_enabled else 0, normalized_scheduled_at, idx),
+        )
+        if schedule_enabled:
+            enqueue_scheduled_job(connection, idx)
+        connection.commit()
+
+    updated = get_job_by_idx(database_path, idx)
+    if updated is None:
+        raise RuntimeError("Failed to load updated job record")
     _finalize_signup_job_approval(database_path, updated)
     _finalize_workflow_job_approval(database_path, updated)
     return updated
@@ -691,25 +742,50 @@ def approve_assigned_job(
     idx: int,
     *,
     actor_userid: str,
+    is_scheduled: bool = False,
+    scheduled_at: str | None = None,
 ) -> JobRecord:
+    from backend.app.db.jobs_scheduled import enqueue_scheduled_job
+
     existing = get_job_by_idx(database_path, idx)
     if existing is None:
         raise ValueError("job not found")
     _require_assigned_reviewer(existing, actor_userid)
     target_status = approval_target_status_code(existing)
 
+    # Signup / workflow jobs complete on approve; scheduling applies to processor jobs only.
+    schedule_enabled = bool(is_scheduled) and target_status == JOB_STATUS_DIRECT_APPROVED
+    normalized_scheduled_at: str | None = None
+    if schedule_enabled:
+        if not (scheduled_at or "").strip():
+            raise ValueError("scheduled_at is required when is_scheduled is true")
+        normalized_scheduled_at = normalize_job_datetime(scheduled_at.strip())
+
     with get_connection(database_path) as connection:
+        _ensure_jobs_schedule_schema(connection)
         cursor = connection.execute(
             """
             UPDATE jobs
-            SET status_code = ?
+            SET status_code = ?,
+                is_scheduled = ?,
+                scheduled_at = ?
             WHERE idx = ? AND status_code = ? AND approver = ?
             """,
-            (target_status, idx, JOB_STATUS_APPROVER_ASSIGNED, actor_userid.strip()),
+            (
+                target_status,
+                1 if schedule_enabled else 0,
+                normalized_scheduled_at,
+                idx,
+                JOB_STATUS_APPROVER_ASSIGNED,
+                actor_userid.strip(),
+            ),
         )
-        connection.commit()
         if cursor.rowcount == 0:
+            connection.rollback()
             raise ValueError("job review state has changed")
+        if schedule_enabled:
+            enqueue_scheduled_job(connection, idx)
+        connection.commit()
 
     updated = get_job_by_idx(database_path, idx)
     if updated is None:

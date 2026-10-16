@@ -5,6 +5,10 @@ from typing import Any
 
 from pathlib import Path
 
+from backend.app.logging.backend_logging import configure_backend_logging
+
+configure_backend_logging()
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -84,6 +88,7 @@ from backend.app.logging.user_comm_logger import initialize_user_comm_logs
 from backend.app.logging.workflow_logger import initialize_workflow_logs
 from backend.app.services.job_decision_loop import run_job_decision_loop
 from backend.app.services.job_processor_loop import run_job_processor_loop
+from backend.app.services.job_schedule_loop import run_job_schedule_loop
 from backend.app.services.k8s_scrape_scheduler import run_k8s_scrape_scheduler_loop
 from backend.app.services.mail_receive_loop import run_mail_receive_loop
 from backend.app.services.mynote_flush_loop import run_mynote_flush_loop
@@ -205,9 +210,7 @@ class AgentManager:
             if is_mock_platform_orchestrator_agent(agent_id):
                 statuses[agent_id] = "ready"
                 continue
-            if self.agents.get(agent_id) is INFRA_SEARCH_SERVICE_MARKER or (
-                self.uses_remote_runtime() and is_infra_search_agent_id(agent_id)
-            ):
+            if self.agents.get(agent_id) is INFRA_SEARCH_SERVICE_MARKER:
                 mcp_status = infra_search_agent_service.mcp_status
                 if mcp_status == "connected":
                     statuses[agent_id] = "connected"
@@ -433,7 +436,7 @@ async def _health_check_loop(manager: AgentManager, interval_seconds: int) -> No
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logging.basicConfig(level=logging.INFO)
+    configure_backend_logging()
     ensure_agent_logs_dir()
     initialize_agent_logs()
     initialize_workflow_logs()
@@ -478,12 +481,23 @@ async def lifespan(app: FastAPI):
         logger.exception("INFRA_GAP_ANALYSIS initialization failed (agent remains available for lazy init)")
         app.state.infra_gap_analysis = infra_gap_analysis_service
 
-    try:
-        await infra_search_agent_service.initialize(runtime_mode)
-        app.state.infra_search_agent = infra_search_agent_service
-    except Exception:
-        logger.exception("INFRA_SEARCH_AGENT initialization failed (agent remains available for lazy init)")
-        app.state.infra_search_agent = infra_search_agent_service
+    # mock: in-process INFRA_SEARCH + inventory MCP
+    # http: external AXIT agent via agentruntime (local_agent_id=INFRA_SEARCH_AGENT)
+    if runtime_mode != "http":
+        try:
+            await infra_search_agent_service.initialize(runtime_mode)
+            app.state.infra_search_agent = infra_search_agent_service
+        except Exception:
+            logger.exception(
+                "INFRA_SEARCH_AGENT initialization failed (agent remains available for lazy init)"
+            )
+            app.state.infra_search_agent = infra_search_agent_service
+    else:
+        app.state.infra_search_agent = None
+        logger.info(
+            "INFRA_SEARCH_AGENT skipped in-process init in http mode "
+            "(use agentruntime local_agent_id=INFRA_SEARCH_AGENT)"
+        )
     await agent_manager.refresh_health()
 
     try:
@@ -505,6 +519,7 @@ async def lifespan(app: FastAPI):
 
     job_processor_settings = load_job_processor_settings()
     job_processor_task: asyncio.Task | None = None
+    job_schedule_task: asyncio.Task | None = None
     if run_workers and job_processor_settings.enabled:
         job_processor_task = asyncio.create_task(
             run_job_processor_loop(
@@ -514,6 +529,12 @@ async def lifespan(app: FastAPI):
                 control_plane_base_url=app.state.control_plane_base_url,
                 settings=job_processor_settings,
                 agent_manager=agent_manager,
+            )
+        )
+        job_schedule_task = asyncio.create_task(
+            run_job_schedule_loop(
+                Path(app.state.database_path),
+                settings=job_processor_settings,
             )
         )
     mynotes_settings = load_mynotes_settings()
@@ -571,6 +592,10 @@ async def lifespan(app: FastAPI):
             job_processor_task.cancel()
             with suppress(asyncio.CancelledError):
                 await job_processor_task
+        if job_schedule_task is not None:
+            job_schedule_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await job_schedule_task
         if mynote_flush_task is not None:
             mynote_flush_task.cancel()
             with suppress(asyncio.CancelledError):

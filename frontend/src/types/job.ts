@@ -26,4 +26,6 @@ export interface JobRecord {
   ai_audit_comment?: string;
   ai_audit_date?: string | null;
   ai_audit_cnt?: number;
+  is_scheduled?: boolean;
+  scheduled_at?: string | null;
 }

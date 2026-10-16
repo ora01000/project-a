@@ -38,7 +38,8 @@ def address_list(msg: Message, header: str) -> str:
 def normalize_body_newlines(text: str) -> str:
     """Keep line breaks for decision context; normalize to ``\\n`` only.
 
-    Does **not** join soft-wrapped lines or collapse paragraph breaks.
+    Does **not** join soft-wrapped lines or collapse paragraph breaks to spaces.
+    Only trims extreme blank runs (3+ newlines → 2) so ``\\n`` and ``\\n\\n`` remain.
     """
     if not text:
         return ""
@@ -48,9 +49,12 @@ def normalize_body_newlines(text: str) -> str:
         .replace("\u2028", "\n")  # line separator
         .replace("\u2029", "\n\n")  # paragraph separator
         .replace("\u0085", "\n")  # NEL
+        .replace("\xa0", " ")  # nbsp
     )
     # Trim trailing spaces on each line, but keep the newline itself.
     normalized = re.sub(r"[ \t]+\n", "\n", normalized)
+    # Keep single and double newlines; only compress 3+ blank runs.
+    normalized = re.sub(r"\n{3,}", "\n\n", normalized)
     # Drop trailing whitespace at EOF only (preserve internal blank lines).
     return normalized.rstrip(" \t")
 
@@ -61,15 +65,39 @@ def html_to_plain_preserve_breaks(html: str) -> str:
         return ""
     text = html
     text = re.sub(r"(?is)<(script|style)[^>]*>.*?</\1>", "", text)
+    # Outlook conditional comments / office tags
+    text = re.sub(r"(?is)<!--\[if[^\]]*\]>.*?<!\[endif\]-->", "", text)
+    text = re.sub(r"</?o:p[^>]*>", "", text, flags=re.IGNORECASE)
     text = re.sub(r"<br\s*/?>", "\n", text, flags=re.IGNORECASE)
     text = re.sub(r"</li>", "\n", text, flags=re.IGNORECASE)
     text = re.sub(r"<li[^>]*>", "• ", text, flags=re.IGNORECASE)
-    text = re.sub(r"</(p|div|h[1-6]|tr|blockquote|table)>", "\n", text, flags=re.IGNORECASE)
-    text = re.sub(r"<(p|div|h[1-6]|tr|blockquote|table)(\s[^>]*)?>", "\n", text, flags=re.IGNORECASE)
+    # Outlook wraps each Enter in <div>…</div>. Emit a break only on close tags
+    # so one Enter → one \\n (opening+closing both adding \\n would double it).
+    text = re.sub(
+        r"<(p|div|h[1-6]|tr|blockquote|table|section|article|header|footer)(\s[^>]*)?>",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    )
+    text = re.sub(
+        r"</(p|div|h[1-6]|tr|blockquote|table|section|article|header|footer)>",
+        "\n",
+        text,
+        flags=re.IGNORECASE,
+    )
     text = re.sub(r"<hr\s*/?>", "\n---\n", text, flags=re.IGNORECASE)
     text = re.sub(r"<[^>]+>", "", text)
     text = unescape(text)
     return normalize_body_newlines(text)
+
+
+def _body_newline_score(text: str) -> int:
+    """Prefer bodies that keep more hard line breaks (Enter), not only blank lines."""
+    if not text:
+        return -1
+    newline_count = text.count("\n")
+    non_empty_lines = sum(1 for line in text.split("\n") if line.strip())
+    return newline_count * 10 + non_empty_lines
 
 
 def _decode_part_text(part: Message) -> str:
@@ -107,7 +135,12 @@ def _iter_body_parts(msg: Message, content_type: str) -> list[str]:
 
 
 def extract_body_text(msg: Message) -> str:
-    """Extract readable body text, preserving newlines for downstream agents."""
+    """Extract readable body text, preserving newlines for downstream agents.
+
+    Many MUAs (esp. Outlook) emit ``text/plain`` where a single Enter becomes a
+    space and only blank lines (Enter×2) remain. Prefer HTML-derived text when it
+    preserves more hard line breaks.
+    """
     plain_parts = _iter_body_parts(msg, "text/plain")
     html_parts = _iter_body_parts(msg, "text/html")
 
@@ -118,15 +151,11 @@ def extract_body_text(msg: Message) -> str:
         else ""
     )
 
-    if plain and "\n" in plain.rstrip("\n"):
-        return plain
-    if html_plain and "\n" in html_plain.rstrip("\n"):
-        # Prefer HTML-derived text when plain collapsed line breaks (common in some MUAs).
-        if not plain or plain.count("\n") < html_plain.count("\n"):
+    if plain and html_plain:
+        if _body_newline_score(html_plain) > _body_newline_score(plain):
             return html_plain
-    if plain:
         return plain
-    return html_plain
+    return plain or html_plain
 
 
 def iter_attachments(msg: Message) -> list[tuple[str, bytes]]:

@@ -40,6 +40,9 @@ class JobWorkflowItem:
     approver_name: str
     status_code: int
     steps: tuple[JobWorkflowStep, ...]
+    is_scheduled: bool = False
+    scheduled_at: str | None = None
+    schedule_waiting: bool = False
 
 
 def _resolve_display_name(database_path: str | Path, userid: str) -> str:
@@ -70,6 +73,7 @@ def build_job_workflow_steps(
     result: JobResultRecord | None,
     *,
     approver_name: str = "",
+    schedule_waiting: bool = False,
 ) -> tuple[JobWorkflowStep, ...]:
     steps: list[JobWorkflowStep] = []
     status = job.status_code
@@ -104,13 +108,23 @@ def build_job_workflow_steps(
         return tuple(steps)
 
     if _should_show_agent_request_step(job):
-        steps.append(
-            JobWorkflowStep(
-                status_code=JOB_STATUS_DIRECT_APPROVED,
-                label="에이전트 처리 요청",
-                timestamp=None,
+        if schedule_waiting:
+            steps.append(
+                JobWorkflowStep(
+                    status_code=JOB_STATUS_DIRECT_APPROVED,
+                    label="계획 작업",
+                    timestamp=job.scheduled_at,
+                    detail="예정",
+                )
             )
-        )
+        else:
+            steps.append(
+                JobWorkflowStep(
+                    status_code=JOB_STATUS_DIRECT_APPROVED,
+                    label="에이전트 처리 요청",
+                    timestamp=None,
+                )
+            )
 
     if status == JOB_STATUS_COMPLETED_SUCCESS:
         steps.append(
@@ -146,6 +160,8 @@ def list_job_workflows(
     viewer_userid: str,
     viewer_role: int,
 ) -> list[JobWorkflowItem]:
+    from backend.app.db.jobs_scheduled import list_scheduled_job_idxs
+
     exclude_signup = not is_admin_role(viewer_role)
     jobs = list_jobs_for_workflow(
         database_path,
@@ -153,6 +169,7 @@ def list_job_workflows(
         viewer_role=viewer_role,
         exclude_job_type=JOB_TYPE_SIGNUP if exclude_signup else None,
     )
+    waiting_idxs = list_scheduled_job_idxs(database_path)
 
     items: list[JobWorkflowItem] = []
     for job in jobs:
@@ -164,10 +181,12 @@ def list_job_workflows(
         if job.status_code >= JOB_STATUS_COMPLETED_SUCCESS:
             result = get_job_result_by_srnum(database_path, job.srnum)
 
+        schedule_waiting = bool(job.is_scheduled) and job.idx in waiting_idxs
         steps = build_job_workflow_steps(
             job,
             result,
             approver_name=approver_name,
+            schedule_waiting=schedule_waiting,
         )
         items.append(
             JobWorkflowItem(
@@ -179,6 +198,9 @@ def list_job_workflows(
                 approver_name=approver_name,
                 status_code=job.status_code,
                 steps=steps,
+                is_scheduled=bool(job.is_scheduled),
+                scheduled_at=job.scheduled_at,
+                schedule_waiting=schedule_waiting,
             )
         )
     return items

@@ -46,7 +46,10 @@ def load_mock_runtime_definitions(database_path: str | Path) -> list[AgentDefini
 
 
 def load_server_agent_definitions(database_path: str | Path) -> list[AgentDefinition]:
-    """Agent catalog from agentruntime for server/external delegation."""
+    """Agent catalog from agentruntime for server/external delegation.
+
+    http 모드에서는 INFRA_SEARCH_AGENT 포함 모든 에이전트를 agentruntime DB 등록분만 사용한다.
+    """
     definitions: list[AgentDefinition] = []
     for record in list_agentruntime_records(database_path, runtime_mode="http"):
         definitions.append(
@@ -58,7 +61,4 @@ def load_server_agent_definitions(database_path: str | Path) -> list[AgentDefini
                 system_prompt="",
             ),
         )
-    catalog_ids = {definition.agent_id for definition in definitions}
-    if INFRA_SEARCH_AGENT.agent_id not in catalog_ids:
-        definitions.append(INFRA_SEARCH_AGENT)
     return definitions

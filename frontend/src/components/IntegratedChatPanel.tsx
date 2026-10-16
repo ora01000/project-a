@@ -56,8 +56,9 @@ function isAbortError(err: unknown): boolean {
   return err instanceof DOMException && err.name === "AbortError";
 }
 
-const DEFAULT_AGENT_LIST_HEIGHT = 160;
-const MIN_AGENT_LIST_HEIGHT = 80;
+/** 라벨 + 에이전트 칩 한 줄(패딩·보더 포함)에 맞춘 기본 높이 */
+const DEFAULT_AGENT_LIST_HEIGHT = 64;
+const MIN_AGENT_LIST_HEIGHT = 52;
 const FIXED_USER_INPUT_HEIGHT = 100;
 const MIN_CONVERSATION_HEIGHT = 120;
 const RESIZE_HANDLE_HEIGHT = 8;

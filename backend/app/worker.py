@@ -10,6 +10,10 @@ import logging
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 
+from backend.app.logging.backend_logging import configure_backend_logging
+
+configure_backend_logging()
+
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
@@ -30,6 +34,7 @@ from backend.app.services.agent_runtime_client import (
 )
 from backend.app.services.job_decision_loop import run_job_decision_loop
 from backend.app.services.job_processor_loop import run_job_processor_loop
+from backend.app.services.job_schedule_loop import run_job_schedule_loop
 from backend.app.services.k8s_scrape_scheduler import run_k8s_scrape_scheduler_loop
 from backend.app.services.mail_receive_loop import run_mail_receive_loop
 from backend.app.services.mynote_flush_loop import run_mynote_flush_loop
@@ -41,6 +46,7 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    configure_backend_logging()
     llm_settings, server_settings, _, database_path = load_settings()
     runtime_mode = normalize_runtime_mode(server_settings.agent_runtime_mode)
     app.state.database_path = init_database(database_path)
@@ -78,6 +84,15 @@ async def lifespan(app: FastAPI):
                     control_plane_base_url=app.state.control_plane_base_url,
                     settings=job_processor_settings,
                     agent_manager=None,
+                )
+            )
+        )
+    if job_processor_settings.enabled:
+        tasks.append(
+            asyncio.create_task(
+                run_job_schedule_loop(
+                    Path(app.state.database_path),
+                    settings=job_processor_settings,
                 )
             )
         )

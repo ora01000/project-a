@@ -10,7 +10,6 @@ from backend.app.config import JobProcessorSettings, load_job_processor_settings
 from backend.app.db.agentruntime import (
     StoredAgentRuntime,
     catalog_agent_id,
-    get_agentruntime_by_agent_id,
     get_agentruntime_by_local_agent_id,
 )
 from backend.app.db.jobs import JobRecord
@@ -29,15 +28,7 @@ def _find_http_helpdesk_record(
     *,
     settings: JobProcessorSettings,
 ) -> StoredAgentRuntime | None:
-    if settings.helpdesk_axit_agent_id:
-        record = get_agentruntime_by_agent_id(
-            database_path,
-            settings.helpdesk_axit_agent_id,
-            runtime_mode="http",
-        )
-        if _is_non_orchestrator(record):
-            return record
-
+    """Resolve by agentruntime.local_agent_id only (AXIT uuid comes from DB agent_id)."""
     local_candidates: list[str] = []
     for candidate in (
         settings.helpdesk_local_agent_id,
@@ -117,14 +108,9 @@ def resolve_helpdesk_agent_id(
     raise RuntimeError(
         "agentruntime record not found for job delegation "
         f"(local_agent_id candidates: {processor_settings.helpdesk_local_agent_id!r}, "
-        f"{DEFAULT_JOB_DELEGATION_LOCAL_AGENT_ID!r}, {HELPDESK_AGENT_ID!r}"
-        + (
-            f"; axit_agent_id={processor_settings.helpdesk_axit_agent_id!r}"
-            if processor_settings.helpdesk_axit_agent_id
-            else ""
-        )
-        + "). Register a non-orchestrator agent (is_orchestrator=0) in agentruntime or set "
-        "JOB_PROCESSOR_HELPDESK_LOCAL_AGENT_ID / JOB_PROCESSOR_HELPDESK_AXIT_AGENT_ID."
+        f"{DEFAULT_JOB_DELEGATION_LOCAL_AGENT_ID!r}, {HELPDESK_AGENT_ID!r}). "
+        "Register a non-orchestrator agent (is_orchestrator=0) with matching "
+        "local_agent_id in agentruntime (http) or set JOB_PROCESSOR_HELPDESK_LOCAL_AGENT_ID."
     )
 
 

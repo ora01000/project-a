@@ -6,15 +6,18 @@ from dataclasses import dataclass
 
 from backend.app.agents.skill_loader import read_skill
 from backend.app.agents.system_prompt_loader import read_system_prompt
+from backend.app.config import _env_setting
 
 AGENT_ID = "INFRA_SEARCH_AGENT"
 AGENT_NAME = "Infra Search Agent"
 INVENTORY_SQL_SKILL_NAME = "inventory_sql"
 MCP_SERVER_KEY = "inventory"
 
-# Inventory MCP endpoints by runtime mode (mock | http)
+# Inventory MCP — mock in-process INFRA_SEARCH only.
+# http 모드에서는 외부 AXIT 에이전트(agentruntime.local_agent_id=INFRA_SEARCH_AGENT)를 사용한다.
+# Explicit override: INVENTORY_MCP_URL or MCP_INVENTORY_URL
 MCP_URL_MOCK = "http://inventory-mcp.ora01000.pe.kr:32716/mcp"
-MCP_URL_HTTP = "http://inventory-mcp.ora01000.pe.kr:32716/mcp"
+MCP_URL_HTTP = MCP_URL_MOCK  # unused when http uses external agent; kept for compatibility
 MCP_TRANSPORT = "http"
 
 # Same LLM gateway wiring as INFRA_GAP_ANALYSIS / JOB_DECISION_AGENT.
@@ -58,6 +61,13 @@ STATIC_CONFIG = InfraSearchStaticConfig()
 
 
 def mcp_url_for_mode(runtime_mode: str) -> str:
+    """Resolve inventory MCP URL for the active runtime mode.
+
+    Override with ``INVENTORY_MCP_URL`` or ``MCP_INVENTORY_URL`` (either mode).
+    """
+    explicit = (_env_setting("INVENTORY_MCP_URL") or _env_setting("MCP_INVENTORY_URL") or "").strip()
+    if explicit:
+        return explicit.rstrip("/")
     mode = (runtime_mode or "mock").strip().lower()
     if mode == "local":
         mode = "mock"
