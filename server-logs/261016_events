@@ -1,0 +1,7 @@
+LAST SEEN   TYPE      REASON      OBJECT                         MESSAGE
+4m14s       Warning   Unhealthy   pod/axitdb-579964cb68-x9r8l    (combined from similar events): Liveness probe errored: rpc error: code = Unknown desc = command error: time="2026-10-16T04:14:32Z" level=error msg="exec failed: unable to start container process: exec: \"bg_isready\": executable file not found in $PATH"...
+87m         Warning   Unhealthy   pod/backend-55f57f69c4-hvpw9   Liveness probe failed: Get "http://10.129.2.22:8080/healthz": context deadline exceeded (Client.Timeout exceeded while awaiting headers)
+86m         Warning   Unhealthy   pod/backend-55f57f69c4-hvpw9   Readiness probe failed: Get "http://10.129.2.22:8080/readyz": context deadline exceeded (Client.Timeout exceeded while awaiting headers)
+86m         Warning   Unhealthy   pod/backend-55f57f69c4-mtqxk   Readiness probe failed: Get "http://10.131.1.45:8080/readyz": context deadline exceeded (Client.Timeout exceeded while awaiting headers)
+86m         Warning   Unhealthy   pod/backend-55f57f69c4-mtqxk   Liveness probe failed: Get "http://10.131.1.45:8080/healthz": context deadline exceeded (Client.Timeout exceeded while awaiting headers)
+
