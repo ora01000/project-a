@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from backend.app.agents.private_cloud_agent import PRIVATE_CLOUD_AGENT_ID
@@ -13,7 +14,16 @@ from backend.app.db.agentruntime import (
     get_agentruntime_by_local_agent_id,
 )
 from backend.app.db.jobs import JobRecord
+from backend.app.db.received_mail import get_received_mail_by_uuid
 from backend.app.services.agent_runtime_client import normalize_runtime_mode
+from backend.app.services.received_mail_attachments import (
+    format_text_attachments_for_prompt,
+    load_received_mail_text_attachments,
+)
+
+logger = logging.getLogger(__name__)
+
+MAIL_CHANNEL_ID = "received_mail"
 
 # Mock / unset-env default: PRIVATE_CLOUD_AGENT (replaces former helpdesk).
 DEFAULT_JOB_DELEGATION_LOCAL_AGENT_ID = PRIVATE_CLOUD_AGENT_ID
@@ -114,8 +124,35 @@ def resolve_helpdesk_agent_id(
     )
 
 
-def build_job_agent_message(job: JobRecord) -> str:
-    return (
+def _mail_text_attachments_for_job(
+    database_path: str | Path,
+    job: JobRecord,
+) -> list[tuple[str, str]]:
+    """Load text attachments for mail-origin jobs (channel_id=received_mail)."""
+    if (job.channel_id or "").strip() != MAIL_CHANNEL_ID:
+        return []
+    mail_uuid = (job.message_id or "").strip()
+    if not mail_uuid:
+        return []
+    record = get_received_mail_by_uuid(database_path, mail_uuid)
+    if record is None:
+        logger.warning(
+            "job agent message: received_mail missing for idx=%s message_id=%s",
+            job.idx,
+            mail_uuid,
+        )
+        return []
+    return load_received_mail_text_attachments(mail_uuid, record.attachment_names)
+
+
+def build_job_agent_message(
+    job: JobRecord,
+    *,
+    database_path: str | Path | None = None,
+    text_attachments: list[tuple[str, str]] | None = None,
+) -> str:
+    """Build helpdesk agent prompt; mail jobs include attachment text after approval."""
+    message = (
         "작업요청서 처리를 수행해 주세요.\n\n"
         f"- SR 번호: {job.srnum}\n"
         f"- 제목: {job.job_title}\n"
@@ -124,3 +161,11 @@ def build_job_agent_message(job: JobRecord) -> str:
         "작업 내용:\n"
         f"{job.job_content}"
     )
+    attachments = text_attachments
+    if attachments is None and database_path is not None:
+        attachments = _mail_text_attachments_for_job(database_path, job)
+    block = format_text_attachments_for_prompt(attachments or [])
+    if not block:
+        return message
+    return f"{message}\n\n{block}"
+

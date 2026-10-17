@@ -135,13 +135,16 @@ CREATE TABLE IF NOT EXISTS mailserver_config (
     updated_at TEXT NOT NULL DEFAULT ''
 );
 
--- Inbound mail captured by IMAP poller (worker / BACKEND_ROLE=all)
+-- Inbound mail captured by IMAP/POP3 poller (worker / BACKEND_ROLE=all).
+-- Column/index drift for existing DBs is applied once in init_database via
+-- ensure_received_mail_table (not on every poll — concurrent DDL deadlocks).
 CREATE TABLE IF NOT EXISTS received_mail (
     idx BIGSERIAL PRIMARY KEY,
     uuid VARCHAR(36) NOT NULL UNIQUE,
     decision_type INTEGER NOT NULL DEFAULT 0,
     message_id VARCHAR(500) NOT NULL DEFAULT '',
     imap_uid BIGINT,
+    pop3_uidl VARCHAR(500) NOT NULL DEFAULT '',
     mailbox VARCHAR(100) NOT NULL DEFAULT 'INBOX',
     subject TEXT NOT NULL DEFAULT '',
     from_address VARCHAR(500) NOT NULL DEFAULT '',
@@ -163,8 +166,15 @@ CREATE INDEX IF NOT EXISTS ix_received_mail_message_id
     ON received_mail (message_id)
     WHERE message_id <> '';
 
+CREATE INDEX IF NOT EXISTS ix_received_mail_pop3_uidl
+    ON received_mail (pop3_uidl)
+    WHERE pop3_uidl <> '';
+
 CREATE INDEX IF NOT EXISTS ix_received_mail_fetched_at
     ON received_mail (fetched_at DESC);
+
+ALTER TABLE received_mail
+    ADD COLUMN IF NOT EXISTS pop3_uidl VARCHAR(500) NOT NULL DEFAULT '';
 
 ALTER TABLE received_mail
     ADD COLUMN IF NOT EXISTS unreadable_attachment_names TEXT NOT NULL DEFAULT '[]';

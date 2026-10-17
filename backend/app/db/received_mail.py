@@ -31,6 +31,10 @@ def _now_iso() -> str:
 
 
 def ensure_received_mail_table(connection) -> None:
+    """Idempotent DDL for received_mail. Call only from init_database (advisory lock).
+
+    Must not run on mail/job poll paths — concurrent AccessExclusiveLock deadlocks.
+    """
     connection.execute(
         """
         CREATE TABLE IF NOT EXISTS received_mail (
@@ -84,6 +88,7 @@ def ensure_received_mail_table(connection) -> None:
             ADD COLUMN IF NOT EXISTS unreadable_attachment_names TEXT NOT NULL DEFAULT '[]'
         """
     )
+    connection.commit()
 
 
 @dataclass(frozen=True)
@@ -162,7 +167,6 @@ def message_already_stored(
     pop3_uidl: str | None = None,
 ) -> bool:
     with get_connection(database_path) as connection:
-        ensure_received_mail_table(connection)
         normalized_id = message_id.strip()
         if normalized_id:
             row = connection.execute(
@@ -223,7 +227,6 @@ def insert_received_mail(
     names_json = json.dumps(list(attachment_names), ensure_ascii=False)
     unreadable_json = json.dumps(list(unreadable_attachment_names or []), ensure_ascii=False)
     with get_connection(database_path) as connection:
-        ensure_received_mail_table(connection)
         row = connection.execute(
             """
             INSERT INTO received_mail (
@@ -264,7 +267,6 @@ def get_received_mail_by_uuid(
     mail_uuid: str,
 ) -> ReceivedMailRecord | None:
     with get_connection(database_path) as connection:
-        ensure_received_mail_table(connection)
         row = connection.execute(
             f"""
             SELECT {_SELECT}
@@ -287,7 +289,6 @@ def list_received_mail(
     capped = max(1, min(int(limit), 200))
     skip = max(0, int(offset))
     with get_connection(database_path) as connection:
-        ensure_received_mail_table(connection)
         if decision_type is None:
             rows = connection.execute(
                 f"""
@@ -320,7 +321,6 @@ def list_pending_received_mail(
     """Oldest pending (decision_type=0) rows for sequential JOB_DECISION processing."""
     capped = max(1, min(int(limit), 200))
     with get_connection(database_path) as connection:
-        ensure_received_mail_table(connection)
         rows = connection.execute(
             f"""
             SELECT {_SELECT}
@@ -342,7 +342,6 @@ def update_decision_type(
     if decision_type not in VALID_DECISION_TYPES:
         raise ValueError(f"invalid decision_type: {decision_type}")
     with get_connection(database_path) as connection:
-        ensure_received_mail_table(connection)
         connection.execute(
             """
             UPDATE received_mail

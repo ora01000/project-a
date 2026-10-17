@@ -86,8 +86,11 @@ def init_database(database_path: str | Path | None = None) -> Path:
                 "ALTER TABLE jobs ALTER COLUMN message_id TYPE VARCHAR(120)"
             )
             from backend.app.db.jobs_scheduled import ensure_jobs_scheduled_table
+            from backend.app.db.received_mail import ensure_received_mail_table
 
             ensure_jobs_scheduled_table(connection)
+            # Once per process boot under advisory_lock — never from mail/job poll paths.
+            ensure_received_mail_table(connection)
             seed_initial_users(connection)
     logger.info("PostgreSQL database initialized via DATABASE_URL")
     return POSTGRES_STATE_TOKEN

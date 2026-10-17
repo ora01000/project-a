@@ -16,14 +16,15 @@ from backend.app.db.jobs import JOB_TYPE_WORKFLOW, JobRecord
 from backend.app.db.received_mail import get_received_mail_by_uuid
 from backend.app.services.agent_runtime_client import normalize_runtime_mode
 from backend.app.services.received_mail_attachments import (
+    ATTACHMENT_TEXT_MAX_CHARS,
     is_allowed_attachment_filename,
-    resolve_attachment_file,
+    load_received_mail_text_attachments,
 )
 
 logger = logging.getLogger(__name__)
 
 MAIL_CHANNEL_ID = "received_mail"
-ATTACHMENT_MAX_CHARS = 20_000
+ATTACHMENT_MAX_CHARS = ATTACHMENT_TEXT_MAX_CHARS
 
 
 def _is_non_orchestrator(record: StoredAgentRuntime | None) -> bool:
@@ -118,17 +119,6 @@ def resolve_job_auditor_agent_id(
     )
 
 
-def _read_text_attachment(mail_uuid: str, filename: str, *, max_chars: int = ATTACHMENT_MAX_CHARS) -> str:
-    path = resolve_attachment_file(mail_uuid, filename)
-    if not path.is_file():
-        return f"[missing attachment file: {filename}]"
-    raw = path.read_bytes()
-    text = raw.decode("utf-8", errors="replace")
-    if len(text) > max_chars:
-        return text[:max_chars] + "\n...[truncated]..."
-    return text
-
-
 def _load_mail_text_attachments(database_path: str | Path, job: JobRecord) -> list[tuple[str, str]]:
     """Return (filename, content) for text attachments linked to a mail-origin job."""
     if (job.channel_id or "").strip() != MAIL_CHANNEL_ID:
@@ -140,16 +130,11 @@ def _load_mail_text_attachments(database_path: str | Path, job: JobRecord) -> li
     if record is None:
         logger.warning("AI review: received_mail missing for job idx=%s message_id=%s", job.idx, mail_uuid)
         return []
-    loaded: list[tuple[str, str]] = []
-    for name in record.attachment_names or []:
-        filename = (name or "").strip()
-        if not filename or not is_allowed_attachment_filename(filename):
-            continue
-        try:
-            loaded.append((filename, _read_text_attachment(mail_uuid, filename)))
-        except Exception as exc:
-            loaded.append((filename, f"[failed to read {filename}: {exc}]"))
-    return loaded
+    return load_received_mail_text_attachments(
+        mail_uuid,
+        record.attachment_names,
+        max_chars=ATTACHMENT_MAX_CHARS,
+    )
 
 
 def _load_workflow_hitl_attachments(database_path: str | Path, job: JobRecord) -> list[tuple[str, str]]:

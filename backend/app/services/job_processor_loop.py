@@ -107,7 +107,7 @@ async def process_approved_job(
     control_plane_base_url: str | None,
     agent_manager=None,
 ) -> None:
-    message = build_job_agent_message(job)
+    message = build_job_agent_message(job, database_path=database_path)
     complete_date = now_job_datetime()
     agent_id = helpdesk_agent_id
     job_task_id = f"job-{job.idx}"

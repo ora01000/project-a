@@ -3193,3 +3193,6 @@ Status	| Case
 - 메일 작업 접수의 requester_name 은 From 표시명을 넣고, 표시명이 없으면 이메일로 둔다. AI검토는 발신 메일 주소만 있어도 요청자 신원 확인으로 본다.
 - INFRA_SEARCH_AGENT: mock=in-process+inventory MCP, http=외부 AXIT(agentruntime.local_agent_id=INFRA_SEARCH_AGENT). WORKFLOW/JOB_AUDITOR/HELPDESK 의 AXIT uuid 도 env가 아니라 agentruntime.agent_id 사용.
 - Teams/Power Automate pending 디버그 메시지 저장소는 backend pod n개 동기화를 위해 Redis 공유로 전환한다.
+
+## 메일 수신 작업 처리시 첨부파일 처리
+- 메일로 수신된 작업에 첨부파일이 있을때 담당자 승인 이후 에이전트 처리 요청시 첨부 텍스트를 함께 프롬프트에 넣어 전달한다.
