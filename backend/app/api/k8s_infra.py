@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
+
+logger = logging.getLogger(__name__)
 
 from backend.app.db.k8s_inventory import (
     COLLECTABLE_INFRA_TYPES,
@@ -266,6 +269,17 @@ async def collect_cluster(cluster_idx: int, request: Request) -> ManualCollectRe
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"수집 실패: {exc}") from exc
+
+    if record.infra_type in (DEFAULT_INFRA_TYPE, "kubevirt", INFRA_TYPE_VSPHERE):
+        try:
+            from backend.app.services.infra_dictionary import refresh_infra_dictionary
+
+            await refresh_infra_dictionary(database_path, reason="manual-collect")
+        except Exception:
+            logger.exception(
+                "infra_dictionary redis refresh after manual collect failed cluster=%s",
+                record.cluster_name,
+            )
 
     backups = result.get("backup_tables") or []
     if isinstance(backups, int):

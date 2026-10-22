@@ -1,4 +1,4 @@
-"""Standalone INFRA_GAP_ANALYSIS agent — independent of AXIT runtime and mock agent catalog."""
+"""INFRA_GAP_ANALYSIS agent — mock: in-process LangGraph; http: external AXIT via agentruntime."""
 
 from __future__ import annotations
 
@@ -149,9 +149,14 @@ class InfraGapAnalysisService:
             "agent_name": STATIC_CONFIG.agent_name,
             "ready": self.is_ready,
             "runtime_mode": self._runtime_mode,
+            "execution": "in-process",
             "mcp_server_key": STATIC_CONFIG.mcp_server_key,
             "mcp_url": mcp_url_for_mode(self._runtime_mode),
             "mcp_status": self._mcp_status,
+            "tools": [
+                {"name": name, "mcp_server": STATIC_CONFIG.mcp_server_key}
+                for name in sorted(GAP_ANALYSIS_ALLOWED_TOOLS)
+            ],
             "llm": (
                 {
                     "base_url": STATIC_CONFIG.http_llm_base_url,

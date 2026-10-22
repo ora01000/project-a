@@ -2867,13 +2867,23 @@ left "작업 워크플로우 목록" 패널의 생성된 작업 워크플로우 
 
   POST /uploadCSV           # param 업로드 파일
   POST /transferCSV2Table   # param filename, tablename
+  POST /retrieve            # api_url, api_key?, auth_type
+  POST /testAPI             # url, token?, auth_type
+  POST /transferJSON2Table  # response_json, tablename
+  POST /addInventory        # table_name, origin_* …
   GET /getInventoryList 
   GET /getInventorySchema   # param inventory(table)
   GET /getRecordsWithRows (startrow/endrow는 1부터, 양끝 포함)    # param table, startrow, endrow
   GET /getCount             # param table
+  GET /getAllDataInColumn   # param tablename, columnname
   POST /sql                 # sql
   POST /removeInventory     # param table
+  POST /removeTempTable     # param tablename
   GET /getInventoryAPIList  # param tablename
+  POST /addInventoryAPI
+  POST /updateInventoryAPI
+  POST /removeInventoryAPI  # param tablename, api_name
+  POST /reloadAPI           # param tablename
 
 
 # 작업 워크플로우, 인벤토리 관리 화면 icon asset 보강
@@ -3196,3 +3206,123 @@ Status	| Case
 
 ## 메일 수신 작업 처리시 첨부파일 처리
 - 메일로 수신된 작업에 첨부파일이 있을때 담당자 승인 이후 에이전트 처리 요청시 첨부 텍스트를 함께 프롬프트에 넣어 전달한다.
+
+## 대화형 터미널 > 작업 접수 에 헬퍼 기능 추가
+- "부서" 와 "작업 제목" 사이에 패널을 하나 추가한다. width : 100%, height : 100px, 패널의 이름은 "인프라 사전" 이다.
+- "인프라 사전"의 데이터소스는 infra_cluster와 각 인프라 클러스터의 latest gen 테이블이다.
+- infra_cluster.infra_type 별로 key : value 정보를 요약해서 redis 에 적재한다. 
+  - redis 적재는 1. 백엔드 시작시, 2. infra_cluster scrape 하고 latest gen 테이블 생성, 업데이트 이후 이다. 백엔드 기동시 로그에 적재되는 시간을 기록한다(디버깅용)
+  - key : value 구성
+    1. infra_type 테이블 
+      - infra_cluster.infra_type : infra_cluster.cluster_name
+      - 만약 display_name 이 있는 경우, (display_name) 를 붙인다.
+    2. k8s_cluster_nodes 테이블
+      - infra_cluster.cluster_name : {infra_cluster.cluster_name}_k8s_nodes.node_name
+    3. k8s_cluster_namespaces 테이블
+      - infra_cluster.cluster_name : {infra_cluster.cluster_name}_k8s_namespaces.namespace
+      - 만약 okd_display_name 이 있는 경우, ({infra_cluster.cluster_name}_k8s_namespaces.okd_display_name) 를 붙인다.
+    4. k8s_cluster_deployments 테이블
+      - infra_cluster.cluster_name : {infra_cluster.cluster_name}_k8s_deployments.name
+    5. kubevirt_cluster_nodes 테이블
+      - infra_cluster.cluster_name : {infra_cluster.cluster_name}_kubevirt_nodes.node_name
+    6. kubevirt_cluster_namespaces 테이블
+      - infra_cluster.cluster_name : {infra_cluster.cluster_name}_kubevirt_namespaces.namespace
+      - 만약 okd_display_name 이 있는 경우, ({infra_cluster.cluster_name}_kubevirt_namespaces.okd_display_name) 를 붙인다.
+    7. kubevirt_cluster_deployments 테이블
+      - infra_cluster.cluster_name : {infra_cluster.cluster_name}_kubevirt_deployments.name
+    8. kubevirt_cluster_vms 테이블
+      - infra_cluster.cluster_name : {infra_cluster.cluster_name}_kubevirt_vms.name        
+    9. vsphere_cluster_vms 테이블
+      - infra_cluster.cluster_name : {infra_cluster.cluster_name}_vsphere_vms_on_host.vm_name
+
+- "인프라 사전" 패널에 다음과 같은 규칙으로 텍스트 레이블 버튼을 차례로 생성하고 패널 위에 그려지는 방향은 left->right 이다. 각 레벨 클릭시 다음 레벨의 candidate 가 보여지며 선택하여 다음 레벨의 레이블 버튼을 생성하는 구조이다.
+  - 레벨1
+    - "인프라 형태"
+  - 레벨2
+    - "OKD(k8s)" : key = "k8s"
+    - "KubeVirt(VM)" : key = "kubevirt"
+    - "vSphere(VM)" : key = "vSphere"
+    - "모름" : key = "unknown"
+  - 레벨3 : key = "k8s"
+    - "클러스터 노드" : key = "{infra_cluster.cluster_name}" -> 레디스 k8s_cluster_nodes 테이블
+    - "프로젝트" : key = "{infra_cluster.cluster_name}" -> 레디스 k8s_cluster_namespaces 테이블
+    - "디플로이먼트" : key = "{infra_cluster.cluster_name}" -> 레디스 k8s_cluster_deployments 테이블
+  - 레벨3 : key = "kubevirt"
+    - "클러스터 노드" : key = "{infra_cluster.cluster_name}" -> 레디스 kubevirt_cluster_nodes 테이블
+    - "프로젝트" : key = "{infra_cluster.cluster_name}" -> 레디스 kubevirt_cluster_namespaces 테이블
+    - "디플로이먼트" : key = "{infra_cluster.cluster_name}" -> 레디스 kubevirt_cluster_deployments 테이블
+    - "VM" : key = "{infra_cluster.cluster_name}" -> 레디스 kubevirt_cluster_vms 테이블
+  - 레벨3 : key = "vSphere"
+    - "VM" : key = "{infra_cluster.cluster_name}" -> 레디스 vsphere_cluster_vms 테이블
+  - 레벨3 : key = "unknown"
+    - "시스템코드" : 입력받도록 한다
+    - "애플리케이션 서비스명" : 입력받도록 한다
+    - "운영담당자" : 입력받도록 한다
+    - "운영팀" : 입력받도록 한다
+    - "IP" : 입력받도록 한다
+    - "호스트명" : 입력받도록 한다
+    - "도메인명" : 입력받도록 한다.
+
+- 다음 레벨의 값을 선택하면, 그 위 레벨의 레이블이 변경된다.
+- 마지막 레벨까지 다음 포맷으로 수정
+  - 레벨1구분값=레벨1선택값 | 레벨2구분값=레벨2선택값 | 레벨3구분값=레벨3선택값
+  - 모름 은 "모름 /" 를 빼고 현행대로
+
+## 인벤토리 정보조회(디버깅) 에 테스트 API 를 추가
+- project-e 에 등록된 API 를 인벤토리 정보조회(디버깅) 팝업에 등록한다.
+  - /Users/insu/project-e
+
+## 대화형 터미널 > 작업 접수 에서 자동완성 기능 적용
+- 자동완성은 한글 초성, 영문 알파벳, 숫자 등 한글자 타이핑마다 fastspell 서비스를 통해 색인된 유사단어를 미리 제시하고 탭을 누르면 제시된 단어를 적용하는 기능이다.
+- fastspell 의 코드는 /Users/insu/project-g 에 있으며, 호출 경로는 로컬(목업)과 서버(http모드)에 따라 다르다.
+  - 로컬(목업) : http://fastspell.ora01000.pe.kr:32716
+  - 서버(http) : http://fastspell.axit-console.svc.cluster.local:80
+
+- 자동완성 기능을 적용하는 곳은 "인프라 사전" 에서 레벨2 "모름"을 선택하면 직접입력하는 텍스트 필드이다. 제시어는 텍스트 입력란에 회색 으로 백그라운드 표시된다.
+- fastspell 기능이 변경되었다. 변경된 코드는 pull 해 놓았다. 변경된 코드를 참조한다.
+  - 주요 변경
+    - 색인을 용도에 맞게 라벨링 하였으며 이에 각 입력 필드에서 어떤 라벨의 색인을 쓸지를 지정해야 한다.
+    - 로컬은 모든 질의에 대해 "all" 이라는 라벨을 파라메터로 추가한다.
+    - 서버(http)의 경우 다음 네 가지 레벨링으로 색인이 구분된다.
+      - project
+      - department
+      - manager
+      - ip
+      - os
+      - hostname
+    - 각 입력필드 별 라벨 지정은 다음과 같다
+      - "시스템코드" : 없음 -> 자동완성 하지 않는다.
+      - "애플리케이션 서비스명" : project
+      - "운영담당자" : manager
+      - "운영팀" : department
+      - "IP" : ip
+      - "호스트명"(추가) : hostname
+      - "도메인명" : 없음 -> 자동완성 하지 않는다.
+- 공백이 입력되면 이후는 새로운 제시어를 쿼리한다.
+- 작업 내용 창에는 fastspell 호출 디버깅을 출력하지 않는다. 레벨3 "unknown" 삽입 시 `{구분자}=입력값` 형식으로만 출력한다.
+- 작업 접수 화면에서 작업 제목과 인프라 사전의 위치를 바꾼다. (요청자/부서 → 작업 제목 → 인프라 사전 → 작업 내용)
+
+## 대화형 터미널 > 대화
+- 사용할 수 있는 에이전트가 하나인 경우 에이전트 선택 패널을 보여주지 않는다.
+- 대화 내용 표시 창 과 메시지 입력 창 사이 메시지 질의어 추천 창을 생성한다. 에이전트 선택 패널이 활성화 될 경우 에이전트 선택 패널 위에 배치한다.
+  - 질의어 추천 창에는 별도의 제목을 표시하지는 않는다.
+    - 추천 질의어 테이블
+      - prompt_offer
+        - idx int primary key
+        - prompt varchar(300)
+    - 추천 질의어
+      - 사용할 수 있는 도구와 스킬을 소개해 줘
+      - 관리 가능한 OKD클러스터와 데이터센터를 출력해줘
+      - 현재 진행 중인 작업 목록을 보여줘
+      - vSphere 클러스터 용량 현황을 요약해줘
+      - 인벤토리에서 호스트명이나 IP로 서버를 찾아줘
+    - 추천 질의어를 클릭하면 메시지 입력 창에 입력된다.
+
+## INFRA_GAP_ANALYSIS 에이전트
+- 서버 http 모드에서 INFRA_GAP_ANALYSIS 에이전트를 외부 에이전트로 변경한다.
+  - agentruntime 의 Local Agent ID : INFRA_GAP_ANALYSIS 로 연동한다. (mock=in-process, http=외부 AXIT)
+  - 시스템 프롬프트(`docs/system-prompt/INFRA_GAP_ANALYSIS_PROMPT.md`) 를 한글로 변환
+  - 사용 중인 도구 목록
+    - MCP 서버 : postgresql
+    - 도구 : `query_readonly` (읽기 전용 SELECT) — `list_schemas` / `list_tables` / `describe_table` 사용 금지
+  

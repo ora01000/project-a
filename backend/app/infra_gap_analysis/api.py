@@ -55,8 +55,19 @@ def _require_gap_analysis_access(request: Request) -> None:
 
 
 @router.get("/infra-gap-analysis/status")
-async def infra_gap_analysis_status() -> dict:
-    return infra_gap_analysis_service.status()
+async def infra_gap_analysis_status(request: Request) -> dict:
+    runtime_mode = str(getattr(request.app.state, "agent_runtime_mode", "mock")).strip().lower()
+    status = infra_gap_analysis_service.status()
+    if runtime_mode == "http":
+        status = {
+            **status,
+            "ready": True,
+            "runtime_mode": "http",
+            "execution": "external-axit",
+            "local_agent_id": STATIC_CONFIG.agent_id,
+            "tools": [{"name": "query_readonly", "mcp_server": STATIC_CONFIG.mcp_server_key}],
+        }
+    return status
 
 
 @router.post("/infra-gap-analysis/invoke", response_model=InfraGapAnalysisInvokeResponse)
@@ -67,12 +78,27 @@ async def infra_gap_analysis_invoke(
     _require_gap_analysis_access(request)
     auth_user = get_request_auth_user(request)
     database_path = getattr(request.app.state, "database_path", None)
+    runtime_mode = str(getattr(request.app.state, "agent_runtime_mode", "mock")).strip().lower()
     try:
         message = body.resolved_message(database_path)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     try:
-        result = await infra_gap_analysis_service.invoke(message)
+        if runtime_mode == "http":
+            agent_runtime = request.app.state.agent_runtime
+            if agent_runtime is None:
+                raise RuntimeError("agent_runtime is not available")
+            from backend.app.services.agent_runtime_client import AgentInvokeRequest
+
+            # agentruntime.local_agent_id = INFRA_GAP_ANALYSIS → AXIT uuid (agent_id)
+            result = await agent_runtime.invoke(
+                AgentInvokeRequest(
+                    agent_id=STATIC_CONFIG.agent_id,
+                    message=message,
+                )
+            )
+        else:
+            result = await infra_gap_analysis_service.invoke(message)
     except Exception as exc:
         logger.exception("INFRA_GAP_ANALYSIS invoke failed")
         log_agent_error(

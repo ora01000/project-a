@@ -94,6 +94,12 @@ CREATE TABLE IF NOT EXISTS mynote_contents (
     updated_at TEXT NOT NULL
 );
 
+-- Suggested chat prompts for the interactive terminal (질의어 추천).
+CREATE TABLE IF NOT EXISTS prompt_offer (
+    idx SERIAL PRIMARY KEY,
+    prompt VARCHAR(300) NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS infra_cluster (
     idx BIGSERIAL PRIMARY KEY,
     cluster_name VARCHAR(50) NOT NULL UNIQUE,

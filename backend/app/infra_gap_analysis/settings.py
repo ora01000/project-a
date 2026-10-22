@@ -11,12 +11,13 @@ AGENT_ID = "INFRA_GAP_ANALYSIS"
 AGENT_NAME = "Infra Gap Analysis"
 MCP_SERVER_KEY = "postgresql"
 
-# MCP endpoints by runtime mode (mock | http)
+# MCP endpoints — mock in-process INFRA_GAP_ANALYSIS only.
+# http 모드에서는 외부 AXIT 에이전트(agentruntime.local_agent_id=INFRA_GAP_ANALYSIS)를 사용한다.
 MCP_URL_MOCK = "http://localhost:30800/mcp"
-MCP_URL_HTTP = "http://pgdb-mcp.mcps.svc.cluster.local:8000/mcp"
+MCP_URL_HTTP = "http://pgdb-mcp.mcps.svc.cluster.local:8000/mcp"  # unused when http uses external agent
 MCP_TRANSPORT = "http"
 
-# HTTP-mode LLM gateway (OpenAI-compatible). Mock mode reuses the existing control-plane LLM.
+# Mock-mode LLM gateway (OpenAI-compatible). http 모드는 외부 AXIT 에이전트를 사용한다.
 # Bifrost splits model on the first "/": provider/model. HF id openai/gpt-oss-120b must be
 # prefixed with the custom provider so vLLM still receives openai/gpt-oss-120b.
 HTTP_LLM_BASE_URL = "http://llmgateway.apps.pkvgs-k8s.lguplus.co.kr/v1"

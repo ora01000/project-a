@@ -169,6 +169,19 @@ async def run_k8s_scrape_scheduler_loop(
                         "k8s scrape scheduler collected cluster idxs=%s",
                         collected,
                     )
+                    try:
+                        from backend.app.services.infra_dictionary import (
+                            refresh_infra_dictionary,
+                        )
+
+                        await refresh_infra_dictionary(
+                            database_path,
+                            reason="scrape",
+                        )
+                    except Exception:
+                        logger.exception(
+                            "infra_dictionary redis refresh after scrape failed"
+                        )
             except asyncio.CancelledError:
                 raise
             except Exception as exc:

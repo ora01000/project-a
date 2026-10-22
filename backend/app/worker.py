@@ -38,6 +38,7 @@ from backend.app.services.job_schedule_loop import run_job_schedule_loop
 from backend.app.services.k8s_scrape_scheduler import run_k8s_scrape_scheduler_loop
 from backend.app.services.mail_receive_loop import run_mail_receive_loop
 from backend.app.services.mynote_flush_loop import run_mynote_flush_loop
+from backend.app.services.infra_dictionary import refresh_infra_dictionary
 from backend.app.services.redis_client import close_redis, init_redis
 from backend.app.services.workflow_cron_scheduler import run_workflow_cron_scheduler_loop
 
@@ -55,6 +56,10 @@ async def lifespan(app: FastAPI):
 
     redis_settings = load_redis_settings()
     await init_redis(redis_settings.url)
+    try:
+        await refresh_infra_dictionary(app.state.database_path, reason="startup")
+    except Exception:
+        logger.exception("infra_dictionary redis load failed at startup")
 
     if runtime_mode == "mock":
         logger.warning(

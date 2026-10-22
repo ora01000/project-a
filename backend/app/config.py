@@ -298,6 +298,11 @@ class AppSettings(BaseSettings):
         default="",
         alias="INVENTORY_CSV_UPLOAD_URL",
     )
+    fastspell_base_url: str = Field(
+        # Empty → resolve_fastspell_base_url() picks mock/http default by AGENT_RUNTIME_MODE.
+        default="",
+        alias="FASTSPELL_BASE_URL",
+    )
 
     job_decision_loop_enabled: bool | None = Field(
         default=None,
@@ -1219,6 +1224,9 @@ def inventory_csv_dir() -> Path:
 INVENTORY_API_MOCK_BASE_URL = "http://inventory-api.ora01000.pe.kr:32716"
 INVENTORY_API_HTTP_BASE_URL = "http://inventory-api.mcps.svc.cluster.local:9000"
 
+FASTSPELL_MOCK_BASE_URL = "http://fastspell.ora01000.pe.kr:32716"
+FASTSPELL_HTTP_BASE_URL = "http://fastspell.axit-console.svc.cluster.local:80"
+
 
 def resolve_inventory_api_base_url() -> str:
     """Base URL for the remote inventory-api service.
@@ -1235,6 +1243,23 @@ def resolve_inventory_api_base_url() -> str:
     if mode == "http":
         return INVENTORY_API_HTTP_BASE_URL
     return INVENTORY_API_MOCK_BASE_URL
+
+
+def resolve_fastspell_base_url() -> str:
+    """Base URL for the fastspell (초성/제시어) service.
+
+    Explicit ``FASTSPELL_BASE_URL`` wins. Otherwise:
+    - mock mode → ``http://fastspell.ora01000.pe.kr:32716``
+    - http mode → ``http://fastspell.axit-console.svc.cluster.local:80``
+    """
+    raw = (AppSettings().fastspell_base_url or "").strip()
+    if raw:
+        return raw.rstrip("/")
+    yaml_settings = _load_yaml(CONFIG_DIR / "settings.yaml")
+    mode = resolve_agent_runtime_mode(server_yaml=yaml_settings.get("server", {})).strip().lower()
+    if mode == "http":
+        return FASTSPELL_HTTP_BASE_URL
+    return FASTSPELL_MOCK_BASE_URL
 
 
 def resolve_inventory_csv_upload_url() -> str:

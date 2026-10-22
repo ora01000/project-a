@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
 from backend.app.agents.base import AgentInvokeResult, ToolUsage
+from backend.app.db.prompt_offer import list_prompt_offers
 from backend.app.db.roles import is_admin_role
 from backend.app.db.users import parse_agent_ids
 from backend.app.disabled_features import is_removed_agent_id, raise_disabled_feature
@@ -82,6 +83,24 @@ class ChatInputHistoryResponse(BaseModel):
 
 class ChatInputHistoryAppendRequest(BaseModel):
     message: str = Field(min_length=1)
+
+
+class PromptOfferItem(BaseModel):
+    idx: int
+    prompt: str
+
+
+class PromptOfferListResponse(BaseModel):
+    items: list[PromptOfferItem]
+
+
+@router.get("/chat/prompt-offers", response_model=PromptOfferListResponse)
+async def get_prompt_offers(request: Request) -> PromptOfferListResponse:
+    get_request_auth_user(request)
+    items = list_prompt_offers(request.app.state.database_path)
+    return PromptOfferListResponse(
+        items=[PromptOfferItem(idx=item.idx, prompt=item.prompt) for item in items]
+    )
 
 
 def _ensure_chat_agent_access(request: Request, agent_id: str) -> None:

@@ -144,6 +144,7 @@ export function IntegratedChatPanel({
   const resizeStartHeightRef = useRef(DEFAULT_AGENT_LIST_HEIGHT);
   /** HTTP runtime does not surface MCP tool usage in the interactive terminal. */
   const [showMcpTools, setShowMcpTools] = useState(true);
+  const [promptOffers, setPromptOffers] = useState<{ idx: number; prompt: string }[]>([]);
 
   const clampAgentListHeight = useCallback((nextHeight: number) => {
     const layoutHeight = layoutRef.current?.clientHeight ?? window.innerHeight;
@@ -270,6 +271,9 @@ export function IntegratedChatPanel({
     [chatAgents, selectedAgentId],
   );
 
+  /** 사용 가능 에이전트가 하나면 선택 UI 불필요(자동 선택). 0개일 때는 안내 표시. */
+  const showAgentPicker = chatAgents.length !== 1;
+
   const isDisabled = !selectedAgent || selectedAgent.status === "disabled";
 
   useEffect(() => {
@@ -319,6 +323,33 @@ export function IntegratedChatPanel({
       return chatAgents[0]?.id ?? "";
     });
   }, [chatAgents]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const response = await fetch("/api/chat/prompt-offers");
+        if (!response.ok) {
+          return;
+        }
+        const payload = (await response.json()) as {
+          items?: { idx: number; prompt: string }[];
+        };
+        if (!cancelled) {
+          setPromptOffers(
+            (payload.items ?? []).filter((item) => Boolean(item.prompt?.trim())),
+          );
+        }
+      } catch {
+        if (!cancelled) {
+          setPromptOffers([]);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (!selectedAgentId) {
@@ -781,68 +812,91 @@ export function IntegratedChatPanel({
 
         {contentTab === "chat" ? (
           <>
-        <div
-          role="separator"
-          aria-orientation="horizontal"
-          aria-label="대화창과 에이전트 목록 높이 조절"
-          aria-valuenow={Math.round(agentListHeight)}
-          aria-valuemin={MIN_AGENT_LIST_HEIGHT}
-          onMouseDown={handleAgentListResizeStart}
-          className="group flex h-2 shrink-0 cursor-row-resize items-center justify-center border-y border-slate-700 bg-slate-900 hover:bg-slate-800"
-        >
-          <span className="h-1 w-12 rounded-full bg-slate-600 group-hover:bg-slate-400" />
-        </div>
+        {promptOffers.length > 0 ? (
+          <div className="shrink-0 border-t border-slate-700 px-3 py-2">
+            <div className="flex flex-wrap gap-1.5" aria-label="추천 질의어">
+              {promptOffers.map((item) => (
+                <button
+                  key={item.idx}
+                  type="button"
+                  disabled={isDisabled || isLoading}
+                  title={item.prompt}
+                  onClick={() => handleInputChange(item.prompt)}
+                  className="max-w-full truncate rounded-md border border-slate-700 bg-slate-900 px-2.5 py-1 text-left text-[11px] text-slate-300 transition hover:border-sky-500 hover:text-sky-200 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {item.prompt}
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
+        {showAgentPicker ? (
+          <div
+            role="separator"
+            aria-orientation="horizontal"
+            aria-label="대화창과 에이전트 목록 높이 조절"
+            aria-valuenow={Math.round(agentListHeight)}
+            aria-valuemin={MIN_AGENT_LIST_HEIGHT}
+            onMouseDown={handleAgentListResizeStart}
+            className="group flex h-2 shrink-0 cursor-row-resize items-center justify-center border-y border-slate-700 bg-slate-900 hover:bg-slate-800"
+          >
+            <span className="h-1 w-12 rounded-full bg-slate-600 group-hover:bg-slate-400" />
+          </div>
+        ) : null}
 
         <form onSubmit={handleSubmit} className="flex shrink-0 flex-col gap-2 p-3">
-          <div
-            className={
-              expandUserInput
-                ? "flex shrink-0 flex-col gap-1 text-xs text-slate-400"
-                : "flex min-h-0 shrink-0 flex-col gap-1 text-xs text-slate-400"
-            }
-            style={expandUserInput ? undefined : { height: agentListHeight }}
-          >
-            <span>에이전트</span>
-            {chatAgents.length === 0 ? (
-              <p className="min-h-0 flex-1 rounded-md border border-slate-800 bg-slate-950/50 px-3 py-2 text-sm text-slate-500">
-                등록된 에이전트 없음
-              </p>
-            ) : (
-              <div
-                className={
-                  expandUserInput
-                    ? "rounded-md border border-slate-800 bg-slate-950/40 p-2"
-                    : "min-h-0 flex-1 overflow-y-auto rounded-md border border-slate-800 bg-slate-950/40 p-2"
-                }
-                role="radiogroup"
-                aria-label="에이전트 선택"
-              >
-                <div className="flex flex-wrap gap-1.5">
-                  {chatAgents.map((agent) => {
-                    const isSelected = selectedAgentId === agent.id;
-                    return (
-                      <button
-                        key={agent.id}
-                        type="button"
-                        role="radio"
-                        aria-checked={isSelected}
-                        disabled={isLoading}
-                        title={`${agent.name} (${agent.status})`}
-                        onClick={() => setSelectedAgentId(agent.id)}
-                        className={`rounded-md border px-2.5 py-1 text-left text-xs transition disabled:cursor-not-allowed disabled:opacity-50 ${
-                          isSelected
-                            ? "border-sky-500 bg-sky-950/70 text-sky-100"
-                            : "border-slate-700 bg-slate-900 text-slate-300 hover:border-slate-500 hover:bg-slate-800"
-                        }`}
-                      >
-                        <span className="font-medium">{agent.name}</span>
-                      </button>
-                    );
-                  })}
+          {showAgentPicker ? (
+            <div
+              className={
+                expandUserInput
+                  ? "flex shrink-0 flex-col gap-1 text-xs text-slate-400"
+                  : "flex min-h-0 shrink-0 flex-col gap-1 text-xs text-slate-400"
+              }
+              style={expandUserInput ? undefined : { height: agentListHeight }}
+            >
+              <span>에이전트</span>
+              {chatAgents.length === 0 ? (
+                <p className="min-h-0 flex-1 rounded-md border border-slate-800 bg-slate-950/50 px-3 py-2 text-sm text-slate-500">
+                  등록된 에이전트 없음
+                </p>
+              ) : (
+                <div
+                  className={
+                    expandUserInput
+                      ? "rounded-md border border-slate-800 bg-slate-950/40 p-2"
+                      : "min-h-0 flex-1 overflow-y-auto rounded-md border border-slate-800 bg-slate-950/40 p-2"
+                  }
+                  role="radiogroup"
+                  aria-label="에이전트 선택"
+                >
+                  <div className="flex flex-wrap gap-1.5">
+                    {chatAgents.map((agent) => {
+                      const isSelected = selectedAgentId === agent.id;
+                      return (
+                        <button
+                          key={agent.id}
+                          type="button"
+                          role="radio"
+                          aria-checked={isSelected}
+                          disabled={isLoading}
+                          title={`${agent.name} (${agent.status})`}
+                          onClick={() => setSelectedAgentId(agent.id)}
+                          className={`rounded-md border px-2.5 py-1 text-left text-xs transition disabled:cursor-not-allowed disabled:opacity-50 ${
+                            isSelected
+                              ? "border-sky-500 bg-sky-950/70 text-sky-100"
+                              : "border-slate-700 bg-slate-900 text-slate-300 hover:border-slate-500 hover:bg-slate-800"
+                          }`}
+                        >
+                          <span className="font-medium">{agent.name}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
-              </div>
-            )}
-          </div>
+              )}
+            </div>
+          ) : null}
 
           <div
             className="flex shrink-0 gap-2"

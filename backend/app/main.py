@@ -46,6 +46,8 @@ from backend.app.api.inventory import router as inventory_router
 from backend.app.api.inventory_api_debug import router as inventory_api_debug_router
 from backend.app.api.axit_mock import router as axit_mock_router
 from backend.app.api.k8s_infra import router as k8s_infra_router
+from backend.app.api.infra_dictionary import router as infra_dictionary_router
+from backend.app.api.fastspell import router as fastspell_router
 from backend.app.api.mailserver import router as mailserver_router
 from backend.app.api.received_mail import router as received_mail_router
 from backend.app.infra_gap_analysis.api import router as infra_gap_analysis_router
@@ -68,6 +70,7 @@ from backend.app.config import (
     resolve_control_plane_base_url,
 )
 from backend.app.middleware.session_auth import SessionAuthMiddleware
+from backend.app.services.infra_dictionary import refresh_infra_dictionary
 from backend.app.services.redis_client import close_redis, init_redis
 from backend.app.services.agent_runtime_client import (
     create_agent_runtime_client,
@@ -463,6 +466,10 @@ async def lifespan(app: FastAPI):
     app.state.runtime_api_key = server_settings.agent_runtime_api_key
     redis_settings = load_redis_settings()
     await init_redis(redis_settings.url)
+    try:
+        await refresh_infra_dictionary(app.state.database_path, reason="startup")
+    except Exception:
+        logger.exception("infra_dictionary redis load failed at startup")
     app.state.auth_session_settings = load_auth_session_settings()
     app.state.agent_runtime = create_agent_runtime_client(
         runtime_mode,
@@ -474,12 +481,23 @@ async def lifespan(app: FastAPI):
     )
     agent_manager.agent_runtime = app.state.agent_runtime
 
-    try:
-        await infra_gap_analysis_service.initialize(runtime_mode)
-        app.state.infra_gap_analysis = infra_gap_analysis_service
-    except Exception:
-        logger.exception("INFRA_GAP_ANALYSIS initialization failed (agent remains available for lazy init)")
-        app.state.infra_gap_analysis = infra_gap_analysis_service
+    # mock: in-process INFRA_GAP_ANALYSIS + postgresql MCP
+    # http: external AXIT agent via agentruntime (local_agent_id=INFRA_GAP_ANALYSIS)
+    if runtime_mode != "http":
+        try:
+            await infra_gap_analysis_service.initialize(runtime_mode)
+            app.state.infra_gap_analysis = infra_gap_analysis_service
+        except Exception:
+            logger.exception(
+                "INFRA_GAP_ANALYSIS initialization failed (agent remains available for lazy init)"
+            )
+            app.state.infra_gap_analysis = infra_gap_analysis_service
+    else:
+        app.state.infra_gap_analysis = None
+        logger.info(
+            "INFRA_GAP_ANALYSIS skipped in-process init in http mode "
+            "(use agentruntime local_agent_id=INFRA_GAP_ANALYSIS)"
+        )
 
     # mock: in-process INFRA_SEARCH + inventory MCP
     # http: external AXIT agent via agentruntime (local_agent_id=INFRA_SEARCH_AGENT)
@@ -661,6 +679,8 @@ def create_app() -> FastAPI:
     app.include_router(whatap_webhook_router, prefix="/api")
     app.include_router(whatap_test_router, prefix="/api")
     app.include_router(k8s_infra_router, prefix="/api")
+    app.include_router(infra_dictionary_router, prefix="/api")
+    app.include_router(fastspell_router, prefix="/api")
     app.include_router(mailserver_router, prefix="/api")
     app.include_router(received_mail_router, prefix="/api")
     app.include_router(infra_gap_analysis_router, prefix="/api")
