@@ -28,6 +28,7 @@ from backend.app.config import (
     resolve_control_plane_base_url,
 )
 from backend.app.db import init_database
+from backend.app.job_decision_agent.agent import job_decision_agent_service
 from backend.app.services.agent_runtime_client import (
     create_agent_runtime_client,
     normalize_runtime_mode,
@@ -141,6 +142,20 @@ async def lifespan(app: FastAPI):
                 )
             )
         )
+    # JOB_DECISION: mock=in-process lazy init; http=AXIT via agentruntime.local_agent_id
+    job_decision_agent_service.bind_agent_runtime(app.state.agent_runtime, runtime_mode)
+    if runtime_mode != "http":
+        try:
+            await job_decision_agent_service.initialize(runtime_mode)
+        except Exception:
+            logger.exception(
+                "JOB_DECISION_AGENT worker init failed (lazy init remains available)"
+            )
+    else:
+        logger.info(
+            "JOB_DECISION_AGENT worker http mode: use agentruntime local_agent_id=JOB_DECISION_AGENT"
+        )
+
     job_decision_settings = load_job_decision_loop_settings()
     if job_decision_settings.enabled:
         tasks.append(

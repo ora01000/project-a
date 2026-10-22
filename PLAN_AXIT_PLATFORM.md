@@ -3325,4 +3325,12 @@ Status	| Case
   - 사용 중인 도구 목록
     - MCP 서버 : postgresql
     - 도구 : `query_readonly` (읽기 전용 SELECT) — `list_schemas` / `list_tables` / `describe_table` 사용 금지
+- AI갭분석 요청 질의(`build_gap_analysis_user_message`)는 한글로 작성하고, 가드레일 PROMPT_ATTACK 오탐을 줄이도록 지시형·영문 강제 문구를 순화한다.
+
+## JOB_DECISION_AGENT
+- 서버 http 모드에서 JOB_DECISION_AGENT 를 외부 에이전트로 변경한다.
+  - agentruntime 의 Local Agent ID : JOB_DECISION_AGENT 로 연동한다. (mock=in-process, http=외부 AXIT)
+  - 시스템 프롬프트(`docs/system-prompt/JOB_DECISION_AGENT_PROMPT.md`) 를 한글로 변환
+  - 사용 중인 도구 목록
+    - 없음 (MCP/도구 미사용 — 메일 본문·텍스트 첨부만으로 판정)
   

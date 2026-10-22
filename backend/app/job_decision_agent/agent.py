@@ -1,4 +1,4 @@
-"""Standalone JOB_DECISION_AGENT — static LangGraph agent (no AXIT / mock catalog)."""
+"""JOB_DECISION_AGENT — mock: in-process LangGraph; http: external AXIT via agentruntime."""
 
 from __future__ import annotations
 
@@ -22,8 +22,8 @@ from backend.app.db.received_mail import (
     get_received_mail_by_uuid,
     update_decision_type,
 )
-from backend.app.job_decision_agent.settings import STATIC_CONFIG, build_system_prompt
-from backend.app.services.agent_runtime_client import normalize_runtime_mode
+from backend.app.job_decision_agent.settings import ALLOWED_TOOLS, STATIC_CONFIG, build_system_prompt
+from backend.app.services.agent_runtime_client import AgentInvokeRequest, normalize_runtime_mode
 from backend.app.services.received_mail_attachments import (
     is_ignored_attachment_filename,
     resolve_attachment_file,
@@ -115,11 +115,11 @@ def _build_llm(runtime_mode: str) -> ChatOpenAI:
 def _read_attachment_text(mail_uuid: str, filename: str, *, max_chars: int = 20000) -> str:
     path = resolve_attachment_file(mail_uuid, filename)
     if not path.is_file():
-        return f"[missing attachment file: {filename}]"
+        return f"[첨부 파일 없음: {filename}]"
     raw = path.read_bytes()
     text = raw.decode("utf-8", errors="replace")
     if len(text) > max_chars:
-        return text[:max_chars] + "\n...[truncated]..."
+        return text[:max_chars] + "\n...[생략]..."
     return text
 
 
@@ -133,31 +133,31 @@ def build_mail_decision_message(
         raise ValueError(f"received_mail not found: {mail_uuid}")
 
     parts: list[str] = [
-        "Evaluate this received_mail record for jobs pipeline classification.",
+        "다음 수신 메일을 jobs 파이프라인 분류 관점에서 검토해 주세요.",
         f"uuid: {record.uuid}",
-        f"subject: {record.subject}",
-        f"from: {record.from_address}",
-        f"to: {record.to_addresses}",
-        f"cc: {record.cc_addresses}",
-        f"received_at: {record.received_at}",
+        f"제목: {record.subject}",
+        f"발신: {record.from_address}",
+        f"수신: {record.to_addresses}",
+        f"참조: {record.cc_addresses}",
+        f"수신시각: {record.received_at}",
         f"message_id: {record.message_id}",
         "",
-        "=== body_text ===",
-        record.body_text or "(empty)",
+        "=== 본문 ===",
+        record.body_text or "(비어 있음)",
         "",
     ]
     if record.attachment_names:
-        parts.append("=== attachments (text) ===")
+        parts.append("=== 텍스트 첨부 ===")
         for name in record.attachment_names:
-            parts.append(f"--- file: {name} ---")
+            parts.append(f"--- 파일: {name} ---")
             try:
                 parts.append(_read_attachment_text(record.uuid, name))
             except Exception as exc:
-                parts.append(f"[failed to read {name}: {exc}]")
+                parts.append(f"[읽기 실패 {name}: {exc}]")
             parts.append("")
     else:
-        parts.append("=== attachments (text) ===")
-        parts.append("(none)")
+        parts.append("=== 텍스트 첨부 ===")
+        parts.append("(없음)")
 
     if record.unreadable_attachment_names:
         relevant = [
@@ -166,7 +166,7 @@ def build_mail_decision_message(
             if name and not is_ignored_attachment_filename(name)
         ]
         if relevant:
-            parts.append("=== unreadable attachments (non-text; prefer type 5 over 10) ===")
+            parts.append("=== 읽을 수 없는 첨부(비텍스트; 10보다 5를 우선 검토) ===")
             for name in relevant:
                 parts.append(f"- {name}")
             parts.append("")
@@ -175,11 +175,12 @@ def build_mail_decision_message(
 
 
 class JobDecisionAgentService:
-    """In-process LangGraph agent without MCP (mail text is injected in the user message)."""
+    """mock: in-process LangGraph (no tools). http: AXIT via agentruntime."""
 
     def __init__(self) -> None:
         self._agent: Any | None = None
         self._runtime_mode: str = "mock"
+        self._agent_runtime: Any | None = None
 
     @property
     def agent_id(self) -> str:
@@ -187,11 +188,28 @@ class JobDecisionAgentService:
 
     @property
     def is_ready(self) -> bool:
+        if self._runtime_mode == "http":
+            return self._agent_runtime is not None
         return self._agent is not None
+
+    def bind_agent_runtime(self, agent_runtime: Any | None, runtime_mode: str) -> None:
+        """Wire external runtime for http mode (called from app startup)."""
+        self._runtime_mode = normalize_runtime_mode(runtime_mode)
+        self._agent_runtime = agent_runtime
 
     async def initialize(self, runtime_mode: str | None = None) -> None:
         mode = normalize_runtime_mode(runtime_mode or resolve_agent_runtime_mode())
         self._runtime_mode = mode
+        if mode == "http":
+            # External AXIT agent; in-process graph is not built.
+            logger.info(
+                "JOB_DECISION_AGENT http mode: skip in-process init "
+                "(use agentruntime local_agent_id=%s)",
+                STATIC_CONFIG.agent_id,
+            )
+            self._agent = None
+            return
+
         llm = _build_llm(mode)
         prompt = build_system_prompt()
         self._agent = create_react_agent(
@@ -200,14 +218,29 @@ class JobDecisionAgentService:
             prompt=SystemMessage(content=prompt),
         )
         logger.info(
-            "JOB_DECISION_AGENT initialized mode=%s llm=%s",
+            "JOB_DECISION_AGENT initialized mode=%s llm=%s tools=%s",
             mode,
-            STATIC_CONFIG.http_llm_model if mode == "http" else "control-plane",
+            "control-plane",
+            sorted(ALLOWED_TOOLS) or [],
         )
 
     async def invoke(self, message: str) -> AgentInvokeResult:
+        mode = normalize_runtime_mode(self._runtime_mode or resolve_agent_runtime_mode())
+        if mode == "http":
+            if self._agent_runtime is None:
+                raise RuntimeError(
+                    "JOB_DECISION_AGENT http mode requires agent_runtime "
+                    f"(local_agent_id={STATIC_CONFIG.agent_id})"
+                )
+            return await self._agent_runtime.invoke(
+                AgentInvokeRequest(
+                    agent_id=STATIC_CONFIG.agent_id,
+                    message=message,
+                )
+            )
+
         if self._agent is None:
-            await self.initialize()
+            await self.initialize(mode)
         assert self._agent is not None
         return await invoke_agent(
             self._agent,
@@ -263,6 +296,9 @@ class JobDecisionAgentService:
             "agent_name": STATIC_CONFIG.agent_name,
             "ready": self.is_ready,
             "runtime_mode": self._runtime_mode,
+            "execution": "external-axit" if self._runtime_mode == "http" else "in-process",
+            "local_agent_id": STATIC_CONFIG.agent_id,
+            "tools": [],
             "decision_types": {
                 "pending": DECISION_TYPE_PENDING,
                 "insufficient": DECISION_TYPE_INSUFFICIENT,
@@ -270,10 +306,7 @@ class JobDecisionAgentService:
                 "non_job": DECISION_TYPE_NON_JOB,
             },
             "llm": (
-                {
-                    "base_url": STATIC_CONFIG.http_llm_base_url,
-                    "model": STATIC_CONFIG.http_llm_model,
-                }
+                {"source": "external-axit"}
                 if self._runtime_mode == "http"
                 else {"source": "control-plane-existing-llm"}
             ),

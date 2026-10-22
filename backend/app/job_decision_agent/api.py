@@ -52,8 +52,19 @@ class JobDecisionEvaluateResponse(BaseModel):
 
 
 @router.get("/job-decision-agent/status")
-async def job_decision_agent_status() -> dict:
-    return job_decision_agent_service.status()
+async def job_decision_agent_status(request: Request) -> dict:
+    runtime_mode = str(getattr(request.app.state, "agent_runtime_mode", "mock")).strip().lower()
+    status = job_decision_agent_service.status()
+    if runtime_mode == "http":
+        status = {
+            **status,
+            "ready": request.app.state.agent_runtime is not None,
+            "runtime_mode": "http",
+            "execution": "external-axit",
+            "local_agent_id": STATIC_CONFIG.agent_id,
+            "tools": [],
+        }
+    return status
 
 
 @router.post("/job-decision-agent/invoke", response_model=JobDecisionInvokeResponse)

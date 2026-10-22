@@ -1,4 +1,8 @@
-"""Static configuration for JOB_DECISION_AGENT (code-only; no AXIT catalog)."""
+"""Static configuration for JOB_DECISION_AGENT.
+
+mock: in-process LangGraph (no MCP tools).
+http: external AXIT via agentruntime.local_agent_id=JOB_DECISION_AGENT.
+"""
 
 from __future__ import annotations
 
@@ -11,11 +15,14 @@ AGENT_ID = "JOB_DECISION_AGENT"
 AGENT_NAME = "Job Decision Agent"
 JOB_SCOPE_SKILL_NAME = "job_scope"
 
-# Same LLM gateway wiring as INFRA_GAP_ANALYSIS.
+# Mock-mode LLM gateway (http uses external AXIT agent).
 # Bifrost custom provider "axit"; backend vLLM model remains openai/gpt-oss-120b.
 HTTP_LLM_BASE_URL = "http://llmgateway.apps.pkvgs-k8s.lguplus.co.kr/v1"
 HTTP_LLM_MODEL = "axit/openai/gpt-oss-120b"
 HTTP_LLM_API_KEY_ENV = "PRIVATE_LLM_API_KEY"
+
+# JOB_DECISION_AGENT does not bind MCP tools; mail text is injected in the user message.
+ALLOWED_TOOLS: frozenset[str] = frozenset()
 
 
 def load_job_scope_skill() -> str:

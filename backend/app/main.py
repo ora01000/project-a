@@ -518,12 +518,24 @@ async def lifespan(app: FastAPI):
         )
     await agent_manager.refresh_health()
 
-    try:
-        await job_decision_agent_service.initialize(runtime_mode)
+    # mock: in-process JOB_DECISION_AGENT (no MCP tools)
+    # http: external AXIT via agentruntime (local_agent_id=JOB_DECISION_AGENT)
+    job_decision_agent_service.bind_agent_runtime(app.state.agent_runtime, runtime_mode)
+    if runtime_mode != "http":
+        try:
+            await job_decision_agent_service.initialize(runtime_mode)
+            app.state.job_decision_agent = job_decision_agent_service
+        except Exception:
+            logger.exception(
+                "JOB_DECISION_AGENT initialization failed (agent remains available for lazy init)"
+            )
+            app.state.job_decision_agent = job_decision_agent_service
+    else:
         app.state.job_decision_agent = job_decision_agent_service
-    except Exception:
-        logger.exception("JOB_DECISION_AGENT initialization failed (agent remains available for lazy init)")
-        app.state.job_decision_agent = job_decision_agent_service
+        logger.info(
+            "JOB_DECISION_AGENT skipped in-process init in http mode "
+            "(use agentruntime local_agent_id=JOB_DECISION_AGENT)"
+        )
 
     health_task = asyncio.create_task(
         _health_check_loop(
