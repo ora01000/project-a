@@ -3,7 +3,28 @@
 프로젝트 최초 개발일(2026-07-08) 이후 변경 이력을 **최근순**으로 요약합니다.  
 출처: git 커밋, `ADDITIONAL_PLAN.md`, 워킹 트리 반영분(2026-07-15~18).
 
-**현재 버전:** 2.0 / 릴리즈 `261008`
+**현재 버전:** 2.0-261026 / 릴리즈 `261026`
+
+---
+
+## 2026-10-26 — 무너코드 터미널·작업접수 도우미 (`261026`)
+
+### 대화형 터미널
+- **헤이 무너 코드(인프라)** 탭: SSH형 가상 터미널, 무너 픽셀 아이콘·애니메이션
+- 단축 명령: help/clear/save(노트), `\tool`·`\platform`은 에이전트 질의로 중계
+- 미등록 `\` 명령은 help 출력(에이전트로 전달하지 않음)
+
+### 작업 접수
+- 인프라 사전 선택은 작업 내용에 직접 넣지 않음 → **작업 종류** 선택 후 도우미 질의
+- `JOB_REQUEST_HELPER`: 요청서 제목·본문 JSON(`title`/`form`) 초안, `{필수입력}` 안내
+- mock: in-process + PRIVATE_CLOUD 도구·스킬 / http: `agentruntime.local_agent_id=JOB_REQUEST_HELPER`
+
+### 에이전트·연동
+- `INFRA_GAP_ANALYSIS`·`JOB_DECISION_AGENT` http 모드 외부 AXIT 연동 및 프롬프트 한글화
+- 인프라 사전 fastspell 자동완성·추천 질의어(`prompt_offer`) 보강
+
+### 릴리즈
+- About: 버전 **2.0-261026**, 릴리즈 **261026**
 
 ---
 
@@ -557,12 +578,12 @@
 | 항목 | 내용 |
 |------|------|
 | 제품명 | AX 인프라 운영 콘솔 |
-| 버전 | 2.0 |
-| 릴리즈 | 261008 |
+| 버전 | 2.0-261026 |
+| 릴리즈 | 261026 |
 | 백엔드 이미지 | `ora01000/project-a-backend:<tag>` |
 | 프론트 이미지 | `ora01000/project-a-frontend:<tag>` |
-| 최근 태그 예 | `260805`, `260806`, `260807` |
-| multi-pod(Postgres) 태그 | `pgYYMMDD` (예: `pg261008`) — `dev-axplatform-multi-pod` 배포용 |
+| 최근 태그 예 | `261026`, `261008`, `260916` |
+| multi-pod(Postgres) 태그 | `pgYYMMDD` (예: `pg261026`) — `dev-axplatform-multi-pod` 배포용 |
 
 ---
 
