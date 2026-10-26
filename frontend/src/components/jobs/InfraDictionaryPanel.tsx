@@ -563,7 +563,7 @@ export function InfraDictionaryPanel({ onPick }: InfraDictionaryPanelProps) {
 
             {activeLevel === null && !typeKey ? (
               <p className="text-[11px] text-slate-500">
-                「인프라 형태」를 눌러 대상 인프라를 고르세요. 최종 값은 작업 내용에 삽입됩니다.
+                「인프라 형태」를 눌러 대상 인프라를 고르세요. 최종 값은 작업 종류 선택 시 에이전트 질의에 사용됩니다.
               </p>
             ) : null}
 

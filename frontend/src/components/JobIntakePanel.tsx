@@ -25,6 +25,20 @@ function buildManualMessageId(userid: string): string {
 const ACTION_BUTTON_BASE =
   "rounded-md px-3 py-2 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-50";
 
+const CHIP =
+  "rounded-md border border-slate-600 bg-slate-900 px-2 py-1 text-[11px] text-slate-200 hover:border-sky-500 hover:text-sky-200 disabled:cursor-not-allowed disabled:opacity-50";
+const CHIP_ACTIVE = "border-sky-500 text-sky-200";
+
+const JOB_KIND_OPTIONS = ["정보 조회", "상태 및 성능 조회", "수평 확장", "수직 확장"] as const;
+
+type JobKind = (typeof JOB_KIND_OPTIONS)[number];
+
+function buildHelperMessage(infraContext: string, jobKind: JobKind): string {
+  const infra = infraContext.trim();
+  const kindToken = `작업종류=${jobKind}`;
+  return infra ? `${infra} | ${kindToken}` : kindToken;
+}
+
 interface JobIntakePanelProps {
   user: AuthUser;
 }
@@ -32,8 +46,11 @@ interface JobIntakePanelProps {
 export function JobIntakePanel({ user }: JobIntakePanelProps) {
   const [jobTitle, setJobTitle] = useState("");
   const [jobContent, setJobContent] = useState("");
+  const [infraContext, setInfraContext] = useState("");
+  const [selectedJobKind, setSelectedJobKind] = useState<JobKind | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isHelping, setIsHelping] = useState(false);
   const [confirmSubmitOpen, setConfirmSubmitOpen] = useState(false);
   const [confirmResetOpen, setConfirmResetOpen] = useState(false);
 
@@ -70,6 +87,8 @@ export function JobIntakePanel({ user }: JobIntakePanelProps) {
       const data = (await response.json()) as JobIntakeResponse;
       setJobTitle("");
       setJobContent("");
+      setInfraContext("");
+      setSelectedJobKind(null);
       requestJobWorkflowRefresh();
       window.alert(`${data.srnum} 작업이 접수되었습니다.`);
     } catch (err) {
@@ -104,8 +123,59 @@ export function JobIntakePanel({ user }: JobIntakePanelProps) {
     setConfirmResetOpen(false);
     setJobTitle("");
     setJobContent("");
+    setInfraContext("");
+    setSelectedJobKind(null);
     setError(null);
   };
+
+  const handleInfraPick = (token: string) => {
+    setInfraContext((prev) => {
+      const trimmed = prev.trimEnd();
+      return trimmed ? `${trimmed}\n${token}` : token;
+    });
+  };
+
+  const handleJobKindSelect = async (jobKind: JobKind) => {
+    if (isSubmitting || isHelping) {
+      return;
+    }
+    setSelectedJobKind(jobKind);
+    setIsHelping(true);
+    setError(null);
+    const message = buildHelperMessage(infraContext, jobKind);
+    try {
+      const response = await fetch("/api/job-request-helper/invoke", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message }),
+      });
+      if (!response.ok) {
+        throw new Error(await parseError(response, "작업 요청서 작성에 실패했습니다."));
+      }
+      const payload = (await response.json()) as {
+        content?: string;
+        title?: string;
+        form?: string;
+      };
+      const title = (payload.title || "").trim();
+      const form = (payload.form || "").trim();
+      if (!title && !form) {
+        throw new Error("작업 요청서 결과가 비어 있습니다.");
+      }
+      if (title) {
+        setJobTitle(title.slice(0, 300));
+      }
+      if (form) {
+        setJobContent(form);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "작업 요청서 작성에 실패했습니다.");
+    } finally {
+      setIsHelping(false);
+    }
+  };
+
+  const busy = isSubmitting || isHelping;
 
   return (
     <>
@@ -132,29 +202,50 @@ export function JobIntakePanel({ user }: JobIntakePanelProps) {
             type="text"
             value={jobTitle}
             onChange={(event) => setJobTitle(event.target.value)}
-            disabled={isSubmitting}
+            disabled={busy}
             maxLength={300}
             placeholder="작업 제목을 입력하세요"
             className="rounded-md border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none focus:border-sky-500 disabled:opacity-50"
           />
         </label>
 
-        <InfraDictionaryPanel
-          onPick={(token) => {
-            setJobContent((prev) => {
-              const trimmed = prev.trimEnd();
-              return trimmed ? `${trimmed}\n${token}` : token;
-            });
-          }}
-        />
+        <InfraDictionaryPanel onPick={handleInfraPick} />
+
+        {infraContext.trim() ? (
+          <p className="whitespace-pre-wrap break-words rounded-md border border-slate-800 bg-slate-950/50 px-2 py-1.5 font-mono text-[11px] text-slate-400">
+            {infraContext}
+          </p>
+        ) : null}
+
+        <div className="w-full shrink-0">
+          <div className="mb-1">
+            <JobFieldLabel bullet="🗂️">작업 종류</JobFieldLabel>
+          </div>
+          <div className="flex flex-wrap gap-1.5 rounded-md border border-slate-700 bg-slate-950/70 p-2">
+            {JOB_KIND_OPTIONS.map((kind) => (
+              <button
+                key={kind}
+                type="button"
+                disabled={busy}
+                className={`${CHIP} ${selectedJobKind === kind ? CHIP_ACTIVE : ""}`}
+                onClick={() => void handleJobKindSelect(kind)}
+              >
+                {kind}
+              </button>
+            ))}
+            {isHelping ? (
+              <span className="self-center text-[11px] text-slate-500">요청서 작성 중…</span>
+            ) : null}
+          </div>
+        </div>
 
         <label className="flex min-h-0 flex-1 flex-col gap-1.5">
           <JobFieldLabel bullet="📝">작업 내용</JobFieldLabel>
           <textarea
             value={jobContent}
             onChange={(event) => setJobContent(event.target.value)}
-            disabled={isSubmitting}
-            placeholder="요청 내용을 입력하세요"
+            disabled={busy}
+            placeholder="작업 종류를 선택하면 요청서가 여기에 작성됩니다"
             className="min-h-[8rem] flex-1 resize-none rounded-md border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none focus:border-sky-500 disabled:opacity-50"
           />
         </label>
@@ -164,14 +255,14 @@ export function JobIntakePanel({ user }: JobIntakePanelProps) {
         <div className="flex w-full shrink-0 items-center gap-2">
           <button
             type="submit"
-            disabled={isSubmitting || !jobTitle.trim() || !jobContent.trim()}
+            disabled={busy || !jobTitle.trim() || !jobContent.trim()}
             className={`${ACTION_BUTTON_BASE} min-w-0 flex-1 bg-sky-600 text-white hover:bg-sky-500 disabled:bg-slate-700`}
           >
             {isSubmitting ? "접수 중..." : "작업 접수"}
           </button>
           <button
             type="button"
-            disabled={isSubmitting}
+            disabled={busy}
             onClick={handleReset}
             className={`${ACTION_BUTTON_BASE} shrink-0 border border-slate-600 bg-slate-800/80 text-slate-200 hover:bg-slate-700`}
           >

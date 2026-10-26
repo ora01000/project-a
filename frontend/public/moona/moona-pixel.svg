@@ -1,0 +1,63 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" shape-rendering="crispEdges">
+  <!-- 무너: 베이지 비엔나소시지형 문어(다리 4), 갈색 똥머리 패턴, 눈·입=검은 점 -->
+  <!-- body #E8D4A8 / outline #C4A574 / swirl #8B5A2B -->
+
+  <!-- 똥머리 (갈색 단일색)
+         **
+         ***
+       ******
+       cols x=5..10 on 16-wide canvas (centered on body) -->
+  <rect x="9" y="0" width="2" height="1" fill="#8B5A2B"/>
+  <rect x="8" y="1" width="3" height="1" fill="#8B5A2B"/>
+  <rect x="5" y="2" width="6" height="1" fill="#8B5A2B"/>
+
+  <!-- 몸통 outline -->
+  <rect x="5" y="3" width="6" height="1" fill="#C4A574"/>
+  <rect x="4" y="4" width="1" height="1" fill="#C4A574"/>
+  <rect x="11" y="4" width="1" height="1" fill="#C4A574"/>
+  <rect x="3" y="5" width="1" height="4" fill="#C4A574"/>
+  <rect x="12" y="5" width="1" height="4" fill="#C4A574"/>
+  <rect x="4" y="9" width="1" height="1" fill="#C4A574"/>
+  <rect x="11" y="9" width="1" height="1" fill="#C4A574"/>
+  <rect x="5" y="10" width="6" height="1" fill="#C4A574"/>
+
+  <!-- 몸통 fill -->
+  <rect x="5" y="4" width="6" height="6" fill="#E8D4A8"/>
+  <rect x="4" y="5" width="1" height="4" fill="#E8D4A8"/>
+  <rect x="11" y="5" width="1" height="4" fill="#E8D4A8"/>
+
+  <!-- 눈 (검은 점 2) -->
+  <rect x="5" y="6" width="2" height="2" fill="#1e293b"/>
+  <rect x="9" y="6" width="2" height="2" fill="#1e293b"/>
+
+  <!-- 입 (눈과 같은 검은 점) -->
+  <rect x="7" y="8" width="2" height="2" fill="#1e293b"/>
+
+  <!-- 다리 1 (좌) -->
+  <rect x="3" y="11" width="2" height="3" fill="#E8D4A8"/>
+  <rect x="3" y="11" width="2" height="1" fill="#C4A574"/>
+  <rect x="2" y="12" width="1" height="2" fill="#C4A574"/>
+  <rect x="5" y="12" width="1" height="2" fill="#C4A574"/>
+  <rect x="3" y="14" width="2" height="1" fill="#C4A574"/>
+
+  <!-- 다리 2 -->
+  <rect x="6" y="11" width="2" height="4" fill="#E8D4A8"/>
+  <rect x="6" y="11" width="2" height="1" fill="#C4A574"/>
+  <rect x="5" y="12" width="1" height="3" fill="#C4A574"/>
+  <rect x="8" y="12" width="1" height="3" fill="#C4A574"/>
+  <rect x="6" y="15" width="2" height="1" fill="#C4A574"/>
+
+  <!-- 다리 3 -->
+  <rect x="9" y="11" width="2" height="4" fill="#E8D4A8"/>
+  <rect x="9" y="11" width="2" height="1" fill="#C4A574"/>
+  <rect x="8" y="12" width="1" height="3" fill="#C4A574"/>
+  <rect x="11" y="12" width="1" height="3" fill="#C4A574"/>
+  <rect x="9" y="15" width="2" height="1" fill="#C4A574"/>
+
+  <!-- 다리 4 (우) -->
+  <rect x="12" y="11" width="2" height="3" fill="#E8D4A8"/>
+  <rect x="12" y="11" width="2" height="1" fill="#C4A574"/>
+  <rect x="11" y="12" width="1" height="2" fill="#C4A574"/>
+  <rect x="14" y="12" width="1" height="2" fill="#C4A574"/>
+  <rect x="12" y="14" width="2" height="1" fill="#C4A574"/>
+</svg>

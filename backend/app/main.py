@@ -56,6 +56,8 @@ from backend.app.infra_search_agent.api import router as infra_search_agent_rout
 from backend.app.infra_search_agent.agent import infra_search_agent_service
 from backend.app.job_decision_agent.api import router as job_decision_agent_router
 from backend.app.job_decision_agent.agent import job_decision_agent_service
+from backend.app.job_request_helper.api import router as job_request_helper_router
+from backend.app.job_request_helper.agent import job_request_helper_service
 from backend.app.config import (
     backend_role_runs_workers,
     load_auth_session_settings,
@@ -537,6 +539,28 @@ async def lifespan(app: FastAPI):
             "(use agentruntime local_agent_id=JOB_DECISION_AGENT)"
         )
 
+    # mock: in-process JOB_REQUEST_HELPER + PRIVATE_CLOUD MCP tools/skills
+    # http: external AXIT via agentruntime (local_agent_id=JOB_REQUEST_HELPER)
+    job_request_helper_service.bind_agent_runtime(app.state.agent_runtime, runtime_mode)
+    if runtime_mode != "http":
+        try:
+            await job_request_helper_service.initialize(
+                runtime_mode,
+                mcp_manager=agent_manager.mcp_manager,
+            )
+            app.state.job_request_helper = job_request_helper_service
+        except Exception:
+            logger.exception(
+                "JOB_REQUEST_HELPER initialization failed (agent remains available for lazy init)"
+            )
+            app.state.job_request_helper = job_request_helper_service
+    else:
+        app.state.job_request_helper = job_request_helper_service
+        logger.info(
+            "JOB_REQUEST_HELPER skipped in-process init in http mode "
+            "(use agentruntime local_agent_id=JOB_REQUEST_HELPER)"
+        )
+
     health_task = asyncio.create_task(
         _health_check_loop(
             agent_manager,
@@ -698,6 +722,7 @@ def create_app() -> FastAPI:
     app.include_router(infra_gap_analysis_router, prefix="/api")
     app.include_router(infra_search_agent_router, prefix="/api")
     app.include_router(job_decision_agent_router, prefix="/api")
+    app.include_router(job_request_helper_router, prefix="/api")
     app.include_router(workflow_router, prefix="/api")
     app.include_router(inventory_router, prefix="/api")
     app.include_router(inventory_api_debug_router, prefix="/api")

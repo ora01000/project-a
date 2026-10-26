@@ -10,6 +10,8 @@ import { createSessionId, isUuidSessionId } from "../utils/sessionId";
 import { AssistantMessageContent } from "./AssistantMessageContent";
 import { CollapsibleUserMessage } from "./CollapsibleUserMessage";
 import { JobIntakePanel } from "./JobIntakePanel";
+import { MoonaIcon } from "./MoonaIcon";
+import { MoonaTerminalPanel } from "./MoonaTerminalPanel";
 import { OpenAiBillingConfirmDialog } from "./OpenAiBillingConfirmDialog";
 import { ToolUsageList } from "./ToolUsageList";
 import { fetchLlmBillingStatus } from "../utils/llmBilling";
@@ -68,11 +70,17 @@ const COMPOSER_FORM_CHROME = 24 + 8;
 /** 대화창에 유지·렌더링할 최근 질의/응답 쌍 개수 */
 const VISIBLE_CHAT_RESPONSE_LIMIT = 10;
 
-type TerminalContentTab = "chat" | "job-intake";
+type TerminalContentTab = "chat" | "job-intake" | "moona";
 
-const CONTENT_TABS: { id: TerminalContentTab; label: string; icon: WorkflowIconName }[] = [
+const CONTENT_TABS: {
+  id: TerminalContentTab;
+  label: string;
+  icon?: WorkflowIconName;
+  moona?: boolean;
+}[] = [
   { id: "chat", label: "대화창", icon: "chat" },
   { id: "job-intake", label: "작업접수", icon: "upload" },
+  { id: "moona", label: "헤이 무너 코드(인프라)", moona: true },
 ];
 
 function keepRecentResponses(entries: IntegratedChatResponse[]): IntegratedChatResponse[] {
@@ -735,13 +743,21 @@ export function IntegratedChatPanel({
                   : "text-slate-400 hover:bg-slate-800/60 hover:text-slate-200"
               }`}
             >
-              <WorkflowIcon name={tab.icon} size="xs" />
+              {tab.moona ? (
+                <MoonaIcon size={14} animated={contentTab === "moona"} />
+              ) : tab.icon ? (
+                <WorkflowIcon name={tab.icon} size="xs" />
+              ) : null}
               {tab.label}
             </button>
           ))}
         </div>
 
-        <div className="flex min-h-0 flex-1 flex-col gap-1 px-3 pt-2">
+        <div
+          className={`flex min-h-0 flex-1 flex-col gap-1 px-3 pt-2 ${
+            contentTab === "moona" ? "pb-3" : ""
+          }`}
+        >
           {contentTab === "chat" ? (
             <>
               <div className="flex items-center justify-between gap-2">
@@ -803,6 +819,15 @@ export function IntegratedChatPanel({
                 </div>
               </div>
             </>
+          ) : contentTab === "moona" ? (
+            <MoonaTerminalPanel
+              user={user}
+              agentId={selectedAgent?.id ?? null}
+              agentName={selectedAgent?.name ?? null}
+              disabled={isDisabled}
+              sessionId={sessionId}
+              onCopyToNote={onCopyToNote}
+            />
           ) : (
             <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-md border border-slate-800 bg-slate-950/50 text-sm">
               <JobIntakePanel user={user} />
