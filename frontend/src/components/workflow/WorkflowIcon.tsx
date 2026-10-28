@@ -36,6 +36,7 @@ export const WORKFLOW_ICON_NAMES = [
   "notes",
   "notice",
   "owner",
+  "platform",
   "quickstart",
   "refresh",
   "result",

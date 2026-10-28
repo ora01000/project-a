@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from "react";
 
 import type { AgentRuntimeFormValues, AgentRuntimeRecord } from "../../types/agentruntime";
 import {
+  AGENTRUNTIME_IS_PROD_OPTIONS,
   AGENTRUNTIME_TYPE_OPTIONS,
   agentRuntimeFormFromRecord,
   emptyAgentRuntimeForm,
@@ -107,6 +108,22 @@ export function AgentConnectionFormModal({
                   </select>
                 </label>
               ) : null}
+              <label className="block text-sm text-slate-300">
+                <span className="mb-1 block">운영 플랫폼 여부</span>
+                <select
+                  value={values.is_prod}
+                  onChange={(event) => updateField("is_prod", Number(event.target.value))}
+                  disabled={isSaving}
+                  required
+                  className="w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 outline-none focus:border-sky-500"
+                >
+                  {AGENTRUNTIME_IS_PROD_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label} ({option.value})
+                    </option>
+                  ))}
+                </select>
+              </label>
               <label className="block text-sm text-slate-300">
                 <span className="mb-1 block">에이전트 이름</span>
                 <input

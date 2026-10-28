@@ -12,5 +12,8 @@ router = APIRouter(tags=["infra-dictionary"])
 
 @router.get("/infra-dictionary")
 async def get_infra_dictionary(request: Request) -> dict:
-    get_request_auth_user(request)
-    return await read_infra_dictionary()
+    user = get_request_auth_user(request)
+    return await read_infra_dictionary(
+        database_path=request.app.state.database_path,
+        current_prod_mode=user.current_prod_mode,
+    )

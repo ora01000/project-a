@@ -37,6 +37,7 @@ from backend.app.db.shape_detail import (
     list_shape_vsphere_clusters,
     list_shape_vsphere_hosts,
 )
+from backend.app.db.prod_mode import INFRA_PROD_DEV, infra_prod_label
 from backend.app.db.roles import is_admin_role
 from backend.app.middleware.session_auth import get_request_auth_user
 from backend.app.services.k8s_collector import (
@@ -61,6 +62,8 @@ class K8sClusterItem(BaseModel):
     cron_expr: str = DEFAULT_CRON_EXPR
     infra_type: str = DEFAULT_INFRA_TYPE
     display_name: str = ""
+    is_prod: int = INFRA_PROD_DEV
+    is_prod_label: str = "개발"
     vsphere_url: str | None = None
     vsphere_id: str | None = None
     vsphere_has_password: bool = False
@@ -73,6 +76,7 @@ class K8sClusterSaveItem(BaseModel):
     cron_expr: str = DEFAULT_CRON_EXPR
     infra_type: str = DEFAULT_INFRA_TYPE
     display_name: str = ""
+    is_prod: int | None = Field(default=None, ge=1, le=3)
     vsphere_url: str | None = None
     vsphere_id: str | None = None
     vsphere_pw: str | None = None
@@ -96,6 +100,7 @@ class K8sShapeClusterItem(BaseModel):
     last_update: str | None = None
     infra_type: str = DEFAULT_INFRA_TYPE
     display_name: str = ""
+    is_prod: int = INFRA_PROD_DEV
 
 
 class K8sShapeCountsModel(BaseModel):
@@ -177,6 +182,8 @@ def _to_item(record) -> K8sClusterItem:
         cron_expr=record.cron_expr or DEFAULT_CRON_EXPR,
         infra_type=record.infra_type or DEFAULT_INFRA_TYPE,
         display_name=record.display_name or "",
+        is_prod=record.is_prod,
+        is_prod_label=infra_prod_label(record.is_prod),
         vsphere_url=getattr(record, "vsphere_url", None),
         vsphere_id=getattr(record, "vsphere_id", None),
         vsphere_has_password=bool(getattr(record, "vsphere_has_password", False)),
@@ -312,10 +319,11 @@ def _shape_counts_model(counts) -> K8sShapeCountsModel:
 @router.get("/k8s-infra/shape/clusters", response_model=list[K8sShapeClusterItem])
 async def list_shape_clusters(request: Request) -> list[K8sShapeClusterItem]:
     """Authenticated users: cluster labels for infra shape analysis."""
-    _require_user(request)
+    viewer = get_request_auth_user(request)
     records = list_infra_clusters(
         request.app.state.database_path,
         infra_types=tuple(sorted(SHAPEABLE_INFRA_TYPES)),
+        current_prod_mode=viewer.current_prod_mode,
     )
     return [
         K8sShapeClusterItem(
@@ -324,6 +332,7 @@ async def list_shape_clusters(request: Request) -> list[K8sShapeClusterItem]:
             last_update=record.last_update,
             infra_type=record.infra_type or DEFAULT_INFRA_TYPE,
             display_name=record.display_name or "",
+            is_prod=record.is_prod,
         )
         for record in records
     ]

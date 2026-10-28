@@ -68,6 +68,7 @@ function renderActiveTab(
           maskIps={shouldMaskIps(currentUser.role)}
           canRunGapAnalysis={canRunGapAnalysis(currentUser.role)}
           onCopyToNote={onCopyToNote}
+          prodMode={currentUser.current_prod_mode === 2 ? 2 : 1}
         />
       );
     case "fossflow":

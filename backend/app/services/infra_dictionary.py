@@ -240,11 +240,55 @@ async def _hash_as_lists(redis, key: str) -> dict[str, list[str]]:
     return result
 
 
-async def read_infra_dictionary() -> dict[str, Any]:
-    """Read dictionary maps from Redis for the job-intake helper API."""
+def _infra_cluster_label(cluster_name: str, display_name: str) -> str:
+    name = (cluster_name or "").strip()
+    display = (display_name or "").strip()
+    return f"{name} ({display})" if display else name
+
+
+def filter_infra_dictionary_for_mode(
+    dictionary: dict[str, Any],
+    database_path: str | Path,
+    current_prod_mode: int,
+) -> dict[str, Any]:
+    """Keep only clusters visible for the DEV/PROD mode (Redis payload itself is global)."""
+    records = list_infra_clusters(database_path, current_prod_mode=current_prod_mode)
+    allowed_names = {record.cluster_name.strip() for record in records}
+    allowed_labels = {
+        _infra_cluster_label(record.cluster_name, record.display_name) for record in records
+    }
+    filtered: dict[str, Any] = {}
+    for key, value in dictionary.items():
+        if key == "infra_type" and isinstance(value, dict):
+            filtered[key] = {
+                infra_type: [label for label in labels if label in allowed_labels]
+                for infra_type, labels in value.items()
+            }
+        elif key.endswith(("_nodes", "_namespaces", "_deployments", "_vms")) and isinstance(
+            value, dict
+        ):
+            filtered[key] = {name: items for name, items in value.items() if name in allowed_names}
+        else:
+            filtered[key] = value
+    infra_type_map = filtered.get("infra_type")
+    if isinstance(infra_type_map, dict):
+        filtered["infra_type"] = {k: v for k, v in infra_type_map.items() if v}
+    return filtered
+
+
+async def read_infra_dictionary(
+    *,
+    database_path: str | Path | None = None,
+    current_prod_mode: int | None = None,
+) -> dict[str, Any]:
+    """Read dictionary maps from Redis for the job-intake helper API.
+
+    When ``database_path`` and ``current_prod_mode`` are given, clusters not visible
+    for that DEV/PROD mode are filtered out.
+    """
     redis = get_redis()
     loaded_at = await redis.get(REDIS_KEY_LOADED_AT)
-    return {
+    dictionary: dict[str, Any] = {
         "loaded_at": loaded_at or "",
         "infra_type": await _hash_as_lists(redis, REDIS_KEY_INFRA_TYPE),
         "k8s_cluster_nodes": await _hash_as_lists(redis, REDIS_KEY_K8S_NODES),
@@ -258,3 +302,11 @@ async def read_infra_dictionary() -> dict[str, Any]:
         "kubevirt_cluster_vms": await _hash_as_lists(redis, REDIS_KEY_KUBEVIRT_VMS),
         "vsphere_cluster_vms": await _hash_as_lists(redis, REDIS_KEY_VSPHERE_VMS),
     }
+    if database_path is None or current_prod_mode is None:
+        return dictionary
+    return await asyncio.to_thread(
+        filter_infra_dictionary_for_mode,
+        dictionary,
+        database_path,
+        current_prod_mode,
+    )

@@ -871,6 +871,7 @@ async def _invoke_work_node(
     node: WorkNodeRecord,
     message: str,
     workflow_uuid: str = "",
+    is_prod: int | None = None,
 ) -> str:
     agent_id = _resolve_invoke_agent_id(database_path, node.target_agent)
     invoke_coro = agent_runtime.invoke(
@@ -879,6 +880,7 @@ async def _invoke_work_node(
             message=message,
             session_id=f"workflow-{node.uuid}",
             agentruntime_idx=int(node.target_agent),
+            is_prod=is_prod,
         )
     )
     try:
@@ -1472,6 +1474,11 @@ async def _execute_from_index(
     visited_fail: set[str] = set()
     history_idx = int(workflow_history_idx or 0)
     executor_idx = _executor_user_idx(requester)
+    from backend.app.db.prod_mode import PROD_MODE_DEV, normalize_prod_mode
+
+    requester_prod_mode = normalize_prod_mode(
+        getattr(requester, "current_prod_mode", PROD_MODE_DEV) if requester else PROD_MODE_DEV
+    )
 
     if mark_hitl_approved:
         steps.append(
@@ -1597,6 +1604,7 @@ async def _execute_from_index(
                 node=node,
                 message=message,
                 workflow_uuid=workflow.uuid,
+                is_prod=requester_prod_mode,
             )
             _assert_structured_work_success(node.script_type, content)
             display_content = _format_structured_work_result(node.script_type, content)
@@ -1722,6 +1730,7 @@ async def _execute_from_index(
                         node=fail_node,
                         message=fail_message,
                         workflow_uuid=workflow.uuid,
+                        is_prod=requester_prod_mode,
                     )
                     _assert_structured_work_success(fail_node.script_type, fail_content)
                     fail_display = _format_structured_work_result(

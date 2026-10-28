@@ -9,6 +9,7 @@ from pathlib import Path
 
 from backend.app.agents.base import AgentDefinition
 from backend.app.db.database import get_connection
+from backend.app.db.prod_mode import PROD_MODE_DEV, PROD_MODE_PROD, normalize_prod_mode
 from backend.app.timezone import DISPLAY_TIMEZONE, now_display_datetime
 
 AGENTRUNTIME_TYPE_MOCKUP = 0
@@ -37,7 +38,7 @@ class MockAgentRuntimePreset:
 
 _AGENTRUNTIME_SELECT = """
     SELECT idx, type, agent_name, agent_id, local_agent_id,
-           description, registered_date, service_id, talkable, is_orchestrator
+           description, registered_date, service_id, talkable, is_orchestrator, is_prod
     FROM agentruntime
 """
 
@@ -54,6 +55,26 @@ class StoredAgentRuntime:
     service_id: str
     talkable: bool
     is_orchestrator: bool
+    is_prod: int = PROD_MODE_DEV
+
+
+def ensure_agentruntime_is_prod_column(connection) -> None:
+    """Add is_prod and replace unique(type, agent_id) with unique(type, agent_id, is_prod)."""
+    connection.execute(
+        """
+        ALTER TABLE agentruntime
+        ADD COLUMN IF NOT EXISTS is_prod INTEGER NOT NULL DEFAULT 1
+        """
+    )
+    connection.execute(
+        "ALTER TABLE agentruntime DROP CONSTRAINT IF EXISTS agentruntime_type_agent_id_key"
+    )
+    connection.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS ux_agentruntime_type_agent_id_is_prod
+        ON agentruntime (type, agent_id, is_prod)
+        """
+    )
 
 
 def default_talkable_for_local_agent_id(local_agent_id: str) -> bool:
@@ -68,10 +89,15 @@ def build_talkable_by_catalog_agent_id(
     database_path: str | Path,
     *,
     runtime_mode: str | None = None,
+    is_prod: int | None = None,
 ) -> dict[str, bool]:
     return {
         catalog_agent_id(record): record.talkable
-        for record in list_agentruntime_records(database_path, runtime_mode=runtime_mode)
+        for record in list_agentruntime_records(
+            database_path,
+            runtime_mode=runtime_mode,
+            is_prod=is_prod,
+        )
     }
 
 
@@ -156,35 +182,102 @@ def resolve_agentruntime_for_invoke(
     catalog_agent_id: str,
     agentruntime_idx: int | None = None,
     runtime_mode: str | None = None,
+    is_prod: int | None = None,
 ) -> StoredAgentRuntime | None:
-    """Resolve agentruntime for AXIT invoke using catalog id or explicit idx."""
+    """Resolve agentruntime for AXIT invoke using catalog id or explicit idx.
+
+    When ``is_prod`` is set, an explicit idx that belongs to the other platform is
+    rematched by catalog id for the requested mode (or rejected if none exists).
+    """
     from backend.app.config import resolve_agent_runtime_mode
+    from backend.app.db.prod_mode import agentruntime_visible_for_mode
     from backend.app.services.agent_runtime_client import normalize_runtime_mode
 
     mode = normalize_runtime_mode(runtime_mode or resolve_agent_runtime_mode())
+    requested_catalog_id = catalog_agent_id.strip()
 
     if agentruntime_idx is not None:
         record = get_agentruntime_by_idx(database_path, agentruntime_idx)
         if record is not None:
-            return record
+            if is_prod is None or agentruntime_visible_for_mode(
+                is_prod=record.is_prod,
+                current_prod_mode=is_prod,
+            ):
+                return record
+            rematch_keys = [
+                record.local_agent_id.strip() or record.agent_id.strip(),
+                record.local_agent_id.strip(),
+                record.agent_id.strip(),
+                requested_catalog_id,
+            ]
+            seen: set[str] = set()
+            for key in rematch_keys:
+                normalized = key.strip()
+                if not normalized or normalized in seen:
+                    continue
+                seen.add(normalized)
+                rematched = get_agentruntime_by_local_agent_id(
+                    database_path,
+                    normalized,
+                    runtime_mode=mode,
+                    is_prod=is_prod,
+                )
+                if rematched is not None:
+                    return rematched
+                rematched = get_agentruntime_by_agent_id(
+                    database_path,
+                    normalized,
+                    runtime_mode=mode,
+                    is_prod=is_prod,
+                )
+                if rematched is not None:
+                    return rematched
+            return None
 
-    normalized_catalog_id = catalog_agent_id.strip()
-    if not normalized_catalog_id:
+    if not requested_catalog_id:
         return None
 
     record = get_agentruntime_by_local_agent_id(
         database_path,
-        normalized_catalog_id,
+        requested_catalog_id,
         runtime_mode=mode,
+        is_prod=is_prod,
     )
     if record is not None:
         return record
 
     return get_agentruntime_by_agent_id(
         database_path,
-        normalized_catalog_id,
+        requested_catalog_id,
         runtime_mode=mode,
+        is_prod=is_prod,
     )
+
+
+def agent_registered_for_prod_mode(
+    database_path: str | Path,
+    agent_id: str,
+    *,
+    runtime_mode: str | None = None,
+    is_prod: int,
+) -> bool:
+    """True when ``agent_id`` has an agentruntime row for the given platform mode."""
+    return (
+        resolve_agentruntime_for_invoke(
+            database_path,
+            catalog_agent_id=agent_id,
+            runtime_mode=runtime_mode,
+            is_prod=is_prod,
+        )
+        is not None
+    )
+
+
+def _row_is_prod(row) -> int:
+    try:
+        return normalize_prod_mode(row["is_prod"])
+    except (KeyError, IndexError, TypeError, ValueError):
+        return PROD_MODE_DEV
 
 
 def _row_to_stored_agentruntime(row) -> StoredAgentRuntime:
@@ -200,6 +293,7 @@ def _row_to_stored_agentruntime(row) -> StoredAgentRuntime:
         service_id=str(row["service_id"]),
         talkable=bool(row["talkable"]),
         is_orchestrator=bool(row["is_orchestrator"]),
+        is_prod=_row_is_prod(row),
     )
 
 
@@ -232,6 +326,7 @@ def mockup_row_from_preset(
         "service_id": resolve_axit_service_id(),
         "talkable": default_talkable_for_local_agent_id(local_agent_id),
         "is_orchestrator": default_is_orchestrator_for_local_agent_id(local_agent_id),
+        "is_prod": PROD_MODE_DEV,
     }
 
 
@@ -252,6 +347,7 @@ def mockup_row_from_definition(
         "service_id": resolve_axit_service_id(),
         "talkable": default_talkable_for_local_agent_id(definition.agent_id),
         "is_orchestrator": default_is_orchestrator_for_local_agent_id(definition.agent_id),
+        "is_prod": PROD_MODE_DEV,
     }
 
 
@@ -259,22 +355,35 @@ def list_agentruntime_records(
     database_path: str | Path,
     *,
     runtime_mode: str | None = None,
+    is_prod: int | None = None,
 ) -> list[StoredAgentRuntime]:
     active_type = resolve_active_agentruntime_type(runtime_mode)
     with get_connection(database_path) as connection:
-        rows = connection.execute(
-            f"""
-            {_AGENTRUNTIME_SELECT}
-            WHERE type = ?
-            ORDER BY idx
-            """,
-            (active_type,),
-        ).fetchall()
+        ensure_agentruntime_is_prod_column(connection)
+        if is_prod is None:
+            rows = connection.execute(
+                f"""
+                {_AGENTRUNTIME_SELECT}
+                WHERE type = ?
+                ORDER BY idx
+                """,
+                (active_type,),
+            ).fetchall()
+        else:
+            rows = connection.execute(
+                f"""
+                {_AGENTRUNTIME_SELECT}
+                WHERE type = ? AND is_prod = ?
+                ORDER BY idx
+                """,
+                (active_type, normalize_prod_mode(is_prod)),
+            ).fetchall()
     return [_row_to_stored_agentruntime(row) for row in rows]
 
 
 def get_agentruntime_by_idx(database_path: str | Path, idx: int) -> StoredAgentRuntime | None:
     with get_connection(database_path) as connection:
+        ensure_agentruntime_is_prod_column(connection)
         row = connection.execute(
             f"""
             {_AGENTRUNTIME_SELECT}
@@ -287,24 +396,59 @@ def get_agentruntime_by_idx(database_path: str | Path, idx: int) -> StoredAgentR
     return _row_to_stored_agentruntime(row)
 
 
+def _get_agentruntime_by_column(
+    database_path: str | Path,
+    *,
+    column: str,
+    value: str,
+    runtime_mode: str | None,
+    is_prod: int | None,
+) -> StoredAgentRuntime | None:
+    """Single-row lookup; when is_prod is None and several rows match, prefer DEV (1)."""
+    if column not in {"agent_id", "local_agent_id"}:
+        raise ValueError(f"unsupported agentruntime lookup column: {column}")
+    active_type = resolve_active_agentruntime_type(runtime_mode)
+    with get_connection(database_path) as connection:
+        ensure_agentruntime_is_prod_column(connection)
+        if is_prod is None:
+            row = connection.execute(
+                f"""
+                {_AGENTRUNTIME_SELECT}
+                WHERE {column} = ? AND type = ?
+                ORDER BY is_prod, idx
+                LIMIT 1
+                """,
+                (value, active_type),
+            ).fetchone()
+        else:
+            row = connection.execute(
+                f"""
+                {_AGENTRUNTIME_SELECT}
+                WHERE {column} = ? AND type = ? AND is_prod = ?
+                ORDER BY idx
+                LIMIT 1
+                """,
+                (value, active_type, normalize_prod_mode(is_prod)),
+            ).fetchone()
+    if row is None:
+        return None
+    return _row_to_stored_agentruntime(row)
+
+
 def get_agentruntime_by_agent_id(
     database_path: str | Path,
     agent_id: str,
     *,
     runtime_mode: str | None = None,
+    is_prod: int | None = None,
 ) -> StoredAgentRuntime | None:
-    active_type = resolve_active_agentruntime_type(runtime_mode)
-    with get_connection(database_path) as connection:
-        row = connection.execute(
-            f"""
-            {_AGENTRUNTIME_SELECT}
-            WHERE agent_id = ? AND type = ?
-            """,
-            (agent_id.strip(), active_type),
-        ).fetchone()
-    if row is None:
-        return None
-    return _row_to_stored_agentruntime(row)
+    return _get_agentruntime_by_column(
+        database_path,
+        column="agent_id",
+        value=agent_id.strip(),
+        runtime_mode=runtime_mode,
+        is_prod=is_prod,
+    )
 
 
 def get_agentruntime_by_local_agent_id(
@@ -312,20 +456,15 @@ def get_agentruntime_by_local_agent_id(
     local_agent_id: str,
     *,
     runtime_mode: str | None = None,
+    is_prod: int | None = None,
 ) -> StoredAgentRuntime | None:
-    active_type = resolve_active_agentruntime_type(runtime_mode)
-    normalized = local_agent_id.strip()
-    with get_connection(database_path) as connection:
-        row = connection.execute(
-            f"""
-            {_AGENTRUNTIME_SELECT}
-            WHERE local_agent_id = ? AND type = ?
-            """,
-            (normalized, active_type),
-        ).fetchone()
-    if row is None:
-        return None
-    return _row_to_stored_agentruntime(row)
+    return _get_agentruntime_by_column(
+        database_path,
+        column="local_agent_id",
+        value=local_agent_id.strip(),
+        runtime_mode=runtime_mode,
+        is_prod=is_prod,
+    )
 
 
 def resolve_local_agent_id(
@@ -351,18 +490,20 @@ def insert_agentruntime_records(
 ) -> int:
     if not rows:
         return 0
+    ensure_agentruntime_is_prod_column(connection)
+    rows_with_prod = [{**row, "is_prod": row.get("is_prod", PROD_MODE_DEV)} for row in rows]
     connection.executemany(
         """
         INSERT INTO agentruntime (
             type, agent_name, agent_id, local_agent_id, description,
-            registered_date, service_id, talkable, is_orchestrator
+            registered_date, service_id, talkable, is_orchestrator, is_prod
         )
         VALUES (
             :type, :agent_name, :agent_id, :local_agent_id, :description,
-            :registered_date, :service_id, :talkable, :is_orchestrator
+            :registered_date, :service_id, :talkable, :is_orchestrator, :is_prod
         )
         """,
-        rows,
+        rows_with_prod,
     )
     return len(rows)
 
@@ -379,6 +520,7 @@ def create_agentruntime_record(
     registered_date: str | None = None,
     talkable: bool | None = None,
     is_orchestrator: bool | None = None,
+    is_prod: int = PROD_MODE_DEV,
 ) -> StoredAgentRuntime:
     registered = normalize_registered_datetime(
         registered_date or format_registered_datetime(),
@@ -394,13 +536,14 @@ def create_agentruntime_record(
         else is_orchestrator
     )
     with get_connection(database_path) as connection:
+        ensure_agentruntime_is_prod_column(connection)
         cursor = connection.execute(
             """
             INSERT INTO agentruntime (
                 type, agent_name, agent_id, local_agent_id, description,
-                registered_date, service_id, talkable, is_orchestrator
+                registered_date, service_id, talkable, is_orchestrator, is_prod
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 runtime_type,
@@ -412,6 +555,7 @@ def create_agentruntime_record(
                 service_id.strip(),
                 1 if resolved_talkable else 0,
                 1 if resolved_is_orchestrator else 0,
+                normalize_prod_mode(is_prod),
             ),
         )
         connection.commit()
@@ -434,17 +578,20 @@ def update_agentruntime_record(
     registered_date: str,
     talkable: bool,
     is_orchestrator: bool,
+    is_prod: int | None = None,
 ) -> StoredAgentRuntime | None:
     existing = get_agentruntime_by_idx(database_path, idx)
     if existing is None:
         return None
+    next_is_prod = existing.is_prod if is_prod is None else normalize_prod_mode(is_prod)
     with get_connection(database_path) as connection:
+        ensure_agentruntime_is_prod_column(connection)
         connection.execute(
             """
             UPDATE agentruntime
             SET agent_name = ?, agent_id = ?, local_agent_id = ?,
                 description = ?, registered_date = ?, service_id = ?,
-                talkable = ?, is_orchestrator = ?
+                talkable = ?, is_orchestrator = ?, is_prod = ?
             WHERE idx = ?
             """,
             (
@@ -456,6 +603,7 @@ def update_agentruntime_record(
                 service_id.strip(),
                 1 if talkable else 0,
                 1 if is_orchestrator else 0,
+                next_is_prod,
                 idx,
             ),
         )
@@ -465,6 +613,7 @@ def update_agentruntime_record(
 
 def delete_agentruntime_record(database_path: str | Path, idx: int) -> bool:
     with get_connection(database_path) as connection:
+        ensure_agentruntime_is_prod_column(connection)
         cursor = connection.execute("DELETE FROM agentruntime WHERE idx = ?", (idx,))
         connection.commit()
         return cursor.rowcount > 0
@@ -598,3 +747,41 @@ def ensure_mock_private_cloud_agentruntime(database_path: str | Path) -> StoredA
         talkable=True,
         is_orchestrator=False,
     )
+
+
+def ensure_mock_prod_agentruntime_duplicates(database_path: str | Path) -> int:
+    """Insert PROD (is_prod=2) copies of mock DEV rows when missing. Returns inserted count."""
+    inserted = 0
+    for record in list_agentruntime_records(
+        database_path,
+        runtime_mode="mock",
+        is_prod=PROD_MODE_DEV,
+    ):
+        if record.type != AGENTRUNTIME_TYPE_MOCKUP:
+            continue
+        with get_connection(database_path) as connection:
+            ensure_agentruntime_is_prod_column(connection)
+            existing = connection.execute(
+                """
+                SELECT idx FROM agentruntime
+                WHERE type = ? AND agent_id = ? AND is_prod = ?
+                """,
+                (AGENTRUNTIME_TYPE_MOCKUP, record.agent_id, PROD_MODE_PROD),
+            ).fetchone()
+        if existing is not None:
+            continue
+        create_agentruntime_record(
+            database_path,
+            runtime_type=AGENTRUNTIME_TYPE_MOCKUP,
+            agent_name=record.agent_name,
+            agent_id=record.agent_id,
+            local_agent_id=record.local_agent_id,
+            description=record.description,
+            service_id=record.service_id,
+            registered_date=record.registered_date,
+            talkable=record.talkable,
+            is_orchestrator=record.is_orchestrator,
+            is_prod=PROD_MODE_PROD,
+        )
+        inserted += 1
+    return inserted

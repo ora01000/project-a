@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import APIRouter, Body, HTTPException, Request
+from fastapi import APIRouter, Body, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from backend.app.db.agentruntime import (
@@ -19,7 +19,9 @@ from backend.app.db.agentruntime import (
     update_agentruntime_record,
 )
 from backend.app.db.engine import is_integrity_error
+from backend.app.db.prod_mode import PROD_MODE_DEV, normalize_prod_mode, prod_mode_label
 from backend.app.db.roles import is_admin_role
+from backend.app.middleware.session_auth import get_request_auth_user
 
 router = APIRouter(tags=["agentruntime"])
 
@@ -35,6 +37,8 @@ class AgentRuntimeRecordResponse(BaseModel):
     service_id: str
     talkable: bool
     is_orchestrator: bool
+    is_prod: int = PROD_MODE_DEV
+    is_prod_label: str = "개발"
 
     @classmethod
     def from_record(cls, record: StoredAgentRuntime) -> "AgentRuntimeRecordResponse":
@@ -49,6 +53,8 @@ class AgentRuntimeRecordResponse(BaseModel):
             service_id=record.service_id,
             talkable=record.talkable,
             is_orchestrator=record.is_orchestrator,
+            is_prod=record.is_prod,
+            is_prod_label=prod_mode_label(record.is_prod),
         )
 
 
@@ -62,6 +68,7 @@ class AgentRuntimeWriteBody(BaseModel):
     service_id: str = Field(min_length=1, max_length=20)
     talkable: bool = True
     is_orchestrator: bool = False
+    is_prod: int = Field(default=PROD_MODE_DEV, ge=1, le=2)
     viewer_role: int
 
 
@@ -93,12 +100,29 @@ async def _sync_agent_catalog(request: Request) -> None:
 
 
 @router.get("/agentruntime", response_model=list[AgentRuntimeRecordResponse])
-async def list_agentruntime(request: Request) -> list[AgentRuntimeRecordResponse]:
+async def list_agentruntime(
+    request: Request,
+    for_current_mode: bool = Query(
+        default=False,
+        description="True면 로그인 사용자의 현재 관리 플랫폼(개발/운영) 에이전트만 반환",
+    ),
+    is_prod: int | None = Query(default=None, ge=1, le=2),
+) -> list[AgentRuntimeRecordResponse]:
     database_path = request.app.state.database_path
     runtime_mode = _active_runtime_mode(request)
+    mode_filter: int | None = None
+    if for_current_mode:
+        auth_user = get_request_auth_user(request)
+        mode_filter = normalize_prod_mode(getattr(auth_user, "current_prod_mode", PROD_MODE_DEV))
+    elif is_prod is not None:
+        mode_filter = normalize_prod_mode(is_prod)
     return [
         AgentRuntimeRecordResponse.from_record(record)
-        for record in list_agentruntime_records(database_path, runtime_mode=runtime_mode)
+        for record in list_agentruntime_records(
+            database_path,
+            runtime_mode=runtime_mode,
+            is_prod=mode_filter,
+        )
     ]
 
 
@@ -122,12 +146,13 @@ async def create_agentruntime(
             registered_date=payload.registered_date or None,
             talkable=payload.talkable,
             is_orchestrator=payload.is_orchestrator,
+            is_prod=payload.is_prod,
         )
     except Exception as exc:
         if is_integrity_error(exc):
             raise HTTPException(
                 status_code=409,
-                detail="동일한 type·agent_id 조합이 이미 존재합니다.",
+                detail="동일한 type·agent_id·운영 플랫폼 여부 조합이 이미 존재합니다.",
             ) from exc
         raise
     await _sync_agent_catalog(request)
@@ -162,12 +187,13 @@ async def update_agentruntime(
             registered_date=payload.registered_date or existing.registered_date,
             talkable=payload.talkable,
             is_orchestrator=payload.is_orchestrator,
+            is_prod=payload.is_prod,
         )
     except Exception as exc:
         if is_integrity_error(exc):
             raise HTTPException(
                 status_code=409,
-                detail="동일한 type·agent_id 조합이 이미 존재합니다.",
+                detail="동일한 type·agent_id·운영 플랫폼 여부 조합이 이미 존재합니다.",
             ) from exc
         raise
     if record is None:

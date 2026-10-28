@@ -96,6 +96,8 @@ class AgentInvokeRequest:
     trace_id: str | None = None
     control_plane_base_url: str | None = None
     agentruntime_idx: int | None = None
+    # DEV/PROD agentruntime row selector (1=개발, 2=운영). None → prefer DEV.
+    is_prod: int | None = None
 
 
 @dataclass(frozen=True)
@@ -224,6 +226,7 @@ class MockAgentRuntimeClient:
             self._database_path,
             axit_agent_id,
             runtime_mode="mock",
+            is_prod=request.is_prod,
         )
         if runtime_record is None:
             return await self._local.invoke(request)
@@ -326,6 +329,7 @@ class ExternalAxitRuntimeClient:
             catalog_agent_id=request.agent_id,
             agentruntime_idx=request.agentruntime_idx,
             runtime_mode="http",
+            is_prod=request.is_prod,
         )
         if runtime_record is None:
             raise RuntimeError(f"No agentruntime record found for agent_id={request.agent_id!r}")

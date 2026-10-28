@@ -28,6 +28,11 @@ from backend.app.db.introspection import (
     list_user_tables,
     pk_autoincrement_sql,
 )
+from backend.app.db.prod_mode import (
+    INFRA_PROD_DEV,
+    infra_cluster_visible_for_mode,
+    normalize_infra_prod_flag,
+)
 from backend.app.timezone import format_display_datetime, now_display_datetime
 
 logger = logging.getLogger(__name__)
@@ -154,6 +159,7 @@ class K8sClusterRecord:
     cron_expr: str = "0 23 * * 6"
     infra_type: str = "k8s"
     display_name: str = ""
+    is_prod: int = INFRA_PROD_DEV
     vsphere_url: str | None = None
     vsphere_id: str | None = None
     vsphere_has_password: bool = False
@@ -173,7 +179,7 @@ _CRON_EXPR_MAX_LEN = 20
 _INFRA_TYPE_MAX_LEN = 20
 _DISPLAY_NAME_MAX_LEN = 100
 _INFRA_CLUSTER_SELECT = (
-    "idx, cluster_name, display_name, last_update, cron, cron_expr, infra_type"
+    "idx, cluster_name, display_name, last_update, cron, cron_expr, infra_type, is_prod"
 )
 _INFRA_TYPE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,19}$")
 _VSPHERE_URL_MAX_LEN = 500
@@ -533,6 +539,15 @@ def ensure_vsphere_infra_info_table(connection) -> None:
     )
 
 
+def ensure_infra_cluster_is_prod_column(connection) -> None:
+    connection.execute(
+        """
+        ALTER TABLE infra_cluster
+        ADD COLUMN IF NOT EXISTS is_prod INTEGER NOT NULL DEFAULT 1
+        """
+    )
+
+
 def ensure_infra_cluster_display_name_column(connection) -> None:
     connection.execute(
         """
@@ -540,6 +555,8 @@ def ensure_infra_cluster_display_name_column(connection) -> None:
         ADD COLUMN IF NOT EXISTS display_name VARCHAR(100) NOT NULL DEFAULT ''
         """
     )
+    # _INFRA_CLUSTER_SELECT includes is_prod; every caller ensures display_name first.
+    ensure_infra_cluster_is_prod_column(connection)
 
 
 def _load_vsphere_info_map(
@@ -671,6 +688,7 @@ def _cluster_record_from_row(row: Any) -> K8sClusterRecord:
     cron_expr_raw = row["cron_expr"] if "cron_expr" in keys else DEFAULT_CRON_EXPR
     infra_type_raw = row["infra_type"] if "infra_type" in keys else DEFAULT_INFRA_TYPE
     display_name_raw = row["display_name"] if "display_name" in keys else ""
+    is_prod_raw = row["is_prod"] if "is_prod" in keys else INFRA_PROD_DEV
     return K8sClusterRecord(
         idx=int(row["idx"]),
         cluster_name=str(row["cluster_name"]),
@@ -680,6 +698,7 @@ def _cluster_record_from_row(row: Any) -> K8sClusterRecord:
         infra_type=str(infra_type_raw or DEFAULT_INFRA_TYPE)[:_INFRA_TYPE_MAX_LEN]
         or DEFAULT_INFRA_TYPE,
         display_name=str(display_name_raw or "").strip()[:_DISPLAY_NAME_MAX_LEN],
+        is_prod=normalize_infra_prod_flag(is_prod_raw),
     )
 
 
@@ -1053,8 +1072,13 @@ def list_infra_clusters(
     database_path: str | Path,
     *,
     infra_types: tuple[str, ...] | None = None,
+    current_prod_mode: int | None = None,
 ) -> list[K8sClusterRecord]:
-    """List infra_cluster rows for the given types (default: all known types)."""
+    """List infra_cluster rows for the given types (default: all known types).
+
+    ``current_prod_mode`` (1=DEV, 2=PROD) filters via ``infra_cluster_visible_for_mode``
+    (PROD shows all; DEV shows DEV/BOTH/vSphere). ``None`` returns every row.
+    """
     types = infra_types or tuple(sorted(KNOWN_INFRA_TYPES))
     if not types:
         return []
@@ -1088,6 +1112,16 @@ def list_infra_clusters(
             record.vsphere_url = url
             record.vsphere_id = account_id
             record.vsphere_has_password = has_password
+    if current_prod_mode is not None:
+        records = [
+            record
+            for record in records
+            if infra_cluster_visible_for_mode(
+                is_prod=record.is_prod,
+                infra_type=record.infra_type,
+                current_prod_mode=current_prod_mode,
+            )
+        ]
     return records
 
 
@@ -1172,10 +1206,12 @@ def save_k8s_clusters(
     - Names must be unique and non-empty
     - Clusters removed from the list are deleted (with per-cluster table drop)
     - Renamed clusters rename their inventory tables
-    - Persists cron / cron_expr / infra_type / display_name when provided
+    - Persists cron / cron_expr / infra_type / display_name / is_prod when provided
     - vSphere rows also upsert vsphere_infra_info (password omitted => keep)
     """
-    normalized: list[tuple[int | None, str, str, bool, str, str, dict[str, Any] | None]] = []
+    normalized: list[
+        tuple[int | None, str, str, bool, str, str, dict[str, Any] | None, int | None]
+    ] = []
     seen_names: set[str] = set()
     for item in clusters:
         name = validate_cluster_name(str(item.get("cluster_name") or ""))
@@ -1194,6 +1230,12 @@ def save_k8s_clusters(
         cron_enabled = _as_bool(item.get("cron"), default=False)
         cron_expr = validate_cron_expr(item.get("cron_expr"))
         infra_type = validate_infra_type(item.get("infra_type") or DEFAULT_INFRA_TYPE)
+        raw_is_prod = item.get("is_prod")
+        is_prod: int | None = (
+            None
+            if raw_is_prod is None or raw_is_prod == ""
+            else normalize_infra_prod_flag(raw_is_prod)
+        )
         vsphere_payload: dict[str, Any] | None = None
         if infra_type == INFRA_TYPE_VSPHERE:
             vsphere_payload = {
@@ -1202,7 +1244,16 @@ def save_k8s_clusters(
                 "vsphere_pw": item.get("vsphere_pw"),
             }
         normalized.append(
-            (idx, name, display_name, cron_enabled, cron_expr, infra_type, vsphere_payload)
+            (
+                idx,
+                name,
+                display_name,
+                cron_enabled,
+                cron_expr,
+                infra_type,
+                vsphere_payload,
+                is_prod,
+            )
         )
 
     managed_types = tuple(sorted(KNOWN_INFRA_TYPES))
@@ -1230,6 +1281,7 @@ def save_k8s_clusters(
             cron_expr,
             infra_type,
             vsphere_payload,
+            is_prod,
         ) in normalized:
             if idx is not None:
                 if idx not in existing_by_idx:
@@ -1246,13 +1298,27 @@ def save_k8s_clusters(
                     )
 
                     rename_vsphere_inventory_tables(connection, old_name, name)
+                next_is_prod = (
+                    normalize_infra_prod_flag(existing_by_idx[idx]["is_prod"])
+                    if is_prod is None
+                    else is_prod
+                )
                 connection.execute(
                     """
                     UPDATE infra_cluster
-                    SET cluster_name = ?, display_name = ?, cron = ?, cron_expr = ?, infra_type = ?
+                    SET cluster_name = ?, display_name = ?, cron = ?, cron_expr = ?,
+                        infra_type = ?, is_prod = ?
                     WHERE idx = ?
                     """,
-                    (name, display_name, 1 if cron_enabled else 0, cron_expr, infra_type, idx),
+                    (
+                        name,
+                        display_name,
+                        1 if cron_enabled else 0,
+                        cron_expr,
+                        infra_type,
+                        next_is_prod,
+                        idx,
+                    ),
                 )
                 cluster_id = idx
                 keep_ids.add(idx)
@@ -1267,11 +1333,19 @@ def save_k8s_clusters(
                 cursor = connection.execute(
                     """
                     INSERT INTO infra_cluster (
-                        cluster_name, display_name, last_update, cron, cron_expr, infra_type
+                        cluster_name, display_name, last_update, cron, cron_expr,
+                        infra_type, is_prod
                     )
-                    VALUES (?, ?, NULL, ?, ?, ?)
+                    VALUES (?, ?, NULL, ?, ?, ?, ?)
                     """,
-                    (name, display_name, 1 if cron_enabled else 0, cron_expr, infra_type),
+                    (
+                        name,
+                        display_name,
+                        1 if cron_enabled else 0,
+                        cron_expr,
+                        infra_type,
+                        INFRA_PROD_DEV if is_prod is None else is_prod,
+                    ),
                 )
                 cluster_id = int(cursor.lastrowid)
                 keep_ids.add(cluster_id)

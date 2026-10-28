@@ -101,9 +101,9 @@ function resolveWorkflowAgentId(
     if (exact?.id.trim()) {
       return exact.id.trim();
     }
-    // http AXIT catalog may use agent_id uuid not yet mirrored in /api/agents list shape;
-    // still allow configured id through to chat endpoint.
-    return configured;
+    throw new Error(
+      "현재 관리 플랫폼에서 WORKFLOW_AGENT를 사용할 수 없습니다. 플랫폼 또는 에이전트 연결을 확인하세요.",
+    );
   }
   const hit = agents.find((agent) => {
     const id = agent.id.trim();
@@ -431,8 +431,8 @@ export function WorkflowPage({ agents, user, onChatComplete }: WorkflowPageProps
         }
         const payload = (await response.json()) as { agent_id?: string };
         const agentId = String(payload.agent_id || "").trim();
-        if (!cancelled && agentId) {
-          setDesignAgentId(agentId);
+        if (!cancelled) {
+          setDesignAgentId(agentId || null);
         }
       } catch {
         // Fallback to agents list lookup in resolveWorkflowAgentId.
@@ -442,7 +442,7 @@ export function WorkflowPage({ agents, user, onChatComplete }: WorkflowPageProps
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [user.current_prod_mode]);
 
   const hasDbRunning =
     items.some(

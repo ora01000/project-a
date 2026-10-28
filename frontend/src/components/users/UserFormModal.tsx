@@ -26,6 +26,7 @@ export function UserFormModal({ mode, user, onClose, onSave }: UserFormModalProp
         depart: user.depart,
         role: user.role,
         band: user.band ?? 1,
+        prod_auth: Boolean(user.prod_auth),
       });
       return;
     }
@@ -156,6 +157,17 @@ export function UserFormModal({ mode, user, onClose, onSave }: UserFormModalProp
                 </option>
               ))}
             </select>
+          </label>
+
+          <label className="flex items-center gap-2 text-sm text-slate-300">
+            <input
+              type="checkbox"
+              checked={values.prod_auth}
+              onChange={(event) => updateField("prod_auth", event.target.checked)}
+              disabled={isSaving}
+              className="h-4 w-4 rounded border-slate-600 bg-slate-950 text-sky-500 focus:ring-sky-500"
+            />
+            <span>운영 플랫폼 관리 여부</span>
           </label>
 
           {error ? (

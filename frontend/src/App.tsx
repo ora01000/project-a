@@ -10,9 +10,11 @@ import { NoticeBoardPage } from "./components/notices/NoticeBoardPage";
 import { AgentConnectionListPage } from "./components/agentruntime/AgentConnectionListPage";
 import { AgentAssignmentPage } from "./components/users/AgentAssignmentPage";
 import { UserListPage } from "./components/users/UserListPage";
+import { useTheme } from "./context/ThemeContext";
 import type { AgentInfo } from "./types/agent";
 import type { AuthUser } from "./types/auth";
 import type { AppView } from "./types/navigation";
+import { themeFromId } from "./types/theme";
 import { ROLE_PENDING, hasAdminAccess } from "./types/user";
 import { logoutSession, setUnauthorizedHandler } from "./utils/api";
 import {
@@ -39,6 +41,7 @@ function isShellView(view: AppView): view is ShellView {
 }
 
 export default function App() {
+  const { setTheme } = useTheme();
   const [user, setUser] = useState<AuthUser | null>(null);
   const [authBootstrapping, setAuthBootstrapping] = useState(() => Boolean(getAccessToken()));
   const [activeView, setActiveView] = useState<AppView>("dashboard");
@@ -71,17 +74,36 @@ export default function App() {
   const handleLoginSuccess = useCallback(
     (loggedInUser: AuthUser, accessToken: string, expiresInSeconds: number) => {
       startAuthSession(loggedInUser, accessToken, expiresInSeconds);
+      // 로그인 시 개발 플랫폼 + 개발 테마 (서버도 current_prod_mode=1 로 리셋)
+      setTheme(themeFromId(loggedInUser.theme_for_dev_mode));
       setUser(loggedInUser);
       setShellView("dashboard");
       setActiveView("dashboard");
     },
-    [],
+    [setTheme],
   );
 
-  const handleUserUpdated = useCallback((updatedUser: AuthUser) => {
-    saveAuthUser(updatedUser);
-    setUser(updatedUser);
-  }, []);
+  const handleUserUpdated = useCallback(
+    (updatedUser: AuthUser) => {
+      const prevMode = user?.current_prod_mode === 2 ? 2 : 1;
+      const nextMode = updatedUser.current_prod_mode === 2 ? 2 : 1;
+      saveAuthUser(updatedUser);
+      setUser(updatedUser);
+      if (prevMode !== nextMode) {
+        void fetch("/api/agents")
+          .then((response) => (response.ok ? response.json() : null))
+          .then((agentsData) => {
+            if (Array.isArray(agentsData)) {
+              setAgents(agentsData as AgentInfo[]);
+            }
+          })
+          .catch(() => {
+            /* 인프라 형상은 JobNotesPanel prodMode 변경으로 갱신 */
+          });
+      }
+    },
+    [user?.current_prod_mode],
+  );
 
   const resetToLoggedOut = useCallback(() => {
     clearClientSessionMemory();
@@ -137,6 +159,11 @@ export default function App() {
         const expiresIn = typeof payload.expires_in === "number" ? payload.expires_in : 3600;
         if (!cancelled) {
           startAuthSession(restoredUser, token, expiresIn);
+          const themeId =
+            restoredUser.current_prod_mode === 2
+              ? restoredUser.theme_for_prod_mode
+              : restoredUser.theme_for_dev_mode;
+          setTheme(themeFromId(themeId));
           setUser(restoredUser);
         }
       } catch {

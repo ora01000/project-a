@@ -5,7 +5,9 @@ from fastapi import APIRouter, HTTPException, Request
 from backend.app.agents.base import AgentDefinition
 from backend.app.db.agentruntime import (
     build_talkable_by_catalog_agent_id,
+    catalog_agent_id,
     default_talkable_for_local_agent_id,
+    list_agentruntime_records,
 )
 from backend.app.services.agent_runtime_client import (
     MOCK_RUNTIME_UNAVAILABLE_DETAIL,
@@ -88,15 +90,35 @@ def _resolve_agent_connection_status(
     return "unknown"
 
 
+def _definitions_for_user_prod_mode(
+    request: Request,
+    definitions: list[AgentDefinition],
+) -> list[AgentDefinition]:
+    """Keep definitions registered in agentruntime for the user's DEV/PROD mode."""
+    user = getattr(request.state, "auth_user", None)
+    database_path = getattr(request.app.state, "database_path", None)
+    if user is None or database_path is None:
+        return definitions
+    records = list_agentruntime_records(
+        database_path,
+        runtime_mode=_runtime_mode(request),
+        is_prod=user.current_prod_mode,
+    )
+    allowed_ids = {catalog_agent_id(record) for record in records}
+    return [definition for definition in definitions if definition.agent_id in allowed_ids]
+
+
 def _talkable_lookup(request: Request) -> dict[str, bool]:
     if not hasattr(request.state, "talkable_by_agent_id"):
         database_path = getattr(request.app.state, "database_path", None)
         if database_path is None:
             request.state.talkable_by_agent_id = {}
         else:
+            user = getattr(request.state, "auth_user", None)
             request.state.talkable_by_agent_id = build_talkable_by_catalog_agent_id(
                 database_path,
                 runtime_mode=_runtime_mode(request),
+                is_prod=None if user is None else user.current_prod_mode,
             )
     return request.state.talkable_by_agent_id
 
@@ -153,7 +175,10 @@ async def list_agents(request: Request) -> list[dict]:
 
     return [
         _agent_payload(request, definition, runtime_summary=runtime_summary)
-        for definition in manager.agent_definitions
+        for definition in _definitions_for_user_prod_mode(
+            request,
+            list(manager.agent_definitions),
+        )
     ]
 
 
@@ -167,6 +192,22 @@ async def list_agent_tools(agent_id: str, request: Request) -> list[dict]:
         manager.get_definition(agent_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found") from exc
+
+    user = getattr(request.state, "auth_user", None)
+    database_path = getattr(request.app.state, "database_path", None)
+    if user is not None and database_path is not None:
+        from backend.app.db.agentruntime import agent_registered_for_prod_mode
+
+        if not agent_registered_for_prod_mode(
+            database_path,
+            agent_id,
+            runtime_mode=_runtime_mode(request),
+            is_prod=user.current_prod_mode,
+        ):
+            raise HTTPException(
+                status_code=404,
+                detail="현재 관리 플랫폼에서 사용할 수 없는 에이전트입니다.",
+            )
 
     try:
         return await request.app.state.agent_runtime.list_agent_tools(agent_id)

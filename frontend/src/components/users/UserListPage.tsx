@@ -84,6 +84,7 @@ export function UserListPage({ currentUserIdx, currentUserRole, onClose }: UserL
         depart: values.depart,
         role: values.role,
         band: values.band,
+        prod_auth: values.prod_auth,
         viewer_role: currentUserRole,
       }),
     });
@@ -185,6 +186,7 @@ export function UserListPage({ currentUserIdx, currentUserRole, onClose }: UserL
                   <th className="px-3 py-2">직책</th>
                   <th className="px-3 py-2">조직</th>
                   <th className="px-3 py-2">역할</th>
+                  <th className="px-3 py-2">운영 플랫폼 권한</th>
                   <th className="px-3 py-2">최근 로그인 시각</th>
                   {canManageUsers ? <th className="px-3 py-2">작업</th> : null}
                 </tr>
@@ -199,6 +201,9 @@ export function UserListPage({ currentUserIdx, currentUserRole, onClose }: UserL
                     <td className="px-3 py-2">{user.depart}</td>
                     <td className="px-3 py-2">
                       {user.role}: {roleLabel(user.role)}
+                    </td>
+                    <td className="px-3 py-2 whitespace-nowrap">
+                      {user.prod_auth ? "예" : "아니오"}
                     </td>
                     <td className="px-3 py-2 font-mono text-xs text-slate-300">
                       {user.last_login?.trim() || "-"}

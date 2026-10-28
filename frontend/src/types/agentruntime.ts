@@ -9,6 +9,9 @@ export interface AgentRuntimeRecord {
   service_id: string;
   talkable: boolean;
   is_orchestrator: boolean;
+  /** 1=개발, 2=운영 */
+  is_prod?: number;
+  is_prod_label?: string;
 }
 
 export interface AgentRuntimeFormValues {
@@ -21,12 +24,25 @@ export interface AgentRuntimeFormValues {
   service_id: string;
   talkable: boolean;
   is_orchestrator: boolean;
+  is_prod: number;
 }
 
 export const AGENTRUNTIME_TYPE_OPTIONS = [
   { value: 0, label: "목업 (0)" },
   { value: 1, label: "외부연동 (1)" },
 ] as const;
+
+export const AGENTRUNTIME_IS_PROD_OPTIONS = [
+  { value: 1, label: "개발" },
+  { value: 2, label: "운영" },
+] as const;
+
+export function agentRuntimeIsProdLabel(record: AgentRuntimeRecord): string {
+  if (record.is_prod_label) {
+    return record.is_prod_label;
+  }
+  return record.is_prod === 2 ? "운영" : "개발";
+}
 
 export function agentRuntimeTypeLabel(type: number): string {
   const option = AGENTRUNTIME_TYPE_OPTIONS.find((item) => item.value === type);
@@ -44,6 +60,7 @@ export function emptyAgentRuntimeForm(defaultType = 0): AgentRuntimeFormValues {
     service_id: "prvops",
     talkable: true,
     is_orchestrator: false,
+    is_prod: 1,
   };
 }
 
@@ -58,6 +75,7 @@ export function agentRuntimeFormFromRecord(record: AgentRuntimeRecord): AgentRun
     service_id: record.service_id,
     talkable: record.talkable,
     is_orchestrator: record.is_orchestrator,
+    is_prod: record.is_prod ?? 1,
   };
 }
 

@@ -3,6 +3,13 @@ from pathlib import Path
 
 from backend.app.db.database import get_connection
 from backend.app.db.bands import DEFAULT_BAND
+from backend.app.db.prod_mode import (
+    PROD_MODE_DEV,
+    PROD_MODE_PROD,
+    THEME_ID_DARK,
+    normalize_prod_mode,
+    normalize_theme_id,
+)
 from backend.app.db.roles import ROLE_ADMIN, ROLE_PENDING, is_admin_role, is_hidden_system_user
 
 AGENTS_COLUMN_MAX_LENGTH = 200
@@ -21,6 +28,10 @@ class User:
     last_login: str | None = None
     request_reason: str = ""
     whatap_event_sub: bool = False
+    prod_auth: bool = False
+    current_prod_mode: int = PROD_MODE_DEV
+    theme_for_dev_mode: int = THEME_ID_DARK
+    theme_for_prod_mode: int = THEME_ID_DARK
 
 
 def ensure_whatap_event_sub_column(connection) -> None:
@@ -28,6 +39,34 @@ def ensure_whatap_event_sub_column(connection) -> None:
         """
         ALTER TABLE users
         ADD COLUMN IF NOT EXISTS whatap_event_sub INTEGER NOT NULL DEFAULT 0
+        """
+    )
+
+
+def ensure_users_prod_columns(connection) -> None:
+    ensure_whatap_event_sub_column(connection)
+    connection.execute(
+        """
+        ALTER TABLE users
+        ADD COLUMN IF NOT EXISTS prod_auth INTEGER NOT NULL DEFAULT 0
+        """
+    )
+    connection.execute(
+        """
+        ALTER TABLE users
+        ADD COLUMN IF NOT EXISTS current_prod_mode INTEGER NOT NULL DEFAULT 1
+        """
+    )
+    connection.execute(
+        """
+        ALTER TABLE users
+        ADD COLUMN IF NOT EXISTS theme_for_dev_mode INTEGER NOT NULL DEFAULT 1
+        """
+    )
+    connection.execute(
+        """
+        ALTER TABLE users
+        ADD COLUMN IF NOT EXISTS theme_for_prod_mode INTEGER NOT NULL DEFAULT 1
         """
     )
 
@@ -85,6 +124,28 @@ def _row_to_user(row) -> User:
         whatap_event_sub = bool(int(row["whatap_event_sub"] or 0))
     except (KeyError, IndexError, TypeError, ValueError):
         whatap_event_sub = False
+    prod_auth = False
+    try:
+        prod_auth = bool(int(row["prod_auth"] or 0))
+    except (KeyError, IndexError, TypeError, ValueError):
+        prod_auth = False
+    current_prod_mode = PROD_MODE_DEV
+    try:
+        current_prod_mode = normalize_prod_mode(row["current_prod_mode"])
+    except (KeyError, IndexError, TypeError, ValueError):
+        current_prod_mode = PROD_MODE_DEV
+    if not prod_auth and current_prod_mode != PROD_MODE_DEV:
+        current_prod_mode = PROD_MODE_DEV
+    theme_for_dev_mode = THEME_ID_DARK
+    try:
+        theme_for_dev_mode = normalize_theme_id(row["theme_for_dev_mode"])
+    except (KeyError, IndexError, TypeError, ValueError):
+        theme_for_dev_mode = THEME_ID_DARK
+    theme_for_prod_mode = THEME_ID_DARK
+    try:
+        theme_for_prod_mode = normalize_theme_id(row["theme_for_prod_mode"])
+    except (KeyError, IndexError, TypeError, ValueError):
+        theme_for_prod_mode = THEME_ID_DARK
     return User(
         idx=int(row["idx"]),
         userid=str(row["userid"]),
@@ -97,18 +158,23 @@ def _row_to_user(row) -> User:
         last_login=last_login,
         request_reason=request_reason,
         whatap_event_sub=whatap_event_sub,
+        prod_auth=prod_auth,
+        current_prod_mode=current_prod_mode,
+        theme_for_dev_mode=theme_for_dev_mode,
+        theme_for_prod_mode=theme_for_prod_mode,
     )
 
 
 _USER_SELECT = (
     "SELECT idx, userid, email, username, depart, role, band, agents, "
-    "last_login, request_reason, whatap_event_sub FROM users"
+    "last_login, request_reason, whatap_event_sub, prod_auth, current_prod_mode, "
+    "theme_for_dev_mode, theme_for_prod_mode FROM users"
 )
 
 
 def list_users(database_path: str | Path, *, viewer_role: int | None = None) -> list[User]:
     with get_connection(database_path) as connection:
-        ensure_whatap_event_sub_column(connection)
+        ensure_users_prod_columns(connection)
         rows = connection.execute(
             f"""
             {_USER_SELECT}
@@ -132,7 +198,7 @@ def list_admin_users(database_path: str | Path) -> list[User]:
 
 def get_user_by_idx(database_path: str | Path, idx: int) -> User | None:
     with get_connection(database_path) as connection:
-        ensure_whatap_event_sub_column(connection)
+        ensure_users_prod_columns(connection)
         row = connection.execute(
             f"""
             {_USER_SELECT}
@@ -147,7 +213,7 @@ def get_user_by_idx(database_path: str | Path, idx: int) -> User | None:
 
 def get_user_by_userid(database_path: str | Path, userid: str) -> User | None:
     with get_connection(database_path) as connection:
-        ensure_whatap_event_sub_column(connection)
+        ensure_users_prod_columns(connection)
         row = connection.execute(
             f"""
             {_USER_SELECT}
@@ -182,7 +248,7 @@ def resolve_username(value: str, username_by_key: dict[str, str]) -> str:
 
 def authenticate_user(database_path: str | Path, userid: str, password: str) -> User | None:
     with get_connection(database_path) as connection:
-        ensure_whatap_event_sub_column(connection)
+        ensure_users_prod_columns(connection)
         row = connection.execute(
             f"""
             {_USER_SELECT}
@@ -208,15 +274,20 @@ def create_user(
     band: int = DEFAULT_BAND,
     agents: str = "",
     request_reason: str = "",
+    prod_auth: bool = False,
 ) -> User:
     if is_hidden_system_user(userid):
         raise ValueError("userid is not allowed")
     encoded_agents = encode_agent_ids(parse_agent_ids(agents))
     with get_connection(database_path) as connection:
+        ensure_users_prod_columns(connection)
         cursor = connection.execute(
             """
-            INSERT INTO users (userid, email, username, password, depart, role, band, agents, request_reason)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO users (
+                userid, email, username, password, depart, role, band, agents,
+                request_reason, prod_auth, current_prod_mode
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 userid.strip(),
@@ -228,6 +299,8 @@ def create_user(
                 int(band),
                 encoded_agents,
                 request_reason.strip(),
+                1 if prod_auth else 0,
+                PROD_MODE_DEV,
             ),
         )
         connection.commit()
@@ -250,6 +323,7 @@ def update_user(
     role: int,
     band: int | None = None,
     request_reason: str | None = None,
+    prod_auth: bool | None = None,
 ) -> User | None:
     existing = get_user_by_idx(database_path, idx)
     if existing is None:
@@ -258,13 +332,17 @@ def update_user(
         return None
     next_band = existing.band if band is None else int(band)
     next_request_reason = existing.request_reason if request_reason is None else request_reason.strip()
+    next_prod_auth = existing.prod_auth if prod_auth is None else bool(prod_auth)
+    next_mode = existing.current_prod_mode if next_prod_auth else PROD_MODE_DEV
 
     with get_connection(database_path) as connection:
+        ensure_users_prod_columns(connection)
         if password:
             connection.execute(
                 """
                 UPDATE users
-                SET email = ?, username = ?, password = ?, depart = ?, role = ?, band = ?, request_reason = ?
+                SET email = ?, username = ?, password = ?, depart = ?, role = ?, band = ?,
+                    request_reason = ?, prod_auth = ?, current_prod_mode = ?
                 WHERE idx = ?
                 """,
                 (
@@ -275,6 +353,8 @@ def update_user(
                     role,
                     next_band,
                     next_request_reason,
+                    1 if next_prod_auth else 0,
+                    next_mode,
                     idx,
                 ),
             )
@@ -282,7 +362,8 @@ def update_user(
             connection.execute(
                 """
                 UPDATE users
-                SET email = ?, username = ?, depart = ?, role = ?, band = ?, request_reason = ?
+                SET email = ?, username = ?, depart = ?, role = ?, band = ?,
+                    request_reason = ?, prod_auth = ?, current_prod_mode = ?
                 WHERE idx = ?
                 """,
                 (
@@ -292,11 +373,74 @@ def update_user(
                     role,
                     next_band,
                     next_request_reason,
+                    1 if next_prod_auth else 0,
+                    next_mode,
                     idx,
                 ),
             )
         connection.commit()
 
+    return get_user_by_idx(database_path, idx)
+
+
+def update_user_current_prod_mode(
+    database_path: str | Path,
+    idx: int,
+    current_prod_mode: int,
+) -> User | None:
+    existing = get_user_by_idx(database_path, idx)
+    if existing is None:
+        return None
+    if is_hidden_system_user(existing.userid, existing.role):
+        return None
+    mode = normalize_prod_mode(current_prod_mode)
+    if mode == PROD_MODE_DEV:
+        pass
+    elif not existing.prod_auth:
+        raise PermissionError("운영 플랫폼 관리 권한이 없습니다.")
+    with get_connection(database_path) as connection:
+        ensure_users_prod_columns(connection)
+        connection.execute(
+            """
+            UPDATE users
+            SET current_prod_mode = ?
+            WHERE idx = ?
+            """,
+            (mode, idx),
+        )
+        connection.commit()
+    return get_user_by_idx(database_path, idx)
+
+
+def update_user_theme_for_mode(
+    database_path: str | Path,
+    idx: int,
+    *,
+    theme_id: int,
+    prod_mode: int | None = None,
+) -> User | None:
+    """Persist theme for the given (or current) platform mode."""
+    existing = get_user_by_idx(database_path, idx)
+    if existing is None:
+        return None
+    if is_hidden_system_user(existing.userid, existing.role):
+        return None
+    mode = normalize_prod_mode(
+        prod_mode if prod_mode is not None else existing.current_prod_mode
+    )
+    theme = normalize_theme_id(theme_id)
+    column = "theme_for_prod_mode" if mode == PROD_MODE_PROD else "theme_for_dev_mode"
+    with get_connection(database_path) as connection:
+        ensure_users_prod_columns(connection)
+        connection.execute(
+            f"""
+            UPDATE users
+            SET {column} = ?
+            WHERE idx = ?
+            """,
+            (theme, idx),
+        )
+        connection.commit()
     return get_user_by_idx(database_path, idx)
 
 
@@ -325,7 +469,10 @@ def update_user_agents(
 
 
 def record_user_login(database_path: str | Path, idx: int) -> tuple[str | None, User | None]:
-    """Persist current login time. Returns (previous_last_login, updated_user)."""
+    """Persist current login time and reset platform mode to DEV.
+
+    Returns (previous_last_login, updated_user).
+    """
     from backend.app.db.job_datetime import now_job_datetime
 
     existing = get_user_by_idx(database_path, idx)
@@ -335,13 +482,14 @@ def record_user_login(database_path: str | Path, idx: int) -> tuple[str | None, 
     previous = existing.last_login
     login_at = now_job_datetime()
     with get_connection(database_path) as connection:
+        ensure_users_prod_columns(connection)
         connection.execute(
             """
             UPDATE users
-            SET last_login = ?
+            SET last_login = ?, current_prod_mode = ?
             WHERE idx = ?
             """,
-            (login_at, idx),
+            (login_at, PROD_MODE_DEV, idx),
         )
         connection.commit()
 

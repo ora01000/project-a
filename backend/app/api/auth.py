@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 
 from backend.app.config import load_auth_provider_settings, load_auth_session_settings
 from backend.app.db.notice_board import list_welcome_notices
+from backend.app.db.prod_mode import PROD_MODE_DEV
 from backend.app.db.roles import ROLE_ADMIN, ROLE_PENDING
 from backend.app.db.users import (
     User,
@@ -17,6 +18,8 @@ from backend.app.db.users import (
     record_user_login,
     resolve_username,
     update_user,
+    update_user_current_prod_mode,
+    update_user_theme_for_mode,
 )
 from backend.app.middleware.session_auth import extract_bearer_token, get_request_auth_user
 from backend.app.services.auth_provider import (
@@ -63,6 +66,10 @@ class UserResponse(BaseModel):
     agents: str = ""
     agent_ids: list[str] = Field(default_factory=list)
     last_login: str | None = None
+    prod_auth: bool = False
+    current_prod_mode: int = PROD_MODE_DEV
+    theme_for_dev_mode: int = 1
+    theme_for_prod_mode: int = 1
 
     @classmethod
     def from_user(cls, user: User) -> "UserResponse":
@@ -78,6 +85,10 @@ class UserResponse(BaseModel):
             agents=user.agents or "",
             agent_ids=agent_ids,
             last_login=user.last_login,
+            prod_auth=user.prod_auth,
+            current_prod_mode=user.current_prod_mode,
+            theme_for_dev_mode=user.theme_for_dev_mode,
+            theme_for_prod_mode=user.theme_for_prod_mode,
         )
 
 
@@ -132,6 +143,16 @@ class CompleteProfileRequest(BaseModel):
 
 class LogoutResponse(BaseModel):
     ok: bool = True
+
+
+class UpdateProdModeRequest(BaseModel):
+    current_prod_mode: int = Field(ge=1, le=2)
+
+
+class UpdateThemeRequest(BaseModel):
+    theme_id: int = Field(ge=1, le=4)
+    # Optional; defaults to the user's current_prod_mode on the server.
+    prod_mode: int | None = Field(default=None, ge=1, le=2)
 
 
 @router.get("/auth/provider", response_model=AuthProviderResponse)
@@ -407,6 +428,40 @@ async def complete_profile(payload: CompleteProfileRequest, request: Request) ->
         depart=payload.depart,
         role=existing.role,
         band=payload.band,
+    )
+    if updated is None:
+        raise HTTPException(status_code=404, detail="사용자를 찾을 수 없습니다.")
+    return UserResponse.from_user(updated)
+
+
+@router.patch("/auth/prod-mode", response_model=UserResponse)
+@router.put("/auth/prod-mode", response_model=UserResponse)
+async def update_prod_mode(payload: UpdateProdModeRequest, request: Request) -> UserResponse:
+    auth_user = get_request_auth_user(request)
+    database_path = request.app.state.database_path
+    try:
+        updated = update_user_current_prod_mode(
+            database_path,
+            auth_user.idx,
+            payload.current_prod_mode,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    if updated is None:
+        raise HTTPException(status_code=404, detail="사용자를 찾을 수 없습니다.")
+    return UserResponse.from_user(updated)
+
+
+@router.patch("/auth/theme", response_model=UserResponse)
+@router.put("/auth/theme", response_model=UserResponse)
+async def update_theme_preference(payload: UpdateThemeRequest, request: Request) -> UserResponse:
+    auth_user = get_request_auth_user(request)
+    database_path = request.app.state.database_path
+    updated = update_user_theme_for_mode(
+        database_path,
+        auth_user.idx,
+        theme_id=payload.theme_id,
+        prod_mode=payload.prod_mode,
     )
     if updated is None:
         raise HTTPException(status_code=404, detail="사용자를 찾을 수 없습니다.")

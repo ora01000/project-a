@@ -22,6 +22,7 @@ import { K8sInfraConfigModal } from "./admin/K8sInfraConfigModal";
 import { MailServerConfigModal } from "./admin/MailServerConfigModal";
 import { MailTestModal } from "./admin/MailTestModal";
 import { ReceivedMailDebugModal } from "./admin/ReceivedMailDebugModal";
+import { PlatformModeModal, platformModeLabel } from "./PlatformModeModal";
 import { ProfileEditModal } from "./ProfileEditModal";
 import { ReleaseNotesModal } from "./ReleaseNotesModal";
 import { TableDebugModal } from "./TableDebugModal";
@@ -80,6 +81,7 @@ export function MenuBar({
   const [showEventReportSub, setShowEventReportSub] = useState(false);
   const [runtimeMode, setRuntimeMode] = useState<string>("mock");
   const [showProfileEdit, setShowProfileEdit] = useState(false);
+  const [showPlatformMode, setShowPlatformMode] = useState(false);
   const [showSaveSuccess, setShowSaveSuccess] = useState(false);
   const [showAgentMenu, setShowAgentMenu] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
@@ -538,6 +540,16 @@ export function MenuBar({
 
         <div className="flex flex-wrap items-center gap-2.5 text-sm text-slate-300">
           <div className="flex items-center gap-2">
+            <span
+              className={`inline-flex items-center rounded-md border px-2.5 py-1 text-xs font-medium ${
+                user.current_prod_mode === 2
+                  ? "border-rose-700/80 bg-rose-950/40 text-rose-100"
+                  : "border-sky-700/80 bg-sky-950/40 text-sky-100"
+              }`}
+              title="현재 관리 플랫폼"
+            >
+              {platformModeLabel(user.current_prod_mode)}
+            </span>
             <time
               className="flex flex-col items-end leading-tight text-slate-400"
               title={`${currentTime.dateLine} ${currentTime.timeLine}`}
@@ -619,6 +631,18 @@ export function MenuBar({
                   <WorkflowIcon name="theme" size="sm" label="화면 테마" />
                   화면 테마
                 </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setShowAccountMenu(false);
+                    setShowPlatformMode(true);
+                  }}
+                  className={menuItemClass()}
+                >
+                  <WorkflowIcon name="platform" size="sm" label="관리 플랫폼 선택" />
+                  관리 플랫폼 선택
+                </button>
                 <div className="my-1 border-t border-slate-700" role="separator" />
                 <button
                   type="button"
@@ -652,7 +676,13 @@ export function MenuBar({
         />
       ) : null}
 
-      {showThemeSettings ? <ThemeSettingsModal onClose={() => setShowThemeSettings(false)} /> : null}
+      {showThemeSettings ? (
+        <ThemeSettingsModal
+          user={user}
+          onUserUpdated={onUserUpdated}
+          onClose={() => setShowThemeSettings(false)}
+        />
+      ) : null}
       {monitorAreaPreset && isAdmin ? (
         <MonitorAreaOverlay
           preset={monitorAreaPreset}
@@ -712,6 +742,13 @@ export function MenuBar({
             setShowProfileEdit(false);
             setShowSaveSuccess(true);
           }}
+        />
+      ) : null}
+      {showPlatformMode ? (
+        <PlatformModeModal
+          user={user}
+          onClose={() => setShowPlatformMode(false)}
+          onChanged={onUserUpdated}
         />
       ) : null}
       {showSaveSuccess ? (

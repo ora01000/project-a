@@ -117,11 +117,25 @@ export function MoonaTerminalPanel({
     }
   }, [lines, isRunning]);
 
+  // 실행 종료 시에만 프롬프트로 포커스. lines.length 의존 시 출력 직후 선택도 깨짐.
   useEffect(() => {
-    if (!isRunning) {
-      inputRef.current?.focus();
+    if (isRunning) {
+      return;
     }
-  }, [isRunning, lines.length]);
+    const selected = window.getSelection()?.toString() ?? "";
+    if (selected.length > 0) {
+      return;
+    }
+    inputRef.current?.focus();
+  }, [isRunning]);
+
+  const focusPromptIfIdle = () => {
+    const selected = window.getSelection()?.toString() ?? "";
+    if (selected.length > 0) {
+      return;
+    }
+    inputRef.current?.focus();
+  };
 
   const appendLine = (line: Omit<TerminalLine, "id">) => {
     setLines((prev) => [...prev, { ...line, id: createLineId() }]);
@@ -290,7 +304,7 @@ export function MoonaTerminalPanel({
   return (
     <div
       className={`flex min-h-0 flex-1 flex-col overflow-hidden rounded-md border font-mono text-[12px] ${shellClass}`}
-      onClick={() => inputRef.current?.focus()}
+      onClick={focusPromptIfIdle}
     >
       <div ref={scrollRef} className="min-h-0 flex-1 space-y-1 overflow-y-auto overscroll-contain p-3">
         {lines.map((line) => {

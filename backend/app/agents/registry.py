@@ -51,7 +51,12 @@ def load_server_agent_definitions(database_path: str | Path) -> list[AgentDefini
     http 모드에서는 INFRA_SEARCH_AGENT 포함 모든 에이전트를 agentruntime DB 등록분만 사용한다.
     """
     definitions: list[AgentDefinition] = []
+    seen_catalog_ids: set[str] = set()
     for record in list_agentruntime_records(database_path, runtime_mode="http"):
+        # DEV/PROD 쌍이 같은 카탈로그 ID를 가질 수 있으므로 한 번만 등록한다.
+        if catalog_agent_id(record) in seen_catalog_ids:
+            continue
+        seen_catalog_ids.add(catalog_agent_id(record))
         definitions.append(
             AgentDefinition(
                 agent_id=catalog_agent_id(record),

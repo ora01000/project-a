@@ -22,6 +22,7 @@ def _find_http_workflow_agent_record(
     database_path: str | Path,
     *,
     settings: WorkflowAgentSettings,
+    is_prod: int | None = None,
 ) -> StoredAgentRuntime | None:
     """Resolve by agentruntime.local_agent_id only (AXIT uuid comes from DB agent_id)."""
     local_candidates: list[str] = []
@@ -38,6 +39,7 @@ def _find_http_workflow_agent_record(
             database_path,
             local_agent_id,
             runtime_mode="http",
+            is_prod=is_prod,
         )
         if _is_non_orchestrator(record):
             return record
@@ -50,6 +52,7 @@ def try_resolve_workflow_agent_runtime_record(
     runtime_mode: str,
     *,
     settings: WorkflowAgentSettings | None = None,
+    is_prod: int | None = None,
 ) -> StoredAgentRuntime | None:
     """Return workflow design agentruntime (is_orchestrator=0)."""
     agent_settings = settings or load_workflow_agent_settings()
@@ -58,6 +61,7 @@ def try_resolve_workflow_agent_runtime_record(
             database_path,
             agent_settings.local_agent_id or WORKFLOW_AGENT_LOCAL_AGENT_ID,
             runtime_mode="mock",
+            is_prod=is_prod,
         )
         if _is_non_orchestrator(record):
             return record
@@ -67,12 +71,17 @@ def try_resolve_workflow_agent_runtime_record(
                 database_path,
                 WORKFLOW_AGENT_LOCAL_AGENT_ID,
                 runtime_mode="mock",
+                is_prod=is_prod,
             )
             if _is_non_orchestrator(record):
                 return record
         return None
 
-    return _find_http_workflow_agent_record(database_path, settings=agent_settings)
+    return _find_http_workflow_agent_record(
+        database_path,
+        settings=agent_settings,
+        is_prod=is_prod,
+    )
 
 
 def try_resolve_workflow_agent_id(
@@ -80,6 +89,7 @@ def try_resolve_workflow_agent_id(
     runtime_mode: str,
     *,
     settings: WorkflowAgentSettings | None = None,
+    is_prod: int | None = None,
 ) -> str | None:
     """Return catalog agent id for workflow design chat, or None if unresolved."""
     agent_settings = settings or load_workflow_agent_settings()
@@ -88,6 +98,7 @@ def try_resolve_workflow_agent_id(
             database_path,
             runtime_mode,
             settings=agent_settings,
+            is_prod=is_prod,
         )
         if record is not None:
             return catalog_agent_id(record)
@@ -100,6 +111,7 @@ def try_resolve_workflow_agent_id(
         database_path,
         runtime_mode,
         settings=agent_settings,
+        is_prod=is_prod,
     )
     if record is None:
         return None
@@ -111,12 +123,14 @@ def resolve_workflow_agent_id(
     runtime_mode: str,
     *,
     settings: WorkflowAgentSettings | None = None,
+    is_prod: int | None = None,
 ) -> str:
     agent_settings = settings or load_workflow_agent_settings()
     agent_id = try_resolve_workflow_agent_id(
         database_path,
         runtime_mode,
         settings=agent_settings,
+        is_prod=is_prod,
     )
     if agent_id is not None:
         return agent_id
@@ -136,6 +150,7 @@ def is_workflow_design_agent_id(
     runtime_mode: str,
     *,
     settings: WorkflowAgentSettings | None = None,
+    is_prod: int | None = None,
 ) -> bool:
     """True when ``agent_id`` is the configured workflow design agent."""
     normalized = agent_id.strip()
@@ -147,5 +162,6 @@ def is_workflow_design_agent_id(
         database_path,
         runtime_mode,
         settings=settings,
+        is_prod=is_prod,
     )
     return resolved is not None and resolved == normalized

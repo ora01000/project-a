@@ -755,7 +755,7 @@ export const WorkflowEditor = forwardRef<WorkflowEditorHandle, WorkflowEditorPro
     let cancelled = false;
     const load = async () => {
       const [runtimeRes, approverRes, templateRes] = await Promise.all([
-        fetch("/api/agentruntime"),
+        fetch("/api/agentruntime?for_current_mode=true"),
         fetch("/api/workflow-approvers"),
         fetch("/api/workflow-templates"),
       ]);
@@ -792,7 +792,7 @@ export const WorkflowEditor = forwardRef<WorkflowEditorHandle, WorkflowEditorPro
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [user.current_prod_mode]);
 
   const rememberCurrentTemplateSession = (templateName: string) => {
     const key = templateName.trim();

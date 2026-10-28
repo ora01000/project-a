@@ -13,8 +13,21 @@ CREATE TABLE IF NOT EXISTS users (
     agents VARCHAR(200) NOT NULL DEFAULT '',
     last_login TEXT,
     request_reason VARCHAR(200) NOT NULL DEFAULT '',
-    whatap_event_sub INTEGER NOT NULL DEFAULT 0
+    whatap_event_sub INTEGER NOT NULL DEFAULT 0,
+    prod_auth INTEGER NOT NULL DEFAULT 0,
+    current_prod_mode INTEGER NOT NULL DEFAULT 1,
+    theme_for_dev_mode INTEGER NOT NULL DEFAULT 1,
+    theme_for_prod_mode INTEGER NOT NULL DEFAULT 1
 );
+
+ALTER TABLE users
+    ADD COLUMN IF NOT EXISTS prod_auth INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE users
+    ADD COLUMN IF NOT EXISTS current_prod_mode INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE users
+    ADD COLUMN IF NOT EXISTS theme_for_dev_mode INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE users
+    ADD COLUMN IF NOT EXISTS theme_for_prod_mode INTEGER NOT NULL DEFAULT 1;
 
 CREATE TABLE IF NOT EXISTS agentruntime (
     idx BIGSERIAL PRIMARY KEY,
@@ -27,8 +40,15 @@ CREATE TABLE IF NOT EXISTS agentruntime (
     service_id VARCHAR(20) NOT NULL,
     talkable INTEGER NOT NULL DEFAULT 1,
     is_orchestrator INTEGER NOT NULL DEFAULT 0,
-    UNIQUE(type, agent_id)
+    is_prod INTEGER NOT NULL DEFAULT 1
 );
+
+ALTER TABLE agentruntime
+    ADD COLUMN IF NOT EXISTS is_prod INTEGER NOT NULL DEFAULT 1;
+-- Allow DEV/PROD pairs with the same AXIT agent_id.
+ALTER TABLE agentruntime DROP CONSTRAINT IF EXISTS agentruntime_type_agent_id_key;
+CREATE UNIQUE INDEX IF NOT EXISTS ux_agentruntime_type_agent_id_is_prod
+    ON agentruntime (type, agent_id, is_prod);
 
 CREATE TABLE IF NOT EXISTS notice_board (
     idx BIGSERIAL PRIMARY KEY,
@@ -107,11 +127,14 @@ CREATE TABLE IF NOT EXISTS infra_cluster (
     last_update TEXT,
     cron INTEGER NOT NULL DEFAULT 0,
     cron_expr VARCHAR(20) NOT NULL DEFAULT '0 23 * * 6',
-    infra_type VARCHAR(20) NOT NULL DEFAULT 'k8s'
+    infra_type VARCHAR(20) NOT NULL DEFAULT 'k8s',
+    is_prod INTEGER NOT NULL DEFAULT 1
 );
 
 ALTER TABLE infra_cluster
     ADD COLUMN IF NOT EXISTS display_name VARCHAR(100) NOT NULL DEFAULT '';
+ALTER TABLE infra_cluster
+    ADD COLUMN IF NOT EXISTS is_prod INTEGER NOT NULL DEFAULT 1;
 
 -- vSphere credentials linked to infra_cluster.idx (infra_type = 'vSphere')
 CREATE TABLE IF NOT EXISTS vsphere_infra_info (

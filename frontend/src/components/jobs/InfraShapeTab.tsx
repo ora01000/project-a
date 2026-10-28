@@ -23,6 +23,8 @@ interface ShapeCluster {
   last_update: string | null;
   infra_type: string;
   display_name?: string;
+  /** 1=개발, 2=운영, 3=개발+운영 */
+  is_prod?: number;
 }
 
 interface ShapeCounts {
@@ -56,6 +58,8 @@ interface InfraShapeTabProps {
   maskIps?: boolean;
   canRunGapAnalysis?: boolean;
   onCopyToNote?: (content: string, noteName?: string) => Promise<void>;
+  /** 관리 플랫폼(개발=1 / 운영=2) 변경 시 클러스터 목록을 다시 불러온다. */
+  prodMode?: number;
 }
 
 type SeriesKey = keyof ShapeCounts;
@@ -108,6 +112,26 @@ function seriesForInfraType(infraType: string, isLight: boolean) {
     return isLight ? VSPHERE_SERIES_LIGHT : VSPHERE_SERIES;
   }
   return isLight ? BASE_SERIES_LIGHT : BASE_SERIES;
+}
+
+function infraProdLabel(isProd: number | null | undefined): string {
+  if (isProd === 2) {
+    return "운영";
+  }
+  if (isProd === 3) {
+    return "개발+운영";
+  }
+  return "개발";
+}
+
+function infraProdBadgeClass(isProd: number | null | undefined): string {
+  if (isProd === 2) {
+    return "border-rose-700/80 bg-rose-950/40 text-rose-100";
+  }
+  if (isProd === 3) {
+    return "border-amber-700/80 bg-amber-950/40 text-amber-100";
+  }
+  return "border-sky-700/80 bg-sky-950/40 text-sky-100";
 }
 
 async function parseError(response: Response, fallback: string): Promise<string> {
@@ -358,6 +382,7 @@ export function InfraShapeTab({
   maskIps = false,
   canRunGapAnalysis = false,
   onCopyToNote,
+  prodMode = 1,
 }: InfraShapeTabProps) {
   const [clusters, setClusters] = useState<ShapeCluster[]>([]);
   const [selectedName, setSelectedName] = useState<string | null>(ALL_CLUSTERS);
@@ -480,7 +505,7 @@ export function InfraShapeTab({
       return;
     }
     void loadClusters();
-  }, [active, loadClusters]);
+  }, [active, loadClusters, prodMode]);
 
   useEffect(() => {
     if (!active || !selectedName) {
@@ -538,10 +563,16 @@ export function InfraShapeTab({
     return items;
   }, [analysis]);
 
+  const selectedCluster = useMemo(
+    () => clusters.find((item) => item.cluster_name === selectedName) ?? null,
+    [clusters, selectedName],
+  );
+
   const selectedInfraType = useMemo(() => {
-    const fromList = clusters.find((item) => item.cluster_name === selectedName)?.infra_type;
-    return analysis?.infra_type || fromList || "k8s";
-  }, [analysis?.infra_type, clusters, selectedName]);
+    return analysis?.infra_type || selectedCluster?.infra_type || "k8s";
+  }, [analysis?.infra_type, selectedCluster]);
+
+  const selectedIsProd = selectedCluster?.is_prod ?? 1;
 
   const runGapAnalysis = useCallback(async () => {
     if (!canRunGapAnalysis || !selectedName || selectedName === ALL_CLUSTERS) {
@@ -716,12 +747,16 @@ export function InfraShapeTab({
                         className="relative flex w-full flex-col items-center rounded-md border border-slate-700/70 bg-slate-900/40 p-2 pt-3 text-left transition-colors hover:border-slate-500 hover:bg-slate-800/50"
                         title={`${cluster.cluster_name} 선택`}
                       >
-                        <InfraTypeIcon
-                          infraType={infraType}
-                          size="md"
-                          className="absolute right-2 top-2"
-                        />
-                        <div className="mb-1 w-full pr-6 text-left">
+                        <div className="absolute right-2 top-2 flex items-center gap-1.5">
+                          <span
+                            className={`inline-flex items-center rounded-md border px-1.5 py-0.5 text-[10px] font-medium leading-none ${infraProdBadgeClass(cluster.is_prod)}`}
+                            title="운영 플랫폼 여부"
+                          >
+                            {infraProdLabel(cluster.is_prod)}
+                          </span>
+                          <InfraTypeIcon infraType={infraType} size="md" />
+                        </div>
+                        <div className="mb-1 w-full pr-24 text-left">
                           <p
                             className="truncate text-[11px] font-semibold text-slate-200"
                             title={cluster.cluster_name}
@@ -777,7 +812,18 @@ export function InfraShapeTab({
           <>
             <div className="grid h-[240px] shrink-0 grid-cols-3 gap-3 overflow-hidden">
               <section className="col-span-2 flex min-h-0 flex-col overflow-hidden rounded-lg border border-slate-700/80 bg-slate-950/40 p-3">
-                <h3 className="mb-2 shrink-0 text-xs font-semibold text-slate-300">요약</h3>
+                <div className="mb-2 flex shrink-0 items-center justify-between gap-2">
+                  <h3 className="text-xs font-semibold text-slate-300">요약</h3>
+                  <div className="flex items-center gap-1.5">
+                    <span
+                      className={`inline-flex items-center rounded-md border px-1.5 py-0.5 text-[10px] font-medium leading-none ${infraProdBadgeClass(selectedIsProd)}`}
+                      title="운영 플랫폼 여부"
+                    >
+                      {infraProdLabel(selectedIsProd)}
+                    </span>
+                    <InfraTypeIcon infraType={normalizeInfraType(selectedInfraType)} size="md" />
+                  </div>
+                </div>
                 {isLoadingAnalysis && !analysis ? (
                   <p className="text-xs text-slate-500">불러오는 중...</p>
                 ) : !analysis ? (

@@ -7,6 +7,12 @@ const DEFAULT_CRON_EXPR = "0 23 * * 6";
 const DEFAULT_INFRA_TYPE = "k8s";
 const INFRA_TYPE_VSPHERE = "vSphere";
 const INFRA_TYPE_OPTIONS = ["k8s", "kubevirt", INFRA_TYPE_VSPHERE] as const;
+const INFRA_PROD_OPTIONS = [
+  { value: 1, label: "개발" },
+  { value: 2, label: "운영" },
+  { value: 3, label: "개발+운영" },
+] as const;
+const DEFAULT_INFRA_PROD = 1;
 const COLLECTABLE_INFRA_TYPES = new Set(["k8s", "kubevirt", INFRA_TYPE_VSPHERE]);
 
 interface K8sClusterRow {
@@ -14,6 +20,8 @@ interface K8sClusterRow {
   cluster_name: string;
   display_name: string;
   infra_type: string;
+  /** 1=개발, 2=운영, 3=개발+운영 */
+  is_prod: number;
   last_update: string | null;
   cron: boolean;
   cron_expr: string;
@@ -64,6 +72,7 @@ type ApiCluster = {
   cron?: boolean;
   cron_expr?: string;
   infra_type?: string;
+  is_prod?: number;
   vsphere_url?: string | null;
   vsphere_id?: string | null;
   vsphere_has_password?: boolean;
@@ -75,6 +84,7 @@ function mapApiRows(data: ApiCluster[]): K8sClusterRow[] {
     cluster_name: item.cluster_name,
     display_name: (item.display_name ?? "").slice(0, 100),
     infra_type: (item.infra_type || DEFAULT_INFRA_TYPE).slice(0, 20),
+    is_prod: item.is_prod ?? DEFAULT_INFRA_PROD,
     last_update: item.last_update,
     cron: Boolean(item.cron),
     cron_expr: (item.cron_expr || DEFAULT_CRON_EXPR).slice(0, 20),
@@ -94,6 +104,7 @@ function emptyDraftRow(): K8sClusterRow {
     cluster_name: "",
     display_name: "",
     infra_type: DEFAULT_INFRA_TYPE,
+    is_prod: DEFAULT_INFRA_PROD,
     last_update: null,
     cron: false,
     cron_expr: DEFAULT_CRON_EXPR,
@@ -196,6 +207,7 @@ export function K8sInfraConfigModal({ viewerRole, onClose }: K8sInfraConfigModal
         cluster_name: row.cluster_name.trim(),
         display_name: row.display_name.trim().slice(0, 100),
         infra_type: (row.infra_type.trim() || DEFAULT_INFRA_TYPE).slice(0, 20),
+        is_prod: row.is_prod,
         cron: row.cron,
         cron_expr: (row.cron_expr.trim() || DEFAULT_CRON_EXPR).slice(0, 20),
       };
@@ -360,6 +372,7 @@ export function K8sInfraConfigModal({ viewerRole, onClose }: K8sInfraConfigModal
                   <th className="px-3 py-2">cluster_name</th>
                   <th className="px-3 py-2">display_name</th>
                   <th className="px-3 py-2">infra_type</th>
+                  <th className="px-3 py-2">운영 플랫폼 여부</th>
                   <th className="px-3 py-2">last_update</th>
                   <th className="px-3 py-2">상태</th>
                   <th className="px-3 py-2 text-right">{isEditMode ? "삭제" : "수집"}</th>
@@ -436,6 +449,28 @@ export function K8sInfraConfigModal({ viewerRole, onClose }: K8sInfraConfigModal
                           ) : (
                             <span className="font-mono text-xs text-slate-400">
                               {row.infra_type || DEFAULT_INFRA_TYPE}
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-3 py-2">
+                          {isEditMode ? (
+                            <select
+                              value={row.is_prod}
+                              onChange={(event) => {
+                                updateRow(row.localKey, { is_prod: Number(event.target.value) });
+                              }}
+                              className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100 focus:border-sky-600 focus:outline-none"
+                            >
+                              {INFRA_PROD_OPTIONS.map((option) => (
+                                <option key={option.value} value={option.value}>
+                                  {option.label} ({option.value})
+                                </option>
+                              ))}
+                            </select>
+                          ) : (
+                            <span className="text-xs text-slate-300">
+                              {INFRA_PROD_OPTIONS.find((option) => option.value === row.is_prod)
+                                ?.label ?? "-"}
                             </span>
                           )}
                         </td>
@@ -526,7 +561,7 @@ export function K8sInfraConfigModal({ viewerRole, onClose }: K8sInfraConfigModal
                       </tr>
                       {isEditMode && isVsphere ? (
                         <tr className="border-b border-slate-800 bg-slate-950/50">
-                          <td colSpan={9} className="px-3 py-3">
+                          <td colSpan={10} className="px-3 py-3">
                             <div className="grid gap-3 sm:grid-cols-3">
                               <label className="flex flex-col gap-1 text-xs text-slate-400">
                                 vSphere 서버 URL

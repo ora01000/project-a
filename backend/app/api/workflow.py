@@ -399,17 +399,24 @@ class WorkflowDesignAgentResponse(BaseModel):
 @router.get("/workflow-design-agent", response_model=WorkflowDesignAgentResponse)
 async def api_get_workflow_design_agent(request: Request) -> WorkflowDesignAgentResponse:
     """Resolve the agent used for AI workflow design (is_orchestrator=0)."""
-    get_request_auth_user(request)
+    auth_user = get_request_auth_user(request)
     database_path = request.app.state.database_path
     runtime_mode = normalize_runtime_mode(
         getattr(request.app.state, "agent_runtime_mode", "mock"),
     )
+    from backend.app.db.prod_mode import PROD_MODE_DEV, normalize_prod_mode
+
+    is_prod = normalize_prod_mode(getattr(auth_user, "current_prod_mode", PROD_MODE_DEV))
     try:
-        agent_id = resolve_workflow_agent_id(database_path, runtime_mode)
+        agent_id = resolve_workflow_agent_id(database_path, runtime_mode, is_prod=is_prod)
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
-    record = try_resolve_workflow_agent_runtime_record(database_path, runtime_mode)
+    record = try_resolve_workflow_agent_runtime_record(
+        database_path,
+        runtime_mode,
+        is_prod=is_prod,
+    )
     return WorkflowDesignAgentResponse(
         agent_id=agent_id,
         local_agent_id=(record.local_agent_id if record else "") or "",

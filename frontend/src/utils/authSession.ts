@@ -171,5 +171,9 @@ export function userFromAuthResponse(payload: Record<string, unknown>): AuthUser
     band: Number(payload.band ?? 1),
     agents: String(payload.agents ?? ""),
     agent_ids: Array.isArray(payload.agent_ids) ? (payload.agent_ids as string[]) : [],
+    prod_auth: Boolean(payload.prod_auth),
+    current_prod_mode: Number(payload.current_prod_mode ?? 1) === 2 ? 2 : 1,
+    theme_for_dev_mode: Number(payload.theme_for_dev_mode ?? 1) || 1,
+    theme_for_prod_mode: Number(payload.theme_for_prod_mode ?? 1) || 1,
   };
 }

@@ -54,8 +54,11 @@ async def job_request_helper_invoke(
     request: Request,
 ) -> JobRequestHelperInvokeResponse:
     auth_user = get_request_auth_user(request)
+    from backend.app.db.prod_mode import PROD_MODE_DEV, normalize_prod_mode
+
+    prod_mode = normalize_prod_mode(getattr(auth_user, "current_prod_mode", PROD_MODE_DEV))
     try:
-        result = await job_request_helper_service.invoke(body.message)
+        result = await job_request_helper_service.invoke(body.message, is_prod=prod_mode)
     except Exception as exc:
         logger.exception("JOB_REQUEST_HELPER invoke failed")
         log_agent_error(

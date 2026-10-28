@@ -34,6 +34,10 @@ class UserResponse(BaseModel):
     request_reason: str = ""
     last_login: str | None = None
     whatap_event_sub: bool = False
+    prod_auth: bool = False
+    current_prod_mode: int = 1
+    theme_for_dev_mode: int = 1
+    theme_for_prod_mode: int = 1
 
     @classmethod
     def from_user(cls, user: User) -> "UserResponse":
@@ -51,6 +55,10 @@ class UserResponse(BaseModel):
             request_reason=user.request_reason,
             last_login=user.last_login,
             whatap_event_sub=user.whatap_event_sub,
+            prod_auth=user.prod_auth,
+            current_prod_mode=user.current_prod_mode,
+            theme_for_dev_mode=user.theme_for_dev_mode,
+            theme_for_prod_mode=user.theme_for_prod_mode,
         )
 
 
@@ -62,6 +70,7 @@ class CreateUserRequest(BaseModel):
     depart: str = Field(min_length=1, max_length=100)
     role: int
     band: int = Field(default=1, ge=1, le=3)
+    prod_auth: bool = False
     viewer_role: int
 
     @field_validator("role")
@@ -79,6 +88,7 @@ class UpdateUserRequest(BaseModel):
     depart: str = Field(min_length=1, max_length=100)
     role: int
     band: int = Field(default=1, ge=1, le=3)
+    prod_auth: bool = False
     viewer_role: int
 
     @field_validator("role")
@@ -153,6 +163,7 @@ async def add_user(payload: CreateUserRequest, request: Request) -> UserResponse
             depart=payload.depart,
             role=payload.role,
             band=payload.band,
+            prod_auth=payload.prod_auth,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -210,6 +221,7 @@ async def modify_user(idx: int, payload: UpdateUserRequest, request: Request) ->
         depart=payload.depart,
         role=payload.role,
         band=payload.band,
+        prod_auth=payload.prod_auth,
     )
     if updated is None:
         raise HTTPException(status_code=404, detail="사용자를 찾을 수 없습니다.")

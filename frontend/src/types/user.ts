@@ -11,6 +11,8 @@ export interface UserRecord {
   request_reason?: string;
   last_login?: string | null;
   whatap_event_sub?: boolean;
+  prod_auth?: boolean;
+  current_prod_mode?: number;
 }
 
 export interface UserFormValues {
@@ -21,6 +23,7 @@ export interface UserFormValues {
   depart: string;
   role: number;
   band: number;
+  prod_auth: boolean;
 }
 
 export function roleLabel(role: number): string {
@@ -93,4 +96,5 @@ export const EMPTY_USER_FORM: UserFormValues = {
   depart: "",
   role: 1,
   band: BAND_EMPLOYEE,
+  prod_auth: false,
 };

@@ -2,7 +2,11 @@ import { useCallback, useEffect, useState } from "react";
 
 import type { AuthUser } from "../../types/auth";
 import type { AgentRuntimeFormValues, AgentRuntimeRecord } from "../../types/agentruntime";
-import { agentRuntimeFormFromRecord, agentRuntimeTypeLabel } from "../../types/agentruntime";
+import {
+  agentRuntimeFormFromRecord,
+  agentRuntimeIsProdLabel,
+  agentRuntimeTypeLabel,
+} from "../../types/agentruntime";
 import { ConfirmDialog } from "../ConfirmDialog";
 import { AgentConnectionFormModal } from "./AgentConnectionFormModal";
 
@@ -189,6 +193,7 @@ export function AgentConnectionListPage({
               <thead>
                 <tr className="border-b border-slate-700 text-left text-slate-400">
                   <th className="px-3 py-2">유형</th>
+                  <th className="px-3 py-2">운영 플랫폼 여부</th>
                   <th className="px-3 py-2">에이전트 이름</th>
                   <th className="px-3 py-2">Agent ID</th>
                   <th className="px-3 py-2">Local Agent ID</th>
@@ -204,6 +209,7 @@ export function AgentConnectionListPage({
                 {records.map((record) => (
                   <tr key={record.idx} className="border-b border-slate-800 text-slate-200">
                     <td className="px-3 py-2 whitespace-nowrap">{agentRuntimeTypeLabel(record.type)}</td>
+                    <td className="px-3 py-2 whitespace-nowrap">{agentRuntimeIsProdLabel(record)}</td>
                     <td className="px-3 py-2">{record.agent_name}</td>
                     <td className="px-3 py-2 font-mono text-xs">{record.agent_id}</td>
                     <td className="px-3 py-2 font-mono text-xs">{record.local_agent_id || "-"}</td>

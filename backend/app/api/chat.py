@@ -9,6 +9,8 @@ from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
 from backend.app.agents.base import AgentInvokeResult, ToolUsage
+from backend.app.db.agentruntime import agent_registered_for_prod_mode
+from backend.app.db.prod_mode import PROD_MODE_DEV, normalize_prod_mode
 from backend.app.db.prompt_offer import list_prompt_offers
 from backend.app.db.roles import is_admin_role
 from backend.app.db.users import parse_agent_ids
@@ -178,6 +180,7 @@ async def _invoke_agent(
     message: str,
     *,
     session_id: str | None = None,
+    is_prod: int | None = None,
 ) -> AgentInvokeResult:
     return await request.app.state.agent_runtime.invoke(
         AgentInvokeRequest(
@@ -186,6 +189,7 @@ async def _invoke_agent(
             session_id=session_id,
             trace_id=uuid4().hex,
             control_plane_base_url=getattr(request.app.state, "control_plane_base_url", None),
+            is_prod=is_prod,
         ),
     )
 
@@ -209,6 +213,28 @@ async def chat_with_agent(agent_id: str, payload: ChatRequest, request: Request)
         if agent_id not in allowed:
             raise HTTPException(status_code=403, detail="할당되지 않은 에이전트입니다.")
 
+    from backend.app.db.users import get_user_by_idx
+
+    db_user = get_user_by_idx(request.app.state.database_path, auth_user.idx)
+    prod_mode = normalize_prod_mode(
+        db_user.current_prod_mode
+        if db_user is not None
+        else getattr(auth_user, "current_prod_mode", PROD_MODE_DEV)
+    )
+    runtime_mode = normalize_runtime_mode(
+        getattr(request.app.state, "agent_runtime_mode", "mock"),
+    )
+    if not agent_registered_for_prod_mode(
+        request.app.state.database_path,
+        agent_id,
+        runtime_mode=runtime_mode,
+        is_prod=prod_mode,
+    ):
+        raise HTTPException(
+            status_code=404,
+            detail="현재 관리 플랫폼에서 사용할 수 없는 에이전트입니다.",
+        )
+
     async def event_generator() -> AsyncIterator[dict[str, str]]:
         chat_task_id = manager.mark_agent_working(agent_id, "채팅 응답", task_id=uuid4().hex)
         try:
@@ -217,6 +243,7 @@ async def chat_with_agent(agent_id: str, payload: ChatRequest, request: Request)
                 agent_id,
                 payload.message,
                 session_id=payload.session_id,
+                is_prod=prod_mode,
             )
             if _is_workflow_design_chat_agent(request, agent_id):
                 result = AgentInvokeResult(

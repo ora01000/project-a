@@ -34,7 +34,7 @@ flowchart LR
 ## 사전 요구사항
 
 - Python **3.12** + [uv](https://docs.astral.sh/uv/)
-- Node.js **18+**
+- Node.js **26.12.1+** (프론트 이미지 빌드: `node:26.12.1-alpine`)
 - PostgreSQL (`DATABASE_URL`)
 - Docker (로컬 Redis 권장)
 - (선택) OpenAI 호환 LLM, MCP 서버 — mock 채팅·도구 연동용

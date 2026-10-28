@@ -137,7 +137,12 @@ class JobRequestHelperService:
             self._tool_names,
         )
 
-    async def invoke(self, message: str) -> AgentInvokeResult:
+    async def invoke(
+        self,
+        message: str,
+        *,
+        is_prod: int | None = None,
+    ) -> AgentInvokeResult:
         mode = normalize_runtime_mode(self._runtime_mode or resolve_agent_runtime_mode())
         if mode == "http":
             if self._agent_runtime is None:
@@ -149,6 +154,7 @@ class JobRequestHelperService:
                 AgentInvokeRequest(
                     agent_id=STATIC_CONFIG.agent_id,
                     message=message,
+                    is_prod=is_prod,
                 )
             )
 
