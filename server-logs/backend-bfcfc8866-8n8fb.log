@@ -1,0 +1,130 @@
+2026-10-27 21:33:16 INFO [backend.app.logging.backend_logging] backend logging configured enabled=file level=debug path=/app/logs/backend/backend-bfcfc8866-8n8fb.log
+2026-10-27 21:33:17 DEBUG [asyncio] Using selector: EpollSelector
+2026-10-27 21:33:17 INFO [uvicorn.error] Started server process [1]
+2026-10-27 21:33:17 INFO [uvicorn.error] Waiting for application startup.
+2026-10-27 21:33:17 INFO [backend.app.logging.backend_logging] backend logging configured enabled=file level=debug path=/app/logs/backend/backend-bfcfc8866-8n8fb.log
+2026-10-27 21:33:17 INFO [backend.app.main] AGENT_RUNTIME_MODE=http
+2026-10-27 21:33:17 INFO [backend.app.main] AGENT_RUNTIME_HTTP_TIMEOUT_SECONDS=300.0
+2026-10-27 21:33:17 INFO [backend.app.db.database] Skip user seeding: users table already has 18 record(s)
+2026-10-27 21:33:17 INFO [backend.app.db.database] PostgreSQL database initialized via DATABASE_URL
+2026-10-27 21:33:17 DEBUG [redis.asyncio.connection] Failed to enable maintenance notifications: unknown subcommand 'MAINT_NOTIFICATIONS'. Try CLIENT HELP.
+2026-10-27 21:33:17 INFO [backend.app.services.redis_client] Redis connected: redis://redis:6379/0
+2026-10-27 21:33:18 INFO [backend.app.services.infra_dictionary] infra_dictionary redis loaded reason=startup loaded_at=2026-10-27 21:33:18 elapsed_ms=106.9 types=['k8s', 'kubevirt', 'vSphere'] clusters=20
+2026-10-27 21:33:18 INFO [backend.app.main] INFRA_GAP_ANALYSIS skipped in-process init in http mode (use agentruntime local_agent_id=INFRA_GAP_ANALYSIS)
+2026-10-27 21:33:18 INFO [backend.app.main] INFRA_SEARCH_AGENT skipped in-process init in http mode (use agentruntime local_agent_id=INFRA_SEARCH_AGENT)
+2026-10-27 21:33:18 INFO [backend.app.main] JOB_DECISION_AGENT skipped in-process init in http mode (use agentruntime local_agent_id=JOB_DECISION_AGENT)
+2026-10-27 21:33:18 INFO [backend.app.main] JOB_REQUEST_HELPER skipped in-process init in http mode (use agentruntime local_agent_id=JOB_REQUEST_HELPER)
+2026-10-27 21:33:18 INFO [backend.app.main] backend role=api run_workers=False
+2026-10-27 21:33:18 INFO [uvicorn.error] Application startup complete.
+2026-10-27 21:33:18 INFO [uvicorn.error] Uvicorn running on http://0.0.0.0:8080 (Press CTRL+C to quit)
+2026-10-27 21:33:29 INFO [uvicorn.access] 10.129.2.2:34070 - "GET /readyz HTTP/1.1" 200
+2026-10-27 21:33:32 INFO [uvicorn.access] 10.128.3.75:48006 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200
+2026-10-27 21:33:32 DEBUG [redis.asyncio.connection] Failed to enable maintenance notifications: unknown subcommand 'MAINT_NOTIFICATIONS'. Try CLIENT HELP.
+2026-10-27 21:33:32 DEBUG [redis.asyncio.connection] Failed to enable maintenance notifications: unknown subcommand 'MAINT_NOTIFICATIONS'. Try CLIENT HELP.
+2026-10-27 21:33:32 INFO [uvicorn.access] 10.128.3.75:48044 - "GET /api/agents HTTP/1.1" 200
+2026-10-27 21:33:34 INFO [uvicorn.access] 10.128.3.75:48038 - "GET /api/jobs/workflow HTTP/1.1" 200
+2026-10-27 21:33:39 INFO [uvicorn.access] 10.129.2.2:47182 - "GET /readyz HTTP/1.1" 200
+2026-10-27 21:33:49 INFO [uvicorn.access] 10.129.2.2:56636 - "GET /healthz HTTP/1.1" 200
+2026-10-27 21:33:49 INFO [uvicorn.access] 10.129.2.2:56642 - "GET /readyz HTTP/1.1" 200
+2026-10-27 21:33:59 INFO [uvicorn.access] 10.129.2.2:34132 - "GET /readyz HTTP/1.1" 200
+2026-10-27 21:34:09 INFO [uvicorn.access] 10.129.2.2:51504 - "GET /healthz HTTP/1.1" 200
+2026-10-27 21:34:09 INFO [uvicorn.access] 10.129.2.2:51508 - "GET /readyz HTTP/1.1" 200
+2026-10-27 21:34:19 INFO [uvicorn.access] 10.129.2.2:59766 - "GET /readyz HTTP/1.1" 200
+2026-10-27 21:34:29 INFO [uvicorn.access] 10.129.2.2:55602 - "GET /readyz HTTP/1.1" 200
+2026-10-27 21:34:29 INFO [uvicorn.access] 10.129.2.2:55614 - "GET /healthz HTTP/1.1" 200
+2026-10-27 21:34:32 INFO [uvicorn.access] 10.128.3.75:33212 - "GET /api/jobs?status_code=0 HTTP/1.1" 200
+2026-10-27 21:34:32 INFO [uvicorn.access] 10.128.3.75:33208 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200
+2026-10-27 21:34:39 INFO [uvicorn.access] 10.129.2.2:37916 - "GET /readyz HTTP/1.1" 200
+2026-10-27 21:34:49 INFO [uvicorn.access] 10.129.2.2:48444 - "GET /readyz HTTP/1.1" 200
+2026-10-27 21:34:49 INFO [uvicorn.access] 10.129.2.2:48452 - "GET /healthz HTTP/1.1" 200
+2026-10-27 21:34:59 INFO [uvicorn.access] 10.129.2.2:41820 - "GET /readyz HTTP/1.1" 200
+2026-10-27 21:35:09 INFO [uvicorn.access] 10.129.2.2:58866 - "GET /readyz HTTP/1.1" 200
+2026-10-27 21:35:09 INFO [uvicorn.access] 10.129.2.2:58882 - "GET /healthz HTTP/1.1" 200
+2026-10-27 21:35:19 INFO [uvicorn.access] 10.129.2.2:42480 - "GET /readyz HTTP/1.1" 200
+2026-10-27 21:35:29 INFO [uvicorn.access] 10.129.2.2:37212 - "GET /readyz HTTP/1.1" 200
+2026-10-27 21:35:29 INFO [uvicorn.access] 10.129.2.2:37218 - "GET /healthz HTTP/1.1" 200
+2026-10-27 21:35:32 INFO [uvicorn.access] 10.128.3.75:36592 - "GET /api/agents HTTP/1.1" 200
+2026-10-27 21:35:32 INFO [uvicorn.access] 10.128.3.75:36568 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200
+2026-10-27 21:35:39 INFO [uvicorn.access] 10.129.2.2:55774 - "GET /readyz HTTP/1.1" 200
+2026-10-27 21:35:49 INFO [uvicorn.access] 10.129.2.2:42146 - "GET /readyz HTTP/1.1" 200
+2026-10-27 21:35:49 INFO [uvicorn.access] 10.129.2.2:42160 - "GET /healthz HTTP/1.1" 200
+2026-10-27 21:35:59 INFO [uvicorn.access] 10.129.2.2:40248 - "GET /readyz HTTP/1.1" 200
+2026-10-27 21:36:09 INFO [uvicorn.access] 10.129.2.2:47536 - "GET /readyz HTTP/1.1" 200
+2026-10-27 21:36:09 INFO [uvicorn.access] 10.129.2.2:47530 - "GET /healthz HTTP/1.1" 200
+2026-10-27 21:36:15 INFO [uvicorn.access] 10.128.3.75:34906 - "GET /api/agents HTTP/1.1" 200
+2026-10-27 21:36:20 INFO [uvicorn.access] 10.128.3.75:34918 - "GET /api/jobs/workflow HTTP/1.1" 200
+2026-10-27 21:36:20 INFO [uvicorn.access] 10.129.2.2:45346 - "GET /readyz HTTP/1.1" 200
+2026-10-27 21:36:20 INFO [uvicorn.access] 10.128.3.75:34948 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200
+2026-10-27 21:36:21 INFO [uvicorn.access] 10.128.3.75:56820 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200
+2026-10-27 21:36:27 INFO [uvicorn.access] 10.128.3.75:56860 - "GET /api/jobs?status_code=0 HTTP/1.1" 200
+2026-10-27 21:36:27 INFO [uvicorn.access] 10.128.3.75:56870 - "GET /api/jobs?status_code=1&approver=isyun HTTP/1.1" 200
+2026-10-27 21:36:27 INFO [uvicorn.access] 10.128.3.75:56892 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200
+2026-10-27 21:36:29 INFO [uvicorn.access] 10.129.2.2:53658 - "GET /healthz HTTP/1.1" 200
+2026-10-27 21:36:29 INFO [uvicorn.access] 10.129.2.2:53664 - "GET /readyz HTTP/1.1" 200
+2026-10-27 21:36:30 INFO [uvicorn.access] 10.128.3.75:35396 - "GET /api/k8s-infra/clusters HTTP/1.1" 200
+2026-10-27 21:36:30 INFO [uvicorn.access] 10.128.3.75:35412 - "GET /api/users?viewer_role=0 HTTP/1.1" 200
+2026-10-27 21:36:36 INFO [uvicorn.access] 10.128.3.75:35434 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200
+2026-10-27 21:36:37 INFO [uvicorn.access] 10.128.3.75:35448 - "GET /api/jobs?status_code=0 HTTP/1.1" 200
+2026-10-27 21:36:39 INFO [uvicorn.access] 10.129.2.2:48900 - "GET /readyz HTTP/1.1" 200
+2026-10-27 21:36:45 INFO [uvicorn.access] 10.128.3.75:59116 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200
+2026-10-27 21:36:48 INFO [uvicorn.access] 10.128.3.75:59158 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200
+2026-10-27 21:36:49 INFO [uvicorn.access] 10.129.2.2:35634 - "GET /readyz HTTP/1.1" 200
+2026-10-27 21:36:49 INFO [uvicorn.access] 10.129.2.2:35638 - "GET /healthz HTTP/1.1" 200
+2026-10-27 21:36:57 INFO [uvicorn.access] 10.128.3.75:42594 - "GET /api/jobs?status_code=0 HTTP/1.1" 200
+2026-10-27 21:37:00 INFO [uvicorn.access] 10.128.3.75:42618 - "GET /api/jobs/workflow HTTP/1.1" 200
+2026-10-27 21:37:00 INFO [uvicorn.access] 10.129.2.2:45118 - "GET /readyz HTTP/1.1" 200
+2026-10-27 21:37:00 INFO [uvicorn.access] 10.128.3.75:42624 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200
+2026-10-27 21:37:00 INFO [uvicorn.access] 10.128.3.75:55924 - "GET /api/agents HTTP/1.1" 200
+2026-10-27 21:37:06 INFO [uvicorn.access] 10.128.3.75:55964 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200
+2026-10-27 21:37:07 INFO [uvicorn.access] 10.128.3.75:55968 - "GET /api/jobs?status_code=0 HTTP/1.1" 200
+2026-10-27 21:37:07 INFO [uvicorn.access] 10.128.3.75:55980 - "GET /api/jobs?status_code=1&approver=isyun HTTP/1.1" 200
+2026-10-27 21:37:09 INFO [uvicorn.access] 10.129.2.2:38912 - "GET /healthz HTTP/1.1" 200
+2026-10-27 21:37:09 INFO [uvicorn.access] 10.129.2.2:38926 - "GET /readyz HTTP/1.1" 200
+2026-10-27 21:37:09 INFO [uvicorn.access] 10.128.3.75:60568 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200
+2026-10-27 21:37:12 INFO [uvicorn.access] 10.128.3.75:60572 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200
+2026-10-27 21:37:15 INFO [uvicorn.access] 10.128.3.75:60606 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200
+2026-10-27 21:37:17 INFO [uvicorn.access] 10.128.3.75:60620 - "GET /api/jobs?status_code=0 HTTP/1.1" 200
+2026-10-27 21:37:20 INFO [uvicorn.access] 10.128.3.75:60642 - "GET /api/jobs/workflow HTTP/1.1" 200
+2026-10-27 21:37:20 INFO [uvicorn.access] 10.129.2.2:36912 - "GET /readyz HTTP/1.1" 200
+2026-10-27 21:37:27 INFO [uvicorn.access] 10.128.3.75:39602 - "GET /api/jobs?status_code=0 HTTP/1.1" 200
+2026-10-27 21:37:27 INFO [uvicorn.access] 10.128.3.75:39618 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200
+2026-10-27 21:37:29 INFO [uvicorn.access] 10.129.2.2:44836 - "GET /readyz HTTP/1.1" 200
+2026-10-27 21:37:29 INFO [uvicorn.access] 10.129.2.2:44838 - "GET /healthz HTTP/1.1" 200
+2026-10-27 21:37:30 INFO [uvicorn.access] 10.128.3.75:60290 - "GET /api/agents HTTP/1.1" 200
+2026-10-27 21:37:30 INFO [uvicorn.access] 10.128.3.75:60304 - "GET /api/users?viewer_role=0 HTTP/1.1" 200
+2026-10-27 21:37:30 INFO [uvicorn.access] 10.128.3.75:60306 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200
+2026-10-27 21:37:36 INFO [uvicorn.access] 10.128.3.75:60334 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200
+2026-10-27 21:37:37 INFO [uvicorn.access] 10.128.3.75:60346 - "GET /api/jobs?status_code=1&approver=isyun HTTP/1.1" 200
+2026-10-27 21:37:40 INFO [uvicorn.access] 10.128.3.75:60348 - "GET /api/jobs/workflow HTTP/1.1" 200
+2026-10-27 21:37:40 INFO [uvicorn.access] 10.129.2.2:55896 - "GET /readyz HTTP/1.1" 200
+2026-10-27 21:37:40 INFO [uvicorn.access] 10.128.3.75:38972 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200
+2026-10-27 21:37:45 INFO [uvicorn.access] 10.128.3.75:38992 - "GET /api/agents HTTP/1.1" 200
+2026-10-27 21:37:45 INFO [uvicorn.access] 10.128.3.75:39008 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200
+2026-10-27 21:37:47 INFO [uvicorn.access] 10.128.3.75:39014 - "GET /api/jobs?status_code=0 HTTP/1.1" 200
+2026-10-27 21:37:47 INFO [uvicorn.access] 10.128.3.75:39026 - "GET /api/jobs?status_code=1&approver=isyun HTTP/1.1" 200
+2026-10-27 21:37:48 INFO [uvicorn.access] 10.128.3.75:39044 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200
+2026-10-27 21:37:49 INFO [uvicorn.access] 10.129.2.2:36440 - "GET /healthz HTTP/1.1" 200
+2026-10-27 21:37:49 INFO [uvicorn.access] 10.129.2.2:36438 - "GET /readyz HTTP/1.1" 200
+2026-10-27 21:37:51 INFO [uvicorn.access] 10.128.3.75:50986 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200
+2026-10-27 21:37:57 INFO [uvicorn.access] 10.128.3.75:50998 - "GET /api/jobs?status_code=0 HTTP/1.1" 200
+2026-10-27 21:37:57 INFO [uvicorn.access] 10.128.3.75:51000 - "GET /api/jobs?status_code=1&approver=isyun HTTP/1.1" 200
+2026-10-27 21:37:57 INFO [uvicorn.access] 10.128.3.75:51010 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200
+2026-10-27 21:37:59 INFO [uvicorn.access] 10.129.2.2:44334 - "GET /readyz HTTP/1.1" 200
+2026-10-27 21:38:00 INFO [uvicorn.access] 10.128.3.75:51906 - "GET /api/agents HTTP/1.1" 200
+2026-10-27 21:38:00 INFO [uvicorn.access] 10.128.3.75:51928 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200
+2026-10-27 21:38:03 INFO [uvicorn.access] 10.128.3.75:51938 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200
+2026-10-27 21:38:08 INFO [uvicorn.access] 10.128.3.75:51954 - "GET /api/jobs?status_code=0 HTTP/1.1" 200
+2026-10-27 21:38:08 INFO [uvicorn.access] 10.128.3.75:51960 - "GET /api/jobs?status_code=1&approver=isyun HTTP/1.1" 200
+2026-10-27 21:38:10 INFO [uvicorn.access] 10.128.3.75:51964 - "GET /api/jobs/workflow HTTP/1.1" 200
+2026-10-27 21:38:10 INFO [uvicorn.access] 10.129.2.2:54016 - "GET /healthz HTTP/1.1" 200
+2026-10-27 21:38:10 INFO [uvicorn.access] 10.129.2.2:54028 - "GET /readyz HTTP/1.1" 200
+2026-10-27 21:38:10 INFO [uvicorn.access] 10.128.3.75:33414 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200
+2026-10-27 21:38:16 INFO [uvicorn.access] 10.128.3.75:33440 - "GET /api/users?viewer_role=0 HTTP/1.1" 200
+2026-10-27 21:38:18 INFO [uvicorn.access] 10.128.3.75:33462 - "GET /api/jobs?status_code=1&approver=isyun HTTP/1.1" 200
+2026-10-27 21:38:19 INFO [uvicorn.access] 10.129.2.2:36360 - "GET /readyz HTTP/1.1" 200
+2026-10-27 21:38:22 INFO [uvicorn.access] 10.128.3.75:52858 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200
+2026-10-27 21:38:25 INFO [uvicorn.access] 10.128.3.75:52868 - "GET /api/debug/teams-power-automate/pending HTTP/1.1" 200
+2026-10-27 21:38:25 INFO [uvicorn.error] Shutting down
+2026-10-27 21:38:25 INFO [uvicorn.error] Waiting for application shutdown.
+2026-10-27 21:38:25 INFO [uvicorn.error] Application shutdown complete.
+2026-10-27 21:38:25 INFO [uvicorn.error] Finished server process [1]
