@@ -471,21 +471,38 @@ async def list_external_inventories(
 
 ORIGIN_API_AUTH_BEARER = 1
 ORIGIN_API_AUTH_HEADER = 2
+ORIGIN_API_AUTH_TOKEN = 3
+ORIGIN_API_AUTH_TYPES = frozenset(
+    {ORIGIN_API_AUTH_BEARER, ORIGIN_API_AUTH_HEADER, ORIGIN_API_AUTH_TOKEN}
+)
 
 
 def normalize_origin_api_auth_type(auth_type: int | None) -> int:
     resolved = ORIGIN_API_AUTH_BEARER if auth_type is None else int(auth_type)
-    if resolved not in (ORIGIN_API_AUTH_BEARER, ORIGIN_API_AUTH_HEADER):
+    if resolved not in ORIGIN_API_AUTH_TYPES:
         raise InventoryExternalApiError("invalid_api_auth")
     return resolved
+
+
+def normalize_origin_api_method(method: str | None, *, default: str = "GET") -> str:
+    text = (method or "").strip().upper() or default
+    if text not in {"GET", "POST"}:
+        raise InventoryExternalApiError("invalid_api_method")
+    return text
 
 
 def validate_origin_api_key_format(
     auth_type: int | None,
     api_key: str | None,
+    *,
+    token_api: str | None = None,
 ) -> tuple[int, str | None]:
-    """Validate optional key for bearer(1) / header(2=``key:value``)."""
+    """Validate optional key for bearer(1) / header(2=``key:value``) / token(3)."""
     resolved = normalize_origin_api_auth_type(auth_type)
+    if resolved == ORIGIN_API_AUTH_TOKEN:
+        if not (token_api or "").strip():
+            raise InventoryExternalApiError("invalid_api_auth")
+        return resolved, None
     key = (api_key or "").strip()
     if not key:
         return resolved, None
@@ -504,6 +521,8 @@ def _inventory_api_client_error(result: dict[str, Any], *, default: str) -> Inve
     detail = ""
     if isinstance(body, dict):
         raw = body.get("detail") or body.get("error") or body.get("message")
+        if isinstance(raw, dict):
+            raw = raw.get("error") or raw.get("message") or raw
         detail = str(raw or "").strip()
     if not detail:
         detail = str(result.get("error") or result.get("raw_body") or default).strip()
@@ -512,8 +531,14 @@ def _inventory_api_client_error(result: dict[str, Any], *, default: str) -> Inve
         return InventoryExternalApiError("invalid_api_auth")
     if "invalid_api_url" in lowered:
         return InventoryExternalApiError("invalid_api_url")
+    if "invalid_api_method" in lowered:
+        return InventoryExternalApiError("invalid_api_method")
+    if "invalid_api_params" in lowered:
+        return InventoryExternalApiError("invalid_api_params")
     if "invalid_json" in lowered:
         return InventoryExternalApiError("invalid_json")
+    if "token_failed" in lowered:
+        return InventoryExternalApiError("token_failed")
     if "retrieve_failed" in lowered:
         return InventoryExternalApiError("retrieve_failed")
     if status == 400 and not detail:
@@ -530,8 +555,13 @@ async def add_external_inventory(
     created_by: int | None = None,
     origin_type: int | None = None,
     origin_api_url: str | None = None,
+    origin_api_url_method: str | None = None,
+    origin_api_url_params: str | None = None,
     origin_api_key: str | None = None,
     origin_api_auth_type: int | None = None,
+    origin_token_api: str | None = None,
+    origin_token_api_method: str | None = None,
+    origin_token_api_params: str | None = None,
     is_scheduled: bool | None = None,
     api_crawling_cron: str | None = None,
     base_url: str | None = None,
@@ -545,14 +575,34 @@ async def add_external_inventory(
     if resolved_type == 1:
         body["origin_csv"] = (origin_csv or "").strip()
     else:
-        auth_type, key = validate_origin_api_key_format(origin_api_auth_type, origin_api_key)
+        auth_type, key = validate_origin_api_key_format(
+            origin_api_auth_type,
+            origin_api_key,
+            token_api=origin_token_api,
+        )
         if origin_csv is not None and str(origin_csv).strip():
             body["origin_csv"] = str(origin_csv).strip()
         if origin_api_url is not None:
             body["origin_api_url"] = str(origin_api_url).strip()
         body["origin_api_auth_type"] = auth_type
-        # Always send key for type=2 so omitting/empty clears the stored secret.
-        body["origin_api_key"] = key or ""
+        body["origin_api_url_method"] = normalize_origin_api_method(
+            origin_api_url_method, default="GET"
+        )
+        if origin_api_url_params is not None:
+            body["origin_api_url_params"] = str(origin_api_url_params).strip()
+        if auth_type == ORIGIN_API_AUTH_TOKEN:
+            body["origin_token_api"] = str(origin_token_api or "").strip()
+            body["origin_token_api_method"] = normalize_origin_api_method(
+                origin_token_api_method, default="POST"
+            )
+            # Blank keeps existing secret on remote upsert.
+            token_params = (origin_token_api_params or "").strip()
+            if token_params:
+                body["origin_token_api_params"] = token_params
+            body["origin_api_key"] = ""
+        else:
+            # Always send key for bearer/header so omitting/empty clears the stored secret.
+            body["origin_api_key"] = key or ""
         if is_scheduled is not None:
             body["is_scheduled"] = bool(is_scheduled)
         if api_crawling_cron is not None:
@@ -581,6 +631,11 @@ async def test_origin_api_via_inventory_api(
     api_url: str,
     api_key: str | None = None,
     auth_type: int | None = None,
+    api_method: str | None = None,
+    api_params: str | None = None,
+    token_api: str | None = None,
+    token_api_method: str | None = None,
+    token_api_params: str | None = None,
     base_url: str | None = None,
     timeout_seconds: float = _DEFAULT_TIMEOUT,
 ) -> dict[str, Any]:
@@ -588,9 +643,24 @@ async def test_origin_api_via_inventory_api(
     url = (api_url or "").strip()
     if not url.lower().startswith(("http://", "https://")):
         raise InventoryExternalApiError("invalid_api_url")
-    resolved_auth, token = validate_origin_api_key_format(auth_type, api_key)
-    body: dict[str, object] = {"url": url, "auth_type": resolved_auth}
-    if token:
+    resolved_auth, token = validate_origin_api_key_format(
+        auth_type, api_key, token_api=token_api
+    )
+    body: dict[str, object] = {
+        "url": url,
+        "auth_type": resolved_auth,
+        "method": normalize_origin_api_method(api_method, default="GET"),
+    }
+    if api_params is not None and str(api_params).strip():
+        body["params"] = str(api_params).strip()
+    if resolved_auth == ORIGIN_API_AUTH_TOKEN:
+        body["token_api"] = str(token_api or "").strip()
+        body["token_api_method"] = normalize_origin_api_method(
+            token_api_method, default="POST"
+        )
+        if token_api_params is not None and str(token_api_params).strip():
+            body["token_api_params"] = str(token_api_params).strip()
+    elif token:
         body["token"] = token
     result = await call_inventory_api(
         method="POST",
@@ -600,11 +670,11 @@ async def test_origin_api_via_inventory_api(
         timeout_seconds=timeout_seconds,
     )
     status = int(result.get("status_code") or 0)
-    if status == 400:
+    if status == 400 or status == 422:
         raise _inventory_api_client_error(result, default="invalid_api_url")
     if status >= 500:
-        raise InventoryExternalApiError(
-            str(result.get("error") or "inventory-api testAPI 호출 실패")
+        raise _inventory_api_client_error(
+            result, default=str(result.get("error") or "inventory-api testAPI 호출 실패")
         )
     payload = result.get("body")
     if isinstance(payload, dict):
@@ -617,6 +687,11 @@ async def retrieve_origin_api_via_inventory_api(
     api_url: str,
     api_key: str | None = None,
     auth_type: int | None = None,
+    api_method: str | None = None,
+    api_params: str | None = None,
+    token_api: str | None = None,
+    token_api_method: str | None = None,
+    token_api_params: str | None = None,
     base_url: str | None = None,
     timeout_seconds: float = _DEFAULT_TIMEOUT,
 ) -> dict[str, Any]:
@@ -624,9 +699,24 @@ async def retrieve_origin_api_via_inventory_api(
     url = (api_url or "").strip()
     if not url.lower().startswith(("http://", "https://")):
         raise InventoryExternalApiError("invalid_api_url")
-    resolved_auth, token = validate_origin_api_key_format(auth_type, api_key)
-    body: dict[str, object] = {"api_url": url, "auth_type": resolved_auth}
-    if token:
+    resolved_auth, token = validate_origin_api_key_format(
+        auth_type, api_key, token_api=token_api
+    )
+    body: dict[str, object] = {
+        "api_url": url,
+        "auth_type": resolved_auth,
+        "api_method": normalize_origin_api_method(api_method, default="GET"),
+    }
+    if api_params is not None and str(api_params).strip():
+        body["api_params"] = str(api_params).strip()
+    if resolved_auth == ORIGIN_API_AUTH_TOKEN:
+        body["token_api"] = str(token_api or "").strip()
+        body["token_api_method"] = normalize_origin_api_method(
+            token_api_method, default="POST"
+        )
+        if token_api_params is not None and str(token_api_params).strip():
+            body["token_api_params"] = str(token_api_params).strip()
+    elif token:
         body["api_key"] = token
     result = await call_inventory_api(
         method="POST",
@@ -636,7 +726,7 @@ async def retrieve_origin_api_via_inventory_api(
         timeout_seconds=timeout_seconds,
     )
     status = int(result.get("status_code") or 0)
-    if status == 400:
+    if status == 400 or status == 422:
         raise _inventory_api_client_error(result, default="invalid_api_url")
     if status == 502 or not result.get("ok"):
         raise _inventory_api_client_error(result, default="retrieve_failed")

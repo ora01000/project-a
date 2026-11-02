@@ -63,8 +63,14 @@ const DEFAULT_ADD_INVENTORY = `{
   "table_name": "inventory_servers",
   "display_name": "servers",
   "description": "",
-  "origin_type": 1,
-  "origin_csv": "servers.csv"
+  "origin_type": 2,
+  "origin_api_url": "https://example.com/api/assets",
+  "origin_api_url_method": "GET",
+  "origin_api_url_params": "",
+  "origin_api_auth_type": 3,
+  "origin_token_api": "https://example.com/oauth/token",
+  "origin_token_api_method": "POST",
+  "origin_token_api_params": "grant_type=client_credentials"
 }`;
 
 const DEFAULT_ADD_API = `{
@@ -127,6 +133,11 @@ export function InventoryApiDebugModal({ viewerRole, onClose }: InventoryApiDebu
   const [apiUrl, setApiUrl] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [authType, setAuthType] = useState("1");
+  const [apiMethod, setApiMethod] = useState("GET");
+  const [apiParams, setApiParams] = useState("");
+  const [tokenApi, setTokenApi] = useState("");
+  const [tokenApiMethod, setTokenApiMethod] = useState("POST");
+  const [tokenApiParams, setTokenApiParams] = useState("");
   const [startrow, setStartrow] = useState("1");
   const [endrow, setEndrow] = useState("20");
   const [sql, setSql] = useState("SELECT 1");
@@ -217,13 +228,21 @@ export function InventoryApiDebugModal({ viewerRole, onClose }: InventoryApiDebu
         if (!apiUrl.trim()) {
           throw new Error("api_url을 입력하세요.");
         }
+        if (authType === "3" && !tokenApi.trim()) {
+          throw new Error("token_api를 입력하세요.");
+        }
         response = await fetch("/api/debug/inventory-api/retrieve", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             api_url: apiUrl.trim(),
-            api_key: apiKey.trim() || null,
+            api_key: authType === "3" ? null : apiKey.trim() || null,
             auth_type: Number(authType) || 1,
+            api_method: apiMethod || "GET",
+            api_params: apiParams.trim() || null,
+            token_api: authType === "3" ? tokenApi.trim() : null,
+            token_api_method: authType === "3" ? tokenApiMethod || "POST" : null,
+            token_api_params: authType === "3" ? tokenApiParams.trim() || null : null,
             base_url: trimmedBase,
           }),
         });
@@ -231,13 +250,21 @@ export function InventoryApiDebugModal({ viewerRole, onClose }: InventoryApiDebu
         if (!apiUrl.trim()) {
           throw new Error("url을 입력하세요.");
         }
+        if (authType === "3" && !tokenApi.trim()) {
+          throw new Error("token_api를 입력하세요.");
+        }
         response = await fetch("/api/debug/inventory-api/testAPI", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             url: apiUrl.trim(),
-            token: apiKey.trim() || null,
+            token: authType === "3" ? null : apiKey.trim() || null,
             auth_type: Number(authType) || 1,
+            method: apiMethod || "GET",
+            params: apiParams.trim() || null,
+            token_api: authType === "3" ? tokenApi.trim() : null,
+            token_api_method: authType === "3" ? tokenApiMethod || "POST" : null,
+            token_api_params: authType === "3" ? tokenApiParams.trim() || null : null,
             base_url: trimmedBase,
           }),
         });
@@ -536,17 +563,75 @@ export function InventoryApiDebugModal({ viewerRole, onClose }: InventoryApiDebu
                 >
                   <option value="1">1 bearer</option>
                   <option value="2">2 header</option>
+                  <option value="3">3 token</option>
                 </select>
               </label>
-              <label className="block text-sm text-slate-300 md:col-span-3">
-                {endpointId === "retrieve" ? "api_key (optional)" : "token (optional)"}
+              <label className="block text-sm text-slate-300">
+                {endpointId === "retrieve" ? "api_method" : "method"}
+                <select
+                  value={apiMethod}
+                  onChange={(event) => setApiMethod(event.target.value)}
+                  className={INPUT}
+                >
+                  <option value="GET">GET</option>
+                  <option value="POST">POST</option>
+                </select>
+              </label>
+              <label className="block text-sm text-slate-300 md:col-span-2">
+                {endpointId === "retrieve" ? "api_params" : "params"} (key=value&…)
                 <input
                   type="text"
-                  value={apiKey}
-                  onChange={(event) => setApiKey(event.target.value)}
+                  value={apiParams}
+                  onChange={(event) => setApiParams(event.target.value)}
                   className={INPUT}
+                  placeholder="foo=1&bar=2"
                 />
               </label>
+              {authType === "3" ? (
+                <>
+                  <label className="block text-sm text-slate-300 md:col-span-2">
+                    token_api
+                    <input
+                      type="text"
+                      value={tokenApi}
+                      onChange={(event) => setTokenApi(event.target.value)}
+                      className={INPUT}
+                      placeholder="https://example.com/oauth/token"
+                    />
+                  </label>
+                  <label className="block text-sm text-slate-300">
+                    token_api_method
+                    <select
+                      value={tokenApiMethod}
+                      onChange={(event) => setTokenApiMethod(event.target.value)}
+                      className={INPUT}
+                    >
+                      <option value="POST">POST</option>
+                      <option value="GET">GET</option>
+                    </select>
+                  </label>
+                  <label className="block text-sm text-slate-300 md:col-span-3">
+                    token_api_params (key=value&…)
+                    <input
+                      type="text"
+                      value={tokenApiParams}
+                      onChange={(event) => setTokenApiParams(event.target.value)}
+                      className={INPUT}
+                      placeholder="grant_type=client_credentials&client_id=…"
+                    />
+                  </label>
+                </>
+              ) : (
+                <label className="block text-sm text-slate-300 md:col-span-3">
+                  {endpointId === "retrieve" ? "api_key (optional)" : "token (optional)"}
+                  <input
+                    type="text"
+                    value={apiKey}
+                    onChange={(event) => setApiKey(event.target.value)}
+                    className={INPUT}
+                  />
+                </label>
+              )}
             </div>
           ) : null}
 

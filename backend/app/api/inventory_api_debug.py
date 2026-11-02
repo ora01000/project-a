@@ -39,14 +39,24 @@ class InventoryApiSqlRequest(BaseModel):
 class InventoryApiRetrieveRequest(BaseModel):
     api_url: str = Field(min_length=1)
     api_key: str | None = None
-    auth_type: int = Field(default=1, ge=1, le=2)
+    auth_type: int = Field(default=1, ge=1, le=3)
+    api_method: str | None = Field(default=None, max_length=10)
+    api_params: str | None = Field(default=None, max_length=1000)
+    token_api: str | None = Field(default=None, max_length=500)
+    token_api_method: str | None = Field(default=None, max_length=10)
+    token_api_params: str | None = Field(default=None, max_length=1000)
     base_url: str | None = None
 
 
 class InventoryApiTestRequest(BaseModel):
     url: str = Field(min_length=1)
     token: str | None = None
-    auth_type: int = Field(default=1, ge=1, le=2)
+    auth_type: int = Field(default=1, ge=1, le=3)
+    method: str | None = Field(default=None, max_length=10)
+    params: str | None = Field(default=None, max_length=1000)
+    token_api: str | None = Field(default=None, max_length=500)
+    token_api_method: str | None = Field(default=None, max_length=10)
+    token_api_params: str | None = Field(default=None, max_length=1000)
     base_url: str | None = None
 
 
@@ -64,8 +74,13 @@ class InventoryApiAddInventoryRequest(BaseModel):
     origin_csv: str | None = Field(default=None, max_length=100)
     origin_type: int | None = None
     origin_api_url: str | None = Field(default=None, max_length=500)
+    origin_api_url_method: str | None = Field(default=None, max_length=10)
+    origin_api_url_params: str | None = Field(default=None, max_length=1000)
     origin_api_auth_type: int | None = None
     origin_api_key: str | None = Field(default=None, max_length=500)
+    origin_token_api: str | None = Field(default=None, max_length=500)
+    origin_token_api_method: str | None = Field(default=None, max_length=10)
+    origin_token_api_params: str | None = Field(default=None, max_length=1000)
     is_scheduled: bool = False
     api_crawling_cron: str | None = Field(default=None, max_length=100)
     base_url: str | None = None

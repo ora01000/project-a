@@ -9,9 +9,14 @@ export interface InventoryItem {
   created_at?: string;
   origin_type?: number;
   origin_api_url?: string;
-  /** 1 = bearer, 2 = header */
+  origin_api_url_method?: string;
+  origin_api_url_params?: string;
+  /** 1 = bearer, 2 = header, 3 = token */
   origin_api_auth_type?: number;
   has_api_key?: boolean;
+  origin_token_api?: string;
+  origin_token_api_method?: string;
+  has_token_api_params?: boolean;
   is_scheduled?: boolean;
   api_crawling_cron?: string;
 }
@@ -29,8 +34,13 @@ export interface InventoryStatsRow {
   error?: string | null;
   origin_type?: number;
   origin_api_url?: string;
+  origin_api_url_method?: string;
+  origin_api_url_params?: string;
   origin_api_auth_type?: number;
   has_api_key?: boolean;
+  origin_token_api?: string;
+  origin_token_api_method?: string;
+  has_token_api_params?: boolean;
   is_scheduled?: boolean;
   api_crawling_cron?: string;
 }
@@ -80,8 +90,8 @@ export interface InventoryCsvPreview {
   response_json?: unknown;
 }
 
-/** 1 = bearer, 2 = custom header (key:value) */
-export type InventoryApiAuthType = 1 | 2;
+/** 1 = bearer, 2 = custom header (key:value), 3 = token API */
+export type InventoryApiAuthType = 1 | 2 | 3;
 
 export interface InventoryTablePreview {
   table_name: string;
@@ -96,3 +106,42 @@ export interface InventoryTablePreview {
 
 /** 1 = CSV upload, 2 = API crawl */
 export type InventoryOriginMode = "csv" | "api";
+
+export type InventoryHttpMethod = "GET" | "POST";
+
+export interface InventoryKeyValueParam {
+  key: string;
+  value: string;
+}
+
+export function parseInventoryParams(raw: string | null | undefined): InventoryKeyValueParam[] {
+  const text = (raw || "").trim();
+  if (!text) {
+    return [];
+  }
+  return text
+    .split("&")
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .map((part) => {
+      const idx = part.indexOf("=");
+      if (idx < 0) {
+        return { key: part, value: "" };
+      }
+      return {
+        key: part.slice(0, idx),
+        value: part.slice(idx + 1),
+      };
+    });
+}
+
+export function serializeInventoryParams(items: InventoryKeyValueParam[]): string {
+  return items
+    .map((item) => ({
+      key: item.key.trim(),
+      value: item.value.trim(),
+    }))
+    .filter((item) => item.key)
+    .map((item) => `${item.key}=${item.value}`)
+    .join("&");
+}

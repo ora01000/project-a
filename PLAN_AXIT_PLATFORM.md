@@ -3468,3 +3468,54 @@ json 형태로 응답한다.
   - 카드의 오른쪽 상단(클러스터 타입을 나타내는 아이콘 왼쪽)에 텍스트 레이블 버튼으로 표시
   - 카드 클릭 후 표시되는 각 클러스터의 상세 정보에서 "요약" 패널의 오른쪽 상단에도 동일한 표시를 추가한다.
 
+## 인벤토리 API 수집시 API 인증방식 추가
+- 새로운 인벤토리 등록시 "API 호출" 을 선택할 경우 인증방식을 "Bearer", "Header" 외 "Token" 을 추가한다.
+- 흐름
+  - Token API로 access_token(+ expires_in) 발급
+  - 캐시해 두고, 실제 인벤토리 API에 Authorization: Bearer {token}
+  - 401/403(토큰 만료) 시 1회만 재발급 후 같은 요청 재시도
+  - 재시도도 실패하면 수집 실패로 처리(무한 재발급 금지)
+- Token 방식을 선택할 경우 다음 API 경로를 입력받는다.
+  - Token 발급 API, 입력 창 옆에 토큰 발급 테스트 버튼을 둔다. 테스트한 결과는 팝업으로 출력
+    - Method
+    - 입력 paramter : key=value 를 추가/삭제 할 수 있도록
+  - API 경로, 입력 창 옆에 테스트 버튼을 둔다. 테스트 결과는 팝업으로 출력
+    - Method
+    - 입력 paramter : key=value 를 추가/삭제 할 수 있도록
+
+- 백엔드 API 서버의 기능이 변경됨. 기능 추가를 위해 코드 변경사항을 참조하고 구현하기 위한 추가되어야 할 기능이 있다면 정리 바람
+  - /Users/insu/project-e
+  - 주요 변경사항
+    - POST /retrieve
+    - POST /testAPI
+    - GET /getInventoryList
+
+### project-e 반영 요약 (inventory-mcp)
+- `auth_type=3` (Token) 추가. 1=Bearer, 2=Header, 3=Token
+- Token 발급·캐시·401/403 1회 재시도는 **project-e 서버가 처리**. project-A는 필드를 전달·저장·UI만 맞추면 됨
+- `POST /retrieve` 추가 필드: `token_api`(auth=3 필수), `token_api_method?`(기본 POST), `token_api_params?`, `api_method?`, `api_params?`
+- `POST /testAPI` 동일 token 필드; 응답에 `token_issued`, `token_retried` 추가 (원격 실패는 HTTP 200 + `ok=false`)
+- `GET /getInventoryList` 추가 필드: `origin_api_url_method`, `origin_api_url_params`, `origin_token_api`, `origin_token_api_method`, `has_token_api_params`(bool, 원문 비노출). 비밀값 미반환
+- 에러: `token_failed`(retrieve 502), `invalid_api_method`, `invalid_api_params`
+
+### project-A 추가 구현 항목
+1. **공통 타입/검증**
+   - `ORIGIN_API_AUTH_TOKEN = 3` 허용 (`inventory_external.py`, debug/proxy pydantic `le=3`)
+   - auth=3일 때 `token_api` 필수, `api_key` 미사용
+2. **프록시/연동 API** (`inventory_external`, `/api/inventories/apicall/*`, `/api/debug/inventory-api/*`)
+   - retrieve/test 요청에 token·method·params 필드 전달
+   - `token_failed` / method·params 검증 에러 매핑
+   - test 응답의 `token_issued`/`token_retried` 전달
+3. **등록·수정 (`addInventory` / update)**
+   - `origin_token_api`, `origin_token_api_method`, `origin_token_api_params`
+   - `origin_api_url_method`, `origin_api_url_params`
+   - 비밀 필드(토큰 params)는 빈 값이면 **기존 유지**
+4. **목록 소비**
+   - getInventoryList의 token/method/params·`has_token_api_params` 표시용 타입 반영
+5. **UI** (`InventoryPage`, `InventoryApiDebugModal`)
+   - 인증방식에 Token(3) 추가
+   - Token 선택 시: Token 발급 API URL + Method + key=value params(+테스트 버튼/팝업), API 경로 Method + params(+테스트)
+   - Token 선택 시 Bearer/Header 키 입력 숨김
+6. **불필요**
+   - A에서 Redis/인메모리 토큰 캐시·재발급 로직 자체 구현 (e가 담당)
+

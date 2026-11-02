@@ -8,6 +8,8 @@ interface InventoryOriginApiTestResult {
   is_json: boolean | null;
   row_count: number | null;
   columns: string[];
+  token_issued?: boolean | null;
+  token_retried?: boolean;
   error: string | null;
   message: string | null;
 }
@@ -101,6 +103,18 @@ export function InventoryOriginApiTestModal({
             <dt className="text-[11px] text-slate-500">행 수</dt>
             <dd className="font-mono text-slate-100">
               {result.row_count == null ? "-" : result.row_count}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-[11px] text-slate-500">token_issued</dt>
+            <dd className="font-mono text-slate-100">
+              {result.token_issued == null ? "-" : result.token_issued ? "yes" : "no"}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-[11px] text-slate-500">token_retried</dt>
+            <dd className="font-mono text-slate-100">
+              {result.token_retried ? "yes" : "no"}
             </dd>
           </div>
           <div className="col-span-2">

@@ -4,11 +4,18 @@ import type { AuthUser } from "../../types/auth";
 import type {
   InventoryApiAuthType,
   InventoryCsvPreview,
+  InventoryHttpMethod,
   InventoryItem,
+  InventoryKeyValueParam,
   InventoryOriginMode,
+} from "../../types/inventory";
+import {
+  parseInventoryParams,
+  serializeInventoryParams,
 } from "../../types/inventory";
 import { InventoryApiPanel } from "./InventoryApiPanel";
 import { InventoryCsvPreviewPanel } from "./InventoryCsvPreviewPanel";
+import { InventoryKeyValueParamsEditor } from "./InventoryKeyValueParamsEditor";
 import { InventoryListPanel } from "./InventoryListPanel";
 import {
   InventoryOriginApiTestModal,
@@ -92,13 +99,19 @@ export function InventoryPage({ user }: InventoryPageProps) {
   const [originCsv, setOriginCsv] = useState<string | null>(null);
   const [originMode, setOriginMode] = useState<InventoryOriginMode>("csv");
   const [originApiUrl, setOriginApiUrl] = useState("");
+  const [originApiMethod, setOriginApiMethod] = useState<InventoryHttpMethod>("GET");
+  const [originApiParams, setOriginApiParams] = useState<InventoryKeyValueParam[]>([]);
   const [originApiKey, setOriginApiKey] = useState("");
   const [originApiAuthType, setOriginApiAuthType] = useState<InventoryApiAuthType>(1);
+  const [originTokenApi, setOriginTokenApi] = useState("");
+  const [originTokenMethod, setOriginTokenMethod] = useState<InventoryHttpMethod>("POST");
+  const [originTokenParams, setOriginTokenParams] = useState<InventoryKeyValueParam[]>([]);
   const [stagedResponseJson, setStagedResponseJson] = useState<unknown>(null);
   const [isScheduled, setIsScheduled] = useState(false);
   const [apiCrawlingCron, setApiCrawlingCron] = useState("");
   const [retrieving, setRetrieving] = useState(false);
   const [testingApi, setTestingApi] = useState(false);
+  const [testingToken, setTestingToken] = useState(false);
   const [apiTestResult, setApiTestResult] = useState<InventoryOriginApiTestResult | null>(null);
   const [tempTableName, setTempTableName] = useState<string | null>(null);
   const [uploadPreview, setUploadPreview] = useState<InventoryCsvPreview | null>(null);
@@ -134,6 +147,7 @@ export function InventoryPage({ user }: InventoryPageProps) {
   const apiFieldsReady =
     originMode !== "api" ||
     (Boolean(originApiUrl.trim()) &&
+      (originApiAuthType !== 3 || Boolean(originTokenApi.trim())) &&
       (!isScheduled || Boolean(apiCrawlingCron.trim())));
   const saveDisabled =
     saving ||
@@ -222,8 +236,13 @@ export function InventoryPage({ user }: InventoryPageProps) {
     setOriginCsv(null);
     setOriginMode("csv");
     setOriginApiUrl("");
+    setOriginApiMethod("GET");
+    setOriginApiParams([]);
     setOriginApiKey("");
     setOriginApiAuthType(1);
+    setOriginTokenApi("");
+    setOriginTokenMethod("POST");
+    setOriginTokenParams([]);
     setStagedResponseJson(null);
     setIsScheduled(false);
     setApiCrawlingCron("");
@@ -246,8 +265,19 @@ export function InventoryPage({ user }: InventoryPageProps) {
     setOriginCsv(item.origin_csv || null);
     setOriginMode(item.origin_type === 2 ? "api" : "csv");
     setOriginApiUrl(item.origin_api_url || "");
+    setOriginApiMethod(
+      (item.origin_api_url_method || "GET").toUpperCase() === "POST" ? "POST" : "GET",
+    );
+    setOriginApiParams(parseInventoryParams(item.origin_api_url_params));
     setOriginApiKey("");
-    setOriginApiAuthType(item.origin_api_auth_type === 2 ? 2 : 1);
+    const auth =
+      item.origin_api_auth_type === 2 ? 2 : item.origin_api_auth_type === 3 ? 3 : 1;
+    setOriginApiAuthType(auth);
+    setOriginTokenApi(item.origin_token_api || "");
+    setOriginTokenMethod(
+      (item.origin_token_api_method || "POST").toUpperCase() === "GET" ? "GET" : "POST",
+    );
+    setOriginTokenParams([]);
     setStagedResponseJson(null);
     setIsScheduled(Boolean(item.is_scheduled));
     setApiCrawlingCron(item.api_crawling_cron || "");
@@ -365,6 +395,10 @@ export function InventoryPage({ user }: InventoryPageProps) {
       setError("API 경로는 http(s)로 시작해야 합니다.");
       return false;
     }
+    if (originApiAuthType === 3 && !originTokenApi.trim()) {
+      setError("Token 발급 API 경로를 입력하세요.");
+      return false;
+    }
 
     setRetrieving(true);
     setError(null);
@@ -376,8 +410,16 @@ export function InventoryPage({ user }: InventoryPageProps) {
         body: JSON.stringify({
           table_name: resolvedTable,
           api_url: url,
-          api_key: originApiKey.trim() || null,
+          api_key: originApiAuthType === 3 ? null : originApiKey.trim() || null,
           auth_type: originApiAuthType,
+          api_method: originApiMethod,
+          api_params: serializeInventoryParams(originApiParams) || null,
+          token_api: originApiAuthType === 3 ? originTokenApi.trim() : null,
+          token_api_method: originApiAuthType === 3 ? originTokenMethod : null,
+          token_api_params:
+            originApiAuthType === 3
+              ? serializeInventoryParams(originTokenParams) || null
+              : null,
           display_name: displayName.trim() || null,
           description: description.trim() || null,
         }),
@@ -407,6 +449,56 @@ export function InventoryPage({ user }: InventoryPageProps) {
     }
   };
 
+  const buildOriginTestBody = () => ({
+    api_url: originApiUrl.trim(),
+    api_key: originApiAuthType === 3 ? null : originApiKey.trim() || null,
+    auth_type: originApiAuthType,
+    api_method: originApiMethod,
+    api_params: serializeInventoryParams(originApiParams) || null,
+    token_api: originApiAuthType === 3 ? originTokenApi.trim() : null,
+    token_api_method: originApiAuthType === 3 ? originTokenMethod : null,
+    token_api_params:
+      originApiAuthType === 3 ? serializeInventoryParams(originTokenParams) || null : null,
+  });
+
+  const handleTestTokenApi = async () => {
+    const url = originApiUrl.trim();
+    const tokenUrl = originTokenApi.trim();
+    if (!tokenUrl) {
+      setError("Token 발급 API 경로를 입력하세요.");
+      return;
+    }
+    if (!/^https?:\/\//i.test(tokenUrl)) {
+      setError("Token 발급 API 경로는 http(s)로 시작해야 합니다.");
+      return;
+    }
+    if (!url || !/^https?:\/\//i.test(url)) {
+      setError("토큰 테스트에는 실제 API 경로도 필요합니다.");
+      return;
+    }
+    setTestingToken(true);
+    setError(null);
+    try {
+      const response = await fetch("/api/inventories/apicall/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(buildOriginTestBody()),
+      });
+      if (!response.ok) {
+        throw new Error(await readErrorDetail(response, "토큰 발급 테스트에 실패했습니다."));
+      }
+      const payload = (await response.json()) as InventoryOriginApiTestResult;
+      setApiTestResult(payload);
+      if (!payload.ok && !payload.token_issued) {
+        setError(payload.error || payload.message || "토큰 발급 테스트가 실패했습니다.");
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "토큰 발급 테스트 실패");
+    } finally {
+      setTestingToken(false);
+    }
+  };
+
   const handleTestOriginApi = async () => {
     const url = originApiUrl.trim();
     if (!url) {
@@ -415,6 +507,10 @@ export function InventoryPage({ user }: InventoryPageProps) {
     }
     if (!/^https?:\/\//i.test(url)) {
       setError("API 경로는 http(s)로 시작해야 합니다.");
+      return;
+    }
+    if (originApiAuthType === 3 && !originTokenApi.trim()) {
+      setError("Token 발급 API 경로를 입력하세요.");
       return;
     }
     if (isCreate) {
@@ -430,11 +526,7 @@ export function InventoryPage({ user }: InventoryPageProps) {
       const response = await fetch("/api/inventories/apicall/test", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          api_url: url,
-          api_key: originApiKey.trim() || null,
-          auth_type: originApiAuthType,
-        }),
+        body: JSON.stringify(buildOriginTestBody()),
       });
       if (!response.ok) {
         throw new Error(await readErrorDetail(response, "API 테스트에 실패했습니다."));
@@ -490,6 +582,10 @@ export function InventoryPage({ user }: InventoryPageProps) {
         setError("API 조회를 먼저 수행하세요.");
         return;
       }
+      if (originApiAuthType === 3 && !originTokenApi.trim()) {
+        setError("Token 발급 API 경로를 입력하세요.");
+        return;
+      }
       if (originApiAuthType === 2 && originApiKey.trim()) {
         const parts = originApiKey.trim().split(":");
         if (parts.length < 2 || !parts[0].trim() || !parts.slice(1).join(":").trim()) {
@@ -536,8 +632,24 @@ export function InventoryPage({ user }: InventoryPageProps) {
             temp_table_name: tempTableName,
             origin_type: originMode === "api" ? 2 : 1,
             origin_api_url: originMode === "api" ? originApiUrl.trim() : null,
-            origin_api_key: originMode === "api" ? originApiKey.trim() || null : null,
+            origin_api_url_method: originMode === "api" ? originApiMethod : null,
+            origin_api_url_params:
+              originMode === "api" ? serializeInventoryParams(originApiParams) || null : null,
+            origin_api_key:
+              originMode === "api" && originApiAuthType !== 3
+                ? originApiKey.trim() || null
+                : null,
             origin_api_auth_type: originMode === "api" ? originApiAuthType : 1,
+            origin_token_api:
+              originMode === "api" && originApiAuthType === 3
+                ? originTokenApi.trim()
+                : null,
+            origin_token_api_method:
+              originMode === "api" && originApiAuthType === 3 ? originTokenMethod : null,
+            origin_token_api_params:
+              originMode === "api" && originApiAuthType === 3
+                ? serializeInventoryParams(originTokenParams) || null
+                : null,
             is_scheduled: originMode === "api" ? isScheduled : false,
             api_crawling_cron:
               originMode === "api" && isScheduled ? apiCrawlingCron.trim() : null,
@@ -569,8 +681,22 @@ export function InventoryPage({ user }: InventoryPageProps) {
           temp_table_name: tempTableName,
           origin_type: originMode === "api" ? 2 : 1,
           origin_api_url: originMode === "api" ? originApiUrl.trim() : null,
-          origin_api_key: originMode === "api" ? originApiKey.trim() || null : null,
+          origin_api_url_method: originMode === "api" ? originApiMethod : null,
+          origin_api_url_params:
+            originMode === "api" ? serializeInventoryParams(originApiParams) || null : null,
+          origin_api_key:
+            originMode === "api" && originApiAuthType !== 3
+              ? originApiKey.trim() || null
+              : null,
           origin_api_auth_type: originMode === "api" ? originApiAuthType : 1,
+          origin_token_api:
+            originMode === "api" && originApiAuthType === 3 ? originTokenApi.trim() : null,
+          origin_token_api_method:
+            originMode === "api" && originApiAuthType === 3 ? originTokenMethod : null,
+          origin_token_api_params:
+            originMode === "api" && originApiAuthType === 3
+              ? serializeInventoryParams(originTokenParams) || null
+              : null,
           is_scheduled: originMode === "api" ? isScheduled : false,
           api_crawling_cron:
             originMode === "api" && isScheduled ? apiCrawlingCron.trim() : null,
@@ -952,18 +1078,6 @@ export function InventoryPage({ user }: InventoryPageProps) {
                       </div>
                     ) : (
                       <div className="flex flex-col gap-3">
-                        <label className="flex flex-col gap-1">
-                          <span className="text-xs font-medium text-slate-300">API 경로</span>
-                          <input
-                            type="url"
-                            value={originApiUrl}
-                            onChange={(event) => setOriginApiUrl(event.target.value)}
-                            disabled={!fieldsEditable}
-                            maxLength={500}
-                            className="rounded-md border border-slate-700 bg-slate-950/80 px-3 py-2 font-mono text-sm text-slate-100 outline-none focus:border-sky-600 disabled:opacity-70"
-                            placeholder="https://example.internal/api/assets"
-                          />
-                        </label>
                         <div className="flex flex-col gap-2">
                           <span className="text-xs font-medium text-slate-300">API 인증 방식</span>
                           <div className="flex flex-wrap gap-2">
@@ -971,6 +1085,7 @@ export function InventoryPage({ user }: InventoryPageProps) {
                               [
                                 { id: 1 as const, label: "Bearer" },
                                 { id: 2 as const, label: "Header" },
+                                { id: 3 as const, label: "Token" },
                               ] as const
                             ).map((option) => (
                               <button
@@ -989,30 +1104,162 @@ export function InventoryPage({ user }: InventoryPageProps) {
                             ))}
                           </div>
                         </div>
-                        <label className="flex flex-col gap-1">
-                          <span className="text-xs font-medium text-slate-300">API KEY</span>
-                          <input
-                            type="password"
-                            value={originApiKey}
-                            onChange={(event) => setOriginApiKey(event.target.value)}
-                            disabled={!fieldsEditable}
-                            maxLength={500}
-                            autoComplete="off"
-                            className="rounded-md border border-slate-700 bg-slate-950/80 px-3 py-2 font-mono text-sm text-slate-100 outline-none focus:border-sky-600 disabled:opacity-70"
-                            placeholder={
-                              originApiAuthType === 2
-                                ? "Header-Name:value"
-                                : isView && selected?.has_api_key
-                                  ? "변경 시에만 입력 (비우면 저장 시 키가 삭제될 수 있음)"
-                                  : "Bearer 토큰 (선택)"
-                            }
-                          />
-                          {originApiAuthType === 2 ? (
-                            <span className="text-[11px] text-slate-500">
-                              header 방식은 <span className="font-mono">key:value</span> 형식으로 입력합니다.
+
+                        {originApiAuthType === 3 ? (
+                          <div className="flex flex-col gap-2 rounded-md border border-slate-700/80 bg-slate-950/40 p-3">
+                            <div className="flex flex-wrap items-end gap-2">
+                              <label className="flex min-w-[12rem] flex-1 flex-col gap-1">
+                                <span className="text-xs font-medium text-slate-300">
+                                  Token 발급 API
+                                </span>
+                                <input
+                                  type="url"
+                                  value={originTokenApi}
+                                  onChange={(event) => setOriginTokenApi(event.target.value)}
+                                  disabled={!fieldsEditable}
+                                  maxLength={500}
+                                  className="rounded-md border border-slate-700 bg-slate-950/80 px-3 py-2 font-mono text-sm text-slate-100 outline-none focus:border-sky-600 disabled:opacity-70"
+                                  placeholder="https://example.internal/oauth/token"
+                                />
+                              </label>
+                              {fieldsEditable ? (
+                                <button
+                                  type="button"
+                                  disabled={
+                                    testingToken ||
+                                    testingApi ||
+                                    retrieving ||
+                                    !originTokenApi.trim() ||
+                                    !originApiUrl.trim()
+                                  }
+                                  onClick={() => void handleTestTokenApi()}
+                                  className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-md border border-slate-600 bg-slate-800/70 px-3 py-2 text-sm text-slate-100 hover:bg-slate-800 disabled:opacity-50"
+                                >
+                                  <WorkflowIcon name="validate" size="sm" label="토큰 발급 테스트" />
+                                  {testingToken ? "토큰 테스트 중…" : "토큰 발급 테스트"}
+                                </button>
+                              ) : null}
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                              <span className="self-center text-xs font-medium text-slate-300">
+                                Method
+                              </span>
+                              {(["GET", "POST"] as const).map((method) => (
+                                <button
+                                  key={`token-method-${method}`}
+                                  type="button"
+                                  disabled={!fieldsEditable}
+                                  onClick={() => setOriginTokenMethod(method)}
+                                  className={`rounded-md border px-3 py-1.5 text-sm ${
+                                    originTokenMethod === method
+                                      ? "border-sky-500 bg-sky-950/50 text-sky-100"
+                                      : "border-slate-600 bg-slate-800/70 text-slate-200 hover:bg-slate-800"
+                                  }`}
+                                >
+                                  {method}
+                                </button>
+                              ))}
+                            </div>
+                            <InventoryKeyValueParamsEditor
+                              label="Token 파라미터 (key=value)"
+                              items={originTokenParams}
+                              disabled={!fieldsEditable}
+                              onChange={setOriginTokenParams}
+                            />
+                            {isView && selected?.has_token_api_params && originTokenParams.length === 0 ? (
+                              <span className="text-[11px] text-slate-500">
+                                저장된 Token 파라미터가 있습니다. 변경 시에만 다시 입력하세요.
+                              </span>
+                            ) : null}
+                          </div>
+                        ) : (
+                          <label className="flex flex-col gap-1">
+                            <span className="text-xs font-medium text-slate-300">API KEY</span>
+                            <input
+                              type="password"
+                              value={originApiKey}
+                              onChange={(event) => setOriginApiKey(event.target.value)}
+                              disabled={!fieldsEditable}
+                              maxLength={500}
+                              autoComplete="off"
+                              className="rounded-md border border-slate-700 bg-slate-950/80 px-3 py-2 font-mono text-sm text-slate-100 outline-none focus:border-sky-600 disabled:opacity-70"
+                              placeholder={
+                                originApiAuthType === 2
+                                  ? "Header-Name:value"
+                                  : isView && selected?.has_api_key
+                                    ? "변경 시에만 입력 (비우면 저장 시 키가 삭제될 수 있음)"
+                                    : "Bearer 토큰 (선택)"
+                              }
+                            />
+                            {originApiAuthType === 2 ? (
+                              <span className="text-[11px] text-slate-500">
+                                header 방식은 <span className="font-mono">key:value</span> 형식으로
+                                입력합니다.
+                              </span>
+                            ) : null}
+                          </label>
+                        )}
+
+                        <div className="flex flex-col gap-2 rounded-md border border-slate-700/80 bg-slate-950/40 p-3">
+                          <div className="flex flex-wrap items-end gap-2">
+                            <label className="flex min-w-[12rem] flex-1 flex-col gap-1">
+                              <span className="text-xs font-medium text-slate-300">API 경로</span>
+                              <input
+                                type="url"
+                                value={originApiUrl}
+                                onChange={(event) => setOriginApiUrl(event.target.value)}
+                                disabled={!fieldsEditable}
+                                maxLength={500}
+                                className="rounded-md border border-slate-700 bg-slate-950/80 px-3 py-2 font-mono text-sm text-slate-100 outline-none focus:border-sky-600 disabled:opacity-70"
+                                placeholder="https://example.internal/api/assets"
+                              />
+                            </label>
+                            {fieldsEditable ? (
+                              <button
+                                type="button"
+                                disabled={
+                                  testingApi ||
+                                  retrieving ||
+                                  testingToken ||
+                                  !originApiUrl.trim() ||
+                                  (originApiAuthType === 3 && !originTokenApi.trim())
+                                }
+                                onClick={() => void handleTestOriginApi()}
+                                className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-md border border-slate-600 bg-slate-800/70 px-3 py-2 text-sm text-slate-100 hover:bg-slate-800 disabled:opacity-50"
+                              >
+                                <WorkflowIcon name="validate" size="sm" label="API 테스트" />
+                                {testingApi || retrieving ? "테스트·미리보기 중…" : "API 테스트"}
+                              </button>
+                            ) : null}
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            <span className="self-center text-xs font-medium text-slate-300">
+                              Method
                             </span>
-                          ) : null}
-                        </label>
+                            {(["GET", "POST"] as const).map((method) => (
+                              <button
+                                key={`api-method-${method}`}
+                                type="button"
+                                disabled={!fieldsEditable}
+                                onClick={() => setOriginApiMethod(method)}
+                                className={`rounded-md border px-3 py-1.5 text-sm ${
+                                  originApiMethod === method
+                                    ? "border-sky-500 bg-sky-950/50 text-sky-100"
+                                    : "border-slate-600 bg-slate-800/70 text-slate-200 hover:bg-slate-800"
+                                }`}
+                              >
+                                {method}
+                              </button>
+                            ))}
+                          </div>
+                          <InventoryKeyValueParamsEditor
+                            label="API 파라미터 (key=value)"
+                            items={originApiParams}
+                            disabled={!fieldsEditable}
+                            onChange={setOriginApiParams}
+                          />
+                        </div>
+
                         <WorkflowScheduleField
                           enabled={isScheduled}
                           cronExpr={apiCrawlingCron || DEFAULT_WORKFLOW_CRON_EXPR}
@@ -1030,18 +1277,13 @@ export function InventoryPage({ user }: InventoryPageProps) {
                           <div className="flex flex-wrap items-center gap-3">
                             <button
                               type="button"
-                              disabled={testingApi || retrieving || !originApiUrl.trim()}
-                              onClick={() => void handleTestOriginApi()}
-                              className="inline-flex items-center justify-center gap-1.5 rounded-md border border-slate-600 bg-slate-800/70 px-3 py-2 text-sm text-slate-100 hover:bg-slate-800 disabled:opacity-50"
-                            >
-                              <WorkflowIcon name="validate" size="sm" label="API 테스트" />
-                              {testingApi || retrieving
-                                ? "테스트·미리보기 중…"
-                                : "API 테스트"}
-                            </button>
-                            <button
-                              type="button"
-                              disabled={retrieving || testingApi || !originApiUrl.trim()}
+                              disabled={
+                                retrieving ||
+                                testingApi ||
+                                testingToken ||
+                                !originApiUrl.trim() ||
+                                (originApiAuthType === 3 && !originTokenApi.trim())
+                              }
                               onClick={() => void handleRetrieve()}
                               className="inline-flex items-center justify-center gap-1.5 rounded-md border border-slate-600 bg-slate-800/70 px-3 py-2 text-sm text-slate-100 hover:bg-slate-800 disabled:opacity-50"
                             >
@@ -1058,6 +1300,9 @@ export function InventoryPage({ user }: InventoryPageProps) {
                         ) : selected?.origin_api_url ? (
                           <p className="truncate text-xs text-slate-400" title={selected.origin_api_url}>
                             {selected.origin_api_url}
+                            {selected.origin_api_auth_type === 3 && selected.origin_token_api
+                              ? ` · token ${selected.origin_token_api}`
+                              : ""}
                             {selected.is_scheduled && selected.api_crawling_cron
                               ? ` · cron ${selected.api_crawling_cron}`
                               : ""}
