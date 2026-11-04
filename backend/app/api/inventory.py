@@ -41,6 +41,7 @@ from backend.app.services.inventory_external import (
     remove_external_temp_table,
     retrieve_origin_api_via_inventory_api,
     test_origin_api_via_inventory_api,
+    test_token_issue_via_inventory_api,
     transfer_csv_to_external_table,
     transfer_json_to_external_table,
     update_external_inventory_api,
@@ -70,11 +71,13 @@ class InventoryResponse(BaseModel):
     origin_api_url: str = ""
     origin_api_url_method: str = "GET"
     origin_api_url_params: str = ""
+    origin_api_url_headers: str = ""
     origin_api_auth_type: int = 1
     has_api_key: bool = False
     origin_token_api: str = ""
     origin_token_api_method: str = "POST"
     has_token_api_params: bool = False
+    has_token_api_headers: bool = False
     is_scheduled: bool = False
     api_crawling_cron: str = ""
 
@@ -94,11 +97,13 @@ class InventoryStatsRow(BaseModel):
     origin_api_url: str = ""
     origin_api_url_method: str = "GET"
     origin_api_url_params: str = ""
+    origin_api_url_headers: str = ""
     origin_api_auth_type: int = 1
     has_api_key: bool = False
     origin_token_api: str = ""
     origin_token_api_method: str = "POST"
     has_token_api_params: bool = False
+    has_token_api_headers: bool = False
     is_scheduled: bool = False
     api_crawling_cron: str = ""
 
@@ -126,11 +131,13 @@ class InventoryCreateRequest(BaseModel):
     origin_api_url: str | None = Field(default=None, max_length=500)
     origin_api_url_method: str | None = Field(default=None, max_length=10)
     origin_api_url_params: str | None = Field(default=None, max_length=1000)
+    origin_api_url_headers: str | None = Field(default=None, max_length=1000)
     origin_api_key: str | None = Field(default=None, max_length=500)
     origin_api_auth_type: int = Field(default=1)
     origin_token_api: str | None = Field(default=None, max_length=500)
     origin_token_api_method: str | None = Field(default=None, max_length=10)
     origin_token_api_params: str | None = Field(default=None, max_length=1000)
+    origin_token_api_headers: str | None = Field(default=None, max_length=1000)
     is_scheduled: bool = False
     api_crawling_cron: str | None = Field(default=None, max_length=100)
     # Transfer filename after CSV upload (origin_type=1).
@@ -182,11 +189,13 @@ class InventoryUpdateRequest(BaseModel):
     origin_api_url: str | None = Field(default=None, max_length=500)
     origin_api_url_method: str | None = Field(default=None, max_length=10)
     origin_api_url_params: str | None = Field(default=None, max_length=1000)
+    origin_api_url_headers: str | None = Field(default=None, max_length=1000)
     origin_api_key: str | None = Field(default=None, max_length=500)
     origin_api_auth_type: int | None = Field(default=None)
     origin_token_api: str | None = Field(default=None, max_length=500)
     origin_token_api_method: str | None = Field(default=None, max_length=10)
     origin_token_api_params: str | None = Field(default=None, max_length=1000)
+    origin_token_api_headers: str | None = Field(default=None, max_length=1000)
     is_scheduled: bool | None = None
     api_crawling_cron: str | None = Field(default=None, max_length=100)
     transfer_filename: str | None = Field(default=None, max_length=100)
@@ -200,9 +209,11 @@ class InventoryApiCallRetrieveRequest(BaseModel):
     auth_type: int = Field(default=1)
     api_method: str | None = Field(default=None, max_length=10)
     api_params: str | None = Field(default=None, max_length=1000)
+    api_headers: str | None = Field(default=None, max_length=1000)
     token_api: str | None = Field(default=None, max_length=500)
     token_api_method: str | None = Field(default=None, max_length=10)
     token_api_params: str | None = Field(default=None, max_length=1000)
+    token_api_headers: str | None = Field(default=None, max_length=1000)
     display_name: str | None = Field(default=None, max_length=100)
     description: str | None = Field(default=None, max_length=200)
 
@@ -231,9 +242,11 @@ class InventoryApiCallTestRequest(BaseModel):
     auth_type: int = Field(default=1)
     api_method: str | None = Field(default=None, max_length=10)
     api_params: str | None = Field(default=None, max_length=1000)
+    api_headers: str | None = Field(default=None, max_length=1000)
     token_api: str | None = Field(default=None, max_length=500)
     token_api_method: str | None = Field(default=None, max_length=10)
     token_api_params: str | None = Field(default=None, max_length=1000)
+    token_api_headers: str | None = Field(default=None, max_length=1000)
 
     @field_validator("api_url")
     @classmethod
@@ -266,6 +279,35 @@ class InventoryApiCallTestResponse(BaseModel):
     columns: list[str] = Field(default_factory=list)
     token_issued: bool | None = None
     token_retried: bool = False
+    error: str | None = None
+    message: str | None = None
+
+
+class InventoryTokenIssueTestRequest(BaseModel):
+    token_api: str = Field(min_length=1, max_length=500)
+    token_api_method: str | None = Field(default=None, max_length=10)
+    token_api_params: str | None = Field(default=None, max_length=1000)
+    token_api_headers: str | None = Field(default=None, max_length=1000)
+
+    @field_validator("token_api")
+    @classmethod
+    def _token_api_ok(cls, value: str) -> str:
+        text = (value or "").strip()
+        if not text.lower().startswith(("http://", "https://")):
+            raise ValueError("invalid_api_url")
+        return text
+
+
+class InventoryTokenIssueTestResponse(BaseModel):
+    token_api: str = ""
+    token_api_method: str = "POST"
+    ok: bool = False
+    status_code: int | None = None
+    elapsed_ms: int | None = None
+    content_type: str | None = None
+    access_token_length: int | None = None
+    token_type: str | None = None
+    expires_in: str | None = None
     error: str | None = None
     message: str | None = None
 
@@ -416,17 +458,22 @@ def _origin_fields_from_row(row: dict[str, Any]) -> dict[str, Any]:
     has_token_params = row.get("has_token_api_params")
     if has_token_params is None:
         has_token_params = bool(str(row.get("origin_token_api_params") or "").strip())
+    has_token_headers = row.get("has_token_api_headers")
+    if has_token_headers is None:
+        has_token_headers = bool(str(row.get("origin_token_api_headers") or "").strip())
     return {
         "origin_type": origin_type,
         "origin_api_url": str(row.get("origin_api_url") or ""),
         "origin_api_url_method": str(row.get("origin_api_url_method") or "GET").upper() or "GET",
         "origin_api_url_params": str(row.get("origin_api_url_params") or ""),
+        "origin_api_url_headers": str(row.get("origin_api_url_headers") or ""),
         "origin_api_auth_type": auth_type,
         "has_api_key": bool(has_key),
         "origin_token_api": str(row.get("origin_token_api") or ""),
         "origin_token_api_method": str(row.get("origin_token_api_method") or "POST").upper()
         or "POST",
         "has_token_api_params": bool(has_token_params),
+        "has_token_api_headers": bool(has_token_headers),
         "is_scheduled": bool(row.get("is_scheduled")),
         "api_crawling_cron": str(row.get("api_crawling_cron") or ""),
     }
@@ -840,9 +887,11 @@ async def api_test_inventory_origin_api(
             auth_type=body.auth_type,
             api_method=body.api_method,
             api_params=body.api_params,
+            api_headers=body.api_headers,
             token_api=body.token_api,
             token_api_method=body.token_api_method,
             token_api_params=body.token_api_params,
+            token_api_headers=body.token_api_headers,
         )
     except InventoryExternalApiError as exc:
         detail = str(exc)
@@ -854,6 +903,7 @@ async def api_test_inventory_origin_api(
                 "invalid_api_auth",
                 "invalid_api_method",
                 "invalid_api_params",
+                "invalid_api_headers",
             }
             else 502
         )
@@ -905,6 +955,77 @@ async def api_test_inventory_origin_api(
     )
 
 
+@router.post(
+    "/inventories/apicall/test-token",
+    response_model=InventoryTokenIssueTestResponse,
+)
+async def api_test_inventory_token_issue(
+    body: InventoryTokenIssueTestRequest,
+    request: Request,
+) -> InventoryTokenIssueTestResponse:
+    """Probe token issuance via inventory-api ``/testTokenIssue`` (no origin API call)."""
+    get_request_auth_user(request)
+    try:
+        payload = await test_token_issue_via_inventory_api(
+            token_api=body.token_api,
+            token_api_method=body.token_api_method,
+            token_api_params=body.token_api_params,
+            token_api_headers=body.token_api_headers,
+        )
+    except InventoryExternalApiError as exc:
+        detail = str(exc)
+        status = (
+            400
+            if detail
+            in {
+                "invalid_api_url",
+                "invalid_api_method",
+                "invalid_api_params",
+                "invalid_api_headers",
+            }
+            else 502
+        )
+        raise HTTPException(status_code=status, detail=detail) from exc
+
+    status_raw = payload.get("status_code")
+    try:
+        status_code = int(status_raw) if status_raw is not None else None
+    except (TypeError, ValueError):
+        status_code = None
+    elapsed_raw = payload.get("elapsed_ms")
+    try:
+        elapsed_ms = int(elapsed_raw) if elapsed_raw is not None else None
+    except (TypeError, ValueError):
+        elapsed_ms = None
+    length_raw = payload.get("access_token_length")
+    try:
+        access_token_length = int(length_raw) if length_raw is not None else None
+    except (TypeError, ValueError):
+        access_token_length = None
+
+    return InventoryTokenIssueTestResponse(
+        token_api=str(payload.get("token_api") or body.token_api),
+        token_api_method=str(payload.get("token_api_method") or "POST").upper(),
+        ok=bool(payload.get("ok")),
+        status_code=status_code,
+        elapsed_ms=elapsed_ms,
+        content_type=(
+            str(payload.get("content_type"))
+            if payload.get("content_type") is not None
+            else None
+        ),
+        access_token_length=access_token_length,
+        token_type=(
+            str(payload.get("token_type")) if payload.get("token_type") is not None else None
+        ),
+        expires_in=(
+            str(payload.get("expires_in")) if payload.get("expires_in") is not None else None
+        ),
+        error=(str(payload.get("error")) if payload.get("error") is not None else None),
+        message=(str(payload.get("message")) if payload.get("message") is not None else None),
+    )
+
+
 @router.post("/inventories/apicall/retrieve", response_model=InventoryCsvPreviewResponse)
 async def api_retrieve_inventory_from_api(
     body: InventoryApiCallRetrieveRequest,
@@ -922,9 +1043,11 @@ async def api_retrieve_inventory_from_api(
             auth_type=body.auth_type,
             api_method=body.api_method,
             api_params=body.api_params,
+            api_headers=body.api_headers,
             token_api=body.token_api,
             token_api_method=body.token_api_method,
             token_api_params=body.token_api_params,
+            token_api_headers=body.token_api_headers,
         )
         response_json = retrieved.get("response_json")
         transfer_result = await transfer_json_to_external_table(
@@ -945,6 +1068,7 @@ async def api_retrieve_inventory_from_api(
             "invalid_api_auth",
             "invalid_api_method",
             "invalid_api_params",
+            "invalid_api_headers",
             "invalid_json",
         }:
             status = 400
@@ -1016,11 +1140,13 @@ async def api_create_inventory(
             origin_api_url=(body.origin_api_url or "").strip() or None,
             origin_api_url_method=body.origin_api_url_method,
             origin_api_url_params=body.origin_api_url_params,
+            origin_api_url_headers=body.origin_api_url_headers,
             origin_api_key=body.origin_api_key,
             origin_api_auth_type=body.origin_api_auth_type,
             origin_token_api=body.origin_token_api,
             origin_token_api_method=body.origin_token_api_method,
             origin_token_api_params=body.origin_token_api_params,
+            origin_token_api_headers=body.origin_token_api_headers,
             is_scheduled=body.is_scheduled,
             api_crawling_cron=(body.api_crawling_cron or "").strip() or None,
         )
@@ -1037,6 +1163,7 @@ async def api_create_inventory(
                 "invalid_api_auth",
                 "invalid_api_method",
                 "invalid_api_params",
+                "invalid_api_headers",
             }
             else 502
         )
@@ -1068,6 +1195,9 @@ async def api_create_inventory(
         origin_api_url_params=(body.origin_api_url_params or "").strip()
         if body.origin_type == 2
         else "",
+        origin_api_url_headers=(body.origin_api_url_headers or "").strip()
+        if body.origin_type == 2
+        else "",
         origin_api_auth_type=auth,
         has_api_key=(
             bool((body.origin_api_key or "").strip())
@@ -1081,6 +1211,9 @@ async def api_create_inventory(
         if body.origin_type == 2 and auth == ORIGIN_API_AUTH_TOKEN
         else "POST",
         has_token_api_params=bool((body.origin_token_api_params or "").strip())
+        if body.origin_type == 2 and auth == ORIGIN_API_AUTH_TOKEN
+        else False,
+        has_token_api_headers=bool((body.origin_token_api_headers or "").strip())
         if body.origin_type == 2 and auth == ORIGIN_API_AUTH_TOKEN
         else False,
         is_scheduled=bool(body.is_scheduled) if body.origin_type == 2 else False,
@@ -1131,11 +1264,13 @@ async def api_update_inventory(
                 origin_api_url=(body.origin_api_url or "").strip() or None,
                 origin_api_url_method=body.origin_api_url_method,
                 origin_api_url_params=body.origin_api_url_params,
+                origin_api_url_headers=body.origin_api_url_headers,
                 origin_api_key=body.origin_api_key,
                 origin_api_auth_type=body.origin_api_auth_type,
                 origin_token_api=body.origin_token_api,
                 origin_token_api_method=body.origin_token_api_method,
                 origin_token_api_params=body.origin_token_api_params,
+                origin_token_api_headers=body.origin_token_api_headers,
                 is_scheduled=body.is_scheduled,
                 api_crawling_cron=(body.api_crawling_cron or "").strip() or None,
             )
@@ -1151,6 +1286,7 @@ async def api_update_inventory(
                 "invalid_api_auth",
                 "invalid_api_method",
                 "invalid_api_params",
+                "invalid_api_headers",
             }
             else 502
         )
@@ -1174,6 +1310,7 @@ async def api_update_inventory(
         origin_api_url=(body.origin_api_url or "").strip(),
         origin_api_url_method=(body.origin_api_url_method or "GET").upper(),
         origin_api_url_params=(body.origin_api_url_params or "").strip(),
+        origin_api_url_headers=(body.origin_api_url_headers or "").strip(),
         origin_api_auth_type=auth,
         has_api_key=bool((body.origin_api_key or "").strip())
         if auth != ORIGIN_API_AUTH_TOKEN
@@ -1185,6 +1322,9 @@ async def api_update_inventory(
         if auth == ORIGIN_API_AUTH_TOKEN
         else "POST",
         has_token_api_params=bool((body.origin_token_api_params or "").strip())
+        if auth == ORIGIN_API_AUTH_TOKEN
+        else False,
+        has_token_api_headers=bool((body.origin_token_api_headers or "").strip())
         if auth == ORIGIN_API_AUTH_TOKEN
         else False,
         is_scheduled=bool(body.is_scheduled),

@@ -42,9 +42,11 @@ class InventoryApiRetrieveRequest(BaseModel):
     auth_type: int = Field(default=1, ge=1, le=3)
     api_method: str | None = Field(default=None, max_length=10)
     api_params: str | None = Field(default=None, max_length=1000)
+    api_headers: str | None = Field(default=None, max_length=1000)
     token_api: str | None = Field(default=None, max_length=500)
     token_api_method: str | None = Field(default=None, max_length=10)
     token_api_params: str | None = Field(default=None, max_length=1000)
+    token_api_headers: str | None = Field(default=None, max_length=1000)
     base_url: str | None = None
 
 
@@ -54,9 +56,19 @@ class InventoryApiTestRequest(BaseModel):
     auth_type: int = Field(default=1, ge=1, le=3)
     method: str | None = Field(default=None, max_length=10)
     params: str | None = Field(default=None, max_length=1000)
+    headers: str | None = Field(default=None, max_length=1000)
     token_api: str | None = Field(default=None, max_length=500)
     token_api_method: str | None = Field(default=None, max_length=10)
     token_api_params: str | None = Field(default=None, max_length=1000)
+    token_api_headers: str | None = Field(default=None, max_length=1000)
+    base_url: str | None = None
+
+
+class InventoryApiTestTokenIssueRequest(BaseModel):
+    token_api: str = Field(min_length=1, max_length=500)
+    token_api_method: str | None = Field(default=None, max_length=10)
+    token_api_params: str | None = Field(default=None, max_length=1000)
+    token_api_headers: str | None = Field(default=None, max_length=1000)
     base_url: str | None = None
 
 
@@ -76,11 +88,13 @@ class InventoryApiAddInventoryRequest(BaseModel):
     origin_api_url: str | None = Field(default=None, max_length=500)
     origin_api_url_method: str | None = Field(default=None, max_length=10)
     origin_api_url_params: str | None = Field(default=None, max_length=1000)
+    origin_api_url_headers: str | None = Field(default=None, max_length=1000)
     origin_api_auth_type: int | None = None
     origin_api_key: str | None = Field(default=None, max_length=500)
     origin_token_api: str | None = Field(default=None, max_length=500)
     origin_token_api_method: str | None = Field(default=None, max_length=10)
     origin_token_api_params: str | None = Field(default=None, max_length=1000)
+    origin_token_api_headers: str | None = Field(default=None, max_length=1000)
     is_scheduled: bool = False
     api_crawling_cron: str | None = Field(default=None, max_length=100)
     base_url: str | None = None
@@ -330,6 +344,23 @@ async def api_inventory_api_debug_test_api(
         return await call_inventory_api(
             method="POST",
             path="/testAPI",
+            base_url=body.base_url,
+            json_body=_body_without_base(body),
+        )
+    except InventoryExternalApiError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@router.post("/debug/inventory-api/testTokenIssue")
+async def api_inventory_api_debug_test_token_issue(
+    body: InventoryApiTestTokenIssueRequest,
+    request: Request,
+) -> dict[str, Any]:
+    _require_admin(request)
+    try:
+        return await call_inventory_api(
+            method="POST",
+            path="/testTokenIssue",
             base_url=body.base_url,
             json_body=_body_without_base(body),
         )

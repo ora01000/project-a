@@ -3479,9 +3479,11 @@ json 형태로 응답한다.
   - Token 발급 API, 입력 창 옆에 토큰 발급 테스트 버튼을 둔다. 테스트한 결과는 팝업으로 출력
     - Method
     - 입력 paramter : key=value 를 추가/삭제 할 수 있도록
+    - header 입력 : key=value 를 추가/삭제 할 수 있도록
   - API 경로, 입력 창 옆에 테스트 버튼을 둔다. 테스트 결과는 팝업으로 출력
     - Method
     - 입력 paramter : key=value 를 추가/삭제 할 수 있도록
+    - header 입력 : key=value 로 추가/삭제 할 수 있도록
 
 - 백엔드 API 서버의 기능이 변경됨. 기능 추가를 위해 코드 변경사항을 참조하고 구현하기 위한 추가되어야 할 기능이 있다면 정리 바람
   - /Users/insu/project-e
@@ -3493,29 +3495,22 @@ json 형태로 응답한다.
 ### project-e 반영 요약 (inventory-mcp)
 - `auth_type=3` (Token) 추가. 1=Bearer, 2=Header, 3=Token
 - Token 발급·캐시·401/403 1회 재시도는 **project-e 서버가 처리**. project-A는 필드를 전달·저장·UI만 맞추면 됨
-- `POST /retrieve` 추가 필드: `token_api`(auth=3 필수), `token_api_method?`(기본 POST), `token_api_params?`, `api_method?`, `api_params?`
-- `POST /testAPI` 동일 token 필드; 응답에 `token_issued`, `token_retried` 추가 (원격 실패는 HTTP 200 + `ok=false`)
-- `GET /getInventoryList` 추가 필드: `origin_api_url_method`, `origin_api_url_params`, `origin_token_api`, `origin_token_api_method`, `has_token_api_params`(bool, 원문 비노출). 비밀값 미반환
-- 에러: `token_failed`(retrieve 502), `invalid_api_method`, `invalid_api_params`
+- `POST /retrieve` 추가 필드: `token_api`(auth=3 필수), `token_api_method?`(기본 POST), `token_api_params?`, `token_api_headers?`, `api_method?`, `api_params?`, `api_headers?`
+- `POST /testAPI` 동일 token 필드 + `headers?`(origin); 응답에 `token_issued`, `token_retried` 추가 (원격 실패는 HTTP 200 + `ok=false`)
+- `POST /testTokenIssue` — Token 발급 API만 단독 테스트 (`token_api`, `token_api_method?`, `token_api_params?`, `token_api_headers?`). origin API·DB·토큰 캐시 미사용. 응답에 `ok`, `status_code`, `elapsed_ms`, `content_type`, `access_token_length`, `token_type`, `expires_in` (access_token 원문 미반환). 원격 실패는 200 + `ok=false` + `token_failed`
+- `GET /getInventoryList` 추가 필드: `origin_api_url_method`, `origin_api_url_params`, `origin_api_url_headers`(원문 반환), `origin_token_api`, `origin_token_api_method`, `has_token_api_params`, `has_token_api_headers`(bool, 원문 비노출). 비밀값 미반환
+- 에러: `token_failed`(retrieve 502), `invalid_api_method`, `invalid_api_params`, `invalid_api_headers`
+- **custom header (e 반영 완료, `df684b6`)**
+  - 형식: params와 동일 `Name=value&Name=value` (값의 `&`/`=`/`+`는 `%26`/`%3D`/`%2B`)
+  - Origin: `api_headers` / `headers`(testAPI) / 카탈로그 `origin_api_url_headers` — **목록에 원문 노출**(비비밀)
+  - Token: `token_api_headers` / 카탈로그 `origin_token_api_headers` — 목록은 `has_token_api_headers`만, 빈 값 재저장 시 **기존 유지**
+  - 금지: `Host`/`Content-Length`/`Transfer-Encoding`/`Connection`/`Accept`/`Content-Type`, 인증이 쓰는 이름과 중복(auth=3 origin의 `Authorization` 등). 토큰 API에는 인증 헤더가 없으므로 `Authorization`(Basic 등) 허용
+  - 캐시 키에 token headers 포함
 
-### project-A 추가 구현 항목
-1. **공통 타입/검증**
-   - `ORIGIN_API_AUTH_TOKEN = 3` 허용 (`inventory_external.py`, debug/proxy pydantic `le=3`)
-   - auth=3일 때 `token_api` 필수, `api_key` 미사용
-2. **프록시/연동 API** (`inventory_external`, `/api/inventories/apicall/*`, `/api/debug/inventory-api/*`)
-   - retrieve/test 요청에 token·method·params 필드 전달
-   - `token_failed` / method·params 검증 에러 매핑
-   - test 응답의 `token_issued`/`token_retried` 전달
-3. **등록·수정 (`addInventory` / update)**
-   - `origin_token_api`, `origin_token_api_method`, `origin_token_api_params`
-   - `origin_api_url_method`, `origin_api_url_params`
-   - 비밀 필드(토큰 params)는 빈 값이면 **기존 유지**
-4. **목록 소비**
-   - getInventoryList의 token/method/params·`has_token_api_params` 표시용 타입 반영
-5. **UI** (`InventoryPage`, `InventoryApiDebugModal`)
-   - 인증방식에 Token(3) 추가
-   - Token 선택 시: Token 발급 API URL + Method + key=value params(+테스트 버튼/팝업), API 경로 Method + params(+테스트)
-   - Token 선택 시 Bearer/Header 키 입력 숨김
-6. **불필요**
-   - A에서 Redis/인메모리 토큰 캐시·재발급 로직 자체 구현 (e가 담당)
+### project-A 구현 (Token auth + headers)
+1. **공통 타입/검증** — auth=3, token_api 필수, `invalid_api_headers` → 400
+2. **프록시** — retrieve/test/test-token·addInventory에 method/params/**headers** (`api_headers`/`headers`, `token_api_headers`, 카탈로그 `origin_*_headers`)
+3. **목록/타입** — `origin_api_url_headers` 원문, `has_token_api_headers`(token headers 원문 비노출, 빈 값=기존 유지)
+4. **UI** — Token/Origin header Name=value 에디터, 테스트·저장 연동, 디버그 모달 동일
+5. **불필요** — A에서 토큰 캐시·재발급 로직 자체 구현 (e가 담당)
 

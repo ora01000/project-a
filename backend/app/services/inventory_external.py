@@ -535,6 +535,8 @@ def _inventory_api_client_error(result: dict[str, Any], *, default: str) -> Inve
         return InventoryExternalApiError("invalid_api_method")
     if "invalid_api_params" in lowered:
         return InventoryExternalApiError("invalid_api_params")
+    if "invalid_api_headers" in lowered:
+        return InventoryExternalApiError("invalid_api_headers")
     if "invalid_json" in lowered:
         return InventoryExternalApiError("invalid_json")
     if "token_failed" in lowered:
@@ -557,11 +559,13 @@ async def add_external_inventory(
     origin_api_url: str | None = None,
     origin_api_url_method: str | None = None,
     origin_api_url_params: str | None = None,
+    origin_api_url_headers: str | None = None,
     origin_api_key: str | None = None,
     origin_api_auth_type: int | None = None,
     origin_token_api: str | None = None,
     origin_token_api_method: str | None = None,
     origin_token_api_params: str | None = None,
+    origin_token_api_headers: str | None = None,
     is_scheduled: bool | None = None,
     api_crawling_cron: str | None = None,
     base_url: str | None = None,
@@ -590,6 +594,8 @@ async def add_external_inventory(
         )
         if origin_api_url_params is not None:
             body["origin_api_url_params"] = str(origin_api_url_params).strip()
+        if origin_api_url_headers is not None:
+            body["origin_api_url_headers"] = str(origin_api_url_headers).strip()
         if auth_type == ORIGIN_API_AUTH_TOKEN:
             body["origin_token_api"] = str(origin_token_api or "").strip()
             body["origin_token_api_method"] = normalize_origin_api_method(
@@ -599,6 +605,9 @@ async def add_external_inventory(
             token_params = (origin_token_api_params or "").strip()
             if token_params:
                 body["origin_token_api_params"] = token_params
+            token_headers = (origin_token_api_headers or "").strip()
+            if token_headers:
+                body["origin_token_api_headers"] = token_headers
             body["origin_api_key"] = ""
         else:
             # Always send key for bearer/header so omitting/empty clears the stored secret.
@@ -626,6 +635,50 @@ async def add_external_inventory(
     return payload if isinstance(payload, dict) else {"result": payload}
 
 
+async def test_token_issue_via_inventory_api(
+    *,
+    token_api: str,
+    token_api_method: str | None = None,
+    token_api_params: str | None = None,
+    token_api_headers: str | None = None,
+    base_url: str | None = None,
+    timeout_seconds: float = _DEFAULT_TIMEOUT,
+) -> dict[str, Any]:
+    """Delegate token-only probe to remote inventory-api ``POST /testTokenIssue``."""
+    url = (token_api or "").strip()
+    if not url.lower().startswith(("http://", "https://")):
+        raise InventoryExternalApiError("invalid_api_url")
+    body: dict[str, object] = {
+        "token_api": url,
+        "token_api_method": normalize_origin_api_method(
+            token_api_method, default="POST"
+        ),
+    }
+    if token_api_params is not None and str(token_api_params).strip():
+        body["token_api_params"] = str(token_api_params).strip()
+    if token_api_headers is not None and str(token_api_headers).strip():
+        body["token_api_headers"] = str(token_api_headers).strip()
+    result = await call_inventory_api(
+        method="POST",
+        path="/testTokenIssue",
+        base_url=base_url,
+        json_body=body,
+        timeout_seconds=timeout_seconds,
+    )
+    status = int(result.get("status_code") or 0)
+    if status == 400 or status == 422:
+        raise _inventory_api_client_error(result, default="invalid_api_url")
+    if status >= 500:
+        raise _inventory_api_client_error(
+            result,
+            default=str(result.get("error") or "inventory-api testTokenIssue 호출 실패"),
+        )
+    payload = result.get("body")
+    if isinstance(payload, dict):
+        return payload
+    raise InventoryExternalApiError("testTokenIssue 응답 형식이 올바르지 않습니다.")
+
+
 async def test_origin_api_via_inventory_api(
     *,
     api_url: str,
@@ -633,9 +686,11 @@ async def test_origin_api_via_inventory_api(
     auth_type: int | None = None,
     api_method: str | None = None,
     api_params: str | None = None,
+    api_headers: str | None = None,
     token_api: str | None = None,
     token_api_method: str | None = None,
     token_api_params: str | None = None,
+    token_api_headers: str | None = None,
     base_url: str | None = None,
     timeout_seconds: float = _DEFAULT_TIMEOUT,
 ) -> dict[str, Any]:
@@ -653,6 +708,8 @@ async def test_origin_api_via_inventory_api(
     }
     if api_params is not None and str(api_params).strip():
         body["params"] = str(api_params).strip()
+    if api_headers is not None and str(api_headers).strip():
+        body["headers"] = str(api_headers).strip()
     if resolved_auth == ORIGIN_API_AUTH_TOKEN:
         body["token_api"] = str(token_api or "").strip()
         body["token_api_method"] = normalize_origin_api_method(
@@ -660,6 +717,8 @@ async def test_origin_api_via_inventory_api(
         )
         if token_api_params is not None and str(token_api_params).strip():
             body["token_api_params"] = str(token_api_params).strip()
+        if token_api_headers is not None and str(token_api_headers).strip():
+            body["token_api_headers"] = str(token_api_headers).strip()
     elif token:
         body["token"] = token
     result = await call_inventory_api(
@@ -689,9 +748,11 @@ async def retrieve_origin_api_via_inventory_api(
     auth_type: int | None = None,
     api_method: str | None = None,
     api_params: str | None = None,
+    api_headers: str | None = None,
     token_api: str | None = None,
     token_api_method: str | None = None,
     token_api_params: str | None = None,
+    token_api_headers: str | None = None,
     base_url: str | None = None,
     timeout_seconds: float = _DEFAULT_TIMEOUT,
 ) -> dict[str, Any]:
@@ -709,6 +770,8 @@ async def retrieve_origin_api_via_inventory_api(
     }
     if api_params is not None and str(api_params).strip():
         body["api_params"] = str(api_params).strip()
+    if api_headers is not None and str(api_headers).strip():
+        body["api_headers"] = str(api_headers).strip()
     if resolved_auth == ORIGIN_API_AUTH_TOKEN:
         body["token_api"] = str(token_api or "").strip()
         body["token_api_method"] = normalize_origin_api_method(
@@ -716,6 +779,8 @@ async def retrieve_origin_api_via_inventory_api(
         )
         if token_api_params is not None and str(token_api_params).strip():
             body["token_api_params"] = str(token_api_params).strip()
+        if token_api_headers is not None and str(token_api_headers).strip():
+            body["token_api_headers"] = str(token_api_headers).strip()
     elif token:
         body["api_key"] = token
     result = await call_inventory_api(

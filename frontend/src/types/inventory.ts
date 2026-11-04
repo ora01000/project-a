@@ -11,12 +11,14 @@ export interface InventoryItem {
   origin_api_url?: string;
   origin_api_url_method?: string;
   origin_api_url_params?: string;
+  origin_api_url_headers?: string;
   /** 1 = bearer, 2 = header, 3 = token */
   origin_api_auth_type?: number;
   has_api_key?: boolean;
   origin_token_api?: string;
   origin_token_api_method?: string;
   has_token_api_params?: boolean;
+  has_token_api_headers?: boolean;
   is_scheduled?: boolean;
   api_crawling_cron?: string;
 }
@@ -36,11 +38,13 @@ export interface InventoryStatsRow {
   origin_api_url?: string;
   origin_api_url_method?: string;
   origin_api_url_params?: string;
+  origin_api_url_headers?: string;
   origin_api_auth_type?: number;
   has_api_key?: boolean;
   origin_token_api?: string;
   origin_token_api_method?: string;
   has_token_api_params?: boolean;
+  has_token_api_headers?: boolean;
   is_scheduled?: boolean;
   api_crawling_cron?: string;
 }

@@ -12,6 +12,7 @@ type EndpointId =
   | "transferCSV2Table"
   | "retrieve"
   | "testAPI"
+  | "testTokenIssue"
   | "transferJSON2Table"
   | "addInventory"
   | "getInventoryList"
@@ -33,6 +34,7 @@ const ENDPOINTS: Array<{ id: EndpointId; method: string; path: string; label: st
   { id: "transferCSV2Table", method: "POST", path: "/transferCSV2Table", label: "CSV→테이블" },
   { id: "retrieve", method: "POST", path: "/retrieve", label: "API retrieve" },
   { id: "testAPI", method: "POST", path: "/testAPI", label: "API 테스트" },
+  { id: "testTokenIssue", method: "POST", path: "/testTokenIssue", label: "토큰 발급 테스트" },
   { id: "transferJSON2Table", method: "POST", path: "/transferJSON2Table", label: "JSON→테이블" },
   { id: "addInventory", method: "POST", path: "/addInventory", label: "인벤토리 등록" },
   { id: "getInventoryList", method: "GET", path: "/getInventoryList", label: "인벤토리 목록" },
@@ -67,10 +69,12 @@ const DEFAULT_ADD_INVENTORY = `{
   "origin_api_url": "https://example.com/api/assets",
   "origin_api_url_method": "GET",
   "origin_api_url_params": "",
+  "origin_api_url_headers": "X-Tenant=ops",
   "origin_api_auth_type": 3,
   "origin_token_api": "https://example.com/oauth/token",
   "origin_token_api_method": "POST",
-  "origin_token_api_params": "grant_type=client_credentials"
+  "origin_token_api_params": "grant_type=client_credentials",
+  "origin_token_api_headers": "X-Client-Secret=hdr-secret"
 }`;
 
 const DEFAULT_ADD_API = `{
@@ -135,9 +139,11 @@ export function InventoryApiDebugModal({ viewerRole, onClose }: InventoryApiDebu
   const [authType, setAuthType] = useState("1");
   const [apiMethod, setApiMethod] = useState("GET");
   const [apiParams, setApiParams] = useState("");
+  const [apiHeaders, setApiHeaders] = useState("");
   const [tokenApi, setTokenApi] = useState("");
   const [tokenApiMethod, setTokenApiMethod] = useState("POST");
   const [tokenApiParams, setTokenApiParams] = useState("");
+  const [tokenApiHeaders, setTokenApiHeaders] = useState("");
   const [startrow, setStartrow] = useState("1");
   const [endrow, setEndrow] = useState("20");
   const [sql, setSql] = useState("SELECT 1");
@@ -240,9 +246,11 @@ export function InventoryApiDebugModal({ viewerRole, onClose }: InventoryApiDebu
             auth_type: Number(authType) || 1,
             api_method: apiMethod || "GET",
             api_params: apiParams.trim() || null,
+            api_headers: apiHeaders.trim() || null,
             token_api: authType === "3" ? tokenApi.trim() : null,
             token_api_method: authType === "3" ? tokenApiMethod || "POST" : null,
             token_api_params: authType === "3" ? tokenApiParams.trim() || null : null,
+            token_api_headers: authType === "3" ? tokenApiHeaders.trim() || null : null,
             base_url: trimmedBase,
           }),
         });
@@ -262,9 +270,26 @@ export function InventoryApiDebugModal({ viewerRole, onClose }: InventoryApiDebu
             auth_type: Number(authType) || 1,
             method: apiMethod || "GET",
             params: apiParams.trim() || null,
+            headers: apiHeaders.trim() || null,
             token_api: authType === "3" ? tokenApi.trim() : null,
             token_api_method: authType === "3" ? tokenApiMethod || "POST" : null,
             token_api_params: authType === "3" ? tokenApiParams.trim() || null : null,
+            token_api_headers: authType === "3" ? tokenApiHeaders.trim() || null : null,
+            base_url: trimmedBase,
+          }),
+        });
+      } else if (endpointId === "testTokenIssue") {
+        if (!tokenApi.trim()) {
+          throw new Error("token_api를 입력하세요.");
+        }
+        response = await fetch("/api/debug/inventory-api/testTokenIssue", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            token_api: tokenApi.trim(),
+            token_api_method: tokenApiMethod || "POST",
+            token_api_params: tokenApiParams.trim() || null,
+            token_api_headers: tokenApiHeaders.trim() || null,
             base_url: trimmedBase,
           }),
         });
@@ -587,6 +612,16 @@ export function InventoryApiDebugModal({ viewerRole, onClose }: InventoryApiDebu
                   placeholder="foo=1&bar=2"
                 />
               </label>
+              <label className="block text-sm text-slate-300 md:col-span-3">
+                {endpointId === "retrieve" ? "api_headers" : "headers"} (Name=value&…)
+                <input
+                  type="text"
+                  value={apiHeaders}
+                  onChange={(event) => setApiHeaders(event.target.value)}
+                  className={INPUT}
+                  placeholder="X-Tenant=ops"
+                />
+              </label>
               {authType === "3" ? (
                 <>
                   <label className="block text-sm text-slate-300 md:col-span-2">
@@ -620,6 +655,16 @@ export function InventoryApiDebugModal({ viewerRole, onClose }: InventoryApiDebu
                       placeholder="grant_type=client_credentials&client_id=…"
                     />
                   </label>
+                  <label className="block text-sm text-slate-300 md:col-span-3">
+                    token_api_headers (Name=value&…)
+                    <input
+                      type="text"
+                      value={tokenApiHeaders}
+                      onChange={(event) => setTokenApiHeaders(event.target.value)}
+                      className={INPUT}
+                      placeholder="Authorization=Basic …"
+                    />
+                  </label>
                 </>
               ) : (
                 <label className="block text-sm text-slate-300 md:col-span-3">
@@ -632,6 +677,52 @@ export function InventoryApiDebugModal({ viewerRole, onClose }: InventoryApiDebu
                   />
                 </label>
               )}
+            </div>
+          ) : null}
+
+          {endpointId === "testTokenIssue" ? (
+            <div className="grid gap-3 md:grid-cols-3">
+              <label className="block text-sm text-slate-300 md:col-span-2">
+                token_api
+                <input
+                  type="text"
+                  value={tokenApi}
+                  onChange={(event) => setTokenApi(event.target.value)}
+                  className={INPUT}
+                  placeholder="https://example.com/oauth/token"
+                />
+              </label>
+              <label className="block text-sm text-slate-300">
+                token_api_method
+                <select
+                  value={tokenApiMethod}
+                  onChange={(event) => setTokenApiMethod(event.target.value)}
+                  className={INPUT}
+                >
+                  <option value="POST">POST</option>
+                  <option value="GET">GET</option>
+                </select>
+              </label>
+              <label className="block text-sm text-slate-300 md:col-span-3">
+                token_api_params (key=value&…)
+                <input
+                  type="text"
+                  value={tokenApiParams}
+                  onChange={(event) => setTokenApiParams(event.target.value)}
+                  className={INPUT}
+                  placeholder="grant_type=client_credentials&client_id=…"
+                />
+              </label>
+              <label className="block text-sm text-slate-300 md:col-span-3">
+                token_api_headers (Name=value&…)
+                <input
+                  type="text"
+                  value={tokenApiHeaders}
+                  onChange={(event) => setTokenApiHeaders(event.target.value)}
+                  className={INPUT}
+                  placeholder="Authorization=Basic …"
+                />
+              </label>
             </div>
           ) : null}
 

@@ -21,6 +21,10 @@ import {
   InventoryOriginApiTestModal,
   type InventoryOriginApiTestResult,
 } from "./InventoryOriginApiTestModal";
+import {
+  InventoryTokenIssueTestModal,
+  type InventoryTokenIssueTestResult,
+} from "./InventoryTokenIssueTestModal";
 import { InventoryStatsPanel } from "./InventoryStatsPanel";
 import { WorkflowIcon } from "../workflow/WorkflowIcon";
 import {
@@ -101,11 +105,13 @@ export function InventoryPage({ user }: InventoryPageProps) {
   const [originApiUrl, setOriginApiUrl] = useState("");
   const [originApiMethod, setOriginApiMethod] = useState<InventoryHttpMethod>("GET");
   const [originApiParams, setOriginApiParams] = useState<InventoryKeyValueParam[]>([]);
+  const [originApiHeaders, setOriginApiHeaders] = useState<InventoryKeyValueParam[]>([]);
   const [originApiKey, setOriginApiKey] = useState("");
   const [originApiAuthType, setOriginApiAuthType] = useState<InventoryApiAuthType>(1);
   const [originTokenApi, setOriginTokenApi] = useState("");
   const [originTokenMethod, setOriginTokenMethod] = useState<InventoryHttpMethod>("POST");
   const [originTokenParams, setOriginTokenParams] = useState<InventoryKeyValueParam[]>([]);
+  const [originTokenHeaders, setOriginTokenHeaders] = useState<InventoryKeyValueParam[]>([]);
   const [stagedResponseJson, setStagedResponseJson] = useState<unknown>(null);
   const [isScheduled, setIsScheduled] = useState(false);
   const [apiCrawlingCron, setApiCrawlingCron] = useState("");
@@ -113,6 +119,8 @@ export function InventoryPage({ user }: InventoryPageProps) {
   const [testingApi, setTestingApi] = useState(false);
   const [testingToken, setTestingToken] = useState(false);
   const [apiTestResult, setApiTestResult] = useState<InventoryOriginApiTestResult | null>(null);
+  const [tokenTestResult, setTokenTestResult] =
+    useState<InventoryTokenIssueTestResult | null>(null);
   const [tempTableName, setTempTableName] = useState<string | null>(null);
   const [uploadPreview, setUploadPreview] = useState<InventoryCsvPreview | null>(null);
   const [csvMismatch, setCsvMismatch] = useState(false);
@@ -238,11 +246,13 @@ export function InventoryPage({ user }: InventoryPageProps) {
     setOriginApiUrl("");
     setOriginApiMethod("GET");
     setOriginApiParams([]);
+    setOriginApiHeaders([]);
     setOriginApiKey("");
     setOriginApiAuthType(1);
     setOriginTokenApi("");
     setOriginTokenMethod("POST");
     setOriginTokenParams([]);
+    setOriginTokenHeaders([]);
     setStagedResponseJson(null);
     setIsScheduled(false);
     setApiCrawlingCron("");
@@ -269,6 +279,7 @@ export function InventoryPage({ user }: InventoryPageProps) {
       (item.origin_api_url_method || "GET").toUpperCase() === "POST" ? "POST" : "GET",
     );
     setOriginApiParams(parseInventoryParams(item.origin_api_url_params));
+    setOriginApiHeaders(parseInventoryParams(item.origin_api_url_headers));
     setOriginApiKey("");
     const auth =
       item.origin_api_auth_type === 2 ? 2 : item.origin_api_auth_type === 3 ? 3 : 1;
@@ -278,6 +289,7 @@ export function InventoryPage({ user }: InventoryPageProps) {
       (item.origin_token_api_method || "POST").toUpperCase() === "GET" ? "GET" : "POST",
     );
     setOriginTokenParams([]);
+    setOriginTokenHeaders([]);
     setStagedResponseJson(null);
     setIsScheduled(Boolean(item.is_scheduled));
     setApiCrawlingCron(item.api_crawling_cron || "");
@@ -414,11 +426,16 @@ export function InventoryPage({ user }: InventoryPageProps) {
           auth_type: originApiAuthType,
           api_method: originApiMethod,
           api_params: serializeInventoryParams(originApiParams) || null,
+          api_headers: serializeInventoryParams(originApiHeaders) || null,
           token_api: originApiAuthType === 3 ? originTokenApi.trim() : null,
           token_api_method: originApiAuthType === 3 ? originTokenMethod : null,
           token_api_params:
             originApiAuthType === 3
               ? serializeInventoryParams(originTokenParams) || null
+              : null,
+          token_api_headers:
+            originApiAuthType === 3
+              ? serializeInventoryParams(originTokenHeaders) || null
               : null,
           display_name: displayName.trim() || null,
           description: description.trim() || null,
@@ -455,14 +472,16 @@ export function InventoryPage({ user }: InventoryPageProps) {
     auth_type: originApiAuthType,
     api_method: originApiMethod,
     api_params: serializeInventoryParams(originApiParams) || null,
+    api_headers: serializeInventoryParams(originApiHeaders) || null,
     token_api: originApiAuthType === 3 ? originTokenApi.trim() : null,
     token_api_method: originApiAuthType === 3 ? originTokenMethod : null,
     token_api_params:
       originApiAuthType === 3 ? serializeInventoryParams(originTokenParams) || null : null,
+    token_api_headers:
+      originApiAuthType === 3 ? serializeInventoryParams(originTokenHeaders) || null : null,
   });
 
   const handleTestTokenApi = async () => {
-    const url = originApiUrl.trim();
     const tokenUrl = originTokenApi.trim();
     if (!tokenUrl) {
       setError("Token 발급 API 경로를 입력하세요.");
@@ -472,24 +491,25 @@ export function InventoryPage({ user }: InventoryPageProps) {
       setError("Token 발급 API 경로는 http(s)로 시작해야 합니다.");
       return;
     }
-    if (!url || !/^https?:\/\//i.test(url)) {
-      setError("토큰 테스트에는 실제 API 경로도 필요합니다.");
-      return;
-    }
     setTestingToken(true);
     setError(null);
     try {
-      const response = await fetch("/api/inventories/apicall/test", {
+      const response = await fetch("/api/inventories/apicall/test-token", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(buildOriginTestBody()),
+        body: JSON.stringify({
+          token_api: tokenUrl,
+          token_api_method: originTokenMethod,
+          token_api_params: serializeInventoryParams(originTokenParams) || null,
+          token_api_headers: serializeInventoryParams(originTokenHeaders) || null,
+        }),
       });
       if (!response.ok) {
         throw new Error(await readErrorDetail(response, "토큰 발급 테스트에 실패했습니다."));
       }
-      const payload = (await response.json()) as InventoryOriginApiTestResult;
-      setApiTestResult(payload);
-      if (!payload.ok && !payload.token_issued) {
+      const payload = (await response.json()) as InventoryTokenIssueTestResult;
+      setTokenTestResult(payload);
+      if (!payload.ok) {
         setError(payload.error || payload.message || "토큰 발급 테스트가 실패했습니다.");
       }
     } catch (err) {
@@ -635,6 +655,8 @@ export function InventoryPage({ user }: InventoryPageProps) {
             origin_api_url_method: originMode === "api" ? originApiMethod : null,
             origin_api_url_params:
               originMode === "api" ? serializeInventoryParams(originApiParams) || null : null,
+            origin_api_url_headers:
+              originMode === "api" ? serializeInventoryParams(originApiHeaders) || null : null,
             origin_api_key:
               originMode === "api" && originApiAuthType !== 3
                 ? originApiKey.trim() || null
@@ -649,6 +671,10 @@ export function InventoryPage({ user }: InventoryPageProps) {
             origin_token_api_params:
               originMode === "api" && originApiAuthType === 3
                 ? serializeInventoryParams(originTokenParams) || null
+                : null,
+            origin_token_api_headers:
+              originMode === "api" && originApiAuthType === 3
+                ? serializeInventoryParams(originTokenHeaders) || null
                 : null,
             is_scheduled: originMode === "api" ? isScheduled : false,
             api_crawling_cron:
@@ -684,6 +710,8 @@ export function InventoryPage({ user }: InventoryPageProps) {
           origin_api_url_method: originMode === "api" ? originApiMethod : null,
           origin_api_url_params:
             originMode === "api" ? serializeInventoryParams(originApiParams) || null : null,
+          origin_api_url_headers:
+            originMode === "api" ? serializeInventoryParams(originApiHeaders) || null : null,
           origin_api_key:
             originMode === "api" && originApiAuthType !== 3
               ? originApiKey.trim() || null
@@ -696,6 +724,10 @@ export function InventoryPage({ user }: InventoryPageProps) {
           origin_token_api_params:
             originMode === "api" && originApiAuthType === 3
               ? serializeInventoryParams(originTokenParams) || null
+              : null,
+          origin_token_api_headers:
+            originMode === "api" && originApiAuthType === 3
+              ? serializeInventoryParams(originTokenHeaders) || null
               : null,
           is_scheduled: originMode === "api" ? isScheduled : false,
           api_crawling_cron:
@@ -1129,8 +1161,7 @@ export function InventoryPage({ user }: InventoryPageProps) {
                                     testingToken ||
                                     testingApi ||
                                     retrieving ||
-                                    !originTokenApi.trim() ||
-                                    !originApiUrl.trim()
+                                    !originTokenApi.trim()
                                   }
                                   onClick={() => void handleTestTokenApi()}
                                   className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-md border border-slate-600 bg-slate-800/70 px-3 py-2 text-sm text-slate-100 hover:bg-slate-800 disabled:opacity-50"
@@ -1169,6 +1200,19 @@ export function InventoryPage({ user }: InventoryPageProps) {
                             {isView && selected?.has_token_api_params && originTokenParams.length === 0 ? (
                               <span className="text-[11px] text-slate-500">
                                 저장된 Token 파라미터가 있습니다. 변경 시에만 다시 입력하세요.
+                              </span>
+                            ) : null}
+                            <InventoryKeyValueParamsEditor
+                              label="Token 헤더 (Name=value)"
+                              items={originTokenHeaders}
+                              disabled={!fieldsEditable}
+                              onChange={setOriginTokenHeaders}
+                            />
+                            {isView &&
+                            selected?.has_token_api_headers &&
+                            originTokenHeaders.length === 0 ? (
+                              <span className="text-[11px] text-slate-500">
+                                저장된 Token 헤더가 있습니다. 변경 시에만 다시 입력하세요.
                               </span>
                             ) : null}
                           </div>
@@ -1258,6 +1302,12 @@ export function InventoryPage({ user }: InventoryPageProps) {
                             disabled={!fieldsEditable}
                             onChange={setOriginApiParams}
                           />
+                          <InventoryKeyValueParamsEditor
+                            label="API 헤더 (Name=value)"
+                            items={originApiHeaders}
+                            disabled={!fieldsEditable}
+                            onChange={setOriginApiHeaders}
+                          />
                         </div>
 
                         <WorkflowScheduleField
@@ -1342,6 +1392,12 @@ export function InventoryPage({ user }: InventoryPageProps) {
         <InventoryOriginApiTestModal
           result={apiTestResult}
           onClose={() => setApiTestResult(null)}
+        />
+      ) : null}
+      {tokenTestResult ? (
+        <InventoryTokenIssueTestModal
+          result={tokenTestResult}
+          onClose={() => setTokenTestResult(null)}
         />
       ) : null}
     </div>
