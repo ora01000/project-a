@@ -4,158 +4,186 @@
 <%@ page import="java.net.*" %>
 <%@ page import="javax.net.ssl.*" %>
 <%@ page import="java.security.cert.*" %>
-<%@ page import="java.security.cert.*" %>
 <%@ page import="org.owasp.validator.html.*" %>
 <%@ page import="org.apache.xml.serialize.HTMLSerializer" %>
 <%@ page import="net.sf.json.*" %>
 
+<%!
+	private static String enc(String value) throws UnsupportedEncodingException {
+		return URLEncoder.encode(value == null ? "" : value, "UTF-8");
+	}
+
+	private static void writeJsonError(
+		HttpServletResponse response,
+		int status,
+		String error,
+		String message
+	) throws IOException {
+		response.resetBuffer();
+		response.setStatus(status);
+		response.setContentType("application/json; charset=UTF-8");
+		response.setCharacterEncoding("UTF-8");
+		JSONObject body = new JSONObject();
+		body.put("error", error == null ? "error" : error);
+		body.put("message", message == null ? "" : message);
+		response.getWriter().write(body.toString());
+		response.flushBuffer();
+	}
+%>
 <%
-	Policy policy = Policy.getInstance("/deployments/ROOT/antisamy.xml");
-	AntiSamy antiSamy = new AntiSamy();
+	java.text.SimpleDateFormat sdf = new java.text.SimpleDateFormat("HH:mm:ss");
+	String unameForLog = "-";
 
-	String[] values = null;
+	try {
+		Policy policy = Policy.getInstance("/deployments/ROOT/antisamy.xml");
+		AntiSamy antiSamy = new AntiSamy();
 
-    String authorization = request.getHeader("Authorization");
-   // System.out.println(authorization);
-    if(authorization != null && authorization.toLowerCase().startsWith("basic")) {
-        String base64Credentials = authorization.substring("Basic".length()).trim();
-        byte[] credDecoded = Base64.getDecoder().decode(base64Credentials);
-        String credentials = new String(credDecoded, "UTF-8");
+		String[] values = null;
+		String authorization = request.getHeader("Authorization");
+		if (authorization != null && authorization.toLowerCase().startsWith("basic")) {
+			String base64Credentials = authorization.substring("Basic".length()).trim();
+			byte[] credDecoded = Base64.getDecoder().decode(base64Credentials);
+			String credentials = new String(credDecoded, "UTF-8");
+			values = credentials.split(":", 2);
+		}
 
-        values = credentials.split(":", 2);
-    }
+		if (values == null || values.length < 2) {
+			System.out.println(sdf.format(new java.util.Date())
+				+ " [ERR] Missing or invalid Basic Authorization header");
+			writeJsonError(response, 401, "invalid_request", "Basic Authorization required");
+			return;
+		}
 
-    if (values != null) {
-	    String uname = values[0];
-	    String password = values[1];
-	    
-	    uname = antiSamy.scan(uname, policy).getCleanHTML(); // XSS 방지
-	    password = antiSamy.scan(password, policy).getCleanHTML(); // XSS 방지
+		String uname = values[0];
+		String password = values[1];
+		uname = antiSamy.scan(uname, policy).getCleanHTML();
+		password = antiSamy.scan(password, policy).getCleanHTML();
+		unameForLog = uname;
 
-	    // Auth-provider policy: send password in plaintext (no SHA-512).
-	  
-	    String client_id = System.getenv("OAUTH_CLIENT_ID");
-	    String client_secret = System.getenv("OAUTH_CLIENT_SECRET");
-	    String autype = System.getenv("OAUTH_AUTH_TYPE");
-	    String scope = System.getenv("OAUTH_SCOPE");
-	    String grant_type = System.getenv("OAUTH_GRANT_TYPE");
-	    String oauth_url = System.getenv("OAUTH_URL");
+		// Auth-provider policy: send password in plaintext (no SHA-512).
+		String client_id = System.getenv("OAUTH_CLIENT_ID");
+		String client_secret = System.getenv("OAUTH_CLIENT_SECRET");
+		String autype = System.getenv("OAUTH_AUTH_TYPE");
+		String scope = System.getenv("OAUTH_SCOPE");
+		String grant_type = System.getenv("OAUTH_GRANT_TYPE");
+		String oauth_url = System.getenv("OAUTH_URL");
 
-	/*
-	    StringBuffer cmdStr = new StringBuffer("curl -X POST ")
-	        .append("--header 'Content-Type: application/x-www-form-urlencoded' ")
-	        .append("--header 'Accept: application/json' ")
-	        .append("-d 'grant_type=").append(grant_type)
-	        .append("&client_id=").append(client_id)
-	        .append("&client_secret=").append(client_secret)
-	        .append("&password=").append(password)
-	        .append("&scope=").append(scope)
-	        .append("&auth_type=").append(auth_type)
-	        .append("&user_id=").append(username).append("' ")
-	        .append("'").append(oauth_url).append("' -k");
-	
-	    // curl -X POST --header 'Content-Type: application/x-www-form-urlencoded' --header 'Accept: application/json' -d 'grant_type=password&client_id=0f64e652-134c-45e8-b80f-435b2d715b08&client_secret=fK6vP8dE3xL5mX4qP3nX8qW5xC7fX4mW7nH4lS5yW4yI1rG6pD&scope=EA&auth_type=IM&password=05e4f7a100ece6900a043a3102ee80991bfe3324c512f8a8d49f610df8044ebb5da9326bc83e01847d91d7dc13dda50d8b2ccd9fa5509b516701850d18f6a11c&user_id=mslim2' 'https://devapi.lguplus.co.kr/uplus/intuser/oauth2/token' -k
-	
-	*/
-	    String urly = oauth_url;
-	    URL obj = new URL(urly);
-	    HttpsURLConnection con = (HttpsURLConnection) obj.openConnection();
-	
-	    con.setRequestMethod("POST");
-	    con.setRequestProperty("Content-Type","application/x-www-form-urlencoded");
-	    con.setRequestProperty("Accept", "application/json");
-	
-	    con.setDoOutput(true);
-	    con.setDoInput(true);
-	    con.setUseCaches(false);
-	    con.setHostnameVerifier(new HostnameVerifier() {
-	
-	        @Override
-	        public boolean verify(String hostname, SSLSession session) {
-	            return true;
-	        }
-	    });
-        
-        
-	    // SSL setting — TLS 1.2+ required for APIM
-	    SSLContext ctx = SSLContext.getInstance("TLSv1.2");
-	    ctx.init(null, new TrustManager[]{
-	        new javax.net.ssl.X509TrustManager() {
+		if (oauth_url == null || oauth_url.trim().isEmpty()) {
+			System.out.println(sdf.format(new java.util.Date())
+				+ " [ERR] OAUTH_URL is not configured");
+			writeJsonError(response, 500, "server_error", "OAUTH_URL is not configured");
+			return;
+		}
 
-	            @Override
-	            public X509Certificate[] getAcceptedIssuers() {
-	                return null;
-	            }
+		URL obj = new URL(oauth_url.trim());
+		HttpsURLConnection con = (HttpsURLConnection) obj.openConnection();
 
-	            @Override
-	            public void checkServerTrusted(X509Certificate[] chain, String authType) throws CertificateException {
-	            }
+		con.setRequestMethod("POST");
+		con.setRequestProperty("Content-Type", "application/x-www-form-urlencoded");
+		con.setRequestProperty("Accept", "application/json");
+		con.setDoOutput(true);
+		con.setDoInput(true);
+		con.setUseCaches(false);
+		con.setConnectTimeout(15000);
+		con.setReadTimeout(30000);
+		con.setHostnameVerifier(new HostnameVerifier() {
+			@Override
+			public boolean verify(String hostname, SSLSession session) {
+				return true;
+			}
+		});
 
-	            @Override
-	            public void checkClientTrusted(X509Certificate[] chain, String authType) throws CertificateException {
-	            }
-	        }
-	    }, null);
-	    con.setSSLSocketFactory(ctx.getSocketFactory());
-	    try {
-	        SSLParameters params = ctx.getDefaultSSLParameters();
-	        params.setProtocols(new String[] { "TLSv1.2", "TLSv1.3" });
-	        con.setSSLParameters(params);
-	    } catch (Exception ignore) {
-	        // keep TLSv1.2 SSLContext factory as the minimum guarantee
-	    }
+		// SSL setting — TLS 1.2+ required for APIM
+		// Use SSLSocketFactory only (HttpsURLConnection has no setSSLParameters).
+		SSLContext ctx = SSLContext.getInstance("TLSv1.2");
+		ctx.init(null, new TrustManager[]{
+			new javax.net.ssl.X509TrustManager() {
+				@Override
+				public X509Certificate[] getAcceptedIssuers() {
+					return new X509Certificate[0];
+				}
 
+				@Override
+				public void checkServerTrusted(X509Certificate[] chain, String authType)
+					throws CertificateException {
+				}
 
-	    DataOutputStream wr = new DataOutputStream(con.getOutputStream());
-	    String urlTxt = "grant_type=" + grant_type +
-						"&client_id=" + client_id +
-						"&client_secret=" + client_secret +
-						"&scope=" + scope +
-						"&auth_type=" + autype +
-						"&user_id=" + uname +
-						"&password=" + password;
-	    
-	    wr.writeBytes(urlTxt);
-	    wr.flush();
-	    wr.close();
+				@Override
+				public void checkClientTrusted(X509Certificate[] chain, String authType)
+					throws CertificateException {
+				}
+			}
+		}, null);
+		con.setSSLSocketFactory(ctx.getSocketFactory());
 
-	    int responseCode = con.getResponseCode();
-            
-            java.text.SimpleDateFormat sdf = new java.text.SimpleDateFormat("HH:mm:ss");
-	    System.out.println(sdf.format(new java.util.Date()) + " Response Code : " + responseCode);
-	    System.out.println(sdf.format(new java.util.Date()) + " Response Msg: " + con.getResponseMessage());
+		String urlTxt = "grant_type=" + enc(grant_type)
+			+ "&client_id=" + enc(client_id)
+			+ "&client_secret=" + enc(client_secret)
+			+ "&scope=" + enc(scope)
+			+ "&auth_type=" + enc(autype)
+			+ "&user_id=" + enc(uname)
+			+ "&password=" + enc(password);
 
-	    if(responseCode == 200)
-	    {
-	        BufferedReader iny = new BufferedReader(new InputStreamReader(con.getInputStream()));
-	        String output;
-	        StringBuffer res= new StringBuffer();
+		DataOutputStream wr = new DataOutputStream(con.getOutputStream());
+		wr.writeBytes(urlTxt);
+		wr.flush();
+		wr.close();
 
-	        while ((output = iny.readLine()) != null) {
-      //          System.out.println(output + "---");
-	            res.append(output);
-	        }
-	        iny.close();
-		System.out.println(sdf.format(new java.util.Date()) + " Output: " + res.toString());
-	
-       //     System.out.println("--step6--");
-	        //printing result from response
-	        // login succcess
-	        // String retval = "{\"sub\":\"" + uname + "\"}";
-	        // CleanResults cleanResults = antiSamy.scan(retval, policy);
-		    response.setContentType("application/json"); 
-		    JSONObject jsonObj = new JSONObject();
-		    uname = antiSamy.scan(uname, policy).getCleanHTML(); // XSS 방지
-       //     System.out.println("--step7--");
-		    jsonObj.put("sub", uname);
-       //     System.out.println("--step8--");
-		    response.getWriter().write(jsonObj.toString());
-       //     System.out.println("--step9--");
-	      System.out.println(sdf.format(new java.util.Date()) + " [INFO] User [" + uname + "] is logged in OpenShift Container Platform successfully");
-	    }
-            else
-            {
-	      System.out.println(sdf.format(new java.util.Date()) + " [ERR] User [" + uname + "] failed to login");
-            }
-    }
+		int responseCode = con.getResponseCode();
+		System.out.println(sdf.format(new java.util.Date()) + " Response Code : " + responseCode);
+		System.out.println(sdf.format(new java.util.Date()) + " Response Msg: " + con.getResponseMessage());
+
+		if (responseCode == 200) {
+			BufferedReader iny = new BufferedReader(new InputStreamReader(con.getInputStream(), "UTF-8"));
+			String output;
+			StringBuffer res = new StringBuffer();
+			while ((output = iny.readLine()) != null) {
+				res.append(output);
+			}
+			iny.close();
+			System.out.println(sdf.format(new java.util.Date()) + " Output: " + res.toString());
+
+			response.setStatus(200);
+			response.setContentType("application/json; charset=UTF-8");
+			response.setCharacterEncoding("UTF-8");
+			JSONObject jsonObj = new JSONObject();
+			uname = antiSamy.scan(uname, policy).getCleanHTML();
+			jsonObj.put("sub", uname);
+			response.getWriter().write(jsonObj.toString());
+			System.out.println(sdf.format(new java.util.Date())
+				+ " [INFO] User [" + uname + "] is logged in OpenShift Container Platform successfully");
+		} else {
+			InputStream errStream = con.getErrorStream();
+			if (errStream != null) {
+				BufferedReader ery = new BufferedReader(new InputStreamReader(errStream, "UTF-8"));
+				StringBuilder errBody = new StringBuilder();
+				String line;
+				while ((line = ery.readLine()) != null) {
+					errBody.append(line);
+				}
+				ery.close();
+				if (errBody.length() > 0) {
+					System.out.println(sdf.format(new java.util.Date())
+						+ " Upstream error body: " + errBody.toString());
+				}
+			}
+			System.out.println(sdf.format(new java.util.Date())
+				+ " [ERR] User [" + uname + "] failed to login");
+			// OKD BasicAuth IdP: failure must be non-200 (never empty 200 / HTML).
+			writeJsonError(response, 401, "access_denied", "upstream authentication failed");
+		}
+	} catch (Throwable t) {
+		// Prevent container HTML error pages — oauth-openshift expects JSON or empty non-200.
+		System.out.println(sdf.format(new java.util.Date())
+			+ " [ERR] User [" + unameForLog + "] login exception: "
+			+ t.getClass().getName() + ": " + t.getMessage());
+		t.printStackTrace(System.out);
+		try {
+			writeJsonError(response, 500, "server_error", "identity provider internal error");
+		} catch (Exception writeFail) {
+			System.out.println(sdf.format(new java.util.Date())
+				+ " [ERR] Failed to write JSON error response: " + writeFail.getMessage());
+			response.setStatus(500);
+		}
+	}
 %>
