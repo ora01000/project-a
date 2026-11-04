@@ -1,0 +1,30 @@
+
+E1104 05:33:45.545724       1 login.go:176] Error authenticating "cwjeong1" with provider "madang": unexpected end of JSON input
+E1104 05:35:26.749956       1 login.go:176] Error authenticating "isyun" with provider "madang": invalid character '<' looking for beginning of value
+E1104 05:35:57.701264       1 login.go:176] Error authenticating "chinh0907" with provider "madang": invalid character '<' looking for beginning of value
+E1104 05:36:49.017290       1 login.go:176] Error authenticating "isyun" with provider "madang": invalid character '<' looking for beginning of value
+E1104 05:46:11.244175       1 osinserver.go:103] osin: error=invalid_request, internal_error=&errors.errorString{s:"Request must be POST"} access_request=request must be POST
+E1104 05:46:11.244199       1 osinserver.go:111] internal error: Request must be POST
+E1104 05:46:11.248523       1 osinserver.go:103] osin: error=invalid_request, internal_error=&errors.errorString{s:"Request must be POST"} access_request=request must be POST
+E1104 05:46:11.248545       1 osinserver.go:111] internal error: Request must be POST
+E1104 05:46:21.489250       1 osinserver.go:103] osin: error=invalid_request, internal_error=&errors.errorString{s:"Request must be POST"} access_request=request must be POST
+E1104 05:46:21.489276       1 osinserver.go:111] internal error: Request must be POST
+E1104 05:49:19.862340       1 osinserver.go:103] osin: error=invalid_request, internal_error=&errors.errorString{s:"Request must be POST"} access_request=request must be POST
+E1104 05:49:19.862363       1 osinserver.go:111] internal error: Request must be POST
+E1104 05:49:19.866044       1 osinserver.go:103] osin: error=invalid_request, internal_error=&errors.errorString{s:"Request must be POST"} access_request=request must be POST
+E1104 05:49:19.866064       1 osinserver.go:111] internal error: Request must be POST
+E1104 05:49:27.862579       1 timeout.go:142] post-timeout activity - time-elapsed: 1.816777131s, POST "/login/madang" result: <nil>
+E1104 05:49:28.063908       1 osinserver.go:103] osin: error=invalid_request, internal_error=&errors.errorString{s:"Request must be POST"} access_request=request must be POST
+E1104 05:49:28.063931       1 osinserver.go:111] internal error: Request must be POST
+E1104 05:49:31.742964       1 osinserver.go:103] osin: error=invalid_request, internal_error=&errors.errorString{s:"Request must be POST"} access_request=request must be POST
+E1104 05:49:31.742989       1 osinserver.go:111] internal error: Request must be POST
+E1104 05:49:31.745971       1 osinserver.go:103] osin: error=invalid_request, internal_error=&errors.errorString{s:"Request must be POST"} access_request=request must be POST
+E1104 05:49:31.745991       1 osinserver.go:111] internal error: Request must be POST
+E1104 05:50:57.481730       1 osinserver.go:103] osin: error=invalid_request, internal_error=&errors.errorString{s:"Request must be POST"} access_request=request must be POST
+E1104 05:50:57.481758       1 osinserver.go:111] internal error: Request must be POST
+E1104 05:50:57.485597       1 osinserver.go:103] osin: error=invalid_request, internal_error=&errors.errorString{s:"Request must be POST"} access_request=request must be POST
+E1104 05:50:57.485618       1 osinserver.go:111] internal error: Request must be POST
+E1104 05:51:05.682508       1 login.go:176] Error authenticating "mtb336" with provider "madang": unexpected end of JSON input
+E1104 05:51:15.063568       1 osinserver.go:103] osin: error=invalid_request, internal_error=&errors.errorString{s:"Request must be POST"} access_request=request must be POST
+E1104 05:51:15.063588       1 osinserver.go:111] internal error: Request must be POST
+
