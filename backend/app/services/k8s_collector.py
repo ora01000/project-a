@@ -599,23 +599,41 @@ def _as_mapping(value: Any) -> dict[str, Any]:
     return {}
 
 
+def _resource_name(item: Any) -> str:
+    return str(_attr(item, "metadata", "name", default="") or "").strip()
+
+
 def _spec_egress_ips(item: Any) -> list[str]:
     """Return .spec.egressIPs as-is (1 or 2 entries used downstream)."""
+    spec = _as_mapping(_attr(item, "spec", default=None))
+    raw_ips = spec.get("egressIPs")
+    if raw_ips is None:
+        raw_ips = _attr(item, "spec", "egressIPs", default=[]) or []
+    if callable(raw_ips):
+        raw_ips = []
+    try:
+        values = list(raw_ips)
+    except TypeError:
+        values = []
     return [
         str(ip).strip()
-        for ip in (_attr(item, "spec", "egressIPs", default=[]) or [])
+        for ip in values
         if ip is not None and str(ip).strip()
     ]
 
 
 def _egress_ip_selector_value(item: Any) -> str | None:
     """Read EgressIP.spec.namespaceSelector.matchLabels.egressIPSelector."""
-    selector = _attr(item, "spec", "namespaceSelector", default=None)
+    spec = _as_mapping(_attr(item, "spec", default=None))
+    selector = spec.get("namespaceSelector")
+    if selector is None:
+        selector = _attr(item, "spec", "namespaceSelector", default=None)
     if selector is None:
         return None
-    match_labels_raw = _attr(selector, "matchLabels", default=None)
-    if match_labels_raw is None and isinstance(selector, dict):
-        match_labels_raw = selector.get("matchLabels")
+    selector_map = _as_mapping(selector)
+    match_labels_raw = selector_map.get("matchLabels")
+    if match_labels_raw is None:
+        match_labels_raw = _attr(selector, "matchLabels", default=None)
     match_labels = _as_mapping(match_labels_raw)
     if not match_labels:
         return None
@@ -628,12 +646,35 @@ def _egress_ip_selector_value(item: Any) -> str | None:
 
 def _status_egress_assignment(item: Any) -> tuple[str | None, str | None]:
     """Return (using_egressip, egressip_assigned_node) from status.items[0]."""
-    status_items = _attr(item, "status", "items", default=[]) or []
-    if not status_items:
+    # Prefer .get("items"): ResourceField/dict-like `.items` is often the method.
+    status_obj = _attr(item, "status", default=None)
+    status_items: Any = None
+    get_fn = getattr(status_obj, "get", None) if status_obj is not None else None
+    if callable(get_fn):
+        try:
+            status_items = get_fn("items")
+        except Exception:
+            status_items = None
+    if status_items is None:
+        status_map = _as_mapping(status_obj)
+        status_items = status_map.get("items")
+    if status_items is None or callable(status_items):
+        raw = _attr(item, "status", "items", default=None)
+        status_items = [] if callable(raw) or raw is None else raw
+    try:
+        values = list(status_items)
+    except TypeError:
+        values = []
+    if not values:
         return None, None
-    status_item = status_items[0]
-    ip = _attr(status_item, "egressIP")
-    node = _attr(status_item, "node")
+    status_item = values[0]
+    status_item_map = _as_mapping(status_item)
+    ip = status_item_map.get("egressIP")
+    node = status_item_map.get("node")
+    if ip is None:
+        ip = _attr(status_item, "egressIP")
+    if node is None:
+        node = _attr(status_item, "node")
     ip_text = str(ip).strip() if ip is not None else ""
     node_text = str(node).strip() if node is not None else ""
     return (
@@ -680,36 +721,131 @@ def _collect_egress_ips(
         for name, labels in namespace_labels.items()
         if str(labels.get(_EGRESS_IP_SELECTOR_KEY) or "").strip()
     }
+    logger.debug(
+        "egressip scrape: namespaces_total=%s namespaces_with_%s=%s selectors=%s",
+        len(namespace_labels),
+        _EGRESS_IP_SELECTOR_KEY,
+        len(ns_with_selector),
+        sorted(set(ns_with_selector.values())),
+    )
 
-    for item in _safe_list(dyn, "network.openshift.io/v1", "NetNamespace"):
+    netns_items = _safe_list(dyn, "network.openshift.io/v1", "NetNamespace")
+    logger.debug("egressip scrape: NetNamespace count=%s", len(netns_items))
+    for item in netns_items:
         name = str(_attr(item, "netName") or _attr(item, "metadata", "name") or "")
         if not name:
             continue
         egress = _attr(item, "egressIPs", default=[]) or []
-        ips = [str(ip).strip() for ip in egress if ip is not None and str(ip).strip()]
+        if callable(egress):
+            egress = []
+        try:
+            egress_values = list(egress)
+        except TypeError:
+            egress_values = []
+        ips = [
+            str(ip).strip()
+            for ip in egress_values
+            if ip is not None and str(ip).strip()
+        ]
         if ips:
             by_namespace[name] = _merge_egress_info(by_namespace.get(name), ips=ips)
+            logger.debug(
+                "egressip scrape: NetNamespace name=%s ips=%s",
+                name,
+                ips,
+            )
 
-    for item in _safe_list(dyn, "k8s.ovn.org/v1", "EgressIP"):
+    eip_items = _safe_list(dyn, "k8s.ovn.org/v1", "EgressIP")
+    logger.debug("egressip scrape: EgressIP count=%s", len(eip_items))
+    matched_pairs = 0
+    skipped_no_selector = 0
+    skipped_no_ips = 0
+    skipped_no_ns_match = 0
+    for item in eip_items:
+        eip_name = _resource_name(item) or "<unknown>"
         selector_value = _egress_ip_selector_value(item)
         if not selector_value:
+            skipped_no_selector += 1
+            logger.debug(
+                "egressip scrape: EgressIP name=%s skip=no_%s_in_namespaceSelector",
+                eip_name,
+                _EGRESS_IP_SELECTOR_KEY,
+            )
             continue
         ips = _spec_egress_ips(item)
         if not ips:
+            skipped_no_ips += 1
+            logger.debug(
+                "egressip scrape: EgressIP name=%s selector=%s skip=empty_spec_egressIPs",
+                eip_name,
+                selector_value,
+            )
             continue
         # Inventory columns hold at most two IPs.
         ips = ips[:2]
         using_ip, assigned_node = _status_egress_assignment(item)
+        logger.debug(
+            "egressip scrape: EgressIP name=%s selector=%s ips=%s "
+            "using=%s node=%s",
+            eip_name,
+            selector_value,
+            ips,
+            using_ip,
+            assigned_node,
+        )
+        hit = 0
         for ns_name, ns_selector in ns_with_selector.items():
             if ns_selector != selector_value:
                 continue
+            hit += 1
+            matched_pairs += 1
             by_namespace[ns_name] = _merge_egress_info(
                 by_namespace.get(ns_name),
                 ips=ips,
                 using_egressip=using_ip,
                 egressip_assigned_node=assigned_node,
             )
+            logger.debug(
+                "egressip scrape: matched namespace=%s EgressIP=%s selector=%s "
+                "ips=%s using=%s node=%s",
+                ns_name,
+                eip_name,
+                selector_value,
+                ips,
+                using_ip,
+                assigned_node,
+            )
+        if hit == 0:
+            skipped_no_ns_match += 1
+            logger.debug(
+                "egressip scrape: EgressIP name=%s selector=%s "
+                "skip=no_namespace_label_match",
+                eip_name,
+                selector_value,
+            )
 
+    logger.debug(
+        "egressip scrape: summary namespaces_with_egress=%s "
+        "ovn_matched_pairs=%s skipped_no_selector=%s skipped_no_ips=%s "
+        "skipped_no_ns_match=%s",
+        len(by_namespace),
+        matched_pairs,
+        skipped_no_selector,
+        skipped_no_ips,
+        skipped_no_ns_match,
+    )
+    if eip_items and matched_pairs == 0:
+        logger.info(
+            "egressip scrape: listed %s EgressIP object(s) but matched 0 namespaces "
+            "(ns_with_selector=%s skipped_no_selector=%s skipped_no_ips=%s "
+            "skipped_no_ns_match=%s); enable DEBUG on %s for details",
+            len(eip_items),
+            len(ns_with_selector),
+            skipped_no_selector,
+            skipped_no_ips,
+            skipped_no_ns_match,
+            __name__,
+        )
     return by_namespace
 
 
