@@ -3526,13 +3526,13 @@ json 형태로 응답한다.
 토큰 발급 및 실제 API 호출 순서는 다음과 같다.
 1. 서비스나우 토큰 발급
 2. APIM 포탈 토큰 발급
-3. 실제 API 호출시 -H "X-Partners-Token: ${서비스나우 토큰}" -H "Authorization: ${APIM 포탈 토큰}"
+3. 실제 API 호출시 -H "X-Partner-Token: ${서비스나우 토큰}" -H "Authorization: ${APIM 포탈 토큰}"
 
 ### project-A / e 계약 (auth_type=4 ServiceNow dual token)
 - `auth_type=4` / `origin_api_auth_type=4`. 기존 3(Token) 유지
 - 필드: APIM=`token_api*` / `origin_token_api*`, 서비스나우=`snow_token_api*` / `origin_snow_token_api*` (auth=4 둘 다 필수)
 - 목록: `has_snow_token_api_params` / `has_snow_token_api_headers` (원문 비노출, 빈 값=기존 유지)
-- origin 헤더 고정(Bearer 접두사 없음): `X-Partners-Token`, `Authorization`
+- origin 헤더 고정(Bearer 접두사 없음): `X-Partner-Token`, `Authorization`
 - 발급·캐시·401/403 시 두 토큰 force 재발급 1회는 **e 담당**. A는 UI·프록시·패스스루만
 - e 요청서: `DEV_REQUEST_INVENTORY_API.md`
 - A 구현: 검증/프록시/목록 매핑 + InventoryPage「서비스나우 Token」UI + DebugModal auth=4

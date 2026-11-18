@@ -25,7 +25,7 @@
 ### origin 요청 헤더 (고정, Bearer 접두사 없음)
 
 ```http
-X-Partners-Token: {snow_access_token}
+X-Partner-Token: {snow_access_token}
 Authorization: {apim_access_token}
 ```
 
@@ -96,7 +96,7 @@ snow·APIM 각각 별도 캐시 엔트리. 키 재료에 각 URL·method·params
 
 origin `api_headers` / `headers`에 다음 이름이 있으면 `invalid_api_headers`:
 
-- `X-Partners-Token`
+- `X-Partner-Token`
 - `Authorization`
 
 (기존 금지 헤더 규칙도 유지)
@@ -155,4 +155,4 @@ auth=4에서 `token_api` 또는 `snow_token_api` 누락 → `invalid_api_auth` (
 2. auth=4로 등록·목록·testAPI·retrieve 시 snow→APIM→origin 헤더 부착
 3. params/headers 비밀 비노출·빈 값 유지
 4. 401/403 시 이중 재발급 1회만
-5. custom header가 `X-Partners-Token`/`Authorization`와 겹치면 400
+5. custom header가 `X-Partner-Token`/`Authorization`와 겹치면 400
