@@ -14,6 +14,7 @@ export interface InventoryItem {
   origin_api_url_headers?: string;
   /** 1 = bearer, 2 = header, 3 = token, 4 = ServiceNow dual token */
   origin_api_auth_type?: number;
+  origin_api_key?: string;
   has_api_key?: boolean;
   origin_token_api?: string;
   origin_token_api_method?: string;
@@ -48,6 +49,7 @@ export interface InventoryStatsRow {
   origin_api_url_params?: string;
   origin_api_url_headers?: string;
   origin_api_auth_type?: number;
+  origin_api_key?: string;
   has_api_key?: boolean;
   origin_token_api?: string;
   origin_token_api_method?: string;

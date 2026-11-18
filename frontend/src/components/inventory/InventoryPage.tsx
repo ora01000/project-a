@@ -297,7 +297,7 @@ export function InventoryPage({ user }: InventoryPageProps) {
     );
     setOriginApiParams(parseInventoryParams(item.origin_api_url_params));
     setOriginApiHeaders(parseInventoryParams(item.origin_api_url_headers));
-    setOriginApiKey("");
+    setOriginApiKey(item.origin_api_key || "");
     const auth: InventoryApiAuthType =
       item.origin_api_auth_type === 2
         ? 2
@@ -1435,7 +1435,7 @@ export function InventoryPage({ user }: InventoryPageProps) {
                           <label className="flex flex-col gap-1">
                             <span className="text-xs font-medium text-slate-300">API KEY</span>
                             <input
-                              type="password"
+                              type="text"
                               value={originApiKey}
                               onChange={(event) => setOriginApiKey(event.target.value)}
                               disabled={!fieldsEditable}
@@ -1445,9 +1445,7 @@ export function InventoryPage({ user }: InventoryPageProps) {
                               placeholder={
                                 originApiAuthType === 2
                                   ? "Header-Name:value"
-                                  : isView && selected?.has_api_key
-                                    ? "변경 시에만 입력 (비우면 저장 시 키가 삭제될 수 있음)"
-                                    : "Bearer 토큰 (선택)"
+                                  : "Bearer 토큰 (선택)"
                               }
                             />
                             {originApiAuthType === 2 ? (

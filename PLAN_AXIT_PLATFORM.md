@@ -3543,6 +3543,6 @@ json 형태로 응답한다.
 
 ## 인벤토리 중 API, 서비스나우 타입을 수정할때
 - 목록에서 API, 서비스나우API 인증 타입을 선택하면 인벤토리를 수정하는 구성화면에서 기존 설정된 헤더, 파람 값이 보이지 않는데 다시 테스트를 수행할 경우 헤더, 파람이 모두 빠져서 테스트가 되지 않는다. 최초 설정한 헤더, 파람은 모두 보이게 하고 인벤토리 설정을 로드하고 다시 테스트해도 정상 수행되게 한다. 이 구조에서 스케줄링 설정된 API콜이 정상적으로 설정된 파람과 헤더를 적용할 수 있는지도 체크한다
-- 반영: e `getInventoryList`가 token/snow params·headers 원문을 반환하고, A `beginView`가 에디터에 로드한다 (`origin_api_key`는 계속 비노출). MCP는 원문 숨김 유지
+- 반영: e `getInventoryList`가 `origin_api_key`·token/snow params·headers 원문을 반환하고, A `beginView`가 에디터에 마스킹 없이 로드한다. MCP는 원문 숨김 유지
 - 스케줄 점검: e `get_api_origin` → `refresh_inventory_from_api`가 DB 원문 params/headers를 사용하므로 스케줄 수집은 UI와 무관하게 정상 적용됨
 

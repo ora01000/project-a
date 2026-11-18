@@ -74,6 +74,7 @@ class InventoryResponse(BaseModel):
     origin_api_url_params: str = ""
     origin_api_url_headers: str = ""
     origin_api_auth_type: int = 1
+    origin_api_key: str = ""
     has_api_key: bool = False
     origin_token_api: str = ""
     origin_token_api_method: str = "POST"
@@ -108,6 +109,7 @@ class InventoryStatsRow(BaseModel):
     origin_api_url_params: str = ""
     origin_api_url_headers: str = ""
     origin_api_auth_type: int = 1
+    origin_api_key: str = ""
     has_api_key: bool = False
     origin_token_api: str = ""
     origin_token_api_method: str = "POST"
@@ -487,9 +489,10 @@ def _origin_fields_from_row(row: dict[str, Any]) -> dict[str, Any]:
         origin_type = 1
     if origin_type not in (1, 2):
         origin_type = 1
+    api_key = str(row.get("origin_api_key") or "").strip()
     has_key = row.get("has_api_key")
     if has_key is None:
-        has_key = bool(str(row.get("origin_api_key") or "").strip())
+        has_key = bool(api_key)
     raw_auth = row.get("origin_api_auth_type")
     try:
         auth_type = int(raw_auth) if raw_auth is not None else 1
@@ -520,6 +523,7 @@ def _origin_fields_from_row(row: dict[str, Any]) -> dict[str, Any]:
         "origin_api_url_params": str(row.get("origin_api_url_params") or ""),
         "origin_api_url_headers": str(row.get("origin_api_url_headers") or ""),
         "origin_api_auth_type": auth_type,
+        "origin_api_key": api_key,
         "has_api_key": bool(has_key),
         "origin_token_api": str(row.get("origin_token_api") or ""),
         "origin_token_api_method": str(row.get("origin_token_api_method") or "POST").upper()
@@ -1291,6 +1295,9 @@ async def api_create_inventory(
         if body.origin_type == 2
         else "",
         origin_api_auth_type=auth,
+        origin_api_key=(body.origin_api_key or "").strip()
+        if body.origin_type == 2 and auth not in ORIGIN_API_AUTH_TOKEN_TYPES
+        else "",
         has_api_key=(
             bool((body.origin_api_key or "").strip())
             if body.origin_type == 2 and auth not in ORIGIN_API_AUTH_TOKEN_TYPES
@@ -1430,6 +1437,7 @@ async def api_update_inventory(
         origin_api_url_params=(body.origin_api_url_params or "").strip(),
         origin_api_url_headers=(body.origin_api_url_headers or "").strip(),
         origin_api_auth_type=auth,
+        origin_api_key=(body.origin_api_key or "").strip() if not is_token else "",
         has_api_key=bool((body.origin_api_key or "").strip()) if not is_token else False,
         origin_token_api=(body.origin_token_api or "").strip() if is_token else "",
         origin_token_api_method=(body.origin_token_api_method or "POST").upper()
