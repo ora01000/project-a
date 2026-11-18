@@ -311,14 +311,14 @@ export function InventoryPage({ user }: InventoryPageProps) {
     setOriginTokenMethod(
       (item.origin_token_api_method || "POST").toUpperCase() === "GET" ? "GET" : "POST",
     );
-    setOriginTokenParams([]);
-    setOriginTokenHeaders([]);
+    setOriginTokenParams(parseInventoryParams(item.origin_token_api_params));
+    setOriginTokenHeaders(parseInventoryParams(item.origin_token_api_headers));
     setOriginSnowTokenApi(item.origin_snow_token_api || "");
     setOriginSnowTokenMethod(
       (item.origin_snow_token_api_method || "POST").toUpperCase() === "GET" ? "GET" : "POST",
     );
-    setOriginSnowTokenParams([]);
-    setOriginSnowTokenHeaders([]);
+    setOriginSnowTokenParams(parseInventoryParams(item.origin_snow_token_api_params));
+    setOriginSnowTokenHeaders(parseInventoryParams(item.origin_snow_token_api_headers));
     setStagedResponseJson(null);
     setIsScheduled(Boolean(item.is_scheduled));
     setApiCrawlingCron(item.api_crawling_cron || "");
@@ -1088,11 +1088,11 @@ export function InventoryPage({ user }: InventoryPageProps) {
 
               <div className="flex min-h-0 min-w-0 flex-1">
                 <div
-                  className={`flex min-h-0 min-w-0 flex-col ${
+                  className={`flex min-h-0 min-w-0 flex-col gap-3 ${
                     showApiPanel && isView ? "w-1/2 pr-3" : "w-full"
                   }`}
                 >
-                  <div className="flex shrink-0 flex-col gap-3">
+                  <div className="flex max-h-[50%] min-h-0 shrink-0 flex-col gap-3 overflow-y-auto overscroll-contain pr-1">
                     <label className="flex flex-col gap-1">
                       <span className="text-xs font-medium text-slate-300">인벤토리 이름</span>
                       <input
@@ -1596,7 +1596,7 @@ export function InventoryPage({ user }: InventoryPageProps) {
                     tableName={previewTableName}
                     filename={originCsv}
                     initialPreview={uploadPreview}
-                    className="mt-4 min-h-0 w-full flex-1"
+                    className="min-h-0 w-full flex-1"
                   />
                 </div>
                 {showApiPanel && isView && selected ? (

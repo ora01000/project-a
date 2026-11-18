@@ -77,10 +77,14 @@ class InventoryResponse(BaseModel):
     has_api_key: bool = False
     origin_token_api: str = ""
     origin_token_api_method: str = "POST"
+    origin_token_api_params: str = ""
+    origin_token_api_headers: str = ""
     has_token_api_params: bool = False
     has_token_api_headers: bool = False
     origin_snow_token_api: str = ""
     origin_snow_token_api_method: str = "POST"
+    origin_snow_token_api_params: str = ""
+    origin_snow_token_api_headers: str = ""
     has_snow_token_api_params: bool = False
     has_snow_token_api_headers: bool = False
     is_scheduled: bool = False
@@ -107,10 +111,14 @@ class InventoryStatsRow(BaseModel):
     has_api_key: bool = False
     origin_token_api: str = ""
     origin_token_api_method: str = "POST"
+    origin_token_api_params: str = ""
+    origin_token_api_headers: str = ""
     has_token_api_params: bool = False
     has_token_api_headers: bool = False
     origin_snow_token_api: str = ""
     origin_snow_token_api_method: str = "POST"
+    origin_snow_token_api_params: str = ""
+    origin_snow_token_api_headers: str = ""
     has_snow_token_api_params: bool = False
     has_snow_token_api_headers: bool = False
     is_scheduled: bool = False
@@ -489,22 +497,22 @@ def _origin_fields_from_row(row: dict[str, Any]) -> dict[str, Any]:
         auth_type = 1
     if auth_type not in (1, 2, 3, 4):
         auth_type = 1
+    token_params = str(row.get("origin_token_api_params") or "").strip()
+    token_headers = str(row.get("origin_token_api_headers") or "").strip()
+    snow_token_params = str(row.get("origin_snow_token_api_params") or "").strip()
+    snow_token_headers = str(row.get("origin_snow_token_api_headers") or "").strip()
     has_token_params = row.get("has_token_api_params")
     if has_token_params is None:
-        has_token_params = bool(str(row.get("origin_token_api_params") or "").strip())
+        has_token_params = bool(token_params)
     has_token_headers = row.get("has_token_api_headers")
     if has_token_headers is None:
-        has_token_headers = bool(str(row.get("origin_token_api_headers") or "").strip())
+        has_token_headers = bool(token_headers)
     has_snow_token_params = row.get("has_snow_token_api_params")
     if has_snow_token_params is None:
-        has_snow_token_params = bool(
-            str(row.get("origin_snow_token_api_params") or "").strip()
-        )
+        has_snow_token_params = bool(snow_token_params)
     has_snow_token_headers = row.get("has_snow_token_api_headers")
     if has_snow_token_headers is None:
-        has_snow_token_headers = bool(
-            str(row.get("origin_snow_token_api_headers") or "").strip()
-        )
+        has_snow_token_headers = bool(snow_token_headers)
     return {
         "origin_type": origin_type,
         "origin_api_url": str(row.get("origin_api_url") or ""),
@@ -516,6 +524,8 @@ def _origin_fields_from_row(row: dict[str, Any]) -> dict[str, Any]:
         "origin_token_api": str(row.get("origin_token_api") or ""),
         "origin_token_api_method": str(row.get("origin_token_api_method") or "POST").upper()
         or "POST",
+        "origin_token_api_params": token_params,
+        "origin_token_api_headers": token_headers,
         "has_token_api_params": bool(has_token_params),
         "has_token_api_headers": bool(has_token_headers),
         "origin_snow_token_api": str(row.get("origin_snow_token_api") or ""),
@@ -523,6 +533,8 @@ def _origin_fields_from_row(row: dict[str, Any]) -> dict[str, Any]:
             row.get("origin_snow_token_api_method") or "POST"
         ).upper()
         or "POST",
+        "origin_snow_token_api_params": snow_token_params,
+        "origin_snow_token_api_headers": snow_token_headers,
         "has_snow_token_api_params": bool(has_snow_token_params),
         "has_snow_token_api_headers": bool(has_snow_token_headers),
         "is_scheduled": bool(row.get("is_scheduled")),
@@ -1288,6 +1300,12 @@ async def api_create_inventory(
         origin_token_api_method=(body.origin_token_api_method or "POST").upper()
         if is_token
         else "POST",
+        origin_token_api_params=(body.origin_token_api_params or "").strip()
+        if is_token
+        else "",
+        origin_token_api_headers=(body.origin_token_api_headers or "").strip()
+        if is_token
+        else "",
         has_token_api_params=bool((body.origin_token_api_params or "").strip())
         if is_token
         else False,
@@ -1298,6 +1316,12 @@ async def api_create_inventory(
         origin_snow_token_api_method=(body.origin_snow_token_api_method or "POST").upper()
         if is_snow
         else "POST",
+        origin_snow_token_api_params=(body.origin_snow_token_api_params or "").strip()
+        if is_snow
+        else "",
+        origin_snow_token_api_headers=(body.origin_snow_token_api_headers or "").strip()
+        if is_snow
+        else "",
         has_snow_token_api_params=bool((body.origin_snow_token_api_params or "").strip())
         if is_snow
         else False,
@@ -1411,6 +1435,12 @@ async def api_update_inventory(
         origin_token_api_method=(body.origin_token_api_method or "POST").upper()
         if is_token
         else "POST",
+        origin_token_api_params=(body.origin_token_api_params or "").strip()
+        if is_token
+        else "",
+        origin_token_api_headers=(body.origin_token_api_headers or "").strip()
+        if is_token
+        else "",
         has_token_api_params=bool((body.origin_token_api_params or "").strip())
         if is_token
         else False,
@@ -1421,6 +1451,12 @@ async def api_update_inventory(
         origin_snow_token_api_method=(body.origin_snow_token_api_method or "POST").upper()
         if is_snow
         else "POST",
+        origin_snow_token_api_params=(body.origin_snow_token_api_params or "").strip()
+        if is_snow
+        else "",
+        origin_snow_token_api_headers=(body.origin_snow_token_api_headers or "").strip()
+        if is_snow
+        else "",
         has_snow_token_api_params=bool((body.origin_snow_token_api_params or "").strip())
         if is_snow
         else False,

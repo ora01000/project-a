@@ -62,12 +62,13 @@ params/headers 문자열 형식은 auth=3과 동일 (`Name=value&Name=value`, �
 | 서비스나우 | **신규** `origin_snow_token_api`, `origin_snow_token_api_method`, `origin_snow_token_api_params`, `origin_snow_token_api_headers` |
 | auth | `origin_api_auth_type=4` |
 
-목록 응답:
+목록 응답 (`GET /getInventoryList` HTTP):
 
-- APIM params/headers: 기존처럼 `has_token_api_params` / `has_token_api_headers`만 (원문 비노출)
-- SNOW params/headers: **신규** `has_snow_token_api_params` / `has_snow_token_api_headers`만 (원문 비노출)
-- URL·method는 노출 (`origin_token_api`, `origin_snow_token_api`, 각 method)
+- `origin_api_key`만 비노출 (`has_api_key`)
+- APIM/SNOW token params·headers는 **원문 반환** (`origin_token_api_params`/`origin_token_api_headers`, `origin_snow_token_api_params`/`origin_snow_token_api_headers`) — 수정 화면 재로드·재테스트용. `has_*` bool도 유지
+- URL·method 노출 (`origin_token_api`, `origin_snow_token_api`, 각 method)
 - 빈 문자열로 params/headers 재저장 시 **기존 비밀값 유지** (auth=3과 동일)
+- MCP `getInventoryList`는 origin/토큰 관련 필드를 계속 숨김
 
 ### 토큰 응답 파서
 
