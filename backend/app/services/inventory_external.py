@@ -472,8 +472,17 @@ async def list_external_inventories(
 ORIGIN_API_AUTH_BEARER = 1
 ORIGIN_API_AUTH_HEADER = 2
 ORIGIN_API_AUTH_TOKEN = 3
+ORIGIN_API_AUTH_SNOW_TOKEN = 4
 ORIGIN_API_AUTH_TYPES = frozenset(
-    {ORIGIN_API_AUTH_BEARER, ORIGIN_API_AUTH_HEADER, ORIGIN_API_AUTH_TOKEN}
+    {
+        ORIGIN_API_AUTH_BEARER,
+        ORIGIN_API_AUTH_HEADER,
+        ORIGIN_API_AUTH_TOKEN,
+        ORIGIN_API_AUTH_SNOW_TOKEN,
+    }
+)
+ORIGIN_API_AUTH_TOKEN_TYPES = frozenset(
+    {ORIGIN_API_AUTH_TOKEN, ORIGIN_API_AUTH_SNOW_TOKEN}
 )
 
 
@@ -482,6 +491,13 @@ def normalize_origin_api_auth_type(auth_type: int | None) -> int:
     if resolved not in ORIGIN_API_AUTH_TYPES:
         raise InventoryExternalApiError("invalid_api_auth")
     return resolved
+
+
+def is_origin_token_auth(auth_type: int | None) -> bool:
+    try:
+        return normalize_origin_api_auth_type(auth_type) in ORIGIN_API_AUTH_TOKEN_TYPES
+    except InventoryExternalApiError:
+        return False
 
 
 def normalize_origin_api_method(method: str | None, *, default: str = "GET") -> str:
@@ -496,11 +512,16 @@ def validate_origin_api_key_format(
     api_key: str | None,
     *,
     token_api: str | None = None,
+    snow_token_api: str | None = None,
 ) -> tuple[int, str | None]:
-    """Validate optional key for bearer(1) / header(2=``key:value``) / token(3)."""
+    """Validate bearer(1) / header(2) / token(3) / snow dual-token(4)."""
     resolved = normalize_origin_api_auth_type(auth_type)
     if resolved == ORIGIN_API_AUTH_TOKEN:
         if not (token_api or "").strip():
+            raise InventoryExternalApiError("invalid_api_auth")
+        return resolved, None
+    if resolved == ORIGIN_API_AUTH_SNOW_TOKEN:
+        if not (token_api or "").strip() or not (snow_token_api or "").strip():
             raise InventoryExternalApiError("invalid_api_auth")
         return resolved, None
     key = (api_key or "").strip()
@@ -513,6 +534,59 @@ def validate_origin_api_key_format(
         if not header_name.strip() or not header_value.strip():
             raise InventoryExternalApiError("invalid_api_auth")
     return resolved, key
+
+
+def _append_token_api_fields(
+    body: dict[str, object],
+    *,
+    token_api: str | None,
+    token_api_method: str | None,
+    token_api_params: str | None,
+    token_api_headers: str | None,
+    snow_token_api: str | None = None,
+    snow_token_api_method: str | None = None,
+    snow_token_api_params: str | None = None,
+    snow_token_api_headers: str | None = None,
+    include_snow: bool = False,
+    catalog_prefix: bool = False,
+) -> None:
+    """Attach APIM (+ optional snow) token fields for runtime or catalog bodies."""
+    token_key = "origin_token_api" if catalog_prefix else "token_api"
+    token_method_key = "origin_token_api_method" if catalog_prefix else "token_api_method"
+    token_params_key = "origin_token_api_params" if catalog_prefix else "token_api_params"
+    token_headers_key = "origin_token_api_headers" if catalog_prefix else "token_api_headers"
+    body[token_key] = str(token_api or "").strip()
+    body[token_method_key] = normalize_origin_api_method(
+        token_api_method, default="POST"
+    )
+    token_params = (token_api_params or "").strip()
+    if token_params:
+        body[token_params_key] = token_params
+    token_headers = (token_api_headers or "").strip()
+    if token_headers:
+        body[token_headers_key] = token_headers
+    if not include_snow:
+        return
+    snow_key = "origin_snow_token_api" if catalog_prefix else "snow_token_api"
+    snow_method_key = (
+        "origin_snow_token_api_method" if catalog_prefix else "snow_token_api_method"
+    )
+    snow_params_key = (
+        "origin_snow_token_api_params" if catalog_prefix else "snow_token_api_params"
+    )
+    snow_headers_key = (
+        "origin_snow_token_api_headers" if catalog_prefix else "snow_token_api_headers"
+    )
+    body[snow_key] = str(snow_token_api or "").strip()
+    body[snow_method_key] = normalize_origin_api_method(
+        snow_token_api_method, default="POST"
+    )
+    snow_params = (snow_token_api_params or "").strip()
+    if snow_params:
+        body[snow_params_key] = snow_params
+    snow_headers = (snow_token_api_headers or "").strip()
+    if snow_headers:
+        body[snow_headers_key] = snow_headers
 
 
 def _inventory_api_client_error(result: dict[str, Any], *, default: str) -> InventoryExternalApiError:
@@ -539,6 +613,10 @@ def _inventory_api_client_error(result: dict[str, Any], *, default: str) -> Inve
         return InventoryExternalApiError("invalid_api_headers")
     if "invalid_json" in lowered:
         return InventoryExternalApiError("invalid_json")
+    if "snow_token_failed" in lowered:
+        return InventoryExternalApiError("snow_token_failed")
+    if "apim_token_failed" in lowered:
+        return InventoryExternalApiError("apim_token_failed")
     if "token_failed" in lowered:
         return InventoryExternalApiError("token_failed")
     if "retrieve_failed" in lowered:
@@ -566,6 +644,10 @@ async def add_external_inventory(
     origin_token_api_method: str | None = None,
     origin_token_api_params: str | None = None,
     origin_token_api_headers: str | None = None,
+    origin_snow_token_api: str | None = None,
+    origin_snow_token_api_method: str | None = None,
+    origin_snow_token_api_params: str | None = None,
+    origin_snow_token_api_headers: str | None = None,
     is_scheduled: bool | None = None,
     api_crawling_cron: str | None = None,
     base_url: str | None = None,
@@ -583,6 +665,7 @@ async def add_external_inventory(
             origin_api_auth_type,
             origin_api_key,
             token_api=origin_token_api,
+            snow_token_api=origin_snow_token_api,
         )
         if origin_csv is not None and str(origin_csv).strip():
             body["origin_csv"] = str(origin_csv).strip()
@@ -596,18 +679,20 @@ async def add_external_inventory(
             body["origin_api_url_params"] = str(origin_api_url_params).strip()
         if origin_api_url_headers is not None:
             body["origin_api_url_headers"] = str(origin_api_url_headers).strip()
-        if auth_type == ORIGIN_API_AUTH_TOKEN:
-            body["origin_token_api"] = str(origin_token_api or "").strip()
-            body["origin_token_api_method"] = normalize_origin_api_method(
-                origin_token_api_method, default="POST"
+        if auth_type in ORIGIN_API_AUTH_TOKEN_TYPES:
+            _append_token_api_fields(
+                body,
+                token_api=origin_token_api,
+                token_api_method=origin_token_api_method,
+                token_api_params=origin_token_api_params,
+                token_api_headers=origin_token_api_headers,
+                snow_token_api=origin_snow_token_api,
+                snow_token_api_method=origin_snow_token_api_method,
+                snow_token_api_params=origin_snow_token_api_params,
+                snow_token_api_headers=origin_snow_token_api_headers,
+                include_snow=auth_type == ORIGIN_API_AUTH_SNOW_TOKEN,
+                catalog_prefix=True,
             )
-            # Blank keeps existing secret on remote upsert.
-            token_params = (origin_token_api_params or "").strip()
-            if token_params:
-                body["origin_token_api_params"] = token_params
-            token_headers = (origin_token_api_headers or "").strip()
-            if token_headers:
-                body["origin_token_api_headers"] = token_headers
             body["origin_api_key"] = ""
         else:
             # Always send key for bearer/header so omitting/empty clears the stored secret.
@@ -691,6 +776,10 @@ async def test_origin_api_via_inventory_api(
     token_api_method: str | None = None,
     token_api_params: str | None = None,
     token_api_headers: str | None = None,
+    snow_token_api: str | None = None,
+    snow_token_api_method: str | None = None,
+    snow_token_api_params: str | None = None,
+    snow_token_api_headers: str | None = None,
     base_url: str | None = None,
     timeout_seconds: float = _DEFAULT_TIMEOUT,
 ) -> dict[str, Any]:
@@ -699,7 +788,10 @@ async def test_origin_api_via_inventory_api(
     if not url.lower().startswith(("http://", "https://")):
         raise InventoryExternalApiError("invalid_api_url")
     resolved_auth, token = validate_origin_api_key_format(
-        auth_type, api_key, token_api=token_api
+        auth_type,
+        api_key,
+        token_api=token_api,
+        snow_token_api=snow_token_api,
     )
     body: dict[str, object] = {
         "url": url,
@@ -710,15 +802,19 @@ async def test_origin_api_via_inventory_api(
         body["params"] = str(api_params).strip()
     if api_headers is not None and str(api_headers).strip():
         body["headers"] = str(api_headers).strip()
-    if resolved_auth == ORIGIN_API_AUTH_TOKEN:
-        body["token_api"] = str(token_api or "").strip()
-        body["token_api_method"] = normalize_origin_api_method(
-            token_api_method, default="POST"
+    if resolved_auth in ORIGIN_API_AUTH_TOKEN_TYPES:
+        _append_token_api_fields(
+            body,
+            token_api=token_api,
+            token_api_method=token_api_method,
+            token_api_params=token_api_params,
+            token_api_headers=token_api_headers,
+            snow_token_api=snow_token_api,
+            snow_token_api_method=snow_token_api_method,
+            snow_token_api_params=snow_token_api_params,
+            snow_token_api_headers=snow_token_api_headers,
+            include_snow=resolved_auth == ORIGIN_API_AUTH_SNOW_TOKEN,
         )
-        if token_api_params is not None and str(token_api_params).strip():
-            body["token_api_params"] = str(token_api_params).strip()
-        if token_api_headers is not None and str(token_api_headers).strip():
-            body["token_api_headers"] = str(token_api_headers).strip()
     elif token:
         body["token"] = token
     result = await call_inventory_api(
@@ -753,6 +849,10 @@ async def retrieve_origin_api_via_inventory_api(
     token_api_method: str | None = None,
     token_api_params: str | None = None,
     token_api_headers: str | None = None,
+    snow_token_api: str | None = None,
+    snow_token_api_method: str | None = None,
+    snow_token_api_params: str | None = None,
+    snow_token_api_headers: str | None = None,
     base_url: str | None = None,
     timeout_seconds: float = _DEFAULT_TIMEOUT,
 ) -> dict[str, Any]:
@@ -761,7 +861,10 @@ async def retrieve_origin_api_via_inventory_api(
     if not url.lower().startswith(("http://", "https://")):
         raise InventoryExternalApiError("invalid_api_url")
     resolved_auth, token = validate_origin_api_key_format(
-        auth_type, api_key, token_api=token_api
+        auth_type,
+        api_key,
+        token_api=token_api,
+        snow_token_api=snow_token_api,
     )
     body: dict[str, object] = {
         "api_url": url,
@@ -772,15 +875,19 @@ async def retrieve_origin_api_via_inventory_api(
         body["api_params"] = str(api_params).strip()
     if api_headers is not None and str(api_headers).strip():
         body["api_headers"] = str(api_headers).strip()
-    if resolved_auth == ORIGIN_API_AUTH_TOKEN:
-        body["token_api"] = str(token_api or "").strip()
-        body["token_api_method"] = normalize_origin_api_method(
-            token_api_method, default="POST"
+    if resolved_auth in ORIGIN_API_AUTH_TOKEN_TYPES:
+        _append_token_api_fields(
+            body,
+            token_api=token_api,
+            token_api_method=token_api_method,
+            token_api_params=token_api_params,
+            token_api_headers=token_api_headers,
+            snow_token_api=snow_token_api,
+            snow_token_api_method=snow_token_api_method,
+            snow_token_api_params=snow_token_api_params,
+            snow_token_api_headers=snow_token_api_headers,
+            include_snow=resolved_auth == ORIGIN_API_AUTH_SNOW_TOKEN,
         )
-        if token_api_params is not None and str(token_api_params).strip():
-            body["token_api_params"] = str(token_api_params).strip()
-        if token_api_headers is not None and str(token_api_headers).strip():
-            body["token_api_headers"] = str(token_api_headers).strip()
     elif token:
         body["api_key"] = token
     result = await call_inventory_api(

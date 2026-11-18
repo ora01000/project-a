@@ -3514,3 +3514,26 @@ json 형태로 응답한다.
 4. **UI** — Token/Origin header Name=value 에디터, 테스트·저장 연동, 디버그 모달 동일
 5. **불필요** — A에서 토큰 캐시·재발급 로직 자체 구현 (e가 담당)
 
+## 인벤토리 API 수집시 API 인증방식에서 서비스나우 전용 인증 방식 추가
+- 서비스나우(ITOM)에서 API를 호출해야 하는데 방식이 단일 token이 아니라, 1. APIM 포탈 token, 2. 서비스나우 API token 두 개를 발급받아야 한다.
+  - UI 수정
+    - "새로운 인벤토리" 추가시 "API 호출" 을 선택할 경우 기존 "Token" 방식은 유지하고, 추가로 "서비스나우 Token" 방식을 추가한다.
+    - 서비스나우 Token 방식일 경우 기 구현된 "Token 발급 API" 는 APIM 포털 토큰 발급으로 사용하고, 추가로 "서비스나우 Token 발급 API" 를 추가한다.
+  - project-e 수정사항
+    - project-e 에서 수정해야 할 사항을 정리해서 DEV_REQUEST_INVENTORY_API.md 로 정리한다.
+
+### 서비스나우 origin 호출시 두 토큰을 어떻게 붙이는지에 대한 답변
+토큰 발급 및 실제 API 호출 순서는 다음과 같다.
+1. 서비스나우 토큰 발급
+2. APIM 포탈 토큰 발급
+3. 실제 API 호출시 -H "X-Partners-Token: ${서비스나우 토큰}" -H "Authorization: ${APIM 포탈 토큰}"
+
+### project-A / e 계약 (auth_type=4 ServiceNow dual token)
+- `auth_type=4` / `origin_api_auth_type=4`. 기존 3(Token) 유지
+- 필드: APIM=`token_api*` / `origin_token_api*`, 서비스나우=`snow_token_api*` / `origin_snow_token_api*` (auth=4 둘 다 필수)
+- 목록: `has_snow_token_api_params` / `has_snow_token_api_headers` (원문 비노출, 빈 값=기존 유지)
+- origin 헤더 고정(Bearer 접두사 없음): `X-Partners-Token`, `Authorization`
+- 발급·캐시·401/403 시 두 토큰 force 재발급 1회는 **e 담당**. A는 UI·프록시·패스스루만
+- e 요청서: `DEV_REQUEST_INVENTORY_API.md`
+- A 구현: 검증/프록시/목록 매핑 + InventoryPage「서비스나우 Token」UI + DebugModal auth=4
+

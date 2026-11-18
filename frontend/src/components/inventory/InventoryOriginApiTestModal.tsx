@@ -9,6 +9,8 @@ interface InventoryOriginApiTestResult {
   row_count: number | null;
   columns: string[];
   token_issued?: boolean | null;
+  snow_token_issued?: boolean | null;
+  apim_token_issued?: boolean | null;
   token_retried?: boolean;
   error: string | null;
   message: string | null;
@@ -109,6 +111,26 @@ export function InventoryOriginApiTestModal({
             <dt className="text-[11px] text-slate-500">token_issued</dt>
             <dd className="font-mono text-slate-100">
               {result.token_issued == null ? "-" : result.token_issued ? "yes" : "no"}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-[11px] text-slate-500">snow_token_issued</dt>
+            <dd className="font-mono text-slate-100">
+              {result.snow_token_issued == null
+                ? "-"
+                : result.snow_token_issued
+                  ? "yes"
+                  : "no"}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-[11px] text-slate-500">apim_token_issued</dt>
+            <dd className="font-mono text-slate-100">
+              {result.apim_token_issued == null
+                ? "-"
+                : result.apim_token_issued
+                  ? "yes"
+                  : "no"}
             </dd>
           </div>
           <div>

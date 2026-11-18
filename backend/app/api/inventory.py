@@ -26,7 +26,8 @@ from backend.app.middleware.session_auth import get_request_auth_user
 from backend.app.services.inventory_external import (
     InventoryExternalApiError,
     InventoryExternalUploadError,
-    ORIGIN_API_AUTH_TOKEN,
+    ORIGIN_API_AUTH_SNOW_TOKEN,
+    ORIGIN_API_AUTH_TOKEN_TYPES,
     add_external_inventory,
     add_external_inventory_api,
     execute_external_inventory_api,
@@ -78,6 +79,10 @@ class InventoryResponse(BaseModel):
     origin_token_api_method: str = "POST"
     has_token_api_params: bool = False
     has_token_api_headers: bool = False
+    origin_snow_token_api: str = ""
+    origin_snow_token_api_method: str = "POST"
+    has_snow_token_api_params: bool = False
+    has_snow_token_api_headers: bool = False
     is_scheduled: bool = False
     api_crawling_cron: str = ""
 
@@ -104,6 +109,10 @@ class InventoryStatsRow(BaseModel):
     origin_token_api_method: str = "POST"
     has_token_api_params: bool = False
     has_token_api_headers: bool = False
+    origin_snow_token_api: str = ""
+    origin_snow_token_api_method: str = "POST"
+    has_snow_token_api_params: bool = False
+    has_snow_token_api_headers: bool = False
     is_scheduled: bool = False
     api_crawling_cron: str = ""
 
@@ -138,6 +147,10 @@ class InventoryCreateRequest(BaseModel):
     origin_token_api_method: str | None = Field(default=None, max_length=10)
     origin_token_api_params: str | None = Field(default=None, max_length=1000)
     origin_token_api_headers: str | None = Field(default=None, max_length=1000)
+    origin_snow_token_api: str | None = Field(default=None, max_length=500)
+    origin_snow_token_api_method: str | None = Field(default=None, max_length=10)
+    origin_snow_token_api_params: str | None = Field(default=None, max_length=1000)
+    origin_snow_token_api_headers: str | None = Field(default=None, max_length=1000)
     is_scheduled: bool = False
     api_crawling_cron: str | None = Field(default=None, max_length=100)
     # Transfer filename after CSV upload (origin_type=1).
@@ -170,6 +183,7 @@ class InventoryCreateRequest(BaseModel):
                     self.origin_api_auth_type,
                     self.origin_api_key,
                     token_api=self.origin_token_api,
+                    snow_token_api=self.origin_snow_token_api,
                 )
             except InventoryExternalApiError as exc:
                 raise ValueError(str(exc)) from exc
@@ -196,6 +210,10 @@ class InventoryUpdateRequest(BaseModel):
     origin_token_api_method: str | None = Field(default=None, max_length=10)
     origin_token_api_params: str | None = Field(default=None, max_length=1000)
     origin_token_api_headers: str | None = Field(default=None, max_length=1000)
+    origin_snow_token_api: str | None = Field(default=None, max_length=500)
+    origin_snow_token_api_method: str | None = Field(default=None, max_length=10)
+    origin_snow_token_api_params: str | None = Field(default=None, max_length=1000)
+    origin_snow_token_api_headers: str | None = Field(default=None, max_length=1000)
     is_scheduled: bool | None = None
     api_crawling_cron: str | None = Field(default=None, max_length=100)
     transfer_filename: str | None = Field(default=None, max_length=100)
@@ -214,6 +232,10 @@ class InventoryApiCallRetrieveRequest(BaseModel):
     token_api_method: str | None = Field(default=None, max_length=10)
     token_api_params: str | None = Field(default=None, max_length=1000)
     token_api_headers: str | None = Field(default=None, max_length=1000)
+    snow_token_api: str | None = Field(default=None, max_length=500)
+    snow_token_api_method: str | None = Field(default=None, max_length=10)
+    snow_token_api_params: str | None = Field(default=None, max_length=1000)
+    snow_token_api_headers: str | None = Field(default=None, max_length=1000)
     display_name: str | None = Field(default=None, max_length=100)
     description: str | None = Field(default=None, max_length=200)
 
@@ -229,7 +251,10 @@ class InventoryApiCallRetrieveRequest(BaseModel):
     def _auth_ok(self) -> InventoryApiCallRetrieveRequest:
         try:
             validate_origin_api_key_format(
-                self.auth_type, self.api_key, token_api=self.token_api
+                self.auth_type,
+                self.api_key,
+                token_api=self.token_api,
+                snow_token_api=self.snow_token_api,
             )
         except InventoryExternalApiError as exc:
             raise ValueError(str(exc)) from exc
@@ -247,6 +272,10 @@ class InventoryApiCallTestRequest(BaseModel):
     token_api_method: str | None = Field(default=None, max_length=10)
     token_api_params: str | None = Field(default=None, max_length=1000)
     token_api_headers: str | None = Field(default=None, max_length=1000)
+    snow_token_api: str | None = Field(default=None, max_length=500)
+    snow_token_api_method: str | None = Field(default=None, max_length=10)
+    snow_token_api_params: str | None = Field(default=None, max_length=1000)
+    snow_token_api_headers: str | None = Field(default=None, max_length=1000)
 
     @field_validator("api_url")
     @classmethod
@@ -260,7 +289,10 @@ class InventoryApiCallTestRequest(BaseModel):
     def _auth_ok(self) -> InventoryApiCallTestRequest:
         try:
             validate_origin_api_key_format(
-                self.auth_type, self.api_key, token_api=self.token_api
+                self.auth_type,
+                self.api_key,
+                token_api=self.token_api,
+                snow_token_api=self.snow_token_api,
             )
         except InventoryExternalApiError as exc:
             raise ValueError(str(exc)) from exc
@@ -278,6 +310,8 @@ class InventoryApiCallTestResponse(BaseModel):
     row_count: int | None = None
     columns: list[str] = Field(default_factory=list)
     token_issued: bool | None = None
+    snow_token_issued: bool | None = None
+    apim_token_issued: bool | None = None
     token_retried: bool = False
     error: str | None = None
     message: str | None = None
@@ -453,7 +487,7 @@ def _origin_fields_from_row(row: dict[str, Any]) -> dict[str, Any]:
         auth_type = int(raw_auth) if raw_auth is not None else 1
     except (TypeError, ValueError):
         auth_type = 1
-    if auth_type not in (1, 2, 3):
+    if auth_type not in (1, 2, 3, 4):
         auth_type = 1
     has_token_params = row.get("has_token_api_params")
     if has_token_params is None:
@@ -461,6 +495,16 @@ def _origin_fields_from_row(row: dict[str, Any]) -> dict[str, Any]:
     has_token_headers = row.get("has_token_api_headers")
     if has_token_headers is None:
         has_token_headers = bool(str(row.get("origin_token_api_headers") or "").strip())
+    has_snow_token_params = row.get("has_snow_token_api_params")
+    if has_snow_token_params is None:
+        has_snow_token_params = bool(
+            str(row.get("origin_snow_token_api_params") or "").strip()
+        )
+    has_snow_token_headers = row.get("has_snow_token_api_headers")
+    if has_snow_token_headers is None:
+        has_snow_token_headers = bool(
+            str(row.get("origin_snow_token_api_headers") or "").strip()
+        )
     return {
         "origin_type": origin_type,
         "origin_api_url": str(row.get("origin_api_url") or ""),
@@ -474,6 +518,13 @@ def _origin_fields_from_row(row: dict[str, Any]) -> dict[str, Any]:
         or "POST",
         "has_token_api_params": bool(has_token_params),
         "has_token_api_headers": bool(has_token_headers),
+        "origin_snow_token_api": str(row.get("origin_snow_token_api") or ""),
+        "origin_snow_token_api_method": str(
+            row.get("origin_snow_token_api_method") or "POST"
+        ).upper()
+        or "POST",
+        "has_snow_token_api_params": bool(has_snow_token_params),
+        "has_snow_token_api_headers": bool(has_snow_token_headers),
         "is_scheduled": bool(row.get("is_scheduled")),
         "api_crawling_cron": str(row.get("api_crawling_cron") or ""),
     }
@@ -892,6 +943,10 @@ async def api_test_inventory_origin_api(
             token_api_method=body.token_api_method,
             token_api_params=body.token_api_params,
             token_api_headers=body.token_api_headers,
+            snow_token_api=body.snow_token_api,
+            snow_token_api_method=body.snow_token_api_method,
+            snow_token_api_params=body.snow_token_api_params,
+            snow_token_api_headers=body.snow_token_api_headers,
         )
     except InventoryExternalApiError as exc:
         detail = str(exc)
@@ -938,6 +993,14 @@ async def api_test_inventory_origin_api(
 
     token_issued_raw = payload.get("token_issued")
     token_issued = bool(token_issued_raw) if token_issued_raw is not None else None
+    snow_issued_raw = payload.get("snow_token_issued")
+    snow_token_issued = (
+        bool(snow_issued_raw) if snow_issued_raw is not None else None
+    )
+    apim_issued_raw = payload.get("apim_token_issued")
+    apim_token_issued = (
+        bool(apim_issued_raw) if apim_issued_raw is not None else None
+    )
     return InventoryApiCallTestResponse(
         url=str(payload.get("url") or body.api_url),
         ok=bool(payload.get("ok")),
@@ -949,6 +1012,8 @@ async def api_test_inventory_origin_api(
         row_count=row_count,
         columns=columns,
         token_issued=token_issued,
+        snow_token_issued=snow_token_issued,
+        apim_token_issued=apim_token_issued,
         token_retried=bool(payload.get("token_retried")),
         error=(str(payload.get("error")) if payload.get("error") is not None else None),
         message=(str(payload.get("message")) if payload.get("message") is not None else None),
@@ -1048,6 +1113,10 @@ async def api_retrieve_inventory_from_api(
             token_api_method=body.token_api_method,
             token_api_params=body.token_api_params,
             token_api_headers=body.token_api_headers,
+            snow_token_api=body.snow_token_api,
+            snow_token_api_method=body.snow_token_api_method,
+            snow_token_api_params=body.snow_token_api_params,
+            snow_token_api_headers=body.snow_token_api_headers,
         )
         response_json = retrieved.get("response_json")
         transfer_result = await transfer_json_to_external_table(
@@ -1072,7 +1141,12 @@ async def api_retrieve_inventory_from_api(
             "invalid_json",
         }:
             status = 400
-        elif detail in {"retrieve_failed", "token_failed"}:
+        elif detail in {
+            "retrieve_failed",
+            "token_failed",
+            "snow_token_failed",
+            "apim_token_failed",
+        }:
             status = 502
         else:
             status = 502
@@ -1147,6 +1221,10 @@ async def api_create_inventory(
             origin_token_api_method=body.origin_token_api_method,
             origin_token_api_params=body.origin_token_api_params,
             origin_token_api_headers=body.origin_token_api_headers,
+            origin_snow_token_api=body.origin_snow_token_api,
+            origin_snow_token_api_method=body.origin_snow_token_api_method,
+            origin_snow_token_api_params=body.origin_snow_token_api_params,
+            origin_snow_token_api_headers=body.origin_snow_token_api_headers,
             is_scheduled=body.is_scheduled,
             api_crawling_cron=(body.api_crawling_cron or "").strip() or None,
         )
@@ -1180,6 +1258,8 @@ async def api_create_inventory(
     if isinstance(created, dict) and created.get("table_name"):
         return _to_inventory_response(created, database_path=request.app.state.database_path)
     auth = body.origin_api_auth_type if body.origin_type == 2 else 1
+    is_token = body.origin_type == 2 and auth in ORIGIN_API_AUTH_TOKEN_TYPES
+    is_snow = body.origin_type == 2 and auth == ORIGIN_API_AUTH_SNOW_TOKEN
     return InventoryResponse(
         table_name=table,
         display_name=body.display_name.strip(),
@@ -1201,20 +1281,28 @@ async def api_create_inventory(
         origin_api_auth_type=auth,
         has_api_key=(
             bool((body.origin_api_key or "").strip())
-            if body.origin_type == 2 and auth != ORIGIN_API_AUTH_TOKEN
+            if body.origin_type == 2 and auth not in ORIGIN_API_AUTH_TOKEN_TYPES
             else False
         ),
-        origin_token_api=(body.origin_token_api or "").strip()
-        if body.origin_type == 2 and auth == ORIGIN_API_AUTH_TOKEN
-        else "",
+        origin_token_api=(body.origin_token_api or "").strip() if is_token else "",
         origin_token_api_method=(body.origin_token_api_method or "POST").upper()
-        if body.origin_type == 2 and auth == ORIGIN_API_AUTH_TOKEN
+        if is_token
         else "POST",
         has_token_api_params=bool((body.origin_token_api_params or "").strip())
-        if body.origin_type == 2 and auth == ORIGIN_API_AUTH_TOKEN
+        if is_token
         else False,
         has_token_api_headers=bool((body.origin_token_api_headers or "").strip())
-        if body.origin_type == 2 and auth == ORIGIN_API_AUTH_TOKEN
+        if is_token
+        else False,
+        origin_snow_token_api=(body.origin_snow_token_api or "").strip() if is_snow else "",
+        origin_snow_token_api_method=(body.origin_snow_token_api_method or "POST").upper()
+        if is_snow
+        else "POST",
+        has_snow_token_api_params=bool((body.origin_snow_token_api_params or "").strip())
+        if is_snow
+        else False,
+        has_snow_token_api_headers=bool((body.origin_snow_token_api_headers or "").strip())
+        if is_snow
         else False,
         is_scheduled=bool(body.is_scheduled) if body.origin_type == 2 else False,
         api_crawling_cron=(body.api_crawling_cron or "").strip() if body.origin_type == 2 else "",
@@ -1271,6 +1359,10 @@ async def api_update_inventory(
                 origin_token_api_method=body.origin_token_api_method,
                 origin_token_api_params=body.origin_token_api_params,
                 origin_token_api_headers=body.origin_token_api_headers,
+                origin_snow_token_api=body.origin_snow_token_api,
+                origin_snow_token_api_method=body.origin_snow_token_api_method,
+                origin_snow_token_api_params=body.origin_snow_token_api_params,
+                origin_snow_token_api_headers=body.origin_snow_token_api_headers,
                 is_scheduled=body.is_scheduled,
                 api_crawling_cron=(body.api_crawling_cron or "").strip() or None,
             )
@@ -1299,6 +1391,8 @@ async def api_update_inventory(
         if body.origin_api_auth_type is not None
         else 1
     )
+    is_token = auth in ORIGIN_API_AUTH_TOKEN_TYPES
+    is_snow = auth == ORIGIN_API_AUTH_SNOW_TOKEN
     return InventoryResponse(
         table_name=table,
         display_name=body.display_name.strip(),
@@ -1312,20 +1406,26 @@ async def api_update_inventory(
         origin_api_url_params=(body.origin_api_url_params or "").strip(),
         origin_api_url_headers=(body.origin_api_url_headers or "").strip(),
         origin_api_auth_type=auth,
-        has_api_key=bool((body.origin_api_key or "").strip())
-        if auth != ORIGIN_API_AUTH_TOKEN
-        else False,
-        origin_token_api=(body.origin_token_api or "").strip()
-        if auth == ORIGIN_API_AUTH_TOKEN
-        else "",
+        has_api_key=bool((body.origin_api_key or "").strip()) if not is_token else False,
+        origin_token_api=(body.origin_token_api or "").strip() if is_token else "",
         origin_token_api_method=(body.origin_token_api_method or "POST").upper()
-        if auth == ORIGIN_API_AUTH_TOKEN
+        if is_token
         else "POST",
         has_token_api_params=bool((body.origin_token_api_params or "").strip())
-        if auth == ORIGIN_API_AUTH_TOKEN
+        if is_token
         else False,
         has_token_api_headers=bool((body.origin_token_api_headers or "").strip())
-        if auth == ORIGIN_API_AUTH_TOKEN
+        if is_token
+        else False,
+        origin_snow_token_api=(body.origin_snow_token_api or "").strip() if is_snow else "",
+        origin_snow_token_api_method=(body.origin_snow_token_api_method or "POST").upper()
+        if is_snow
+        else "POST",
+        has_snow_token_api_params=bool((body.origin_snow_token_api_params or "").strip())
+        if is_snow
+        else False,
+        has_snow_token_api_headers=bool((body.origin_snow_token_api_headers or "").strip())
+        if is_snow
         else False,
         is_scheduled=bool(body.is_scheduled),
         api_crawling_cron=(body.api_crawling_cron or "").strip(),

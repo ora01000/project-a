@@ -39,7 +39,7 @@ class InventoryApiSqlRequest(BaseModel):
 class InventoryApiRetrieveRequest(BaseModel):
     api_url: str = Field(min_length=1)
     api_key: str | None = None
-    auth_type: int = Field(default=1, ge=1, le=3)
+    auth_type: int = Field(default=1, ge=1, le=4)
     api_method: str | None = Field(default=None, max_length=10)
     api_params: str | None = Field(default=None, max_length=1000)
     api_headers: str | None = Field(default=None, max_length=1000)
@@ -47,13 +47,17 @@ class InventoryApiRetrieveRequest(BaseModel):
     token_api_method: str | None = Field(default=None, max_length=10)
     token_api_params: str | None = Field(default=None, max_length=1000)
     token_api_headers: str | None = Field(default=None, max_length=1000)
+    snow_token_api: str | None = Field(default=None, max_length=500)
+    snow_token_api_method: str | None = Field(default=None, max_length=10)
+    snow_token_api_params: str | None = Field(default=None, max_length=1000)
+    snow_token_api_headers: str | None = Field(default=None, max_length=1000)
     base_url: str | None = None
 
 
 class InventoryApiTestRequest(BaseModel):
     url: str = Field(min_length=1)
     token: str | None = None
-    auth_type: int = Field(default=1, ge=1, le=3)
+    auth_type: int = Field(default=1, ge=1, le=4)
     method: str | None = Field(default=None, max_length=10)
     params: str | None = Field(default=None, max_length=1000)
     headers: str | None = Field(default=None, max_length=1000)
@@ -61,6 +65,10 @@ class InventoryApiTestRequest(BaseModel):
     token_api_method: str | None = Field(default=None, max_length=10)
     token_api_params: str | None = Field(default=None, max_length=1000)
     token_api_headers: str | None = Field(default=None, max_length=1000)
+    snow_token_api: str | None = Field(default=None, max_length=500)
+    snow_token_api_method: str | None = Field(default=None, max_length=10)
+    snow_token_api_params: str | None = Field(default=None, max_length=1000)
+    snow_token_api_headers: str | None = Field(default=None, max_length=1000)
     base_url: str | None = None
 
 
@@ -95,6 +103,10 @@ class InventoryApiAddInventoryRequest(BaseModel):
     origin_token_api_method: str | None = Field(default=None, max_length=10)
     origin_token_api_params: str | None = Field(default=None, max_length=1000)
     origin_token_api_headers: str | None = Field(default=None, max_length=1000)
+    origin_snow_token_api: str | None = Field(default=None, max_length=500)
+    origin_snow_token_api_method: str | None = Field(default=None, max_length=10)
+    origin_snow_token_api_params: str | None = Field(default=None, max_length=1000)
+    origin_snow_token_api_headers: str | None = Field(default=None, max_length=1000)
     is_scheduled: bool = False
     api_crawling_cron: str | None = Field(default=None, max_length=100)
     base_url: str | None = None

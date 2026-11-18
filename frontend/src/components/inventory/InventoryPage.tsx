@@ -112,12 +112,22 @@ export function InventoryPage({ user }: InventoryPageProps) {
   const [originTokenMethod, setOriginTokenMethod] = useState<InventoryHttpMethod>("POST");
   const [originTokenParams, setOriginTokenParams] = useState<InventoryKeyValueParam[]>([]);
   const [originTokenHeaders, setOriginTokenHeaders] = useState<InventoryKeyValueParam[]>([]);
+  const [originSnowTokenApi, setOriginSnowTokenApi] = useState("");
+  const [originSnowTokenMethod, setOriginSnowTokenMethod] =
+    useState<InventoryHttpMethod>("POST");
+  const [originSnowTokenParams, setOriginSnowTokenParams] = useState<InventoryKeyValueParam[]>(
+    [],
+  );
+  const [originSnowTokenHeaders, setOriginSnowTokenHeaders] = useState<
+    InventoryKeyValueParam[]
+  >([]);
   const [stagedResponseJson, setStagedResponseJson] = useState<unknown>(null);
   const [isScheduled, setIsScheduled] = useState(false);
   const [apiCrawlingCron, setApiCrawlingCron] = useState("");
   const [retrieving, setRetrieving] = useState(false);
   const [testingApi, setTestingApi] = useState(false);
   const [testingToken, setTestingToken] = useState(false);
+  const [testingSnowToken, setTestingSnowToken] = useState(false);
   const [apiTestResult, setApiTestResult] = useState<InventoryOriginApiTestResult | null>(null);
   const [tokenTestResult, setTokenTestResult] =
     useState<InventoryTokenIssueTestResult | null>(null);
@@ -152,10 +162,13 @@ export function InventoryPage({ user }: InventoryPageProps) {
     : originMode === "csv"
       ? Boolean(originCsv)
       : Boolean(originApiUrl.trim());
+  const isTokenAuth = originApiAuthType === 3 || originApiAuthType === 4;
+  const isSnowAuth = originApiAuthType === 4;
   const apiFieldsReady =
     originMode !== "api" ||
     (Boolean(originApiUrl.trim()) &&
-      (originApiAuthType !== 3 || Boolean(originTokenApi.trim())) &&
+      (!isTokenAuth || Boolean(originTokenApi.trim())) &&
+      (!isSnowAuth || Boolean(originSnowTokenApi.trim())) &&
       (!isScheduled || Boolean(apiCrawlingCron.trim())));
   const saveDisabled =
     saving ||
@@ -253,6 +266,10 @@ export function InventoryPage({ user }: InventoryPageProps) {
     setOriginTokenMethod("POST");
     setOriginTokenParams([]);
     setOriginTokenHeaders([]);
+    setOriginSnowTokenApi("");
+    setOriginSnowTokenMethod("POST");
+    setOriginSnowTokenParams([]);
+    setOriginSnowTokenHeaders([]);
     setStagedResponseJson(null);
     setIsScheduled(false);
     setApiCrawlingCron("");
@@ -281,8 +298,14 @@ export function InventoryPage({ user }: InventoryPageProps) {
     setOriginApiParams(parseInventoryParams(item.origin_api_url_params));
     setOriginApiHeaders(parseInventoryParams(item.origin_api_url_headers));
     setOriginApiKey("");
-    const auth =
-      item.origin_api_auth_type === 2 ? 2 : item.origin_api_auth_type === 3 ? 3 : 1;
+    const auth: InventoryApiAuthType =
+      item.origin_api_auth_type === 2
+        ? 2
+        : item.origin_api_auth_type === 3
+          ? 3
+          : item.origin_api_auth_type === 4
+            ? 4
+            : 1;
     setOriginApiAuthType(auth);
     setOriginTokenApi(item.origin_token_api || "");
     setOriginTokenMethod(
@@ -290,6 +313,12 @@ export function InventoryPage({ user }: InventoryPageProps) {
     );
     setOriginTokenParams([]);
     setOriginTokenHeaders([]);
+    setOriginSnowTokenApi(item.origin_snow_token_api || "");
+    setOriginSnowTokenMethod(
+      (item.origin_snow_token_api_method || "POST").toUpperCase() === "GET" ? "GET" : "POST",
+    );
+    setOriginSnowTokenParams([]);
+    setOriginSnowTokenHeaders([]);
     setStagedResponseJson(null);
     setIsScheduled(Boolean(item.is_scheduled));
     setApiCrawlingCron(item.api_crawling_cron || "");
@@ -407,8 +436,16 @@ export function InventoryPage({ user }: InventoryPageProps) {
       setError("API 경로는 http(s)로 시작해야 합니다.");
       return false;
     }
-    if (originApiAuthType === 3 && !originTokenApi.trim()) {
-      setError("Token 발급 API 경로를 입력하세요.");
+    if (isTokenAuth && !originTokenApi.trim()) {
+      setError(
+        isSnowAuth
+          ? "APIM 포탈 Token 발급 API 경로를 입력하세요."
+          : "Token 발급 API 경로를 입력하세요.",
+      );
+      return false;
+    }
+    if (isSnowAuth && !originSnowTokenApi.trim()) {
+      setError("서비스나우 Token 발급 API 경로를 입력하세요.");
       return false;
     }
 
@@ -422,21 +459,27 @@ export function InventoryPage({ user }: InventoryPageProps) {
         body: JSON.stringify({
           table_name: resolvedTable,
           api_url: url,
-          api_key: originApiAuthType === 3 ? null : originApiKey.trim() || null,
+          api_key: isTokenAuth ? null : originApiKey.trim() || null,
           auth_type: originApiAuthType,
           api_method: originApiMethod,
           api_params: serializeInventoryParams(originApiParams) || null,
           api_headers: serializeInventoryParams(originApiHeaders) || null,
-          token_api: originApiAuthType === 3 ? originTokenApi.trim() : null,
-          token_api_method: originApiAuthType === 3 ? originTokenMethod : null,
-          token_api_params:
-            originApiAuthType === 3
-              ? serializeInventoryParams(originTokenParams) || null
-              : null,
-          token_api_headers:
-            originApiAuthType === 3
-              ? serializeInventoryParams(originTokenHeaders) || null
-              : null,
+          token_api: isTokenAuth ? originTokenApi.trim() : null,
+          token_api_method: isTokenAuth ? originTokenMethod : null,
+          token_api_params: isTokenAuth
+            ? serializeInventoryParams(originTokenParams) || null
+            : null,
+          token_api_headers: isTokenAuth
+            ? serializeInventoryParams(originTokenHeaders) || null
+            : null,
+          snow_token_api: isSnowAuth ? originSnowTokenApi.trim() : null,
+          snow_token_api_method: isSnowAuth ? originSnowTokenMethod : null,
+          snow_token_api_params: isSnowAuth
+            ? serializeInventoryParams(originSnowTokenParams) || null
+            : null,
+          snow_token_api_headers: isSnowAuth
+            ? serializeInventoryParams(originSnowTokenHeaders) || null
+            : null,
           display_name: displayName.trim() || null,
           description: description.trim() || null,
         }),
@@ -468,30 +511,46 @@ export function InventoryPage({ user }: InventoryPageProps) {
 
   const buildOriginTestBody = () => ({
     api_url: originApiUrl.trim(),
-    api_key: originApiAuthType === 3 ? null : originApiKey.trim() || null,
+    api_key: isTokenAuth ? null : originApiKey.trim() || null,
     auth_type: originApiAuthType,
     api_method: originApiMethod,
     api_params: serializeInventoryParams(originApiParams) || null,
     api_headers: serializeInventoryParams(originApiHeaders) || null,
-    token_api: originApiAuthType === 3 ? originTokenApi.trim() : null,
-    token_api_method: originApiAuthType === 3 ? originTokenMethod : null,
-    token_api_params:
-      originApiAuthType === 3 ? serializeInventoryParams(originTokenParams) || null : null,
-    token_api_headers:
-      originApiAuthType === 3 ? serializeInventoryParams(originTokenHeaders) || null : null,
+    token_api: isTokenAuth ? originTokenApi.trim() : null,
+    token_api_method: isTokenAuth ? originTokenMethod : null,
+    token_api_params: isTokenAuth
+      ? serializeInventoryParams(originTokenParams) || null
+      : null,
+    token_api_headers: isTokenAuth
+      ? serializeInventoryParams(originTokenHeaders) || null
+      : null,
+    snow_token_api: isSnowAuth ? originSnowTokenApi.trim() : null,
+    snow_token_api_method: isSnowAuth ? originSnowTokenMethod : null,
+    snow_token_api_params: isSnowAuth
+      ? serializeInventoryParams(originSnowTokenParams) || null
+      : null,
+    snow_token_api_headers: isSnowAuth
+      ? serializeInventoryParams(originSnowTokenHeaders) || null
+      : null,
   });
 
-  const handleTestTokenApi = async () => {
-    const tokenUrl = originTokenApi.trim();
+  const runTokenIssueTest = async (kind: "apim" | "snow") => {
+    const isSnow = kind === "snow";
+    const tokenUrl = (isSnow ? originSnowTokenApi : originTokenApi).trim();
+    const label = isSnow ? "서비스나우 Token" : isSnowAuth ? "APIM 포탈 Token" : "Token";
     if (!tokenUrl) {
-      setError("Token 발급 API 경로를 입력하세요.");
+      setError(`${label} 발급 API 경로를 입력하세요.`);
       return;
     }
     if (!/^https?:\/\//i.test(tokenUrl)) {
-      setError("Token 발급 API 경로는 http(s)로 시작해야 합니다.");
+      setError(`${label} 발급 API 경로는 http(s)로 시작해야 합니다.`);
       return;
     }
-    setTestingToken(true);
+    if (isSnow) {
+      setTestingSnowToken(true);
+    } else {
+      setTestingToken(true);
+    }
     setError(null);
     try {
       const response = await fetch("/api/inventories/apicall/test-token", {
@@ -499,9 +558,13 @@ export function InventoryPage({ user }: InventoryPageProps) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           token_api: tokenUrl,
-          token_api_method: originTokenMethod,
-          token_api_params: serializeInventoryParams(originTokenParams) || null,
-          token_api_headers: serializeInventoryParams(originTokenHeaders) || null,
+          token_api_method: isSnow ? originSnowTokenMethod : originTokenMethod,
+          token_api_params: serializeInventoryParams(
+            isSnow ? originSnowTokenParams : originTokenParams,
+          ) || null,
+          token_api_headers: serializeInventoryParams(
+            isSnow ? originSnowTokenHeaders : originTokenHeaders,
+          ) || null,
         }),
       });
       if (!response.ok) {
@@ -515,8 +578,20 @@ export function InventoryPage({ user }: InventoryPageProps) {
     } catch (err) {
       setError(err instanceof Error ? err.message : "토큰 발급 테스트 실패");
     } finally {
-      setTestingToken(false);
+      if (isSnow) {
+        setTestingSnowToken(false);
+      } else {
+        setTestingToken(false);
+      }
     }
+  };
+
+  const handleTestTokenApi = async () => {
+    await runTokenIssueTest("apim");
+  };
+
+  const handleTestSnowTokenApi = async () => {
+    await runTokenIssueTest("snow");
   };
 
   const handleTestOriginApi = async () => {
@@ -529,8 +604,16 @@ export function InventoryPage({ user }: InventoryPageProps) {
       setError("API 경로는 http(s)로 시작해야 합니다.");
       return;
     }
-    if (originApiAuthType === 3 && !originTokenApi.trim()) {
-      setError("Token 발급 API 경로를 입력하세요.");
+    if (isTokenAuth && !originTokenApi.trim()) {
+      setError(
+        isSnowAuth
+          ? "APIM 포탈 Token 발급 API 경로를 입력하세요."
+          : "Token 발급 API 경로를 입력하세요.",
+      );
+      return;
+    }
+    if (isSnowAuth && !originSnowTokenApi.trim()) {
+      setError("서비스나우 Token 발급 API 경로를 입력하세요.");
       return;
     }
     if (isCreate) {
@@ -602,8 +685,16 @@ export function InventoryPage({ user }: InventoryPageProps) {
         setError("API 조회를 먼저 수행하세요.");
         return;
       }
-      if (originApiAuthType === 3 && !originTokenApi.trim()) {
-        setError("Token 발급 API 경로를 입력하세요.");
+      if (isTokenAuth && !originTokenApi.trim()) {
+        setError(
+          isSnowAuth
+            ? "APIM 포탈 Token 발급 API 경로를 입력하세요."
+            : "Token 발급 API 경로를 입력하세요.",
+        );
+        return;
+      }
+      if (isSnowAuth && !originSnowTokenApi.trim()) {
+        setError("서비스나우 Token 발급 API 경로를 입력하세요.");
         return;
       }
       if (originApiAuthType === 2 && originApiKey.trim()) {
@@ -658,23 +749,31 @@ export function InventoryPage({ user }: InventoryPageProps) {
             origin_api_url_headers:
               originMode === "api" ? serializeInventoryParams(originApiHeaders) || null : null,
             origin_api_key:
-              originMode === "api" && originApiAuthType !== 3
-                ? originApiKey.trim() || null
-                : null,
+              originMode === "api" && !isTokenAuth ? originApiKey.trim() || null : null,
             origin_api_auth_type: originMode === "api" ? originApiAuthType : 1,
             origin_token_api:
-              originMode === "api" && originApiAuthType === 3
-                ? originTokenApi.trim()
-                : null,
+              originMode === "api" && isTokenAuth ? originTokenApi.trim() : null,
             origin_token_api_method:
-              originMode === "api" && originApiAuthType === 3 ? originTokenMethod : null,
+              originMode === "api" && isTokenAuth ? originTokenMethod : null,
             origin_token_api_params:
-              originMode === "api" && originApiAuthType === 3
+              originMode === "api" && isTokenAuth
                 ? serializeInventoryParams(originTokenParams) || null
                 : null,
             origin_token_api_headers:
-              originMode === "api" && originApiAuthType === 3
+              originMode === "api" && isTokenAuth
                 ? serializeInventoryParams(originTokenHeaders) || null
+                : null,
+            origin_snow_token_api:
+              originMode === "api" && isSnowAuth ? originSnowTokenApi.trim() : null,
+            origin_snow_token_api_method:
+              originMode === "api" && isSnowAuth ? originSnowTokenMethod : null,
+            origin_snow_token_api_params:
+              originMode === "api" && isSnowAuth
+                ? serializeInventoryParams(originSnowTokenParams) || null
+                : null,
+            origin_snow_token_api_headers:
+              originMode === "api" && isSnowAuth
+                ? serializeInventoryParams(originSnowTokenHeaders) || null
                 : null,
             is_scheduled: originMode === "api" ? isScheduled : false,
             api_crawling_cron:
@@ -713,21 +812,31 @@ export function InventoryPage({ user }: InventoryPageProps) {
           origin_api_url_headers:
             originMode === "api" ? serializeInventoryParams(originApiHeaders) || null : null,
           origin_api_key:
-            originMode === "api" && originApiAuthType !== 3
-              ? originApiKey.trim() || null
-              : null,
+            originMode === "api" && !isTokenAuth ? originApiKey.trim() || null : null,
           origin_api_auth_type: originMode === "api" ? originApiAuthType : 1,
           origin_token_api:
-            originMode === "api" && originApiAuthType === 3 ? originTokenApi.trim() : null,
+            originMode === "api" && isTokenAuth ? originTokenApi.trim() : null,
           origin_token_api_method:
-            originMode === "api" && originApiAuthType === 3 ? originTokenMethod : null,
+            originMode === "api" && isTokenAuth ? originTokenMethod : null,
           origin_token_api_params:
-            originMode === "api" && originApiAuthType === 3
+            originMode === "api" && isTokenAuth
               ? serializeInventoryParams(originTokenParams) || null
               : null,
           origin_token_api_headers:
-            originMode === "api" && originApiAuthType === 3
+            originMode === "api" && isTokenAuth
               ? serializeInventoryParams(originTokenHeaders) || null
+              : null,
+          origin_snow_token_api:
+            originMode === "api" && isSnowAuth ? originSnowTokenApi.trim() : null,
+          origin_snow_token_api_method:
+            originMode === "api" && isSnowAuth ? originSnowTokenMethod : null,
+          origin_snow_token_api_params:
+            originMode === "api" && isSnowAuth
+              ? serializeInventoryParams(originSnowTokenParams) || null
+              : null,
+          origin_snow_token_api_headers:
+            originMode === "api" && isSnowAuth
+              ? serializeInventoryParams(originSnowTokenHeaders) || null
               : null,
           is_scheduled: originMode === "api" ? isScheduled : false,
           api_crawling_cron:
@@ -1118,6 +1227,7 @@ export function InventoryPage({ user }: InventoryPageProps) {
                                 { id: 1 as const, label: "Bearer" },
                                 { id: 2 as const, label: "Header" },
                                 { id: 3 as const, label: "Token" },
+                                { id: 4 as const, label: "서비스나우 Token" },
                               ] as const
                             ).map((option) => (
                               <button
@@ -1137,12 +1247,108 @@ export function InventoryPage({ user }: InventoryPageProps) {
                           </div>
                         </div>
 
-                        {originApiAuthType === 3 ? (
+                        {isSnowAuth ? (
                           <div className="flex flex-col gap-2 rounded-md border border-slate-700/80 bg-slate-950/40 p-3">
                             <div className="flex flex-wrap items-end gap-2">
                               <label className="flex min-w-[12rem] flex-1 flex-col gap-1">
                                 <span className="text-xs font-medium text-slate-300">
-                                  Token 발급 API
+                                  서비스나우 Token 발급 API
+                                </span>
+                                <input
+                                  type="url"
+                                  value={originSnowTokenApi}
+                                  onChange={(event) =>
+                                    setOriginSnowTokenApi(event.target.value)
+                                  }
+                                  disabled={!fieldsEditable}
+                                  maxLength={500}
+                                  className="rounded-md border border-slate-700 bg-slate-950/80 px-3 py-2 font-mono text-sm text-slate-100 outline-none focus:border-sky-600 disabled:opacity-70"
+                                  placeholder="https://example.internal/snow/oauth/token"
+                                />
+                              </label>
+                              {fieldsEditable ? (
+                                <button
+                                  type="button"
+                                  disabled={
+                                    testingSnowToken ||
+                                    testingToken ||
+                                    testingApi ||
+                                    retrieving ||
+                                    !originSnowTokenApi.trim()
+                                  }
+                                  onClick={() => void handleTestSnowTokenApi()}
+                                  className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-md border border-slate-600 bg-slate-800/70 px-3 py-2 text-sm text-slate-100 hover:bg-slate-800 disabled:opacity-50"
+                                >
+                                  <WorkflowIcon
+                                    name="validate"
+                                    size="sm"
+                                    label="서비스나우 토큰 발급 테스트"
+                                  />
+                                  {testingSnowToken
+                                    ? "토큰 테스트 중…"
+                                    : "토큰 발급 테스트"}
+                                </button>
+                              ) : null}
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                              <span className="self-center text-xs font-medium text-slate-300">
+                                Method
+                              </span>
+                              {(["GET", "POST"] as const).map((method) => (
+                                <button
+                                  key={`snow-token-method-${method}`}
+                                  type="button"
+                                  disabled={!fieldsEditable}
+                                  onClick={() => setOriginSnowTokenMethod(method)}
+                                  className={`rounded-md border px-3 py-1.5 text-sm ${
+                                    originSnowTokenMethod === method
+                                      ? "border-sky-500 bg-sky-950/50 text-sky-100"
+                                      : "border-slate-600 bg-slate-800/70 text-slate-200 hover:bg-slate-800"
+                                  }`}
+                                >
+                                  {method}
+                                </button>
+                              ))}
+                            </div>
+                            <InventoryKeyValueParamsEditor
+                              label="서비스나우 Token 파라미터 (key=value)"
+                              items={originSnowTokenParams}
+                              disabled={!fieldsEditable}
+                              onChange={setOriginSnowTokenParams}
+                            />
+                            {isView &&
+                            selected?.has_snow_token_api_params &&
+                            originSnowTokenParams.length === 0 ? (
+                              <span className="text-[11px] text-slate-500">
+                                저장된 서비스나우 Token 파라미터가 있습니다. 변경 시에만 다시
+                                입력하세요.
+                              </span>
+                            ) : null}
+                            <InventoryKeyValueParamsEditor
+                              label="서비스나우 Token 헤더 (Name=value)"
+                              items={originSnowTokenHeaders}
+                              disabled={!fieldsEditable}
+                              onChange={setOriginSnowTokenHeaders}
+                            />
+                            {isView &&
+                            selected?.has_snow_token_api_headers &&
+                            originSnowTokenHeaders.length === 0 ? (
+                              <span className="text-[11px] text-slate-500">
+                                저장된 서비스나우 Token 헤더가 있습니다. 변경 시에만 다시
+                                입력하세요.
+                              </span>
+                            ) : null}
+                          </div>
+                        ) : null}
+
+                        {isTokenAuth ? (
+                          <div className="flex flex-col gap-2 rounded-md border border-slate-700/80 bg-slate-950/40 p-3">
+                            <div className="flex flex-wrap items-end gap-2">
+                              <label className="flex min-w-[12rem] flex-1 flex-col gap-1">
+                                <span className="text-xs font-medium text-slate-300">
+                                  {isSnowAuth
+                                    ? "APIM 포탈 Token 발급 API"
+                                    : "Token 발급 API"}
                                 </span>
                                 <input
                                   type="url"
@@ -1159,6 +1365,7 @@ export function InventoryPage({ user }: InventoryPageProps) {
                                   type="button"
                                   disabled={
                                     testingToken ||
+                                    testingSnowToken ||
                                     testingApi ||
                                     retrieving ||
                                     !originTokenApi.trim()
@@ -1192,7 +1399,11 @@ export function InventoryPage({ user }: InventoryPageProps) {
                               ))}
                             </div>
                             <InventoryKeyValueParamsEditor
-                              label="Token 파라미터 (key=value)"
+                              label={
+                                isSnowAuth
+                                  ? "APIM Token 파라미터 (key=value)"
+                                  : "Token 파라미터 (key=value)"
+                              }
                               items={originTokenParams}
                               disabled={!fieldsEditable}
                               onChange={setOriginTokenParams}
@@ -1203,7 +1414,11 @@ export function InventoryPage({ user }: InventoryPageProps) {
                               </span>
                             ) : null}
                             <InventoryKeyValueParamsEditor
-                              label="Token 헤더 (Name=value)"
+                              label={
+                                isSnowAuth
+                                  ? "APIM Token 헤더 (Name=value)"
+                                  : "Token 헤더 (Name=value)"
+                              }
                               items={originTokenHeaders}
                               disabled={!fieldsEditable}
                               onChange={setOriginTokenHeaders}
@@ -1265,8 +1480,10 @@ export function InventoryPage({ user }: InventoryPageProps) {
                                   testingApi ||
                                   retrieving ||
                                   testingToken ||
+                                  testingSnowToken ||
                                   !originApiUrl.trim() ||
-                                  (originApiAuthType === 3 && !originTokenApi.trim())
+                                  (isTokenAuth && !originTokenApi.trim()) ||
+                                  (isSnowAuth && !originSnowTokenApi.trim())
                                 }
                                 onClick={() => void handleTestOriginApi()}
                                 className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-md border border-slate-600 bg-slate-800/70 px-3 py-2 text-sm text-slate-100 hover:bg-slate-800 disabled:opacity-50"
@@ -1331,8 +1548,10 @@ export function InventoryPage({ user }: InventoryPageProps) {
                                 retrieving ||
                                 testingApi ||
                                 testingToken ||
+                                testingSnowToken ||
                                 !originApiUrl.trim() ||
-                                (originApiAuthType === 3 && !originTokenApi.trim())
+                                (isTokenAuth && !originTokenApi.trim()) ||
+                                (isSnowAuth && !originSnowTokenApi.trim())
                               }
                               onClick={() => void handleRetrieve()}
                               className="inline-flex items-center justify-center gap-1.5 rounded-md border border-slate-600 bg-slate-800/70 px-3 py-2 text-sm text-slate-100 hover:bg-slate-800 disabled:opacity-50"
@@ -1350,7 +1569,13 @@ export function InventoryPage({ user }: InventoryPageProps) {
                         ) : selected?.origin_api_url ? (
                           <p className="truncate text-xs text-slate-400" title={selected.origin_api_url}>
                             {selected.origin_api_url}
-                            {selected.origin_api_auth_type === 3 && selected.origin_token_api
+                            {selected.origin_api_auth_type === 4 &&
+                            selected.origin_snow_token_api
+                              ? ` · snow ${selected.origin_snow_token_api}`
+                              : ""}
+                            {(selected.origin_api_auth_type === 3 ||
+                              selected.origin_api_auth_type === 4) &&
+                            selected.origin_token_api
                               ? ` · token ${selected.origin_token_api}`
                               : ""}
                             {selected.is_scheduled && selected.api_crawling_cron

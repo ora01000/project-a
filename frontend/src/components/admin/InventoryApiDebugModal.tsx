@@ -70,11 +70,15 @@ const DEFAULT_ADD_INVENTORY = `{
   "origin_api_url_method": "GET",
   "origin_api_url_params": "",
   "origin_api_url_headers": "X-Tenant=ops",
-  "origin_api_auth_type": 3,
-  "origin_token_api": "https://example.com/oauth/token",
+  "origin_api_auth_type": 4,
+  "origin_token_api": "https://example.com/apim/oauth/token",
   "origin_token_api_method": "POST",
   "origin_token_api_params": "grant_type=client_credentials",
-  "origin_token_api_headers": "X-Client-Secret=hdr-secret"
+  "origin_token_api_headers": "X-Client-Secret=hdr-secret",
+  "origin_snow_token_api": "https://example.com/snow/oauth/token",
+  "origin_snow_token_api_method": "POST",
+  "origin_snow_token_api_params": "grant_type=client_credentials",
+  "origin_snow_token_api_headers": "Authorization=Basic …"
 }`;
 
 const DEFAULT_ADD_API = `{
@@ -144,6 +148,10 @@ export function InventoryApiDebugModal({ viewerRole, onClose }: InventoryApiDebu
   const [tokenApiMethod, setTokenApiMethod] = useState("POST");
   const [tokenApiParams, setTokenApiParams] = useState("");
   const [tokenApiHeaders, setTokenApiHeaders] = useState("");
+  const [snowTokenApi, setSnowTokenApi] = useState("");
+  const [snowTokenApiMethod, setSnowTokenApiMethod] = useState("POST");
+  const [snowTokenApiParams, setSnowTokenApiParams] = useState("");
+  const [snowTokenApiHeaders, setSnowTokenApiHeaders] = useState("");
   const [startrow, setStartrow] = useState("1");
   const [endrow, setEndrow] = useState("20");
   const [sql, setSql] = useState("SELECT 1");
@@ -234,23 +242,44 @@ export function InventoryApiDebugModal({ viewerRole, onClose }: InventoryApiDebu
         if (!apiUrl.trim()) {
           throw new Error("api_url을 입력하세요.");
         }
-        if (authType === "3" && !tokenApi.trim()) {
+        if ((authType === "3" || authType === "4") && !tokenApi.trim()) {
           throw new Error("token_api를 입력하세요.");
+        }
+        if (authType === "4" && !snowTokenApi.trim()) {
+          throw new Error("snow_token_api를 입력하세요.");
         }
         response = await fetch("/api/debug/inventory-api/retrieve", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             api_url: apiUrl.trim(),
-            api_key: authType === "3" ? null : apiKey.trim() || null,
+            api_key:
+              authType === "3" || authType === "4" ? null : apiKey.trim() || null,
             auth_type: Number(authType) || 1,
             api_method: apiMethod || "GET",
             api_params: apiParams.trim() || null,
             api_headers: apiHeaders.trim() || null,
-            token_api: authType === "3" ? tokenApi.trim() : null,
-            token_api_method: authType === "3" ? tokenApiMethod || "POST" : null,
-            token_api_params: authType === "3" ? tokenApiParams.trim() || null : null,
-            token_api_headers: authType === "3" ? tokenApiHeaders.trim() || null : null,
+            token_api:
+              authType === "3" || authType === "4" ? tokenApi.trim() : null,
+            token_api_method:
+              authType === "3" || authType === "4"
+                ? tokenApiMethod || "POST"
+                : null,
+            token_api_params:
+              authType === "3" || authType === "4"
+                ? tokenApiParams.trim() || null
+                : null,
+            token_api_headers:
+              authType === "3" || authType === "4"
+                ? tokenApiHeaders.trim() || null
+                : null,
+            snow_token_api: authType === "4" ? snowTokenApi.trim() : null,
+            snow_token_api_method:
+              authType === "4" ? snowTokenApiMethod || "POST" : null,
+            snow_token_api_params:
+              authType === "4" ? snowTokenApiParams.trim() || null : null,
+            snow_token_api_headers:
+              authType === "4" ? snowTokenApiHeaders.trim() || null : null,
             base_url: trimmedBase,
           }),
         });
@@ -258,23 +287,44 @@ export function InventoryApiDebugModal({ viewerRole, onClose }: InventoryApiDebu
         if (!apiUrl.trim()) {
           throw new Error("url을 입력하세요.");
         }
-        if (authType === "3" && !tokenApi.trim()) {
+        if ((authType === "3" || authType === "4") && !tokenApi.trim()) {
           throw new Error("token_api를 입력하세요.");
+        }
+        if (authType === "4" && !snowTokenApi.trim()) {
+          throw new Error("snow_token_api를 입력하세요.");
         }
         response = await fetch("/api/debug/inventory-api/testAPI", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             url: apiUrl.trim(),
-            token: authType === "3" ? null : apiKey.trim() || null,
+            token:
+              authType === "3" || authType === "4" ? null : apiKey.trim() || null,
             auth_type: Number(authType) || 1,
             method: apiMethod || "GET",
             params: apiParams.trim() || null,
             headers: apiHeaders.trim() || null,
-            token_api: authType === "3" ? tokenApi.trim() : null,
-            token_api_method: authType === "3" ? tokenApiMethod || "POST" : null,
-            token_api_params: authType === "3" ? tokenApiParams.trim() || null : null,
-            token_api_headers: authType === "3" ? tokenApiHeaders.trim() || null : null,
+            token_api:
+              authType === "3" || authType === "4" ? tokenApi.trim() : null,
+            token_api_method:
+              authType === "3" || authType === "4"
+                ? tokenApiMethod || "POST"
+                : null,
+            token_api_params:
+              authType === "3" || authType === "4"
+                ? tokenApiParams.trim() || null
+                : null,
+            token_api_headers:
+              authType === "3" || authType === "4"
+                ? tokenApiHeaders.trim() || null
+                : null,
+            snow_token_api: authType === "4" ? snowTokenApi.trim() : null,
+            snow_token_api_method:
+              authType === "4" ? snowTokenApiMethod || "POST" : null,
+            snow_token_api_params:
+              authType === "4" ? snowTokenApiParams.trim() || null : null,
+            snow_token_api_headers:
+              authType === "4" ? snowTokenApiHeaders.trim() || null : null,
             base_url: trimmedBase,
           }),
         });
@@ -589,6 +639,7 @@ export function InventoryApiDebugModal({ viewerRole, onClose }: InventoryApiDebu
                   <option value="1">1 bearer</option>
                   <option value="2">2 header</option>
                   <option value="3">3 token</option>
+                  <option value="4">4 ServiceNow dual token</option>
                 </select>
               </label>
               <label className="block text-sm text-slate-300">
@@ -622,10 +673,61 @@ export function InventoryApiDebugModal({ viewerRole, onClose }: InventoryApiDebu
                   placeholder="X-Tenant=ops"
                 />
               </label>
-              {authType === "3" ? (
+              {authType === "3" || authType === "4" ? (
                 <>
+                  {authType === "4" ? (
+                    <>
+                      <label className="block text-sm text-slate-300 md:col-span-2">
+                        snow_token_api
+                        <input
+                          type="text"
+                          value={snowTokenApi}
+                          onChange={(event) => setSnowTokenApi(event.target.value)}
+                          className={INPUT}
+                          placeholder="https://example.com/snow/oauth/token"
+                        />
+                      </label>
+                      <label className="block text-sm text-slate-300">
+                        snow_token_api_method
+                        <select
+                          value={snowTokenApiMethod}
+                          onChange={(event) =>
+                            setSnowTokenApiMethod(event.target.value)
+                          }
+                          className={INPUT}
+                        >
+                          <option value="POST">POST</option>
+                          <option value="GET">GET</option>
+                        </select>
+                      </label>
+                      <label className="block text-sm text-slate-300 md:col-span-3">
+                        snow_token_api_params (key=value&…)
+                        <input
+                          type="text"
+                          value={snowTokenApiParams}
+                          onChange={(event) =>
+                            setSnowTokenApiParams(event.target.value)
+                          }
+                          className={INPUT}
+                          placeholder="grant_type=client_credentials&client_id=…"
+                        />
+                      </label>
+                      <label className="block text-sm text-slate-300 md:col-span-3">
+                        snow_token_api_headers (Name=value&…)
+                        <input
+                          type="text"
+                          value={snowTokenApiHeaders}
+                          onChange={(event) =>
+                            setSnowTokenApiHeaders(event.target.value)
+                          }
+                          className={INPUT}
+                          placeholder="Authorization=Basic …"
+                        />
+                      </label>
+                    </>
+                  ) : null}
                   <label className="block text-sm text-slate-300 md:col-span-2">
-                    token_api
+                    {authType === "4" ? "token_api (APIM)" : "token_api"}
                     <input
                       type="text"
                       value={tokenApi}
