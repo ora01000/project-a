@@ -58,24 +58,21 @@ function statusLabel(statusCode: number): string {
   return STATUS_FILTER_OPTIONS.find((option) => option.value === statusCode)?.label ?? `상태 ${statusCode}`;
 }
 
-function formatApproverLabel(
-  approverUserid: string | null | undefined,
-  usersByUserid: Map<string, UserRecord>,
-): string {
-  const userid = (approverUserid ?? "").trim();
-  if (!userid) {
+function formatApproverLabel(job: JobRecord, usersByIdx: Map<number, UserRecord>): string {
+  if (job.approver_idx === null || job.approver_idx === undefined) {
     return "—";
   }
-  const user = usersByUserid.get(userid);
+  const fallback = (job.approver_name ?? job.approver_userid ?? "").trim() || String(job.approver_idx);
+  const user = usersByIdx.get(job.approver_idx);
   if (!user) {
-    return userid;
+    return fallback;
   }
   const depart = user.depart.trim();
   const name = user.username.trim();
   if (depart && name) {
     return `${name} ${depart}`;
   }
-  return name || depart || userid;
+  return name || depart || fallback;
 }
 
 function statusFilterButtonClass(isActive: boolean): string {
@@ -95,8 +92,8 @@ function compareJobs(left: JobRecord, right: JobRecord, column: SortColumn): num
     case "status_code":
       return left.status_code - right.status_code;
     case "requester_name": {
-      const leftName = (left.requester_name || left.madang_id || "").trim();
-      const rightName = (right.requester_name || right.madang_id || "").trim();
+      const leftName = (left.requester_name || left.requester_userid || "").trim();
+      const rightName = (right.requester_name || right.requester_userid || "").trim();
       return leftName.localeCompare(rightName, "ko");
     }
     case "request_date":
@@ -157,8 +154,8 @@ export function JobMgmtTab({ active, currentUser }: JobMgmtTabProps) {
   const { page, pageSize, totalPages, totalItems, pageItems, setPage, setPageSize } =
     useClientPagination(filteredJobs);
 
-  const usersByUserid = useMemo(
-    () => new Map(users.map((user) => [user.userid, user])),
+  const usersByIdx = useMemo(
+    () => new Map(users.map((user) => [user.idx, user])),
     [users],
   );
 
@@ -437,13 +434,13 @@ export function JobMgmtTab({ active, currentUser }: JobMgmtTabProps) {
                         {job.job_title}
                       </td>
                       <td className="whitespace-nowrap px-3 py-2 text-xs text-slate-300">
-                        {job.requester_name || job.madang_id || "—"}
+                        {job.requester_name || job.requester_userid || "—"}
                       </td>
                       <td
                         className="whitespace-nowrap px-3 py-2 text-xs text-slate-400"
-                        title={job.approver?.trim() || undefined}
+                        title={job.approver_userid?.trim() || undefined}
                       >
-                        {formatApproverLabel(job.approver, usersByUserid)}
+                        {formatApproverLabel(job, usersByIdx)}
                       </td>
                       <td className="whitespace-nowrap px-3 py-2 text-xs text-slate-400">
                         {formatJobDate(job.request_date)}
@@ -531,7 +528,7 @@ export function JobMgmtTab({ active, currentUser }: JobMgmtTabProps) {
                     {panelJob.job_title}
                   </JobInlineField>
                   <JobInlineField label="요청자" bullet="👤">
-                    {panelJob.requester_name || panelJob.madang_id || "—"}
+                    {panelJob.requester_name || panelJob.requester_userid || "—"}
                   </JobInlineField>
                   <JobInlineField label="요청자 이메일" bullet="✉️">
                     {panelJob.requester_email || "—"}
@@ -540,7 +537,7 @@ export function JobMgmtTab({ active, currentUser }: JobMgmtTabProps) {
                     {panelJob.requester_depart || "—"}
                   </JobInlineField>
                   <JobInlineField label="승인자" bullet="✅">
-                    {formatApproverLabel(panelJob.approver, usersByUserid)}
+                    {formatApproverLabel(panelJob, usersByIdx)}
                   </JobInlineField>
                   <JobInlineField label="요청 일시" bullet="🕐">
                     {formatJobDate(panelJob.request_date)}

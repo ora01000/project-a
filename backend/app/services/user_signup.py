@@ -3,7 +3,7 @@ from pathlib import Path
 
 from backend.app.db.roles import ROLE_PENDING, ROLE_USER
 from backend.app.db.jobs import JobRecord, create_user_access_request_job
-from backend.app.db.users import User, create_user, delete_users, get_user_by_idx, get_user_by_userid, update_user
+from backend.app.db.users import User, create_user, delete_users, get_user_by_idx, update_user
 from backend.app.notifications.email_sender import (
     send_signup_approval_email,
     send_signup_rejection_email,
@@ -80,13 +80,9 @@ def approve_pending_user_for_signup_job(database_path: Path, job: JobRecord) -> 
     if job.job_type != JOB_TYPE_SIGNUP:
         return None
 
-    userid = str(job.madang_id or "").strip()
-    if not userid:
-        raise ValueError("signup job is missing userid (madang_id)")
-
-    user = get_user_by_userid(database_path, userid)
+    user = get_user_by_idx(database_path, int(job.requester_idx))
     if user is None:
-        raise ValueError(f"signup user not found for userid={userid!r}")
+        raise ValueError(f"signup user not found for requester_idx={job.requester_idx!r}")
 
     return approve_signup(database_path, user.idx)
 

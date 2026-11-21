@@ -46,7 +46,7 @@ from backend.app.notifications.email_sender import (
     send_ax_infra_job_rejection_email,
     send_job_report_emails,
 )
-from backend.app.db.users import get_user_by_userid
+from backend.app.db.users import get_user_by_idx
 from backend.app.services.user_signup import notify_signup_approved
 from backend.app.services.workflow_runner import (
     fail_workflow_after_rejection,
@@ -71,12 +71,12 @@ router = APIRouter(tags=["jobs"])
 async def _notify_signup_job_approved(database_path, job: JobRecord) -> None:
     if job.job_type != JOB_TYPE_SIGNUP:
         return
-    userid = (job.madang_id or "").strip()
-    if not userid:
-        return
-    user = get_user_by_userid(database_path, userid)
+    user = get_user_by_idx(database_path, int(job.requester_idx))
     if user is None:
-        logger.warning("Signup approval email skipped: user not found for madang_id=%s", userid)
+        logger.warning(
+            "Signup approval email skipped: user not found for requester_idx=%s",
+            job.requester_idx,
+        )
         return
     await notify_signup_approved(database_path, user)
 
@@ -152,15 +152,24 @@ def _fail_workflow_job_if_needed(database_path, job: JobRecord) -> None:
 
 class JobIntakeRequest(BaseModel):
     job_title: str = Field(min_length=1, max_length=300)
-    requester_name: str = Field(min_length=1, max_length=100)
     requester_email: str = Field(min_length=1, max_length=100)
     requester_depart: str = Field(min_length=1, max_length=100)
     job_content: str = Field(min_length=1)
     request_date: str = Field(min_length=1)
-    madang_id: str = Field(min_length=1, max_length=50)
+    # Requester identity: requester_idx, or legacy userid / madang_id (resolved to idx server-side).
+    requester_idx: int | None = None
+    userid: str | None = Field(default=None, max_length=50)
+    madang_id: str | None = Field(default=None, max_length=50)
     team_id: str = Field(min_length=1, max_length=50)
     channel_id: str = Field(min_length=1, max_length=120)
     message_id: str = Field(min_length=1, max_length=120)
+
+    @model_validator(mode="after")
+    def _require_requester_identity(self) -> "JobIntakeRequest":
+        has_userid = bool((self.userid or "").strip() or (self.madang_id or "").strip())
+        if self.requester_idx is None and not has_userid:
+            raise ValueError("requester_idx (or userid) is required")
+        return self
 
 
 class JobRecordResponse(BaseModel):
@@ -169,14 +178,17 @@ class JobRecordResponse(BaseModel):
     status_code: int
     job_type: int = 1
     approver_registered_date: str | None = None
-    approver: str | None = None
+    approver_idx: int | None = None
+    approver_name: str | None = None
+    approver_userid: str | None = None
     job_title: str
+    requester_idx: int
     requester_name: str
+    requester_userid: str = ""
     requester_email: str
     requester_depart: str
     job_content: str
     request_date: str
-    madang_id: str
     team_id: str
     channel_id: str
     message_id: str
@@ -197,14 +209,17 @@ class JobRecordResponse(BaseModel):
             status_code=record.status_code,
             job_type=record.job_type,
             approver_registered_date=record.approver_registered_date,
-            approver=record.approver,
+            approver_idx=record.approver_idx,
+            approver_name=record.approver_name,
+            approver_userid=record.approver_userid,
             job_title=record.job_title,
+            requester_idx=record.requester_idx,
             requester_name=record.requester_name,
+            requester_userid=record.requester_userid,
             requester_email=record.requester_email,
             requester_depart=record.requester_depart,
             job_content=record.job_content,
             request_date=record.request_date,
-            madang_id=record.madang_id,
             team_id=record.team_id,
             channel_id=record.channel_id,
             message_id=record.message_id,
@@ -264,7 +279,7 @@ async def list_job_records(
     request: Request,
     status_code: int | None = Query(default=None),
     min_status_code: int | None = Query(default=None),
-    approver: str | None = Query(default=None),
+    approver_idx: int | None = Query(default=None),
     job_type: int | None = Query(default=None),
     exclude_status_code: int | None = Query(default=None),
 ) -> list[JobRecordResponse]:
@@ -276,11 +291,11 @@ async def list_job_records(
         database_path,
         status_code=status_code,
         min_status_code=min_status_code,
-        approver=approver,
+        approver_idx=approver_idx,
         job_type=job_type,
         exclude_status_code=exclude_status_code,
         exclude_job_type=JOB_TYPE_SIGNUP if _hide_signup_jobs_for_viewer(viewer.role) else None,
-        viewer_userid=viewer.userid,
+        viewer_idx=viewer.idx,
         viewer_role=viewer.role,
     )
     return [JobRecordResponse.from_record(record) for record in records]
@@ -305,9 +320,11 @@ class JobWorkflowStepResponse(BaseModel):
 class JobWorkflowItemResponse(BaseModel):
     idx: int
     srnum: str
+    requester_idx: int
     requester_name: str
-    requester_userid: str
-    approver: str | None = None
+    requester_userid: str = ""
+    approver_idx: int | None = None
+    approver_userid: str | None = None
     approver_name: str = ""
     status_code: int
     steps: list[JobWorkflowStepResponse]
@@ -320,9 +337,11 @@ class JobWorkflowItemResponse(BaseModel):
         return cls(
             idx=item.idx,
             srnum=item.srnum,
+            requester_idx=item.requester_idx,
             requester_name=item.requester_name,
             requester_userid=item.requester_userid,
-            approver=item.approver,
+            approver_idx=item.approver_idx,
+            approver_userid=item.approver_userid,
             approver_name=item.approver_name,
             status_code=item.status_code,
             steps=[JobWorkflowStepResponse.from_step(step) for step in item.steps],
@@ -338,7 +357,7 @@ async def list_job_workflow_items(request: Request) -> list[JobWorkflowItemRespo
     viewer = get_request_auth_user(request)
     items = list_job_workflows(
         database_path,
-        viewer_userid=viewer.userid,
+        viewer_idx=viewer.idx,
         viewer_role=viewer.role,
     )
     return [JobWorkflowItemResponse.from_item(item) for item in items]
@@ -351,7 +370,7 @@ async def get_job_record(request: Request, idx: int) -> JobRecordResponse:
     record = get_job_by_idx(database_path, idx)
     if record is None:
         raise HTTPException(status_code=404, detail="Job not found")
-    if not can_view_job(job=record, viewer_userid=viewer.userid, viewer_role=viewer.role):
+    if not can_view_job(job=record, viewer_idx=viewer.idx, viewer_role=viewer.role):
         raise HTTPException(status_code=404, detail="Job not found")
     return JobRecordResponse.from_record(record)
 
@@ -424,7 +443,7 @@ async def _notify_ax_infra_reject_or_cancel(database_path, job: JobRecord) -> No
                 database_path=database_path,
                 job_title=job.job_title,
                 requester_email=job.requester_email,
-                approver_userid=job.approver,
+                approver_userid=job.approver_userid,
                 reject_reason=reason,
             )
         elif job.status_code == JOB_STATUS_CANCELLED:
@@ -432,7 +451,7 @@ async def _notify_ax_infra_reject_or_cancel(database_path, job: JobRecord) -> No
                 database_path=database_path,
                 job_title=job.job_title,
                 requester_email=job.requester_email,
-                approver_userid=job.approver,
+                approver_userid=job.approver_userid,
                 drop_reason=(job.drop_reason or "").strip(),
             )
     except Exception:
@@ -525,7 +544,7 @@ async def send_job_report_email(
 
 
 class AssignJobApproverRequest(BaseModel):
-    approver: str = Field(min_length=1, max_length=20)
+    approver_idx: int
 
 
 @router.post("/jobs/{idx}/approver", response_model=JobRecordResponse)
@@ -536,7 +555,7 @@ async def assign_job_approver_endpoint(
 ) -> JobRecordResponse:
     database_path = request.app.state.database_path
     try:
-        record = assign_job_approver(database_path, idx, approver_userid=body.approver)
+        record = assign_job_approver(database_path, idx, approver_idx=body.approver_idx)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
@@ -546,7 +565,7 @@ async def assign_job_approver_endpoint(
 
 
 class DirectApproveJobRequest(BaseModel):
-    actor_userid: str = Field(min_length=1, max_length=20)
+    # Actor is always the authenticated session user (viewer.idx); body carries no identity.
     is_scheduled: bool = False
     scheduled_at: str | None = None
 
@@ -558,6 +577,7 @@ async def direct_approve_job_endpoint(
     body: DirectApproveJobRequest,
 ) -> JobRecordResponse:
     database_path = request.app.state.database_path
+    viewer = get_request_auth_user(request)
     existing = get_job_by_idx(database_path, idx)
     if existing is not None:
         try:
@@ -568,7 +588,7 @@ async def direct_approve_job_endpoint(
         record = direct_approve_job(
             database_path,
             idx,
-            approver_userid=body.actor_userid,
+            approver_idx=viewer.idx,
             is_scheduled=body.is_scheduled,
             scheduled_at=body.scheduled_at,
         )
@@ -583,7 +603,8 @@ async def direct_approve_job_endpoint(
 
 
 class JobReviewActionRequest(BaseModel):
-    actor_userid: str = Field(min_length=1, max_length=20)
+    # Actor is always the authenticated session user (viewer.idx); body carries no identity.
+    pass
 
 
 class JobApproveRequest(JobReviewActionRequest):
@@ -606,6 +627,7 @@ async def approve_job_review(
     body: JobApproveRequest,
 ) -> JobRecordResponse:
     database_path = request.app.state.database_path
+    viewer = get_request_auth_user(request)
     existing = get_job_by_idx(database_path, idx)
     if existing is not None:
         try:
@@ -616,7 +638,7 @@ async def approve_job_review(
         record = approve_assigned_job(
             database_path,
             idx,
-            actor_userid=body.actor_userid,
+            actor_idx=viewer.idx,
             is_scheduled=body.is_scheduled,
             scheduled_at=body.scheduled_at,
         )
@@ -637,6 +659,7 @@ async def reject_job_review(
     body: JobRejectRequest,
 ) -> JobRecordResponse:
     database_path = request.app.state.database_path
+    viewer = get_request_auth_user(request)
     existing = get_job_by_idx(database_path, idx)
     if existing is None:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -646,14 +669,14 @@ async def reject_job_review(
             record = reject_received_job(
                 database_path,
                 idx,
-                actor_userid=body.actor_userid,
+                actor_idx=viewer.idx,
                 drop_reason=body.drop_reason,
             )
         elif existing.status_code == JOB_STATUS_APPROVER_ASSIGNED:
             record = reject_assigned_job(
                 database_path,
                 idx,
-                actor_userid=body.actor_userid,
+                actor_idx=viewer.idx,
                 drop_reason=body.drop_reason,
             )
         else:
@@ -670,7 +693,7 @@ async def reject_job_review(
     return JobRecordResponse.from_record(record)
 
 
-def _ensure_job_ai_review_access(job: JobRecord, viewer_userid: str, viewer_role: int) -> None:
+def _ensure_job_ai_review_access(job: JobRecord, viewer_idx: int, viewer_role: int) -> None:
     if job.job_type == JOB_TYPE_SIGNUP and _hide_signup_jobs_for_viewer(viewer_role):
         raise HTTPException(status_code=404, detail="Job not found")
 
@@ -680,8 +703,8 @@ def _ensure_job_ai_review_access(job: JobRecord, viewer_userid: str, viewer_role
         return
 
     if job.status_code == JOB_STATUS_APPROVER_ASSIGNED:
-        approver = (job.approver or "").strip()
-        if is_admin_role(viewer_role) or viewer_userid == approver:
+        is_assigned_approver = job.approver_idx is not None and int(job.approver_idx) == int(viewer_idx)
+        if is_admin_role(viewer_role) or is_assigned_approver:
             return
         raise HTTPException(status_code=403, detail="지정된 승인자 또는 관리자만 AI 검토할 수 있습니다.")
 
@@ -705,7 +728,7 @@ async def ai_review_job(
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
 
-    _ensure_job_ai_review_access(job, viewer.userid, viewer.role)
+    _ensure_job_ai_review_access(job, viewer.idx, viewer.role)
 
     runtime_mode = getattr(request.app.state, "agent_runtime_mode", "mock")
     agent_runtime = request.app.state.agent_runtime
@@ -774,11 +797,12 @@ async def ai_review_job(
 async def rework_job_endpoint(
     request: Request,
     idx: int,
-    body: JobReviewActionRequest,
+    body: JobReviewActionRequest | None = None,
 ) -> JobRecordResponse:
     database_path = request.app.state.database_path
+    viewer = get_request_auth_user(request)
     try:
-        record = rework_job(database_path, idx, actor_userid=body.actor_userid)
+        record = rework_job(database_path, idx, actor_idx=viewer.idx)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
@@ -794,11 +818,12 @@ async def cancel_job_endpoint(
     body: JobCancelRequest,
 ) -> JobRecordResponse:
     database_path = request.app.state.database_path
+    viewer = get_request_auth_user(request)
     try:
         record = cancel_failed_job(
             database_path,
             idx,
-            actor_userid=body.actor_userid,
+            actor_idx=viewer.idx,
             drop_reason=body.drop_reason,
         )
     except ValueError as exc:

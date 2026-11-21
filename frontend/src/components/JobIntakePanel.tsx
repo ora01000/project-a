@@ -71,11 +71,10 @@ export function JobIntakePanel({ user }: JobIntakePanelProps) {
         body: JSON.stringify({
           job_title: trimmedTitle,
           job_content: trimmedContent,
-          requester_name: user.username,
+          requester_idx: user.idx,
           requester_email: user.email,
           requester_depart: user.depart,
           request_date: new Date().toISOString(),
-          madang_id: user.userid,
           team_id: "manual",
           channel_id: "integrated-chat",
           message_id: buildManualMessageId(user.userid),

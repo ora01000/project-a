@@ -54,6 +54,9 @@ export interface WorkNodeItem {
   worker?: "agent" | "hitl" | string;
   upload?: boolean;
   upload_path?: string;
+  /** users.idx of the HITL approver (DB source of truth; 0 = none). */
+  approver_idx?: number;
+  /** Computed from approver_idx for UI; server maps userid → idx on save. */
   approver_userid?: string;
   /** Compact CRUD flags e.g. ``cru`` (HITL empty). */
   crud?: string;

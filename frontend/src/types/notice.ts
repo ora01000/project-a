@@ -2,7 +2,7 @@ import { dateOnlyAfterDays, todayDateOnly } from "../utils/datetime";
 
 export interface NoticeRecord {
   idx: number;
-  writer: string;
+  writer_idx: number;
   writer_name?: string | null;
   write_date: string;
   from_date: string;
@@ -13,7 +13,6 @@ export interface NoticeRecord {
 }
 
 export interface NoticeFormValues {
-  writer: string;
   from_date: string;
   until_date: string;
   title: string;
@@ -22,11 +21,10 @@ export interface NoticeFormValues {
 }
 
 
-export function emptyNoticeForm(writer: string): NoticeFormValues {
+export function emptyNoticeForm(): NoticeFormValues {
   const fromDate = todayDateOnly();
   const untilDate = dateOnlyAfterDays(7);
   return {
-    writer,
     from_date: `${fromDate} 00:00:00`,
     until_date: `${untilDate} 00:00:00`,
     title: "",

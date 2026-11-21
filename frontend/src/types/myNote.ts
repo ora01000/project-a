@@ -1,6 +1,6 @@
 export interface MyNote {
   idx: number;
-  userid: string;
+  user_idx: number;
   note_name: string;
   create_date: string;
   origin_file: string;

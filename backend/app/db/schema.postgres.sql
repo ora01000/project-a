@@ -3,10 +3,12 @@
 
 CREATE TABLE IF NOT EXISTS users (
     idx BIGSERIAL PRIMARY KEY,
-    userid VARCHAR(50) NOT NULL UNIQUE,
-    email VARCHAR(50) NOT NULL,
-    username VARCHAR(50) NOT NULL,
-    password VARCHAR(50) NOT NULL,
+    userid TEXT NOT NULL,
+    email TEXT NOT NULL,
+    username TEXT NOT NULL,
+    password TEXT NOT NULL,
+    userid_bidx VARCHAR(64) NOT NULL DEFAULT '',
+    email_bidx VARCHAR(64) NOT NULL DEFAULT '',
     depart VARCHAR(100) NOT NULL,
     role INTEGER NOT NULL,
     band INTEGER NOT NULL DEFAULT 1,
@@ -28,6 +30,24 @@ ALTER TABLE users
     ADD COLUMN IF NOT EXISTS theme_for_dev_mode INTEGER NOT NULL DEFAULT 1;
 ALTER TABLE users
     ADD COLUMN IF NOT EXISTS theme_for_prod_mode INTEGER NOT NULL DEFAULT 1;
+
+-- users field crypto: widen plaintext columns for AES-GCM tokens; blind indexes for lookup
+ALTER TABLE users ALTER COLUMN userid TYPE TEXT;
+ALTER TABLE users ALTER COLUMN email TYPE TEXT;
+ALTER TABLE users ALTER COLUMN username TYPE TEXT;
+ALTER TABLE users ALTER COLUMN password TYPE TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS userid_bidx VARCHAR(64) NOT NULL DEFAULT '';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS email_bidx VARCHAR(64) NOT NULL DEFAULT '';
+-- Drop legacy UNIQUE(userid) if present; uniqueness moves to userid_bidx.
+ALTER TABLE users DROP CONSTRAINT IF EXISTS users_userid_key;
+CREATE UNIQUE INDEX IF NOT EXISTS ux_users_userid_bidx
+    ON users (userid_bidx)
+    WHERE userid_bidx <> '';
+-- email is not unique in this product (e.g. root/isyun share an address).
+DROP INDEX IF EXISTS ux_users_email_bidx;
+CREATE INDEX IF NOT EXISTS ix_users_email_bidx
+    ON users (email_bidx)
+    WHERE email_bidx <> '';
 
 CREATE TABLE IF NOT EXISTS agentruntime (
     idx BIGSERIAL PRIMARY KEY,
@@ -52,7 +72,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS ux_agentruntime_type_agent_id_is_prod
 
 CREATE TABLE IF NOT EXISTS notice_board (
     idx BIGSERIAL PRIMARY KEY,
-    writer VARCHAR(50) NOT NULL,
+    writer_idx BIGINT NOT NULL,
     write_date TEXT NOT NULL,
     from_date TEXT NOT NULL,
     until_date TEXT NOT NULL,
@@ -61,20 +81,35 @@ CREATE TABLE IF NOT EXISTS notice_board (
     welcome_popup INTEGER NOT NULL DEFAULT 0
 );
 
+-- notice_board: writer (userid string) -> writer_idx (users.idx)
+ALTER TABLE notice_board ADD COLUMN IF NOT EXISTS writer_idx BIGINT;
+DO $$ BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = current_schema() AND table_name = 'notice_board' AND column_name = 'writer'
+  ) THEN
+    UPDATE notice_board n
+    SET writer_idx = COALESCE((SELECT u.idx FROM users u WHERE u.userid = n.writer), 1)
+    WHERE n.writer_idx IS NULL;
+  END IF;
+END $$;
+UPDATE notice_board SET writer_idx = 1 WHERE writer_idx IS NULL;
+ALTER TABLE notice_board ALTER COLUMN writer_idx SET NOT NULL;
+ALTER TABLE notice_board DROP COLUMN IF EXISTS writer;
+
 CREATE TABLE IF NOT EXISTS jobs (
     idx BIGSERIAL PRIMARY KEY,
     srnum VARCHAR(20) NOT NULL UNIQUE,
     status_code INTEGER NOT NULL DEFAULT 0,
     job_type INTEGER NOT NULL DEFAULT 1,
     approver_registered_date TEXT,
-    approver VARCHAR(20),
+    approver_idx BIGINT,
     job_title VARCHAR(300) NOT NULL,
-    requester_name VARCHAR(100) NOT NULL,
     requester_email VARCHAR(100) NOT NULL,
     requester_depart VARCHAR(100) NOT NULL,
     job_content TEXT NOT NULL,
     request_date TEXT NOT NULL,
-    madang_id VARCHAR(50) NOT NULL,
+    requester_idx BIGINT NOT NULL DEFAULT 1,
     team_id VARCHAR(50) NOT NULL,
     channel_id VARCHAR(120) NOT NULL,
     message_id VARCHAR(120) NOT NULL,
@@ -87,6 +122,45 @@ CREATE TABLE IF NOT EXISTS jobs (
     is_scheduled INTEGER NOT NULL DEFAULT 0,
     scheduled_at TEXT
 );
+
+-- jobs: user string columns (madang_id / approver / requester_name) -> users.idx
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS requester_idx BIGINT;
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS approver_idx BIGINT;
+-- backfill from legacy columns if they exist
+DO $$ BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = current_schema() AND table_name = 'jobs' AND column_name = 'madang_id'
+  ) THEN
+    -- Existing deployments: make sure hidden system users exist before backfill
+    -- (fresh DBs are seeded by init_database after the initial users).
+    INSERT INTO users (userid, email, username, password, depart, role, band)
+    SELECT v.userid, v.email, v.username, v.password, v.depart, v.role, v.band
+    FROM (VALUES
+      ('auto_approve', 'auto_approve@admin.io', 'auto_approve', 'system-no-login-auto-approve', 'System', 5, 1),
+      ('whatap', 'whatap@admin.io', 'Whatap', 'system-no-login-whatap', 'Whatap', 5, 1),
+      ('external', 'external@admin.io', 'External', 'system-no-login-external', 'External', 5, 1)
+    ) AS v(userid, email, username, password, depart, role, band)
+    WHERE EXISTS (SELECT 1 FROM users)
+      AND NOT EXISTS (SELECT 1 FROM users u WHERE u.userid = v.userid);
+
+    UPDATE jobs j SET requester_idx = COALESCE((SELECT u.idx FROM users u WHERE u.userid = j.madang_id), 1)
+    WHERE requester_idx IS NULL;
+  END IF;
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = current_schema() AND table_name = 'jobs' AND column_name = 'approver'
+  ) THEN
+    UPDATE jobs j SET approver_idx = (SELECT u.idx FROM users u WHERE u.userid = j.approver)
+    WHERE approver IS NOT NULL AND TRIM(approver) <> '' AND approver_idx IS NULL;
+  END IF;
+END $$;
+UPDATE jobs SET requester_idx = 1 WHERE requester_idx IS NULL;
+ALTER TABLE jobs ALTER COLUMN requester_idx SET DEFAULT 1;
+ALTER TABLE jobs ALTER COLUMN requester_idx SET NOT NULL;
+ALTER TABLE jobs DROP COLUMN IF EXISTS madang_id;
+ALTER TABLE jobs DROP COLUMN IF EXISTS approver;
+ALTER TABLE jobs DROP COLUMN IF EXISTS requester_name;
 
 CREATE TABLE IF NOT EXISTS jobs_scheduled (
     idx BIGSERIAL PRIMARY KEY,
@@ -101,12 +175,29 @@ CREATE TABLE IF NOT EXISTS jobs_result (
 
 CREATE TABLE IF NOT EXISTS mynotes (
     idx BIGSERIAL PRIMARY KEY,
-    userid VARCHAR(50) NOT NULL,
+    user_idx BIGINT NOT NULL,
     note_name VARCHAR(200) NOT NULL,
     create_date TEXT NOT NULL,
     origin_file VARCHAR(200) NOT NULL,
     last_update TEXT NOT NULL
 );
+
+-- mynotes: userid (string) -> user_idx (users.idx)
+ALTER TABLE mynotes ADD COLUMN IF NOT EXISTS user_idx BIGINT;
+DO $$ BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = current_schema() AND table_name = 'mynotes' AND column_name = 'userid'
+  ) THEN
+    UPDATE mynotes m
+    SET user_idx = COALESCE((SELECT u.idx FROM users u WHERE u.userid = m.userid), 1)
+    WHERE m.user_idx IS NULL;
+  END IF;
+END $$;
+UPDATE mynotes SET user_idx = 1 WHERE user_idx IS NULL;
+ALTER TABLE mynotes ALTER COLUMN user_idx SET NOT NULL;
+ALTER TABLE mynotes DROP COLUMN IF EXISTS userid;
+CREATE INDEX IF NOT EXISTS ix_mynotes_user_idx ON mynotes (user_idx);
 
 CREATE TABLE IF NOT EXISTS mynote_contents (
     note_idx BIGINT PRIMARY KEY REFERENCES mynotes(idx) ON DELETE CASCADE,
@@ -258,8 +349,31 @@ ALTER TABLE work_node
     ADD COLUMN IF NOT EXISTS upload INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE work_node
     ADD COLUMN IF NOT EXISTS upload_path VARCHAR(500) NOT NULL DEFAULT '';
+-- work_node: approver_userid (string) -> approver_idx (users.idx; 0 = none/unmatched)
 ALTER TABLE work_node
-    ADD COLUMN IF NOT EXISTS approver_userid VARCHAR(50) NOT NULL DEFAULT '';
+    ADD COLUMN IF NOT EXISTS approver_idx INTEGER NOT NULL DEFAULT 0;
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = current_schema()
+          AND table_name = 'work_node'
+          AND column_name = 'approver_userid'
+    ) THEN
+        UPDATE work_node w
+        SET approver_idx = COALESCE(
+            (SELECT u.idx FROM users u WHERE u.userid = w.approver_userid LIMIT 1),
+            0
+        )
+        WHERE w.approver_userid IS NOT NULL
+          AND btrim(w.approver_userid) <> ''
+          AND w.approver_idx = 0;
+        ALTER TABLE work_node DROP COLUMN IF EXISTS approver_userid;
+    END IF;
+END $$;
+UPDATE work_node SET approver_idx = 0 WHERE approver_idx IS NULL;
+ALTER TABLE work_node ALTER COLUMN approver_idx SET DEFAULT 0;
+ALTER TABLE work_node ALTER COLUMN approver_idx SET NOT NULL;
 -- Legacy column cleanup (agent_response → work_script, drop user_prompt)
 DO $$
 BEGIN

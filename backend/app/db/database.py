@@ -6,7 +6,7 @@ import logging
 from pathlib import Path
 
 from backend.app.config import PROJECT_ROOT
-from backend.app.db.seed import INITIAL_USERS
+from backend.app.db.seed import INITIAL_USERS, ensure_system_users_on_connection
 
 logger = logging.getLogger(__name__)
 
@@ -36,28 +36,44 @@ def get_connection(database_path: str | Path | None = None):
 
 
 def seed_initial_users(connection) -> int:
+    from backend.app.db.users import ensure_users_field_crypto_schema
+    from backend.app.security.users_field_crypto import pack_user_secrets
+
+    ensure_users_field_crypto_schema(connection)
     row = connection.execute("SELECT COUNT(*) AS count FROM users").fetchone()
     existing_count = int(row["count"]) if row else 0
     if existing_count > 0:
         logger.info("Skip user seeding: users table already has %s record(s)", existing_count)
         return 0
 
-    rows = [
-        (
-            user["userid"],
-            user["email"],
-            user["username"],
-            user["password"],
-            user["depart"],
-            user["role"],
-            user["band"],
+    rows = []
+    for user in INITIAL_USERS:
+        packed = pack_user_secrets(
+            userid=user["userid"],
+            email=user["email"],
+            username=user["username"],
+            password=user["password"],
         )
-        for user in INITIAL_USERS
-    ]
+        rows.append(
+            (
+                packed["userid"],
+                packed["email"],
+                packed["username"],
+                packed["password"],
+                packed["userid_bidx"],
+                packed["email_bidx"],
+                user["depart"],
+                user["role"],
+                user["band"],
+            )
+        )
     connection.executemany(
         """
-        INSERT INTO users (userid, email, username, password, depart, role, band)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO users (
+            userid, email, username, password, userid_bidx, email_bidx,
+            depart, role, band
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         rows,
     )
@@ -98,5 +114,10 @@ def init_database(database_path: str | Path | None = None) -> Path:
             ensure_prompt_offer_table(connection)
             seed_prompt_offers_if_empty(connection)
             seed_initial_users(connection)
+            # Hidden system users (auto_approve / whatap / external) for jobs.*_idx.
+            ensure_system_users_on_connection(connection)
+            from backend.app.db.users import migrate_users_field_encryption
+
+            migrate_users_field_encryption(connection)
     logger.info("PostgreSQL database initialized via DATABASE_URL")
     return POSTGRES_STATE_TOKEN

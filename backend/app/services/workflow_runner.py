@@ -27,7 +27,7 @@ from backend.app.db.jobs import (
     assign_job_approver,
     create_job_from_intake,
 )
-from backend.app.db.users import User, get_user_by_userid
+from backend.app.db.users import User, get_user_by_idx, get_user_by_userid
 from backend.app.db.workflow import (
     WorkNodeRecord,
     WorkflowRecord,
@@ -1255,12 +1255,11 @@ async def _notify_hitl_approval(
         database_path,
         JobIntakePayload(
             job_title=title[:300],
-            requester_name=(requester.username or requester.userid).strip(),
+            requester_idx=int(requester.idx),
             requester_email=(requester.email or "").strip() or f"{requester.userid}@local",
             requester_depart=(requester.depart or "").strip() or "-",
             job_content=body_md,
             request_date=now_job_datetime(),
-            madang_id=(requester.userid or "").strip(),
             team_id="",
             channel_id="",
             message_id=encode_workflow_job_message_id(
@@ -1272,7 +1271,7 @@ async def _notify_hitl_approval(
         ),
     )
     try:
-        assign_job_approver(database_path, job.idx, approver_userid=approver_userid)
+        assign_job_approver(database_path, job.idx, approver_idx=int(approver.idx))
     except ValueError as exc:
         logger.warning("workflow HITL approver assign failed job=%s: %s", job.idx, exc)
 
@@ -1928,7 +1927,7 @@ async def resume_workflow_after_approval(
     if resume_index < 0 or resume_index >= len(tokens):
         raise ValueError(f"승인 재개 위치가 올바르지 않습니다: {resume_index}")
 
-    requester = get_user_by_userid(database_path, (job.madang_id or "").strip())
+    requester = get_user_by_idx(database_path, int(job.requester_idx))
     history_idx = _open_workflow_history_idx(database_path, workflow.uuid)
     if history_idx <= 0:
         history = insert_workflow_history(

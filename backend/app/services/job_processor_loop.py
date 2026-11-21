@@ -66,7 +66,7 @@ async def _notify_ax_infra_job_completion(database_path: Path, job: JobRecord, r
             database_path=database_path,
             job_title=job.job_title,
             requester_email=job.requester_email,
-            approver_userid=job.approver,
+            approver_userid=job.approver_userid,
             report_body=report_body,
             **reply_kwargs,
         )

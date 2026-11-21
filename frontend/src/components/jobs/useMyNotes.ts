@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import type { AuthUser } from "../../types/auth";
 import type { MyNote, MyNoteDetail } from "../../types/myNote";
 
 async function parseError(response: Response, fallback: string): Promise<string> {
@@ -33,7 +32,7 @@ export interface UseMyNotesResult {
   submitRename: () => Promise<void>;
 }
 
-export function useMyNotes(currentUser: AuthUser, active: boolean): UseMyNotesResult {
+export function useMyNotes(active: boolean): UseMyNotesResult {
   const [notes, setNotes] = useState<MyNote[]>([]);
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
   const [content, setContent] = useState("");
@@ -50,24 +49,22 @@ export function useMyNotes(currentUser: AuthUser, active: boolean): UseMyNotesRe
   contentRef.current = content;
 
   const loadNotes = useCallback(async () => {
-    const params = new URLSearchParams({ userid: currentUser.userid });
-    const response = await fetch(`/api/mynotes?${params.toString()}`);
+    const response = await fetch("/api/mynotes");
     if (!response.ok) {
       throw new Error(await parseError(response, "노트 목록을 불러오지 못했습니다."));
     }
     return (await response.json()) as MyNote[];
-  }, [currentUser.userid]);
+  }, []);
 
   const loadNoteDetail = useCallback(
     async (idx: number) => {
-      const params = new URLSearchParams({ userid: currentUser.userid });
-      const response = await fetch(`/api/mynotes/${idx}?${params.toString()}`);
+      const response = await fetch(`/api/mynotes/${idx}`);
       if (!response.ok) {
         throw new Error(await parseError(response, "노트를 불러오지 못했습니다."));
       }
       return (await response.json()) as MyNoteDetail;
     },
-    [currentUser.userid],
+    [],
   );
 
   const refreshNotes = useCallback(async () => {
@@ -155,7 +152,6 @@ export function useMyNotes(currentUser: AuthUser, active: boolean): UseMyNotesRe
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            userid: currentUser.userid,
             content: contentRef.current,
           }),
         });
@@ -178,7 +174,7 @@ export function useMyNotes(currentUser: AuthUser, active: boolean): UseMyNotesRe
         setIsSaving(false);
       }
     },
-    [currentUser.userid, selectedIdx],
+    [selectedIdx],
   );
 
   const selectNote = useCallback(
@@ -208,7 +204,7 @@ export function useMyNotes(currentUser: AuthUser, active: boolean): UseMyNotesRe
       const response = await fetch("/api/mynotes", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userid: currentUser.userid }),
+        body: JSON.stringify({}),
       });
       if (!response.ok) {
         throw new Error(await parseError(response, "노트 생성에 실패했습니다."));
@@ -222,7 +218,7 @@ export function useMyNotes(currentUser: AuthUser, active: boolean): UseMyNotesRe
     } catch (err) {
       setError(err instanceof Error ? err.message : "노트 생성에 실패했습니다.");
     }
-  }, [currentUser.userid]);
+  }, []);
 
   const createNoteFromContent = useCallback(
     async (noteContent: string, noteName?: string): Promise<number | null> => {
@@ -234,7 +230,6 @@ export function useMyNotes(currentUser: AuthUser, active: boolean): UseMyNotesRe
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            userid: currentUser.userid,
             note_name: noteName?.trim() || undefined,
           }),
         });
@@ -247,7 +242,6 @@ export function useMyNotes(currentUser: AuthUser, active: boolean): UseMyNotesRe
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            userid: currentUser.userid,
             content: noteContent,
           }),
         });
@@ -270,7 +264,7 @@ export function useMyNotes(currentUser: AuthUser, active: boolean): UseMyNotesRe
         return null;
       }
     },
-    [currentUser.userid, saveContent],
+    [saveContent],
   );
 
   const confirmDelete = useCallback(async () => {
@@ -279,8 +273,7 @@ export function useMyNotes(currentUser: AuthUser, active: boolean): UseMyNotesRe
     }
     setError(null);
     try {
-      const params = new URLSearchParams({ userid: currentUser.userid });
-      const response = await fetch(`/api/mynotes/${selectedIdx}?${params.toString()}`, {
+      const response = await fetch(`/api/mynotes/${selectedIdx}`, {
         method: "DELETE",
       });
       if (!response.ok) {
@@ -291,7 +284,7 @@ export function useMyNotes(currentUser: AuthUser, active: boolean): UseMyNotesRe
     } catch (err) {
       setError(err instanceof Error ? err.message : "노트 삭제에 실패했습니다.");
     }
-  }, [currentUser.userid, refreshNotes, selectedIdx]);
+  }, [refreshNotes, selectedIdx]);
 
   const submitRename = useCallback(async () => {
     if (selectedIdx === null) {
@@ -309,7 +302,6 @@ export function useMyNotes(currentUser: AuthUser, active: boolean): UseMyNotesRe
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          userid: currentUser.userid,
           note_name: trimmed,
         }),
       });
@@ -324,7 +316,7 @@ export function useMyNotes(currentUser: AuthUser, active: boolean): UseMyNotesRe
     } catch (err) {
       setError(err instanceof Error ? err.message : "노트 이름 변경에 실패했습니다.");
     }
-  }, [currentUser.userid, renameValue, selectedIdx]);
+  }, [renameValue, selectedIdx]);
 
   const selectedNote = useMemo(
     () => notes.find((note) => note.idx === selectedIdx) ?? null,

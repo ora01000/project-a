@@ -9,14 +9,19 @@ export interface JobRecord {
   status_code: number;
   job_type?: number;
   approver_registered_date: string | null;
-  approver: string | null;
+  approver_idx: number | null;
+  /** Computed from users join (display). */
+  approver_name?: string | null;
+  approver_userid?: string | null;
   job_title: string;
+  requester_idx: number;
+  /** Computed display name (not stored). */
   requester_name: string;
+  requester_userid?: string;
   requester_email: string;
   requester_depart: string;
   job_content: string;
   request_date: string;
-  madang_id: string;
   team_id: string;
   channel_id: string;
   message_id: string;

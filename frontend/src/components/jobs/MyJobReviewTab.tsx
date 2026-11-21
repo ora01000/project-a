@@ -62,7 +62,7 @@ export function MyJobReviewTab({ active, currentUser, onCopyToNote }: MyJobRevie
     try {
       const params = new URLSearchParams({
         status_code: "1",
-        approver: currentUser.userid,
+        approver_idx: String(currentUser.idx),
       });
       const response = await fetch(`/api/jobs?${params.toString()}`);
       if (!response.ok) {
@@ -83,7 +83,7 @@ export function MyJobReviewTab({ active, currentUser, onCopyToNote }: MyJobRevie
     } finally {
       setIsLoading(false);
     }
-  }, [currentUser.userid]);
+  }, [currentUser.idx]);
 
   useEffect(() => {
     if (!active) {
@@ -205,7 +205,6 @@ export function MyJobReviewTab({ active, currentUser, onCopyToNote }: MyJobRevie
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          actor_userid: currentUser.userid,
           is_scheduled: payload.isScheduled,
           scheduled_at: payload.isScheduled ? payload.scheduledAt : null,
         }),
@@ -235,7 +234,6 @@ export function MyJobReviewTab({ active, currentUser, onCopyToNote }: MyJobRevie
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          actor_userid: currentUser.userid,
           drop_reason: rejectReason.trim(),
         }),
       });

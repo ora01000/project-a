@@ -168,9 +168,9 @@ export function RejectedJobsTab({ active }: RejectedJobsTabProps) {
             <JobInlineField label="요청 일시" bullet="🕐">
               {formatJobDate(selectedJob.request_date)}
             </JobInlineField>
-            {selectedJob.approver?.trim() ? (
+            {selectedJob.approver_idx !== null && selectedJob.approver_idx !== undefined ? (
               <JobInlineField label="작업 승인자" bullet="✅">
-                {selectedJob.approver}
+                {selectedJob.approver_name ?? selectedJob.approver_userid}
               </JobInlineField>
             ) : null}
             <JobBlockField label="작업 내용" bullet="📝">
@@ -194,7 +194,7 @@ export function RejectedJobsTab({ active }: RejectedJobsTabProps) {
           name: selectedJob.requester_name,
           email: selectedJob.requester_email,
           depart: selectedJob.requester_depart,
-          madangId: selectedJob.madang_id,
+          madangId: selectedJob.requester_userid ?? "",
         }}
         onClose={() => setEmailModalOpen(false)}
         onSent={(message) => setEmailSuccess(message)}

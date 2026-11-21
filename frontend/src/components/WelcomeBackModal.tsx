@@ -8,7 +8,7 @@ import { setWelcomeBackHiddenForToday } from "../utils/welcomeBackHide";
 
 export interface WelcomeNoticeItem {
   idx: number;
-  writer: string;
+  writer_idx: number;
   writer_name: string;
   title: string;
   from_date: string;
@@ -110,7 +110,7 @@ export function WelcomeBackModal({
                       {notice.title}
                     </h3>
                     <span className="text-xs text-slate-400">
-                      작성자: {notice.writer_name || notice.writer}
+                      작성자: {notice.writer_name || `#${notice.writer_idx}`}
                     </span>
                   </div>
                   <p className="mt-1 font-mono text-xs text-slate-400">

@@ -451,7 +451,8 @@ class WorkNodeResponse(BaseModel):
     worker: str = "agent"
     upload: bool = False
     upload_path: str = ""
-    approver_userid: str = ""
+    approver_idx: int = 0
+    approver_userid: str = ""  # computed from approver_idx for UI compat
     crud: str = ""
     is_draft: bool = False
 
@@ -490,6 +491,7 @@ class WorkNodeResponse(BaseModel):
             worker=str(getattr(record, "worker", None) or "agent"),
             upload=bool(getattr(record, "upload", False)),
             upload_path=str(getattr(record, "upload_path", None) or ""),
+            approver_idx=int(getattr(record, "approver_idx", 0) or 0),
             approver_userid=str(getattr(record, "approver_userid", None) or ""),
             crud=str(getattr(record, "crud", None) or ""),
             is_draft=False,
@@ -512,7 +514,9 @@ class WorkNodeWriteRequest(BaseModel):
     worker: str | None = Field(default=None, max_length=10)
     upload: bool | None = None
     upload_path: str | None = Field(default=None, max_length=500)
-    approver_userid: str | None = Field(default=None, max_length=50)
+    # UI may send userid (or ``H:userid``); server resolves to users.idx for storage.
+    approver_userid: str | None = Field(default=None, max_length=60)
+    approver_idx: int | None = Field(default=None, ge=0)
     crud: str | None = Field(default=None, max_length=20)
     validation_message: str | None = None
 
@@ -897,6 +901,7 @@ async def api_create_work_node(body: WorkNodeWriteRequest, request: Request) -> 
             upload=bool(body.upload) if body.upload is not None else False,
             upload_path=body.upload_path or "",
             approver_userid=body.approver_userid or "",
+            approver_idx=body.approver_idx,
             crud=normalize_crud(body.crud) if body.crud is not None else "",
         )
     except ValueError as exc:
@@ -944,6 +949,7 @@ async def api_update_work_node(
             upload=body.upload,
             upload_path=body.upload_path,
             approver_userid=body.approver_userid,
+            approver_idx=body.approver_idx,
             crud=body.crud,
         )
     except ValueError as exc:
@@ -1594,7 +1600,8 @@ async def api_get_workflow_job_hitl(job_idx: int, request: Request) -> dict[str,
         "work_name": node.work_name if node else "",
         "upload": bool(node.upload) if node else False,
         "upload_path": node.upload_path if node else "",
-        "approver_userid": node.approver_userid if node else (job.approver or ""),
+        "approver_idx": int(node.approver_idx or 0) if node else int(job.approver_idx or 0),
+        "approver_userid": node.approver_userid if node else (job.approver_userid or ""),
         "files": files,
     }
 
@@ -1613,7 +1620,7 @@ async def api_upload_workflow_job_attachments(
     job = get_job_by_idx(database_path, job_idx)
     if job is None or int(job.job_type) != JOB_TYPE_WORKFLOW:
         raise HTTPException(status_code=404, detail="워크플로우 승인 작업을 찾을 수 없습니다.")
-    if (job.approver or "").strip() and (job.approver or "").strip() != auth_user.userid:
+    if job.approver_idx is not None and int(job.approver_idx) != int(auth_user.idx):
         from backend.app.db.roles import is_admin_role
 
         if not is_admin_role(auth_user.role):

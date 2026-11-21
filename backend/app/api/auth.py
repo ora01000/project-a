@@ -11,12 +11,12 @@ from backend.app.db.prod_mode import PROD_MODE_DEV
 from backend.app.db.roles import ROLE_ADMIN, ROLE_PENDING
 from backend.app.db.users import (
     User,
-    build_userid_username_map,
+    build_idx_username_map,
     get_user_by_idx,
     get_user_by_userid,
     parse_agent_ids,
     record_user_login,
-    resolve_username,
+    resolve_username_by_idx,
     update_user,
     update_user_current_prod_mode,
     update_user_theme_for_mode,
@@ -47,7 +47,7 @@ class LoginRequest(BaseModel):
 
 class WelcomeNoticeSummary(BaseModel):
     idx: int
-    writer: str
+    writer_idx: int
     writer_name: str
     title: str
     from_date: str
@@ -224,12 +224,12 @@ async def login(payload: LoginRequest, request: Request) -> LoginResponse:
     returning_user = previous_last_login is not None and not result.profile_required
     welcome_notices: list[WelcomeNoticeSummary] = []
     if returning_user:
-        username_by_key = build_userid_username_map(database_path)
+        username_by_idx = build_idx_username_map(database_path)
         welcome_notices = [
             WelcomeNoticeSummary(
                 idx=notice.idx,
-                writer=notice.writer,
-                writer_name=resolve_username(notice.writer, username_by_key),
+                writer_idx=notice.writer_idx,
+                writer_name=resolve_username_by_idx(notice.writer_idx, username_by_idx),
                 title=notice.title,
                 from_date=notice.from_date,
                 until_date=notice.until_date,
@@ -280,12 +280,12 @@ async def madang_admin_bypass_login(
     returning_user = previous_last_login is not None
     welcome_notices: list[WelcomeNoticeSummary] = []
     if returning_user:
-        username_by_key = build_userid_username_map(database_path)
+        username_by_idx = build_idx_username_map(database_path)
         welcome_notices = [
             WelcomeNoticeSummary(
                 idx=notice.idx,
-                writer=notice.writer,
-                writer_name=resolve_username(notice.writer, username_by_key),
+                writer_idx=notice.writer_idx,
+                writer_name=resolve_username_by_idx(notice.writer_idx, username_by_idx),
                 title=notice.title,
                 from_date=notice.from_date,
                 until_date=notice.until_date,
@@ -368,7 +368,7 @@ async def register_madang_user(payload: MadangRegisterRequest, request: Request)
         logger.exception(
             "Signup request admin email failed for srnum=%s userid=%s",
             job.srnum,
-            job.madang_id,
+            job.requester_userid,
         )
 
     return MadangRegisterResponse(

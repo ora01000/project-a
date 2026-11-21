@@ -40,7 +40,12 @@ _WORK_NODE_SELECT = """
     script_type, test_result, files, create_date, validate_date,
     last_start_date, last_end_date, last_success, last_fail_reason,
     use_previous_work_result, work_report, cron, cron_expr, schedule_wait,
-    worker, upload, upload_path, approver_userid, crud
+    worker, upload, upload_path, approver_idx,
+    COALESCE(
+        (SELECT u.userid FROM users u WHERE u.idx = work_node.approver_idx LIMIT 1),
+        ''
+    ) AS approver_userid,
+    crud
 """
 
 _WORKFLOW_SELECT = """
@@ -348,6 +353,79 @@ def _migrate_work_node_script_columns(connection) -> None:
         connection.execute("ALTER TABLE work_node DROP COLUMN IF EXISTS user_prompt")
 
 
+def normalize_approver_userid(value: str | None) -> str:
+    """Accept ``userid`` or ``H:userid`` (optionally ``@n``) and return the bare userid."""
+    raw = (value or "").strip()
+    if raw[:2].upper() == "H:":
+        raw = raw[2:].strip()
+    if "@" in raw and raw.rsplit("@", 1)[1].isdigit():
+        raw = raw.rsplit("@", 1)[0].strip()
+    return raw[:50]
+
+
+def _users_table_exists(connection) -> bool:
+    return bool(_table_column_names(connection, "users"))
+
+
+def _resolve_approver_idx_conn(connection, userid: str | None) -> int:
+    """Map userid / ``H:userid`` to users.idx on an open connection (0 when unknown)."""
+    key = normalize_approver_userid(userid)
+    if not key or not _users_table_exists(connection):
+        return 0
+    row = connection.execute(
+        "SELECT idx FROM users WHERE userid = ? LIMIT 1",
+        (key,),
+    ).fetchone()
+    if row is None:
+        return 0
+    return int(_column_value(row, "idx", 0) or 0)
+
+
+def resolve_approver_idx(database_path: str | Path, userid: str | None) -> int:
+    """Map userid / ``H:userid`` to users.idx (0 when blank or unmatched)."""
+    if not normalize_approver_userid(userid):
+        return 0
+    with get_connection(database_path) as connection:
+        return _resolve_approver_idx_conn(connection, userid)
+
+
+def resolve_approver_userid(database_path: str | Path, approver_idx: int | None) -> str:
+    """Map work_node.approver_idx to users.userid ('' when 0 or unknown)."""
+    idx = int(approver_idx or 0)
+    if idx <= 0:
+        return ""
+    user = get_user_by_idx(database_path, idx)
+    return user.userid if user is not None else ""
+
+
+def _migrate_work_node_approver_idx(connection) -> None:
+    """approver_userid (string) -> approver_idx (users.idx); empty/unmatched -> 0."""
+    connection.execute(
+        """
+        ALTER TABLE work_node
+            ADD COLUMN IF NOT EXISTS approver_idx INTEGER NOT NULL DEFAULT 0
+        """
+    )
+    columns = _table_column_names(connection, "work_node")
+    if "approver_userid" in columns and _users_table_exists(connection):
+        connection.execute(
+            """
+            UPDATE work_node w
+            SET approver_idx = COALESCE(
+                (SELECT u.idx FROM users u WHERE u.userid = w.approver_userid LIMIT 1),
+                0
+            )
+            WHERE w.approver_userid IS NOT NULL
+              AND btrim(w.approver_userid) <> ''
+              AND w.approver_idx = 0
+            """
+        )
+        connection.execute("ALTER TABLE work_node DROP COLUMN IF EXISTS approver_userid")
+    connection.execute("UPDATE work_node SET approver_idx = 0 WHERE approver_idx IS NULL")
+    connection.execute("ALTER TABLE work_node ALTER COLUMN approver_idx SET DEFAULT 0")
+    connection.execute("ALTER TABLE work_node ALTER COLUMN approver_idx SET NOT NULL")
+
+
 def _migrate_legacy_hitl_and_workflow_json(connection) -> None:
     """Replace ``H:userid`` tokens with hitl work_nodes and persist JSON documents."""
     from backend.app.services.workflow_document import (
@@ -407,7 +485,7 @@ def _migrate_legacy_hitl_and_workflow_json(connection) -> None:
                         script_type, test_result, files, create_date, validate_date,
                         last_start_date, last_end_date, last_success, last_fail_reason,
                         use_previous_work_result, work_report, cron, cron_expr,
-                        worker, upload, upload_path, approver_userid
+                        worker, upload, upload_path, approver_idx
                     ) VALUES (
                         ?, ?, ?, ?, 0, '', '', 0, '', ?, '',
                         '', '', 0, '', 0, '', 0, '0 9 * * *',
@@ -420,7 +498,7 @@ def _migrate_legacy_hitl_and_workflow_json(connection) -> None:
                         f"결재승인 ({userid})"[:100] if userid else "결재승인",
                         "마이그레이션된 HITL 승인 단계",
                         now_job_datetime(),
-                        userid[:50],
+                        _resolve_approver_idx_conn(connection, userid),
                     ),
                 )
                 rewritten_parts.append(hitl_uuid)
@@ -466,7 +544,7 @@ def ensure_workflow_tables(connection) -> None:
             worker VARCHAR(10) NOT NULL DEFAULT 'agent',
             upload INTEGER NOT NULL DEFAULT 0,
             upload_path VARCHAR(500) NOT NULL DEFAULT '',
-            approver_userid VARCHAR(50) NOT NULL DEFAULT '',
+            approver_idx INTEGER NOT NULL DEFAULT 0,
             crud VARCHAR(4) NOT NULL DEFAULT ''
         )
         """
@@ -585,12 +663,7 @@ def ensure_workflow_tables(connection) -> None:
             ADD COLUMN IF NOT EXISTS upload_path VARCHAR(500) NOT NULL DEFAULT ''
         """
     )
-    connection.execute(
-        """
-        ALTER TABLE work_node
-            ADD COLUMN IF NOT EXISTS approver_userid VARCHAR(50) NOT NULL DEFAULT ''
-        """
-    )
+    _migrate_work_node_approver_idx(connection)
     connection.execute(
         """
         ALTER TABLE work_node
@@ -808,7 +881,8 @@ class WorkNodeRecord:
     worker: str = "agent"
     upload: bool = False
     upload_path: str = ""
-    approver_userid: str = ""
+    approver_idx: int = 0
+    approver_userid: str = ""  # computed from users.userid (not stored)
     crud: str = ""
 
 
@@ -886,6 +960,7 @@ def _row_to_work_node(row) -> WorkNodeRecord:
     worker = row["worker"] if "worker" in keys else "agent"
     upload = row["upload"] if "upload" in keys else 0
     upload_path = row["upload_path"] if "upload_path" in keys else ""
+    approver_idx = row["approver_idx"] if "approver_idx" in keys else 0
     approver_userid = row["approver_userid"] if "approver_userid" in keys else ""
     crud = row["crud"] if "crud" in keys else ""
     idx = row["idx"] if "idx" in keys else 0
@@ -922,6 +997,7 @@ def _row_to_work_node(row) -> WorkNodeRecord:
         worker=worker_norm,
         upload=bool(int(upload or 0)),
         upload_path=str(upload_path or "")[:500],
+        approver_idx=int(approver_idx or 0),
         approver_userid=str(approver_userid or "")[:50],
         crud=normalize_crud(crud),
     )
@@ -1044,6 +1120,7 @@ def create_work_node(
     upload: bool = False,
     upload_path: str = "",
     approver_userid: str = "",
+    approver_idx: int | None = None,
     crud: str = "",
 ) -> WorkNodeRecord:
     from backend.app.db.k8s_inventory import validate_cron_expr
@@ -1058,6 +1135,10 @@ def create_work_node(
     expr = validate_cron_expr(cron_expr or DEFAULT_WORK_NODE_CRON_EXPR)
     with get_connection(database_path) as connection:
         ensure_workflow_tables(connection)
+        if approver_idx is not None:
+            next_approver_idx = max(int(approver_idx or 0), 0)
+        else:
+            next_approver_idx = _resolve_approver_idx_conn(connection, approver_userid)
         row = connection.execute(
             f"""
             INSERT INTO work_node (
@@ -1065,7 +1146,7 @@ def create_work_node(
                 script_type, test_result, files, create_date, validate_date,
                 last_start_date, last_end_date, last_success, last_fail_reason,
                 use_previous_work_result, work_report, cron, cron_expr,
-                worker, upload, upload_path, approver_userid, crud
+                worker, upload, upload_path, approver_idx, crud
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', '', 0, '', ?, ?, ?, ?, ?, ?, ?, ?, ?)
             RETURNING {_WORK_NODE_SELECT}
             """,
@@ -1088,7 +1169,7 @@ def create_work_node(
                 worker_type,
                 1 if upload else 0,
                 (upload_path or "").strip()[:500],
-                (approver_userid or "").strip()[:50],
+                next_approver_idx,
                 crud_flags,
             ),
         ).fetchone()
@@ -1114,6 +1195,7 @@ def update_work_node(
     upload: bool | None = None,
     upload_path: str | None = None,
     approver_userid: str | None = None,
+    approver_idx: int | None = None,
     crud: str | None = None,
 ) -> WorkNodeRecord | None:
     from backend.app.db.k8s_inventory import validate_cron_expr
@@ -1137,11 +1219,6 @@ def update_work_node(
     next_upload_path = (
         existing.upload_path if upload_path is None else (upload_path or "").strip()[:500]
     )
-    next_approver = (
-        existing.approver_userid
-        if approver_userid is None
-        else (approver_userid or "").strip()[:50]
-    )
     if next_worker == "hitl":
         next_crud = ""
     elif crud is None:
@@ -1150,13 +1227,19 @@ def update_work_node(
         next_crud = normalize_crud(crud)
     with get_connection(database_path) as connection:
         ensure_workflow_tables(connection)
+        if approver_idx is not None:
+            next_approver_idx = max(int(approver_idx or 0), 0)
+        elif approver_userid is not None:
+            next_approver_idx = _resolve_approver_idx_conn(connection, approver_userid)
+        else:
+            next_approver_idx = int(existing.approver_idx or 0)
         connection.execute(
             """
             UPDATE work_node
             SET work_name = ?, work_description = ?, target_agent = ?, work_script = ?,
                 script_type = ?, test_result = ?, files = ?, validate_date = ?,
                 use_previous_work_result = ?, work_report = ?, cron = ?, cron_expr = ?,
-                worker = ?, upload = ?, upload_path = ?, approver_userid = ?, crud = ?
+                worker = ?, upload = ?, upload_path = ?, approver_idx = ?, crud = ?
             WHERE uuid = ?
             """,
             (
@@ -1175,7 +1258,7 @@ def update_work_node(
                 next_worker,
                 1 if next_upload else 0,
                 next_upload_path,
-                next_approver,
+                next_approver_idx,
                 next_crud,
                 existing.uuid,
             ),
@@ -1466,7 +1549,7 @@ def clone_workflow(
             worker=node.worker,
             upload=node.upload,
             upload_path="",
-            approver_userid=node.approver_userid,
+            approver_idx=node.approver_idx,
             crud=node.crud,
         )
         source_userid = resolve_work_node_upload_userid(database_path, node.owner)

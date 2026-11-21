@@ -60,7 +60,7 @@ function renderActiveTab(
     case "rejected-jobs":
       return <RejectedJobsTab active />;
     case "my-notes":
-      return <MyNotesTab myNotes={myNotes} currentUser={currentUser} />;
+      return <MyNotesTab myNotes={myNotes} />;
     case "infra-shape":
       return (
         <InfraShapeTab
@@ -84,7 +84,7 @@ export function JobNotesPanel({
   const [activeTab, setActiveTab] = useState<JobNotesTab>("infra-shape");
   const isAdmin = hasAdminAccess(currentUser.role);
   const visibleTabs = TABS.filter((tab) => !tab.adminOnly || isAdmin);
-  const myNotes = useMyNotes(currentUser, activeTab === "my-notes");
+  const myNotes = useMyNotes(activeTab === "my-notes");
   const { hasNewReview, hasNewMyReview } = useJobReviewNewBadges(currentUser, activeTab);
 
   useEffect(() => {

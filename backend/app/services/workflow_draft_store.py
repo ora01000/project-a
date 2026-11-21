@@ -85,6 +85,7 @@ def work_node_to_dict(record: WorkNodeRecord) -> dict[str, Any]:
         "worker": record.worker,
         "upload": record.upload,
         "upload_path": record.upload_path,
+        "approver_idx": int(record.approver_idx or 0),
         "approver_userid": record.approver_userid,
         "crud": record.crud,
     }
@@ -119,6 +120,7 @@ def work_node_from_dict(data: dict[str, Any]) -> WorkNodeRecord:
         worker=str(data.get("worker") or "agent"),
         upload=bool(data.get("upload")),
         upload_path=str(data.get("upload_path") or "")[:500],
+        approver_idx=int(data.get("approver_idx") or 0),
         approver_userid=str(data.get("approver_userid") or "")[:50],
         crud=normalize_crud(data.get("crud")),
     )

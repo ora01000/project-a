@@ -12,7 +12,6 @@ import {
 interface NoticeFormModalProps {
   mode: "create" | "edit";
   notice?: NoticeRecord;
-  writerUserid: string;
   writerUsername: string;
   onClose: () => void;
   onSave: (values: NoticeFormValues) => Promise<void>;
@@ -60,19 +59,17 @@ const markdownComponents = {
 export function NoticeFormModal({
   mode,
   notice,
-  writerUserid,
   writerUsername,
   onClose,
   onSave,
 }: NoticeFormModalProps) {
-  const [values, setValues] = useState<NoticeFormValues>(() => emptyNoticeForm(writerUserid));
+  const [values, setValues] = useState<NoticeFormValues>(() => emptyNoticeForm());
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
     if (mode === "edit" && notice) {
       setValues({
-        writer: notice.writer,
         from_date: notice.from_date,
         until_date: notice.until_date,
         title: notice.title,
@@ -81,12 +78,12 @@ export function NoticeFormModal({
       });
       return;
     }
-    setValues(emptyNoticeForm(writerUserid));
-  }, [mode, notice, writerUserid]);
+    setValues(emptyNoticeForm());
+  }, [mode, notice]);
 
   const displayWriterName =
     mode === "edit" && notice
-      ? notice.writer_name?.trim() || notice.writer
+      ? notice.writer_name?.trim() || `#${notice.writer_idx}`
       : writerUsername;
 
   const fromParts = splitNoticeDateTime(values.from_date);
@@ -108,7 +105,6 @@ export function NoticeFormModal({
     try {
       await onSave({
         ...values,
-        writer: mode === "create" ? writerUserid : values.writer,
         from_date: joinNoticeDateTime(fromParts.date, fromParts.time),
         until_date: joinNoticeDateTime(untilParts.date, untilParts.time),
       });

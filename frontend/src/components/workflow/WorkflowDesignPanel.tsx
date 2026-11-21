@@ -326,7 +326,6 @@ export function WorkflowDesignPanel({
         {hitlJobIdx != null ? (
           <WorkflowHitlApproveModal
             jobIdx={hitlJobIdx}
-            actorUserid={user.userid}
             onClose={() => setHitlJobIdx(null)}
             onDone={() => {
               setHitlJobIdx(null);

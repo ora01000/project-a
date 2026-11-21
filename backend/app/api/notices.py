@@ -12,14 +12,15 @@ from backend.app.db.notice_board import (
     update_notice_welcome_popup,
 )
 from backend.app.db.roles import ROLE_ADMIN, is_admin_role
-from backend.app.db.users import build_userid_username_map, get_user_by_userid, resolve_username
+from backend.app.db.users import build_idx_username_map, resolve_username_by_idx
+from backend.app.middleware.session_auth import get_request_auth_user
 
 router = APIRouter(tags=["notices"])
 
 
 class NoticeResponse(BaseModel):
     idx: int
-    writer: str
+    writer_idx: int
     writer_name: str | None = None
     write_date: str
     from_date: str
@@ -33,14 +34,14 @@ class NoticeResponse(BaseModel):
         cls,
         notice: Notice,
         *,
-        username_by_key: dict[str, str] | None = None,
+        username_by_idx: dict[int, str] | None = None,
     ) -> "NoticeResponse":
-        writer_name = notice.writer
-        if username_by_key is not None:
-            writer_name = resolve_username(notice.writer, username_by_key)
+        writer_name: str | None = None
+        if username_by_idx is not None:
+            writer_name = resolve_username_by_idx(notice.writer_idx, username_by_idx) or None
         return cls(
             idx=notice.idx,
-            writer=notice.writer,
+            writer_idx=notice.writer_idx,
             writer_name=writer_name,
             write_date=notice.write_date,
             from_date=notice.from_date,
@@ -52,7 +53,6 @@ class NoticeResponse(BaseModel):
 
 
 class CreateNoticeRequest(BaseModel):
-    writer: str = Field(min_length=1, max_length=50)
     from_date: str = Field(min_length=1)
     until_date: str = Field(min_length=1)
     title: str = Field(min_length=1, max_length=100)
@@ -85,8 +85,8 @@ def _require_admin(viewer_role: int) -> None:
         raise HTTPException(status_code=403, detail="관리자만 수행할 수 있습니다.")
 
 
-def _username_map(request: Request) -> dict[str, str]:
-    return build_userid_username_map(request.app.state.database_path)
+def _username_map(request: Request) -> dict[int, str]:
+    return build_idx_username_map(request.app.state.database_path)
 
 
 def _normalize_period(value: str) -> str:
@@ -99,9 +99,9 @@ def _normalize_period(value: str) -> str:
 @router.get("/notices", response_model=list[NoticeResponse])
 async def get_notices(request: Request) -> list[NoticeResponse]:
     database_path = request.app.state.database_path
-    username_by_key = _username_map(request)
+    username_by_idx = _username_map(request)
     return [
-        NoticeResponse.from_notice(notice, username_by_key=username_by_key)
+        NoticeResponse.from_notice(notice, username_by_idx=username_by_idx)
         for notice in list_notices(database_path)
     ]
 
@@ -112,20 +112,19 @@ async def get_notice(idx: int, request: Request) -> NoticeResponse:
     notice = get_notice_by_idx(database_path, idx)
     if notice is None:
         raise HTTPException(status_code=404, detail="공지사항을 찾을 수 없습니다.")
-    return NoticeResponse.from_notice(notice, username_by_key=_username_map(request))
+    return NoticeResponse.from_notice(notice, username_by_idx=_username_map(request))
 
 
 @router.post("/notices", response_model=NoticeResponse, status_code=201)
 async def add_notice(payload: CreateNoticeRequest, request: Request) -> NoticeResponse:
     _require_admin(payload.viewer_role)
     database_path = request.app.state.database_path
-    writer = payload.writer.strip()
-    if get_user_by_userid(database_path, writer) is None:
-        raise HTTPException(status_code=400, detail="작성자 userid를 확인할 수 없습니다.")
+    # Writer identity always comes from the authenticated session, not the request body.
+    writer_idx = get_request_auth_user(request).idx
 
     notice = create_notice(
         database_path,
-        writer=writer,
+        writer_idx=writer_idx,
         write_date=now_job_datetime(),
         from_date=_normalize_period(payload.from_date),
         until_date=_normalize_period(payload.until_date),
@@ -133,7 +132,7 @@ async def add_notice(payload: CreateNoticeRequest, request: Request) -> NoticeRe
         notice=payload.notice,
         welcome_popup=payload.welcome_popup,
     )
-    return NoticeResponse.from_notice(notice, username_by_key=_username_map(request))
+    return NoticeResponse.from_notice(notice, username_by_idx=_username_map(request))
 
 
 @router.put("/notices/{idx}", response_model=NoticeResponse)
@@ -147,7 +146,7 @@ async def modify_notice(idx: int, payload: UpdateNoticeRequest, request: Request
     updated = update_notice(
         database_path,
         idx,
-        writer=existing.writer,
+        writer_idx=existing.writer_idx,
         write_date=existing.write_date,
         from_date=_normalize_period(payload.from_date),
         until_date=_normalize_period(payload.until_date),
@@ -157,7 +156,7 @@ async def modify_notice(idx: int, payload: UpdateNoticeRequest, request: Request
     )
     if updated is None:
         raise HTTPException(status_code=404, detail="공지사항을 찾을 수 없습니다.")
-    return NoticeResponse.from_notice(updated, username_by_key=_username_map(request))
+    return NoticeResponse.from_notice(updated, username_by_idx=_username_map(request))
 
 
 @router.patch("/notices/{idx}/welcome-popup", response_model=NoticeResponse)
@@ -175,7 +174,7 @@ async def patch_welcome_popup(
     )
     if updated is None:
         raise HTTPException(status_code=404, detail="공지사항을 찾을 수 없습니다.")
-    return NoticeResponse.from_notice(updated, username_by_key=_username_map(request))
+    return NoticeResponse.from_notice(updated, username_by_idx=_username_map(request))
 
 
 @router.delete("/notices")

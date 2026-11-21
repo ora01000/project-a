@@ -48,9 +48,19 @@ async def rename_mynote_content_in_redis(
     await redis.delete(old_key)
 
 
-async def hydrate_mynote_content(record: MyNoteRecord, *, file_content: str) -> str:
-    cached = await get_mynote_content_from_redis(record.userid, record.note_name)
+async def hydrate_mynote_content(
+    record: MyNoteRecord,
+    *,
+    file_content: str,
+    userid: str,
+) -> str:
+    """Load note body from Redis, seeding it from durable storage when missing.
+
+    ``userid`` is the owner's users.userid (resolved from ``record.user_idx``);
+    it is only used to build the Redis key and is never persisted in mynotes.
+    """
+    cached = await get_mynote_content_from_redis(userid, record.note_name)
     if cached is not None:
         return cached
-    await set_mynote_content_in_redis(record.userid, record.note_name, file_content)
+    await set_mynote_content_in_redis(userid, record.note_name, file_content)
     return file_content

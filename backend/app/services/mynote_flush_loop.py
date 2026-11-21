@@ -11,6 +11,7 @@ from backend.app.db.mynotes import (
     list_all_mynotes,
     persist_mynote_content,
     read_mynote_content,
+    resolve_mynote_owner_userid,
 )
 from backend.app.services.mynote_content_store import (
     get_mynote_content_from_redis,
@@ -24,12 +25,29 @@ async def flush_mynotes_to_storage(database_path: Path) -> int:
     settings = load_mynotes_settings()
     records = list_all_mynotes(database_path)
     flushed = 0
+    userid_by_idx: dict[int, str | None] = {}
 
     for record in records:
-        redis_content = await get_mynote_content_from_redis(record.userid, record.note_name)
+        if record.user_idx not in userid_by_idx:
+            try:
+                userid_by_idx[record.user_idx] = resolve_mynote_owner_userid(
+                    database_path, record.user_idx
+                )
+            except ValueError:
+                logger.warning(
+                    "mynote flush skipped: owner not found (note=%s user_idx=%s)",
+                    record.idx,
+                    record.user_idx,
+                )
+                userid_by_idx[record.user_idx] = None
+        owner_userid = userid_by_idx[record.user_idx]
+        if owner_userid is None:
+            continue
+
+        redis_content = await get_mynote_content_from_redis(owner_userid, record.note_name)
         if redis_content is None:
             durable = read_mynote_content(record, database_path=database_path)
-            await hydrate_mynote_content(record, file_content=durable)
+            await hydrate_mynote_content(record, file_content=durable, userid=owner_userid)
             continue
 
         durable = read_mynote_content(record, database_path=database_path)

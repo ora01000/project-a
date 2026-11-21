@@ -186,6 +186,16 @@ class AppSettings(BaseSettings):
     backend_api_host: str = Field(default="localhost", alias="BACKEND_API_HOST")
     backend_api_port: int | None = Field(default=None, alias="BACKEND_API_PORT")
     database_url: str = Field(default="", alias="DATABASE_URL")
+    # users field crypto (userid/email/password/username). Keys must not live in DB.
+    users_field_crypto_backend: str = Field(default="env", alias="USERS_FIELD_CRYPTO_BACKEND")
+    users_field_kek: str = Field(default="", alias="USERS_FIELD_KEK")
+    users_field_previous_kek: str = Field(default="", alias="USERS_FIELD_PREVIOUS_KEK")
+    users_field_blind_key: str = Field(default="", alias="USERS_FIELD_BLIND_KEY")
+    users_field_key_version: int = Field(default=1, alias="USERS_FIELD_KEY_VERSION")
+    users_field_vault_kek_path: str = Field(
+        default="secret/data/project-a/users-field-crypto",
+        alias="USERS_FIELD_VAULT_KEK_PATH",
+    )
     backend_role: str = Field(default="all", alias="BACKEND_ROLE")
     health_check_interval_seconds: int = Field(default=30, alias="HEALTH_CHECK_INTERVAL_SECONDS")
     agent_runtime_mode: str = Field(default="mock", alias="AGENT_RUNTIME_MODE")

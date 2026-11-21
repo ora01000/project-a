@@ -301,7 +301,7 @@ export function WhatapEventReportTab({ active, onCopyToNote }: WhatapEventReport
             name: selectedJob.requester_name,
             email: selectedJob.requester_email,
             depart: selectedJob.requester_depart,
-            madangId: selectedJob.madang_id,
+            madangId: selectedJob.requester_userid ?? "",
           }}
           onClose={() => setEmailModalOpen(false)}
           onSent={(message) => setEmailSuccess(message)}

@@ -1212,6 +1212,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "croniter" },
+    { name = "cryptography" },
     { name = "fastapi" },
     { name = "httpx" },
     { name = "jaydebeapi" },
@@ -1233,6 +1234,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "croniter", specifier = ">=6.2.4" },
+    { name = "cryptography", specifier = ">=49.0.0" },
     { name = "fastapi", specifier = ">=0.139.0" },
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "jaydebeapi", specifier = ">=1.2.3" },

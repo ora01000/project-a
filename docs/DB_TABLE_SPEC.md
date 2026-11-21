@@ -1,6 +1,6 @@
 # DB 테이블 명세서
 
-작성 기준일: 2026-10-06  
+작성 기준일: 2026-11-19  
 DB: **PostgreSQL** (`DATABASE_URL` 필수)  
 기준 소스:
 
@@ -9,6 +9,12 @@ DB: **PostgreSQL** (`DATABASE_URL` 필수)
 
 날짜/시각 컬럼은 대부분 **TEXT(ISO 문자열)** 로 저장한다.  
 정수 플래그(`enabled`, `cron`, `talkable` 등)는 `0`/`1` 관례를 따른다.
+
+### 사용자 참조 원칙
+
+- 다른 테이블이 사용자를 참조할 때는 **`users.idx`만** 저장한다.
+- `userid` / `username` 등 문자열 식별자는 타 테이블에 저장하지 않는다. 표시명은 조회 시 `users` JOIN/룩업으로 조립한다.
+- API 응답의 `requester_name`, `approver_userid` 등은 **계산 필드**이며 DB 컬럼이 아니다.
 
 ---
 
@@ -20,9 +26,11 @@ DB: **PostgreSQL** (`DATABASE_URL` 필수)
 | `agentruntime` | 에이전트 런타임 카탈로그(mock/http) |
 | `notice_board` | 공지 |
 | `jobs` | 작업(헬프데스크/Whatap/워크플로 등) |
+| `jobs_scheduled` | 예약 작업 대기열 (`jobs.idx` FK) |
 | `jobs_result` | 작업 완료 결과 |
 | `mynotes` | 노트 메타데이터 |
 | `mynote_contents` | 노트 본문(DB 백엔드) |
+| `prompt_offer` | 질의어 추천 프롬프트 |
 | `infra_cluster` | 인프라 클러스터 등록 |
 | `vsphere_infra_info` | vSphere 접속 정보 |
 | `mailserver_config` | SMTP/IMAP 설정(사실상 싱글톤) |
@@ -122,11 +130,13 @@ DB: **PostgreSQL** (`DATABASE_URL` 필수)
 
 | 컬럼 | 타입 | NULL | 기본값 | 설명 |
 |------|------|------|--------|------|
-| `idx` | BIGSERIAL | PK | | |
-| `userid` | VARCHAR(50) | UNIQUE | | 로그인 ID |
-| `email` | VARCHAR(50) | | | |
-| `username` | VARCHAR(50) | | | 표시명 |
-| `password` | VARCHAR(50) | | | |
+| `idx` | BIGSERIAL | PK | | 타 테이블 사용자 참조의 유일한 키 |
+| `userid` | TEXT | | | 로그인 ID 암호문(`v{n}:…`) 또는 평문(키 미설정) |
+| `email` | TEXT | | | 이메일 암호문/평문 |
+| `username` | TEXT | | | 표시명 암호문/평문 |
+| `password` | TEXT | | | 비밀번호 암호문/평문 (운영 인증은 미사용) |
+| `userid_bidx` | VARCHAR(64) | | `''` | HMAC blind index (조회·UNIQUE) |
+| `email_bidx` | VARCHAR(64) | | `''` | HMAC blind index (조회·UNIQUE) |
 | `depart` | VARCHAR(100) | | | 부서 |
 | `role` | INTEGER | | | §2.1 |
 | `band` | INTEGER | | `1` | §2.2 |
@@ -134,6 +144,17 @@ DB: **PostgreSQL** (`DATABASE_URL` 필수)
 | `last_login` | TEXT | YES | | |
 | `request_reason` | VARCHAR(200) | | `''` | 가입 사유 등 |
 | `whatap_event_sub` | INTEGER | | `0` | Whatap 이벤트 메일 구독 |
+| `prod_auth` | INTEGER | | `0` | PROD 모드 사용 권한 |
+| `current_prod_mode` | INTEGER | | `1` | 현재 모드(DEV/PROD 등) |
+| `theme_for_dev_mode` | INTEGER | | `1` | DEV 테마 |
+| `theme_for_prod_mode` | INTEGER | | `1` | PROD 테마 |
+
+UNIQUE INDEX `ux_users_userid_bidx` (`userid_bidx`) WHERE `userid_bidx <> ''`  
+INDEX `ix_users_email_bidx` (`email_bidx`) WHERE `email_bidx <> ''` (이메일은 중복 허용)
+
+필드 암호: AES-256-GCM 봉투 암호 + `USERS_FIELD_CRYPTO_BACKEND`=`env`\|`vault`. 키는 DB 밖(`USERS_FIELD_KEK`, `USERS_FIELD_BLIND_KEY`).
+
+숨김 시스템 사용자(시드, 로그인 불가): `root`, `auto_approve`, `whatap`, `external`.
 
 ### 3.2 `agentruntime`
 
@@ -149,21 +170,24 @@ DB: **PostgreSQL** (`DATABASE_URL` 필수)
 | `service_id` | VARCHAR(20) | | | |
 | `talkable` | INTEGER | | `1` | 대화 가능 |
 | `is_orchestrator` | INTEGER | | `0` | 오케스트레이터 여부 |
+| `is_prod` | INTEGER | | `1` | PROD(1)/DEV(0) 페어 구분 |
 
-UNIQUE(`type`, `agent_id`)
+UNIQUE INDEX `ux_agentruntime_type_agent_id_is_prod` (`type`, `agent_id`, `is_prod`)
 
 ### 3.3 `notice_board`
 
 | 컬럼 | 타입 | NULL | 기본값 | 설명 |
 |------|------|------|--------|------|
 | `idx` | BIGSERIAL | PK | | |
-| `writer` | VARCHAR(50) | | | |
+| `writer_idx` | BIGINT | NOT NULL | | 작성자 `users.idx` |
 | `write_date` | TEXT | | | |
 | `from_date` | TEXT | | | 게시 시작 |
 | `until_date` | TEXT | | | 게시 종료 |
 | `title` | VARCHAR(100) | | | |
 | `notice` | TEXT | | | 본문 |
 | `welcome_popup` | INTEGER | | `0` | 환영 팝업 |
+
+제거됨: `writer` (userid 문자열) → `writer_idx`. API 계산 필드: `writer_name`.
 
 ### 3.4 `jobs`
 
@@ -174,14 +198,13 @@ UNIQUE(`type`, `agent_id`)
 | `status_code` | INTEGER | | `0` | §2.4 |
 | `job_type` | INTEGER | | `1` | §2.5 |
 | `approver_registered_date` | TEXT | YES | | |
-| `approver` | VARCHAR(20) | YES | | 승인자 userid |
+| `approver_idx` | BIGINT | YES | | 승인자 `users.idx` (NULL=미지정) |
 | `job_title` | VARCHAR(300) | | | |
-| `requester_name` | VARCHAR(100) | | | |
-| `requester_email` | VARCHAR(100) | | | |
-| `requester_depart` | VARCHAR(100) | | | |
+| `requester_email` | VARCHAR(100) | | | 연락용(표시 보조) |
+| `requester_depart` | VARCHAR(100) | | | 연락용(표시 보조) |
 | `job_content` | TEXT | | | |
 | `request_date` | TEXT | | | |
-| `madang_id` | VARCHAR(50) | | | |
+| `requester_idx` | BIGINT | NOT NULL | `1` | 요청자 `users.idx` |
 | `team_id` | VARCHAR(50) | | | Teams |
 | `channel_id` | VARCHAR(120) | | | |
 | `message_id` | VARCHAR(120) | | | |
@@ -191,8 +214,23 @@ UNIQUE(`type`, `agent_id`)
 | `ai_audit_comment` | TEXT | YES | | AI 감사 코멘트 |
 | `ai_audit_date` | TEXT | YES | | |
 | `ai_audit_cnt` | INTEGER | | `0` | |
+| `is_scheduled` | INTEGER | | `0` | 예약 실행 여부 |
+| `scheduled_at` | TEXT | YES | | 예약 시각 |
 
-### 3.5 `jobs_result`
+제거됨(마이그레이션): `madang_id`, `approver`, `requester_name` → idx/조회 시 조립로 대체.
+
+API 계산 필드(비저장): `requester_name`, `approver_name`, `requester_userid`, `approver_userid`.
+
+### 3.5 `jobs_scheduled`
+
+예약 대기 작업. `jobs.is_scheduled=1` 과 연동.
+
+| 컬럼 | 타입 | NULL | 기본값 | 설명 |
+|------|------|------|--------|------|
+| `idx` | BIGSERIAL | PK | | |
+| `job_idx` | BIGINT | UNIQUE, FK→`jobs.idx` CASCADE | | |
+
+### 3.6 `jobs_result`
 
 | 컬럼 | 타입 | NULL | 기본값 | 설명 |
 |------|------|------|--------|------|
@@ -200,18 +238,22 @@ UNIQUE(`type`, `agent_id`)
 | `result` | TEXT | | | 결과 본문 |
 | `complete_date` | TEXT | | | |
 
-### 3.6 `mynotes` / `mynote_contents`
+### 3.7 `mynotes` / `mynote_contents`
 
 **mynotes**
 
 | 컬럼 | 타입 | NULL | 기본값 | 설명 |
 |------|------|------|--------|------|
 | `idx` | BIGSERIAL | PK | | |
-| `userid` | VARCHAR(50) | | | |
+| `user_idx` | BIGINT | NOT NULL | | 소유자 `users.idx` |
 | `note_name` | VARCHAR(200) | | | |
 | `create_date` | TEXT | | | |
 | `origin_file` | VARCHAR(200) | | | |
 | `last_update` | TEXT | | | |
+
+INDEX `ix_mynotes_user_idx` (`user_idx`)
+
+제거됨: `userid` (문자열) → `user_idx`. Redis/파일 경로는 조회한 `users.userid`로만 조립.
 
 **mynote_contents**
 
@@ -221,7 +263,16 @@ UNIQUE(`type`, `agent_id`)
 | `content` | TEXT | | `''` | 본문 |
 | `updated_at` | TEXT | | | |
 
-### 3.7 `infra_cluster` / `vsphere_infra_info`
+### 3.8 `prompt_offer`
+
+대화 단말 질의어 추천.
+
+| 컬럼 | 타입 | NULL | 기본값 | 설명 |
+|------|------|------|--------|------|
+| `idx` | SERIAL | PK | | |
+| `prompt` | VARCHAR(300) | | | 추천 질의 문구 |
+
+### 3.9 `infra_cluster` / `vsphere_infra_info`
 
 **infra_cluster**
 
@@ -234,6 +285,7 @@ UNIQUE(`type`, `agent_id`)
 | `cron` | INTEGER | | `0` | 스케줄 사용 |
 | `cron_expr` | VARCHAR(20) | | `'0 23 * * 6'` | |
 | `infra_type` | VARCHAR(20) | | `'k8s'` | §2.6 |
+| `is_prod` | INTEGER | | `1` | PROD(1)/DEV(0) |
 
 **vsphere_infra_info**
 
@@ -244,7 +296,7 @@ UNIQUE(`type`, `agent_id`)
 | `vsphere_id` | VARCHAR(200) | | `''` | |
 | `vsphere_pw` | TEXT | | `''` | |
 
-### 3.8 `mailserver_config`
+### 3.10 `mailserver_config`
 
 SMTP/IMAP 설정. 운영상 1행 사용을 가정.
 
@@ -267,7 +319,7 @@ SMTP/IMAP 설정. 운영상 1행 사용을 가정.
 | `imap_use_ssl` | INTEGER | `1` | |
 | `updated_at` | TEXT | `''` | |
 
-### 3.9 `received_mail`
+### 3.11 `received_mail`
 
 | 컬럼 | 타입 | NULL | 기본값 | 설명 |
 |------|------|------|--------|------|
@@ -295,15 +347,16 @@ SMTP/IMAP 설정. 운영상 1행 사용을 가정.
 - `message_id` (비어 있지 않을 때)
 - `fetched_at DESC`
 
-### 3.10 `work_node`
+### 3.12 `work_node`
 
-논리 키: `uuid`. `idx`는 SERIAL PK(레거시 호환).
+논리 키: `uuid`. `idx`는 SERIAL PK(레거시 호환).  
+추가 컬럼·마이그레이션은 `ensure_workflow_tables()`에서도 보정한다.
 
 | 컬럼 | 타입 | 기본값 | 설명 |
 |------|------|--------|------|
 | `idx` | SERIAL PK | | |
 | `uuid` | VARCHAR(36) UNIQUE | | |
-| `owner` | INTEGER | `1` | 소유 사용자 idx |
+| `owner` | INTEGER | `1` | 소유자 `users.idx` |
 | `work_name` | VARCHAR(100) | | |
 | `work_description` | VARCHAR(500) | `''` | |
 | `target_agent` | INTEGER | `0` | agentruntime idx 등 |
@@ -325,16 +378,19 @@ SMTP/IMAP 설정. 운영상 1행 사용을 가정.
 | `worker` | VARCHAR(10) | `'agent'` | §2.9 |
 | `upload` | INTEGER | `0` | HITL 업로드 |
 | `upload_path` | VARCHAR(500) | `''` | |
-| `approver_userid` | VARCHAR(50) | `''` | HITL 승인자 |
+| `approver_idx` | INTEGER | `0` | HITL 승인자 `users.idx` (0=미지정) |
 | `crud` | VARCHAR(4) | `''` | §2.10 |
 
-### 3.11 `workflow`
+제거됨: `approver_userid` (문자열) → `approver_idx`.  
+API 계산 필드: `approver_userid` (`users.userid`). 워크플로 표현식 `H:{userid}` 포맷은 유지(경계에서 idx↔userid 변환).
+
+### 3.13 `workflow`
 
 | 컬럼 | 타입 | 기본값 | 설명 |
 |------|------|--------|------|
 | `idx` | SERIAL PK | | |
 | `uuid` | VARCHAR(36) UNIQUE | | |
-| `owner` | INTEGER | `1` | |
+| `owner` | INTEGER | `1` | 소유자 `users.idx` |
 | `distribute` | BOOLEAN | FALSE | 배포/공유 |
 | `workflow_name` | VARCHAR(100) | | |
 | `workflow_description` | VARCHAR(500) | `''` | |
@@ -348,7 +404,12 @@ SMTP/IMAP 설정. 운영상 1행 사용을 가정.
 | `cron_expr` | VARCHAR(20) | `'0 9 * * *'` | |
 | `merge_work_result` | VARCHAR(2000) | `''` | 취합 대상 work_node uuid CSV |
 
-### 3.12 `workflow_history` / `work_node_history`
+제거됨: `checkin_user`, `checkin_time` (owner/distribute 모델로 대체).
+
+### 3.14 `workflow_history` / `work_node_history`
+
+최종 스키마는 `ensure_workflow_tables()` 기준.  
+(`schema.postgres.sql`의 `finish_success`/`result_file`은 기동 시 `success`로 이관·DROP)
 
 **workflow_history**
 
@@ -359,9 +420,9 @@ SMTP/IMAP 설정. 운영상 1행 사용을 가정.
 | `start_date` | TEXT | `''` | |
 | `end_date` | TEXT | `''` | |
 | `success` | INTEGER | `0` | |
-| `user_idx` | INTEGER | `1` | 실행자 |
+| `user_idx` | INTEGER | `1` | 실행자 `users.idx` |
 
-INDEX(`uuid`)
+INDEX `ix_workflow_history_uuid` (`uuid`)
 
 **work_node_history**
 
@@ -373,11 +434,11 @@ INDEX(`uuid`)
 | `end_date` | TEXT | `''` | |
 | `success` | INTEGER | `0` | |
 | `workflow_history_idx` | INTEGER | `0` | 소속 실행 |
-| `user_idx` | INTEGER | `1` | |
+| `user_idx` | INTEGER | `1` | 실행자 `users.idx` |
 
 INDEX(`uuid`), INDEX(`workflow_history_idx`)
 
-### 3.13 `workflow_template`
+### 3.15 `workflow_template`
 
 | 컬럼 | 타입 | NULL | 기본값 | 설명 |
 |------|------|------|--------|------|
@@ -385,7 +446,7 @@ INDEX(`uuid`), INDEX(`workflow_history_idx`)
 | `template_name` | VARCHAR(70) | UNIQUE | | |
 | `template_filename` | VARCHAR(200) | UNIQUE | | |
 | `update_date` | TEXT | | `''` | |
-| `created_by` | INTEGER | | `1` | users.idx |
+| `created_by` | INTEGER | | `1` | 작성자 `users.idx` |
 
 ---
 
@@ -433,10 +494,15 @@ INDEX(`uuid`), INDEX(`workflow_history_idx`)
 
 ```
 users.idx ──┬── work_node.owner / workflow.owner / *_history.user_idx
-            └── workflow_template.created_by
+            ├── work_node.approver_idx (0=미지정)
+            ├── workflow_template.created_by
+            ├── jobs.requester_idx / jobs.approver_idx
+            ├── mynotes.user_idx
+            └── notice_board.writer_idx
 
 agentruntime.idx ≈ work_node.target_agent (정수 참조, DB FK 아님)
 
+jobs.idx ── jobs_scheduled.job_idx (CASCADE)
 jobs.srnum ── jobs_result.srnum
 
 mynotes.idx ── mynote_contents.note_idx (CASCADE)

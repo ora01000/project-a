@@ -93,7 +93,7 @@ export function MyJobResultsTab({ active, currentUser, onCopyToNote }: MyJobResu
     try {
       const params = new URLSearchParams({
         min_status_code: "10",
-        approver: currentUser.userid,
+        approver_idx: String(currentUser.idx),
         exclude_status_code: "13",
       });
       const response = await fetch(`/api/jobs?${params.toString()}`);
@@ -115,7 +115,7 @@ export function MyJobResultsTab({ active, currentUser, onCopyToNote }: MyJobResu
     } finally {
       setIsLoading(false);
     }
-  }, [currentUser.userid]);
+  }, [currentUser.idx]);
 
   const loadJobResult = useCallback(async (jobIdx: number) => {
     setIsLoadingResult(true);
@@ -184,7 +184,7 @@ export function MyJobResultsTab({ active, currentUser, onCopyToNote }: MyJobResu
       const response = await fetch(`/api/jobs/${selectedJob.idx}/rework`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ actor_userid: currentUser.userid }),
+        body: JSON.stringify({}),
       });
       if (!response.ok) {
         throw new Error(await parseError(response, "재작업 요청에 실패했습니다."));
@@ -211,7 +211,6 @@ export function MyJobResultsTab({ active, currentUser, onCopyToNote }: MyJobResu
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          actor_userid: currentUser.userid,
           drop_reason: dropReason,
         }),
       });
@@ -404,7 +403,7 @@ export function MyJobResultsTab({ active, currentUser, onCopyToNote }: MyJobResu
             name: selectedJob.requester_name,
             email: selectedJob.requester_email,
             depart: selectedJob.requester_depart,
-            madangId: selectedJob.madang_id,
+            madangId: selectedJob.requester_userid ?? "",
           }}
           onClose={() => setEmailModalOpen(false)}
           onSent={(message) => setEmailSuccess(message)}

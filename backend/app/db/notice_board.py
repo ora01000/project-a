@@ -5,7 +5,7 @@ from backend.app.db.database import get_connection
 
 NOTICE_SELECT_COLUMNS = """
     idx,
-    writer,
+    writer_idx,
     write_date,
     from_date,
     until_date,
@@ -18,7 +18,7 @@ NOTICE_SELECT_COLUMNS = """
 @dataclass(frozen=True)
 class Notice:
     idx: int
-    writer: str
+    writer_idx: int
     write_date: str
     from_date: str
     until_date: str
@@ -30,7 +30,7 @@ class Notice:
 def _row_to_notice(row) -> Notice:
     return Notice(
         idx=int(row["idx"]),
-        writer=str(row["writer"]),
+        writer_idx=int(row["writer_idx"]),
         write_date=str(row["write_date"]),
         from_date=str(row["from_date"]),
         until_date=str(row["until_date"]),
@@ -93,7 +93,7 @@ def get_notice_by_idx(database_path: str | Path, idx: int) -> Notice | None:
 def create_notice(
     database_path: str | Path,
     *,
-    writer: str,
+    writer_idx: int,
     write_date: str,
     from_date: str,
     until_date: str,
@@ -105,7 +105,7 @@ def create_notice(
         cursor = connection.execute(
             """
             INSERT INTO notice_board (
-                writer,
+                writer_idx,
                 write_date,
                 from_date,
                 until_date,
@@ -116,7 +116,7 @@ def create_notice(
             VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                writer.strip(),
+                int(writer_idx),
                 write_date.strip(),
                 from_date.strip(),
                 until_date.strip(),
@@ -138,7 +138,7 @@ def update_notice(
     database_path: str | Path,
     idx: int,
     *,
-    writer: str,
+    writer_idx: int,
     write_date: str,
     from_date: str,
     until_date: str,
@@ -150,7 +150,7 @@ def update_notice(
         cursor = connection.execute(
             """
             UPDATE notice_board
-            SET writer = ?,
+            SET writer_idx = ?,
                 write_date = ?,
                 from_date = ?,
                 until_date = ?,
@@ -160,7 +160,7 @@ def update_notice(
             WHERE idx = ?
             """,
             (
-                writer.strip(),
+                int(writer_idx),
                 write_date.strip(),
                 from_date.strip(),
                 until_date.strip(),

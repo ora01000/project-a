@@ -6,6 +6,8 @@ ROLE_SUPERADMIN = 100
 
 ROOT_USERID = "root"
 AUTO_APPROVE_USERID = "auto_approve"
+WHATAP_USERID = "whatap"
+EXTERNAL_USERID = "external"
 
 ASSIGNABLE_ROLES = frozenset({ROLE_ADMIN, ROLE_USER, ROLE_INFRAADMIN, ROLE_PENDING})
 
@@ -36,11 +38,21 @@ def is_auto_approve_userid(userid: str) -> bool:
     return userid.strip().lower() == AUTO_APPROVE_USERID
 
 
+def is_whatap_userid(userid: str) -> bool:
+    return userid.strip().lower() == WHATAP_USERID
+
+
+def is_external_userid(userid: str) -> bool:
+    return userid.strip().lower() == EXTERNAL_USERID
+
+
 def is_hidden_system_user(userid: str, role: int | None = None) -> bool:
     normalized = userid.strip()
     if normalized == ROOT_USERID:
         return True
     if is_auto_approve_userid(normalized):
+        return True
+    if is_whatap_userid(normalized) or is_external_userid(normalized):
         return True
     if role is not None and role == ROLE_SUPERADMIN:
         return True

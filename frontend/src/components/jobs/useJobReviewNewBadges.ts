@@ -61,7 +61,7 @@ export function useJobReviewNewBadges(
       fetchJobIdxs(
         new URLSearchParams({
           status_code: "1",
-          approver: currentUser.userid,
+          approver_idx: String(currentUser.idx),
         }),
       ),
     ]);
@@ -80,7 +80,7 @@ export function useJobReviewNewBadges(
       setSeenMyReviewIdxs(new Set(myReviewIdxs));
       setMyReviewBaselineReady(true);
     }
-  }, [currentUser.userid]);
+  }, [currentUser.idx]);
 
   useEffect(() => {
     void pollPendingJobs();

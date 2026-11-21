@@ -76,7 +76,7 @@ async def register_user(payload: RegisterUserRequest, request: Request) -> Regis
         logger.exception(
             "Signup request admin email failed for srnum=%s userid=%s",
             job.srnum,
-            job.madang_id,
+            job.requester_userid,
         )
 
     return RegisterUserResponse(

@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 
-import type { AuthUser } from "../../types/auth";
 import { AssistantMessageContent } from "../AssistantMessageContent";
 import { ConfirmDialog } from "../ConfirmDialog";
 import { ListPaginationControls } from "./ListPaginationControls";
@@ -24,10 +23,9 @@ function panelModeButtonClass(isSelected: boolean): string {
 
 interface MyNotesTabProps {
   myNotes: UseMyNotesResult;
-  currentUser: AuthUser;
 }
 
-export function MyNotesTab({ myNotes, currentUser }: MyNotesTabProps) {
+export function MyNotesTab({ myNotes }: MyNotesTabProps) {
   const {
     notes,
     selectedIdx,
@@ -191,7 +189,6 @@ export function MyNotesTab({ myNotes, currentUser }: MyNotesTabProps) {
         <JobReportEmailModal
           subject={selectedNote.note_name}
           sendEndpoint={`/api/mynotes/${selectedNote.idx}/send-email`}
-          extraBody={{ userid: currentUser.userid }}
           onClose={() => setEmailModalOpen(false)}
           onSent={(message) => setEmailSuccess(message)}
         />

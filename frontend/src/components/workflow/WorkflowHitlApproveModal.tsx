@@ -13,7 +13,6 @@ interface HitlInfo {
 
 interface WorkflowHitlApproveModalProps {
   jobIdx: number;
-  actorUserid: string;
   onClose: () => void;
   onDone: () => void;
 }
@@ -25,7 +24,6 @@ async function parseError(response: Response, fallback: string): Promise<string>
 
 export function WorkflowHitlApproveModal({
   jobIdx,
-  actorUserid,
   onClose,
   onDone,
 }: WorkflowHitlApproveModalProps) {
@@ -91,7 +89,7 @@ export function WorkflowHitlApproveModal({
       const response = await fetch(`/api/jobs/${jobIdx}/approve`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ actor_userid: actorUserid }),
+        body: JSON.stringify({}),
       });
       if (!response.ok) {
         throw new Error(await parseError(response, "승인에 실패했습니다."));
@@ -117,7 +115,6 @@ export function WorkflowHitlApproveModal({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          actor_userid: actorUserid,
           drop_reason: rejectReason.trim(),
         }),
       });

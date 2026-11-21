@@ -19,7 +19,6 @@ from backend.app.db.jobs import (
 )
 from backend.app.db.jobs_result import JobResultRecord, get_job_result_by_srnum
 from backend.app.db.roles import is_admin_role
-from backend.app.db.users import get_user_by_userid
 
 
 @dataclass(frozen=True)
@@ -34,25 +33,17 @@ class JobWorkflowStep:
 class JobWorkflowItem:
     idx: int
     srnum: str
+    requester_idx: int
     requester_name: str
     requester_userid: str
-    approver: str | None
+    approver_idx: int | None
+    approver_userid: str | None
     approver_name: str
     status_code: int
     steps: tuple[JobWorkflowStep, ...]
     is_scheduled: bool = False
     scheduled_at: str | None = None
     schedule_waiting: bool = False
-
-
-def _resolve_display_name(database_path: str | Path, userid: str) -> str:
-    normalized = userid.strip()
-    if not normalized:
-        return ""
-    user = get_user_by_userid(database_path, normalized)
-    if user is not None and user.username.strip():
-        return user.username.strip()
-    return normalized
 
 
 def _should_show_agent_request_step(job: JobRecord) -> bool:
@@ -77,7 +68,7 @@ def build_job_workflow_steps(
 ) -> tuple[JobWorkflowStep, ...]:
     steps: list[JobWorkflowStep] = []
     status = job.status_code
-    has_approver = bool((job.approver or "").strip())
+    has_approver = job.approver_idx is not None
 
     steps.append(
         JobWorkflowStep(
@@ -93,7 +84,7 @@ def build_job_workflow_steps(
                 status_code=JOB_STATUS_APPROVER_ASSIGNED,
                 label="승인자 지정",
                 timestamp=job.approver_registered_date,
-                detail=approver_name or (job.approver or "").strip(),
+                detail=approver_name or (job.approver_userid or "").strip(),
             )
         )
 
@@ -157,7 +148,7 @@ def build_job_workflow_steps(
 def list_job_workflows(
     database_path: str | Path,
     *,
-    viewer_userid: str,
+    viewer_idx: int | None,
     viewer_role: int,
 ) -> list[JobWorkflowItem]:
     from backend.app.db.jobs_scheduled import list_scheduled_job_idxs
@@ -165,7 +156,7 @@ def list_job_workflows(
     exclude_signup = not is_admin_role(viewer_role)
     jobs = list_jobs_for_workflow(
         database_path,
-        viewer_userid=viewer_userid,
+        viewer_idx=viewer_idx,
         viewer_role=viewer_role,
         exclude_job_type=JOB_TYPE_SIGNUP if exclude_signup else None,
     )
@@ -173,9 +164,7 @@ def list_job_workflows(
 
     items: list[JobWorkflowItem] = []
     for job in jobs:
-        approver_name = ""
-        if (job.approver or "").strip():
-            approver_name = _resolve_display_name(database_path, job.approver or "")
+        approver_name = (job.approver_name or job.approver_userid or "").strip()
 
         result: JobResultRecord | None = None
         if job.status_code >= JOB_STATUS_COMPLETED_SUCCESS:
@@ -192,9 +181,11 @@ def list_job_workflows(
             JobWorkflowItem(
                 idx=job.idx,
                 srnum=job.srnum,
+                requester_idx=job.requester_idx,
                 requester_name=job.requester_name,
-                requester_userid=job.madang_id,
-                approver=job.approver,
+                requester_userid=job.requester_userid,
+                approver_idx=job.approver_idx,
+                approver_userid=job.approver_userid,
                 approver_name=approver_name,
                 status_code=job.status_code,
                 steps=steps,

@@ -8,9 +8,11 @@ export interface JobWorkflowStep {
 export interface JobWorkflowItem {
   idx: number;
   srnum: string;
+  requester_idx: number;
   requester_name: string;
-  requester_userid: string;
-  approver: string | null;
+  requester_userid?: string;
+  approver_idx: number | null;
+  approver_userid?: string | null;
   approver_name: string;
   status_code: number;
   steps: JobWorkflowStep[];

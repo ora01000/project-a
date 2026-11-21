@@ -53,7 +53,6 @@ export function NoticeBoardPage({ user, onClose }: NoticeBoardPageProps) {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        writer: user.userid,
         from_date: values.from_date,
         until_date: values.until_date,
         title: values.title,
@@ -211,7 +210,7 @@ export function NoticeBoardPage({ user, onClose }: NoticeBoardPageProps) {
                     <tr key={notice.idx} className="border-b border-slate-800 text-slate-200">
                       <td className="px-3 py-2">{notice.idx}</td>
                       <td className="px-3 py-2">{notice.title}</td>
-                      <td className="px-3 py-2">{notice.writer_name?.trim() || notice.writer}</td>
+                      <td className="px-3 py-2">{notice.writer_name?.trim() || `#${notice.writer_idx}`}</td>
                       <td className="px-3 py-2 whitespace-nowrap font-mono text-xs">
                         {notice.write_date}
                       </td>
@@ -294,7 +293,6 @@ export function NoticeBoardPage({ user, onClose }: NoticeBoardPageProps) {
         <NoticeFormModal
           mode={formMode}
           notice={formMode === "edit" ? editingNotice ?? undefined : undefined}
-          writerUserid={user.userid}
           writerUsername={user.username}
           onClose={() => {
             setFormMode(null);

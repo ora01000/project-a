@@ -26,8 +26,18 @@ from backend.app.db.received_mail import (
     list_pending_received_mail,
     update_decision_type,
 )
-from backend.app.db.roles import AUTO_APPROVE_USERID, ROLE_ADMIN
-from backend.app.db.users import list_users
+from backend.app.db.roles import (
+    AUTO_APPROVE_USERID,
+    EXTERNAL_USERID,
+    ROLE_ADMIN,
+    is_hidden_system_user,
+)
+from backend.app.db.users import (
+    get_user_idx_by_email,
+    get_user_idx_by_userid,
+    list_users,
+    require_system_user_idx,
+)
 from backend.app.job_decision_agent.agent import ParsedDecision, job_decision_agent_service
 from backend.app.notifications.email_sender import send_job_supplement_request_email
 from backend.app.services.received_mail_attachments import is_ignored_attachment_filename
@@ -84,9 +94,22 @@ def resolve_mail_requester(from_address: str) -> tuple[str, str]:
     return (display or email)[:100], email[:100]
 
 
-def madang_id_from_email(email: str) -> str:
+def userid_from_email_local_part(email: str) -> str:
     local = (email or "").split("@", 1)[0].strip()
-    return (local or "unknown")[:50]
+    return local[:50]
+
+
+def resolve_mail_requester_idx(database_path: Path | str, sender_email: str) -> int:
+    """Map a mail sender to users.idx (email match → userid local-part → ``external``)."""
+    by_email = get_user_idx_by_email(database_path, sender_email)
+    if by_email is not None:
+        return by_email
+    local = userid_from_email_local_part(sender_email)
+    if local and not is_hidden_system_user(local):
+        by_userid = get_user_idx_by_userid(database_path, local)
+        if by_userid is not None:
+            return by_userid
+    return require_system_user_idx(database_path, EXTERNAL_USERID)
 
 
 def build_job_title(subject: str) -> str:
@@ -118,25 +141,27 @@ def create_job_from_received_mail(
     record: ReceivedMailRecord,
     parsed: ParsedDecision,
 ) -> JobRecord:
-    requester_name, sender = resolve_mail_requester(record.from_address)
+    _display_name, sender = resolve_mail_requester(record.from_address)
     if not sender:
         raise ValueError("sender email is required to create a job")
     auto_approve = is_read_job_kind(parsed.job_kind)
     approved_at = now_job_datetime() if auto_approve else None
+    approver_idx = (
+        require_system_user_idx(database_path, AUTO_APPROVE_USERID) if auto_approve else None
+    )
     payload = JobIntakePayload(
         job_title=build_job_title(record.subject),
-        requester_name=requester_name,
+        requester_idx=resolve_mail_requester_idx(database_path, sender),
         requester_email=sender,
         requester_depart=UNKNOWN_DEPART,
         job_content=build_job_content(record, parsed),
         request_date=now_job_datetime(),
-        madang_id=madang_id_from_email(sender),
         team_id=MAIL_TEAM_ID,
         channel_id=MAIL_CHANNEL_ID,
         message_id=record.uuid[:50],
         job_type=JOB_TYPE_AX_INFRA,
         status_code=JOB_STATUS_DIRECT_APPROVED if auto_approve else JOB_STATUS_RECEIVED,
-        approver=AUTO_APPROVE_USERID if auto_approve else None,
+        approver_idx=approver_idx,
         approver_registered_date=approved_at,
     )
     job = create_job_from_intake(database_path, payload)

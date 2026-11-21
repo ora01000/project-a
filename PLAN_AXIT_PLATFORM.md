@@ -3546,3 +3546,28 @@ json 형태로 응답한다.
 - 반영: e `getInventoryList`가 `origin_api_key`·token/snow params·headers 원문을 반환하고, A `beginView`가 에디터에 마스킹 없이 로드한다. MCP는 원문 숨김 유지
 - 스케줄 점검: e `get_api_origin` → `refresh_inventory_from_api`가 DB 원문 params/headers를 사용하므로 스케줄 수집은 UI와 무관하게 정상 적용됨
 
+## 사용자 참조 원칙 (users.idx)
+- users 테이블 기준, 다른 모든 테이블에서 user를 참조하는 경우 `users.idx` 만을 참조한다. 다른 테이블은 userid, username 등을 저장하지 않는다.
+- 표시명은 조회 시 users JOIN/룩업으로 조립한다.
+- 이번 범위는 DB 컬럼만: `jobs.requester_idx`/`approver_idx`, `mynotes.user_idx`, `notice_board.writer_idx`, `work_node.approver_idx`. 파일경로·Redis·`H:{userid}` 표현식 포맷은 유지(필요 시 idx→userid 해석).
+
+## 테이블 중 일부 필드에 대한 양방향 암호화 구현에 대한 검토
+- users 테이블
+  - userid
+  - email
+  - password
+  - username
+- 구현을 하기 전에 방법에 대한 검토를 진행
+  - 검토 사항
+    - 공개키 보관 방식
+      - 외부 상용 저장소를 사용 : vault 등
+      - DB를 제외한 별도의 보관 방식 제안
+    - 공개키 rotation에 따른 데이터 갱신
+      - users 테이블에 한정되므로 공개키 교체시 부하는 적을 것으로 판단되나 방안 제안 필요
+- 검토 결론 (반영)
+  - 「공개키」= KEK. 필드 암호는 봉투 암호화 AES-256-GCM + 버전 접두(`v{n}:…`). 라이브러리 `cryptography`
+  - 키는 DB에 두지 않음. `USERS_FIELD_CRYPTO_BACKEND`: `env`(기본, K8s Secret→환경변수) | `vault`(동일 암호문 포맷, KEK만 Vault에서 로드)
+  - 검색·UNIQUE용 HMAC blind index: `userid_bidx`, `email_bidx` (blind key는 KEK와 분리)
+  - password도 양방향 암호 저장. **운영 인증은 저장 password를 사용하지 않음**(OAuth 등). 로컬/시드 경로만 복호 비교 가능
+  - rotation: 구·신 KEK 동시 복호 + 신 KEK만 암호 → users 전량 재암호 배치 후 구키 폐기. users 한정으로 부하 작음
+  

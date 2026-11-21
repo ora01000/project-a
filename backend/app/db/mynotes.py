@@ -26,11 +26,21 @@ def ensure_mynote_name_column_width(connection) -> None:
 @dataclass(frozen=True)
 class MyNoteRecord:
     idx: int
-    userid: str
+    user_idx: int
     note_name: str
     create_date: str
     origin_file: str
     last_update: str
+
+
+def resolve_mynote_owner_userid(database_path: str | Path, user_idx: int) -> str:
+    """Resolve users.userid for Redis keys / file paths (never stored in mynotes)."""
+    from backend.app.db.users import get_user_by_idx
+
+    user = get_user_by_idx(database_path, int(user_idx))
+    if user is None:
+        raise ValueError(f"user not found for idx={user_idx}")
+    return _sanitize_user_id(user.userid)
 
 
 def _sanitize_user_id(userid: str) -> str:
@@ -63,7 +73,7 @@ def resolve_origin_file_path(origin_file: str) -> Path:
 def _row_to_mynote(row) -> MyNoteRecord:
     return MyNoteRecord(
         idx=int(row["idx"]),
-        userid=str(row["userid"]),
+        user_idx=int(row["user_idx"]),
         note_name=str(row["note_name"]),
         create_date=str(row["create_date"]),
         origin_file=str(row["origin_file"]),
@@ -71,18 +81,17 @@ def _row_to_mynote(row) -> MyNoteRecord:
     )
 
 
-def list_mynotes(database_path: str | Path, *, userid: str) -> list[MyNoteRecord]:
-    safe_userid = _sanitize_user_id(userid)
+def list_mynotes(database_path: str | Path, *, user_idx: int) -> list[MyNoteRecord]:
     with get_connection(database_path) as connection:
         ensure_mynote_name_column_width(connection)
         rows = connection.execute(
             """
-            SELECT idx, userid, note_name, create_date, origin_file, last_update
+            SELECT idx, user_idx, note_name, create_date, origin_file, last_update
             FROM mynotes
-            WHERE userid = ?
+            WHERE user_idx = ?
             ORDER BY last_update DESC, idx DESC
             """,
-            (safe_userid,),
+            (int(user_idx),),
         ).fetchall()
     return [_row_to_mynote(row) for row in rows]
 
@@ -91,7 +100,7 @@ def list_all_mynotes(database_path: str | Path) -> list[MyNoteRecord]:
     with get_connection(database_path) as connection:
         rows = connection.execute(
             """
-            SELECT idx, userid, note_name, create_date, origin_file, last_update
+            SELECT idx, user_idx, note_name, create_date, origin_file, last_update
             FROM mynotes
             ORDER BY idx ASC
             """
@@ -103,7 +112,7 @@ def get_mynote_by_idx(database_path: str | Path, idx: int) -> MyNoteRecord | Non
     with get_connection(database_path) as connection:
         row = connection.execute(
             """
-            SELECT idx, userid, note_name, create_date, origin_file, last_update
+            SELECT idx, user_idx, note_name, create_date, origin_file, last_update
             FROM mynotes
             WHERE idx = ?
             """,
@@ -117,10 +126,10 @@ def get_mynote_by_idx(database_path: str | Path, idx: int) -> MyNoteRecord | Non
 def create_mynote(
     database_path: str | Path,
     *,
-    userid: str,
+    user_idx: int,
     note_name: str | None = None,
 ) -> MyNoteRecord:
-    safe_userid = _sanitize_user_id(userid)
+    safe_userid = resolve_mynote_owner_userid(database_path, user_idx)
     create_date = now_job_datetime()
     last_update = create_date
     resolved_name = (note_name or "").strip() or create_date
@@ -140,10 +149,10 @@ def create_mynote(
         ensure_mynote_name_column_width(connection)
         cursor = connection.execute(
             """
-            INSERT INTO mynotes (userid, note_name, create_date, origin_file, last_update)
+            INSERT INTO mynotes (user_idx, note_name, create_date, origin_file, last_update)
             VALUES (?, ?, ?, ?, ?)
             """,
-            (safe_userid, resolved_name, create_date, origin_file, last_update),
+            (int(user_idx), resolved_name, create_date, origin_file, last_update),
         )
         connection.commit()
         note_idx = int(cursor.lastrowid)
@@ -160,13 +169,13 @@ def update_mynote_name(
     database_path: str | Path,
     idx: int,
     *,
-    userid: str,
+    user_idx: int,
     note_name: str,
 ) -> MyNoteRecord:
     existing = get_mynote_by_idx(database_path, idx)
     if existing is None:
         raise ValueError("note not found")
-    if existing.userid != _sanitize_user_id(userid):
+    if existing.user_idx != int(user_idx):
         raise ValueError("note does not belong to this user")
 
     resolved_name = note_name.strip()
@@ -182,9 +191,9 @@ def update_mynote_name(
             """
             UPDATE mynotes
             SET note_name = ?, last_update = ?
-            WHERE idx = ? AND userid = ?
+            WHERE idx = ? AND user_idx = ?
             """,
-            (resolved_name, last_update, idx, existing.userid),
+            (resolved_name, last_update, idx, existing.user_idx),
         )
         connection.commit()
         if cursor.rowcount == 0:
@@ -200,12 +209,12 @@ def touch_mynote_last_update(
     database_path: str | Path,
     idx: int,
     *,
-    userid: str,
+    user_idx: int,
 ) -> MyNoteRecord:
     existing = get_mynote_by_idx(database_path, idx)
     if existing is None:
         raise ValueError("note not found")
-    if existing.userid != _sanitize_user_id(userid):
+    if existing.user_idx != int(user_idx):
         raise ValueError("note does not belong to this user")
 
     last_update = now_job_datetime()
@@ -214,9 +223,9 @@ def touch_mynote_last_update(
             """
             UPDATE mynotes
             SET last_update = ?
-            WHERE idx = ? AND userid = ?
+            WHERE idx = ? AND user_idx = ?
             """,
-            (last_update, idx, existing.userid),
+            (last_update, idx, existing.user_idx),
         )
         connection.commit()
         if cursor.rowcount == 0:
@@ -288,13 +297,13 @@ def save_mynote_content(
     database_path: str | Path,
     idx: int,
     *,
-    userid: str,
+    user_idx: int,
     content: str,
 ) -> MyNoteRecord:
     existing = get_mynote_by_idx(database_path, idx)
     if existing is None:
         raise ValueError("note not found")
-    if existing.userid != _sanitize_user_id(userid):
+    if existing.user_idx != int(user_idx):
         raise ValueError("note does not belong to this user")
 
     persist_mynote_content(database_path, existing, content)
@@ -305,9 +314,9 @@ def save_mynote_content(
             """
             UPDATE mynotes
             SET last_update = ?
-            WHERE idx = ? AND userid = ?
+            WHERE idx = ? AND user_idx = ?
             """,
-            (last_update, idx, existing.userid),
+            (last_update, idx, existing.user_idx),
         )
         connection.commit()
         if cursor.rowcount == 0:
@@ -348,12 +357,12 @@ def delete_mynote(
     database_path: str | Path,
     idx: int,
     *,
-    userid: str,
+    user_idx: int,
 ) -> None:
     existing = get_mynote_by_idx(database_path, idx)
     if existing is None:
         raise ValueError("note not found")
-    if existing.userid != _sanitize_user_id(userid):
+    if existing.user_idx != int(user_idx):
         raise ValueError("note does not belong to this user")
 
     file_path = resolve_origin_file_path(existing.origin_file)
@@ -361,9 +370,9 @@ def delete_mynote(
         cursor = connection.execute(
             """
             DELETE FROM mynotes
-            WHERE idx = ? AND userid = ?
+            WHERE idx = ? AND user_idx = ?
             """,
-            (idx, existing.userid),
+            (idx, existing.user_idx),
         )
         connection.commit()
         if cursor.rowcount == 0:

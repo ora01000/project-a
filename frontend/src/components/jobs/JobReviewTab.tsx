@@ -28,7 +28,7 @@ function formatJobDate(value: string): string {
 }
 
 function hasApprover(job: JobRecord): boolean {
-  return Boolean(job.approver?.trim());
+  return job.approver_idx !== null && job.approver_idx !== undefined;
 }
 
 function srnumButtonClass(job: JobRecord, isSelected: boolean): string {
@@ -53,7 +53,7 @@ export function JobReviewTab({ active, currentUser, onCopyToNote }: JobReviewTab
   const [jobs, setJobs] = useState<JobRecord[]>([]);
   const [users, setUsers] = useState<UserRecord[]>([]);
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
-  const [selectedApproverUserid, setSelectedApproverUserid] = useState("");
+  const [selectedApproverIdx, setSelectedApproverIdx] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isAssigning, setIsAssigning] = useState(false);
@@ -119,13 +119,13 @@ export function JobReviewTab({ active, currentUser, onCopyToNote }: JobReviewTab
     [jobs, selectedIdx],
   );
 
-  const usernameByUserid = useMemo(
-    () => new Map(users.map((user) => [user.userid, user.username])),
+  const usernameByIdx = useMemo(
+    () => new Map(users.map((user) => [user.idx, user.username])),
     [users],
   );
 
   useEffect(() => {
-    setSelectedApproverUserid("");
+    setSelectedApproverIdx(null);
     setConfirmAssignOpen(false);
     setConfirmDirectApproveOpen(false);
     setRejectModalOpen(false);
@@ -133,8 +133,8 @@ export function JobReviewTab({ active, currentUser, onCopyToNote }: JobReviewTab
     setRejectReason("");
   }, [selectedIdx]);
 
-  const assignApprover = async (approverUserid: string) => {
-    if (!selectedJob || !approverUserid) {
+  const assignApprover = async (approverIdx: number | null) => {
+    if (!selectedJob || approverIdx === null) {
       return;
     }
 
@@ -144,7 +144,7 @@ export function JobReviewTab({ active, currentUser, onCopyToNote }: JobReviewTab
       const response = await fetch(`/api/jobs/${selectedJob.idx}/approver`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ approver: approverUserid }),
+        body: JSON.stringify({ approver_idx: approverIdx }),
       });
       if (!response.ok) {
         throw new Error(await parseError(response, "작업 승인자 지정에 실패했습니다."));
@@ -161,7 +161,7 @@ export function JobReviewTab({ active, currentUser, onCopyToNote }: JobReviewTab
   };
 
   const handleAssignApprover = async () => {
-    await assignApprover(selectedApproverUserid);
+    await assignApprover(selectedApproverIdx);
   };
 
   const handleDirectApprove = async (payload: {
@@ -179,7 +179,6 @@ export function JobReviewTab({ active, currentUser, onCopyToNote }: JobReviewTab
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          actor_userid: currentUser.userid,
           is_scheduled: payload.isScheduled,
           scheduled_at: payload.isScheduled ? payload.scheduledAt : null,
         }),
@@ -209,7 +208,6 @@ export function JobReviewTab({ active, currentUser, onCopyToNote }: JobReviewTab
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          actor_userid: currentUser.userid,
           drop_reason: rejectReason.trim(),
         }),
       });
@@ -229,9 +227,7 @@ export function JobReviewTab({ active, currentUser, onCopyToNote }: JobReviewTab
   };
 
   const selectedApproverLabel =
-    selectedApproverUserid.length > 0
-      ? usernameByUserid.get(selectedApproverUserid) ?? selectedApproverUserid
-      : "";
+    selectedApproverIdx !== null ? usernameByIdx.get(selectedApproverIdx) ?? String(selectedApproverIdx) : "";
 
   const {
     page,
@@ -313,20 +309,24 @@ export function JobReviewTab({ active, currentUser, onCopyToNote }: JobReviewTab
               <div className="shrink-0 border-t border-slate-700/80 pt-3">
                 {hasApprover(selectedJob) ? (
                   <JobInlineField label="작업 승인자" bullet="✅">
-                    {usernameByUserid.get(selectedJob.approver ?? "") ?? selectedJob.approver}
+                    {selectedJob.approver_name ??
+                      (selectedJob.approver_idx !== null ? usernameByIdx.get(selectedJob.approver_idx) : undefined) ??
+                      selectedJob.approver_userid}
                   </JobInlineField>
                 ) : (
                   <div className="space-y-2">
                     <div className="flex flex-wrap items-center gap-2">
                       <JobFieldLabel bullet="✅">작업 승인자</JobFieldLabel>
                       <select
-                        value={selectedApproverUserid}
-                        onChange={(event) => setSelectedApproverUserid(event.target.value)}
+                        value={selectedApproverIdx === null ? "" : String(selectedApproverIdx)}
+                        onChange={(event) =>
+                          setSelectedApproverIdx(event.target.value ? Number(event.target.value) : null)
+                        }
                         className="min-w-[180px] flex-1 rounded-md border border-slate-600 bg-slate-950 px-2.5 py-1.5 text-sm text-slate-100"
                       >
                         <option value="">사용자 선택</option>
                         {users.map((user) => (
-                          <option key={user.idx} value={user.userid}>
+                          <option key={user.idx} value={String(user.idx)}>
                             {user.username}
                           </option>
                         ))}
@@ -336,7 +336,7 @@ export function JobReviewTab({ active, currentUser, onCopyToNote }: JobReviewTab
                       <div className="flex flex-wrap gap-2">
                         <button
                           type="button"
-                          disabled={!selectedApproverUserid || isAssigning}
+                          disabled={selectedApproverIdx === null || isAssigning}
                           onClick={() => setConfirmAssignOpen(true)}
                           className="rounded-md border border-sky-700 bg-sky-950/60 px-3 py-1.5 text-sm font-medium text-sky-100 hover:bg-sky-900/70 disabled:cursor-not-allowed disabled:opacity-40"
                         >

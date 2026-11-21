@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from backend.app.db.mynotes import (
@@ -17,6 +17,7 @@ from backend.app.db.mynotes import (
     save_mynote_content,
     update_mynote_name,
 )
+from backend.app.db.users import User
 from backend.app.middleware.session_auth import get_request_auth_user
 from backend.app.notifications.email_recipients import (
     SendEmailRecipientsRequest,
@@ -38,7 +39,7 @@ router = APIRouter(tags=["mynotes"])
 
 class MyNoteResponse(BaseModel):
     idx: int
-    userid: str
+    user_idx: int
     note_name: str
     create_date: str
     origin_file: str
@@ -48,7 +49,7 @@ class MyNoteResponse(BaseModel):
     def from_record(cls, record: MyNoteRecord) -> "MyNoteResponse":
         return cls(
             idx=record.idx,
-            userid=record.userid,
+            user_idx=record.user_idx,
             note_name=record.note_name,
             create_date=record.create_date,
             origin_file=record.origin_file,
@@ -63,7 +64,7 @@ class MyNoteDetailResponse(MyNoteResponse):
     def from_record(cls, record: MyNoteRecord, *, content: str) -> "MyNoteDetailResponse":
         return cls(
             idx=record.idx,
-            userid=record.userid,
+            user_idx=record.user_idx,
             note_name=record.note_name,
             create_date=record.create_date,
             origin_file=record.origin_file,
@@ -73,36 +74,45 @@ class MyNoteDetailResponse(MyNoteResponse):
 
 
 class CreateMyNoteRequest(BaseModel):
-    userid: str = Field(min_length=1, max_length=50)
     note_name: str | None = Field(default=None, max_length=200)
 
 
 class RenameMyNoteRequest(BaseModel):
-    userid: str = Field(min_length=1, max_length=50)
     note_name: str = Field(min_length=1, max_length=200)
 
 
 class SaveMyNoteContentRequest(BaseModel):
-    userid: str = Field(min_length=1, max_length=50)
     content: str = ""
 
 
 class SendMyNoteEmailRequest(SendEmailRecipientsRequest):
-    userid: str = Field(min_length=1, max_length=50)
+    pass
 
 
-async def _load_mynote_content(record: MyNoteRecord, database_path) -> str:
+async def _load_mynote_content(record: MyNoteRecord, database_path, *, userid: str) -> str:
     file_content = read_mynote_content(record, database_path=database_path)
-    return await hydrate_mynote_content(record, file_content=file_content)
+    return await hydrate_mynote_content(record, file_content=file_content, userid=userid)
+
+
+def _get_owned_note(request: Request, idx: int) -> tuple[User, MyNoteRecord]:
+    """Resolve the session user and the note; 404/403 unless the user owns it.
+
+    Identity is always the authenticated session user (never client-sent userid).
+    """
+    auth_user = get_request_auth_user(request)
+    record = get_mynote_by_idx(request.app.state.database_path, idx)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Note not found")
+    if record.user_idx != auth_user.idx:
+        raise HTTPException(status_code=403, detail="Note does not belong to this user")
+    return auth_user, record
 
 
 @router.get("/mynotes", response_model=list[MyNoteResponse])
-async def list_my_notes(
-    request: Request,
-    userid: str = Query(min_length=1, max_length=50),
-) -> list[MyNoteResponse]:
+async def list_my_notes(request: Request) -> list[MyNoteResponse]:
+    auth_user = get_request_auth_user(request)
     database_path = request.app.state.database_path
-    records = list_mynotes(database_path, userid=userid)
+    records = list_mynotes(database_path, user_idx=auth_user.idx)
     return [MyNoteResponse.from_record(record) for record in records]
 
 
@@ -111,14 +121,15 @@ async def create_my_note(
     request: Request,
     body: CreateMyNoteRequest,
 ) -> MyNoteDetailResponse:
+    auth_user = get_request_auth_user(request)
     database_path = request.app.state.database_path
     try:
         record = create_mynote(
             database_path,
-            userid=body.userid,
+            user_idx=auth_user.idx,
             note_name=body.note_name,
         )
-        await set_mynote_content_in_redis(record.userid, record.note_name, "")
+        await set_mynote_content_in_redis(auth_user.userid, record.note_name, "")
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
@@ -131,13 +142,13 @@ async def create_my_note(
 async def get_my_note(
     request: Request,
     idx: int,
-    userid: str = Query(min_length=1, max_length=50),
 ) -> MyNoteDetailResponse:
     database_path = request.app.state.database_path
+    auth_user = get_request_auth_user(request)
     record = get_mynote_by_idx(database_path, idx)
-    if record is None or record.userid != userid.strip():
+    if record is None or record.user_idx != auth_user.idx:
         raise HTTPException(status_code=404, detail="Note not found")
-    content = await _load_mynote_content(record, database_path)
+    content = await _load_mynote_content(record, database_path, userid=auth_user.userid)
     return MyNoteDetailResponse.from_record(record, content=content)
 
 
@@ -148,11 +159,7 @@ async def save_my_note_content(
     body: SaveMyNoteContentRequest,
 ) -> MyNoteResponse:
     database_path = request.app.state.database_path
-    existing = get_mynote_by_idx(database_path, idx)
-    if existing is None:
-        raise HTTPException(status_code=404, detail="Note not found")
-    if existing.userid != body.userid.strip():
-        raise HTTPException(status_code=403, detail="Note does not belong to this user")
+    auth_user, _existing = _get_owned_note(request, idx)
 
     try:
         # Durable write-through first so Redis restart cannot drop unflushed edits.
@@ -160,10 +167,10 @@ async def save_my_note_content(
         record = save_mynote_content(
             database_path,
             idx,
-            userid=body.userid,
+            user_idx=auth_user.idx,
             content=body.content,
         )
-        await set_mynote_content_in_redis(record.userid, record.note_name, body.content)
+        await set_mynote_content_in_redis(auth_user.userid, record.note_name, body.content)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
@@ -179,26 +186,23 @@ async def rename_my_note(
     body: RenameMyNoteRequest,
 ) -> MyNoteResponse:
     database_path = request.app.state.database_path
-    existing = get_mynote_by_idx(database_path, idx)
-    if existing is None:
-        raise HTTPException(status_code=404, detail="Note not found")
-    if existing.userid != body.userid.strip():
-        raise HTTPException(status_code=403, detail="Note does not belong to this user")
+    auth_user, existing = _get_owned_note(request, idx)
 
     old_note_name = existing.note_name
     try:
         await hydrate_mynote_content(
             existing,
             file_content=read_mynote_content(existing, database_path=database_path),
+            userid=auth_user.userid,
         )
         record = update_mynote_name(
             database_path,
             idx,
-            userid=body.userid,
+            user_idx=auth_user.idx,
             note_name=body.note_name,
         )
         await rename_mynote_content_in_redis(
-            existing.userid,
+            auth_user.userid,
             old_note_name=old_note_name,
             new_note_name=record.note_name,
         )
@@ -216,15 +220,10 @@ async def send_my_note_email(
     idx: int,
     body: SendMyNoteEmailRequest,
 ) -> SendMarkdownEmailResponse:
-    get_request_auth_user(request)
     database_path = request.app.state.database_path
-    record = get_mynote_by_idx(database_path, idx)
-    if record is None:
-        raise HTTPException(status_code=404, detail="Note not found")
-    if record.userid != body.userid.strip():
-        raise HTTPException(status_code=403, detail="Note does not belong to this user")
+    auth_user, record = _get_owned_note(request, idx)
 
-    content = await _load_mynote_content(record, database_path)
+    content = await _load_mynote_content(record, database_path, userid=auth_user.userid)
     if not content.strip():
         raise HTTPException(status_code=400, detail="노트 내용이 비어 있습니다.")
 
@@ -280,18 +279,13 @@ async def send_my_note_email(
 async def delete_my_note(
     request: Request,
     idx: int,
-    userid: str = Query(min_length=1, max_length=50),
 ) -> None:
     database_path = request.app.state.database_path
-    existing = get_mynote_by_idx(database_path, idx)
-    if existing is None:
-        raise HTTPException(status_code=404, detail="Note not found")
-    if existing.userid != userid.strip():
-        raise HTTPException(status_code=403, detail="Note does not belong to this user")
+    auth_user, existing = _get_owned_note(request, idx)
 
     try:
-        await delete_mynote_content_from_redis(existing.userid, existing.note_name)
-        delete_mynote(database_path, idx, userid=userid)
+        await delete_mynote_content_from_redis(auth_user.userid, existing.note_name)
+        delete_mynote(database_path, idx, user_idx=auth_user.idx)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
