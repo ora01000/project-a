@@ -130,7 +130,7 @@ export function UserListPage({ currentUserIdx, currentUserRole, onClose }: UserL
         role="dialog"
         aria-modal="true"
         aria-labelledby="user-list-title"
-        className="flex max-h-[90vh] w-full max-w-6xl flex-col overflow-hidden rounded-xl border border-slate-700 bg-slate-900 shadow-xl"
+        className="flex max-h-[90vh] w-full max-w-[93.6rem] flex-col overflow-hidden rounded-xl border border-slate-700 bg-slate-900 shadow-xl"
       >
         <header className="flex shrink-0 items-center justify-between border-b border-slate-700 px-4 py-3">
           <div>

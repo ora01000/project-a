@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -17,6 +18,9 @@ from backend.app.db.job_datetime import (
     now_job_datetime,
 )
 from backend.app.db.users import User
+from backend.app.security.users_field_crypto import decrypt_field
+
+LOGGER = logging.getLogger(__name__)
 
 JOB_STATUS_RECEIVED = 0
 JOB_STATUS_APPROVER_ASSIGNED = 1
@@ -153,14 +157,25 @@ def _optional_int(value) -> int | None:
         return None
 
 
+def _decrypt_user_field(raw: object | None, *, aad: str) -> str:
+    text = str(raw or "")
+    if not text:
+        return ""
+    try:
+        return decrypt_field(text, aad=aad).strip()
+    except Exception:
+        LOGGER.exception("Failed to decrypt joined users.%s in jobs query", aad)
+        return text.strip()
+
+
 def _row_to_job(row) -> JobRecord:
     approver_registered_date = row["approver_registered_date"]
     approver_idx = _optional_int(row["approver_idx"])
-    requester_userid = str(row["requester_userid"] or "").strip()
-    requester_username = str(row["requester_username"] or "").strip()
+    requester_userid = _decrypt_user_field(row["requester_userid"], aad="userid")
+    requester_username = _decrypt_user_field(row["requester_username"], aad="username")
     requester_email = str(row["requester_email"] or "")
-    approver_userid = str(row["approver_userid"] or "").strip() or None
-    approver_username = str(row["approver_username"] or "").strip()
+    approver_userid = _decrypt_user_field(row["approver_userid"], aad="userid") or None
+    approver_username = _decrypt_user_field(row["approver_username"], aad="username")
     approver_name = (approver_username or approver_userid) if approver_idx is not None else None
     return JobRecord(
         idx=int(row["idx"]),

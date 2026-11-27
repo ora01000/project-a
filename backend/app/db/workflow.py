@@ -16,6 +16,7 @@ from backend.app.config import (
 from backend.app.db.database import get_connection
 from backend.app.db.job_datetime import now_job_datetime
 from backend.app.db.users import get_user_by_idx
+from backend.app.security.users_field_crypto import blind_index, decrypt_field
 from backend.app.services.workflow_graph import parse_workflow_tokens  # noqa: F401 — used by migration helpers indirectly
 
 SCRIPT_TYPES = frozenset({"oc/kubectl/virtctl", "ansible", "cli", "prompt"})
@@ -258,7 +259,12 @@ def _migrate_workflow_history_result_files(connection) -> None:
         ).fetchone()
         userid = ""
         if userid_row is not None:
-            userid = sanitize_upload_userid(str(_column_value(userid_row, "userid", 0) or ""))
+            raw_uid = str(_column_value(userid_row, "userid", 0) or "")
+            try:
+                raw_uid = decrypt_field(raw_uid, aad="userid")
+            except Exception:
+                pass
+            userid = sanitize_upload_userid(raw_uid)
         if not userid:
             userid = sanitize_upload_userid(f"user_{user_idx}") or "unknown"
         try:
@@ -372,10 +378,18 @@ def _resolve_approver_idx_conn(connection, userid: str | None) -> int:
     key = normalize_approver_userid(userid)
     if not key or not _users_table_exists(connection):
         return 0
-    row = connection.execute(
-        "SELECT idx FROM users WHERE userid = ? LIMIT 1",
-        (key,),
-    ).fetchone()
+    user_cols = _table_column_names(connection, "users")
+    if "userid_bidx" in user_cols:
+        bidx = blind_index(key, kind="userid")
+        row = connection.execute(
+            "SELECT idx FROM users WHERE userid_bidx = ? OR (userid_bidx = '' AND userid = ?) LIMIT 1",
+            (bidx, key),
+        ).fetchone()
+    else:
+        row = connection.execute(
+            "SELECT idx FROM users WHERE userid = ? LIMIT 1",
+            (key,),
+        ).fetchone()
     if row is None:
         return 0
     return int(_column_value(row, "idx", 0) or 0)
@@ -961,7 +975,11 @@ def _row_to_work_node(row) -> WorkNodeRecord:
     upload = row["upload"] if "upload" in keys else 0
     upload_path = row["upload_path"] if "upload_path" in keys else ""
     approver_idx = row["approver_idx"] if "approver_idx" in keys else 0
-    approver_userid = row["approver_userid"] if "approver_userid" in keys else ""
+    raw_approver_userid = row["approver_userid"] if "approver_userid" in keys else ""
+    try:
+        approver_userid = decrypt_field(str(raw_approver_userid or ""), aad="userid").strip()
+    except Exception:
+        approver_userid = str(raw_approver_userid or "").strip()
     crud = row["crud"] if "crud" in keys else ""
     idx = row["idx"] if "idx" in keys else 0
     try:

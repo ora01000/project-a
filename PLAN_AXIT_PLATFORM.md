@@ -3570,4 +3570,12 @@ json 형태로 응답한다.
   - 검색·UNIQUE용 HMAC blind index: `userid_bidx`, `email_bidx` (blind key는 KEK와 분리)
   - password도 양방향 암호 저장. **운영 인증은 저장 password를 사용하지 않음**(OAuth 등). 로컬/시드 경로만 복호 비교 가능
   - rotation: 구·신 KEK 동시 복호 + 신 KEK만 암호 → users 전량 재암호 배치 후 구키 폐기. users 한정으로 부하 작음
+
+- 대시보드 -> 작업 진행, 작업 관리 에서 사용자 이름이 암호화 된 상태로 출력됨
+- 작업 워크플로우 의 워크노드 에서 HITL 결재자 이름이 암호화 된 출력됨
+
+
   
+  ## 사용자 조회 목록 UI 개선
+  - 사용자 조회 목록 패널의 가로 너비를 30% 늘린다.
+  - 반영: `UserListPage` `max-w-6xl`(72rem) → `max-w-[93.6rem]`(×1.3)

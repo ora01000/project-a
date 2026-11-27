@@ -115,12 +115,59 @@ def ensure_users_field_crypto_schema(connection) -> None:
     )
 
 
+def _plain_userid_from_row(row) -> str:
+    raw = str(row["userid"] or "")
+    if is_ciphertext(raw):
+        try:
+            return decrypt_field(raw, aad="userid").strip()
+        except Exception:
+            return raw.strip()
+    return raw.strip()
+
+
+def dedupe_users_by_plain_userid(connection) -> int:
+    """Delete duplicate users sharing the same logical userid (keep lowest idx).
+
+    Can appear after UNIQUE(userid) was dropped and plaintext system users were
+    re-inserted beside already-encrypted rows.
+    """
+    ensure_users_field_crypto_schema(connection)
+    rows = connection.execute("SELECT idx, userid FROM users ORDER BY idx").fetchall()
+    keep: dict[str, int] = {}
+    delete_idxs: list[int] = []
+    for row in rows:
+        plain = _plain_userid_from_row(row)
+        if not plain:
+            continue
+        key = plain.lower()
+        idx = int(row["idx"])
+        if key not in keep:
+            keep[key] = idx
+        else:
+            delete_idxs.append(idx)
+    if not delete_idxs:
+        return 0
+    placeholders = ", ".join("?" for _ in delete_idxs)
+    connection.execute(
+        f"DELETE FROM users WHERE idx IN ({placeholders})",
+        delete_idxs,
+    )
+    connection.commit()
+    LOGGER.warning(
+        "Removed duplicate users by plain userid count=%s idxs=%s",
+        len(delete_idxs),
+        delete_idxs,
+    )
+    return len(delete_idxs)
+
+
 def migrate_users_field_encryption(connection) -> int:
     """Encrypt plaintext user secrets in place and backfill blind indexes.
 
     Safe to re-run. When crypto is disabled, only fills bidx from plaintext.
     """
     ensure_users_field_crypto_schema(connection)
+    dedupe_users_by_plain_userid(connection)
     rows = connection.execute(
         "SELECT idx, userid, email, username, password, userid_bidx, email_bidx FROM users"
     ).fetchall()

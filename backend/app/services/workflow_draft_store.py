@@ -7,6 +7,7 @@ import logging
 from typing import Any
 
 from backend.app.db.workflow import WorkNodeRecord, WorkflowRecord, normalize_crud, normalize_script_type
+from backend.app.security.users_field_crypto import decrypt_field
 from backend.app.services.redis_client import get_redis
 from backend.app.services.workflow_graph import parse_workflow_tokens
 
@@ -95,6 +96,11 @@ def work_node_from_dict(data: dict[str, Any]) -> WorkNodeRecord:
     work_script = data.get("work_script")
     if work_script is None:
         work_script = data.get("agent_response") or ""
+    raw_approver_userid = str(data.get("approver_userid") or "")
+    try:
+        approver_userid = decrypt_field(raw_approver_userid, aad="userid").strip()
+    except Exception:
+        approver_userid = raw_approver_userid.strip()
     return WorkNodeRecord(
         idx=int(data.get("idx") or 0),
         uuid=str(data.get("uuid") or ""),
@@ -121,7 +127,7 @@ def work_node_from_dict(data: dict[str, Any]) -> WorkNodeRecord:
         upload=bool(data.get("upload")),
         upload_path=str(data.get("upload_path") or "")[:500],
         approver_idx=int(data.get("approver_idx") or 0),
-        approver_userid=str(data.get("approver_userid") or "")[:50],
+        approver_userid=approver_userid[:50],
         crud=normalize_crud(data.get("crud")),
     )
 

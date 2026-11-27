@@ -132,18 +132,9 @@ DO $$ BEGIN
     SELECT 1 FROM information_schema.columns
     WHERE table_schema = current_schema() AND table_name = 'jobs' AND column_name = 'madang_id'
   ) THEN
-    -- Existing deployments: make sure hidden system users exist before backfill
-    -- (fresh DBs are seeded by init_database after the initial users).
-    INSERT INTO users (userid, email, username, password, depart, role, band)
-    SELECT v.userid, v.email, v.username, v.password, v.depart, v.role, v.band
-    FROM (VALUES
-      ('auto_approve', 'auto_approve@admin.io', 'auto_approve', 'system-no-login-auto-approve', 'System', 5, 1),
-      ('whatap', 'whatap@admin.io', 'Whatap', 'system-no-login-whatap', 'Whatap', 5, 1),
-      ('external', 'external@admin.io', 'External', 'system-no-login-external', 'External', 5, 1)
-    ) AS v(userid, email, username, password, depart, role, band)
-    WHERE EXISTS (SELECT 1 FROM users)
-      AND NOT EXISTS (SELECT 1 FROM users u WHERE u.userid = v.userid);
-
+    -- System users (auto_approve/whatap/external) are ensured in Python
+    -- (ensure_system_users) so encrypted userid rows are not duplicated here.
+    -- Legacy madang_id was plaintext userid; match only while still plaintext.
     UPDATE jobs j SET requester_idx = COALESCE((SELECT u.idx FROM users u WHERE u.userid = j.madang_id), 1)
     WHERE requester_idx IS NULL;
   END IF;

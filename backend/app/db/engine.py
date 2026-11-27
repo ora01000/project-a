@@ -157,8 +157,18 @@ def advisory_lock(connection: PostgresConnection, lock_key: int = 26080701) -> I
     connection.execute("SELECT pg_advisory_lock(?)", (lock_key,))
     try:
         yield
+    except Exception:
+        # Clear aborted transaction so unlock can run on the same connection.
+        try:
+            connection.execute("ROLLBACK")
+        except Exception:
+            pass
+        raise
     finally:
-        connection.execute("SELECT pg_advisory_unlock(?)", (lock_key,))
+        try:
+            connection.execute("SELECT pg_advisory_unlock(?)", (lock_key,))
+        except Exception:
+            pass
 
 
 def ping_database(config: DatabaseConfig) -> bool:
